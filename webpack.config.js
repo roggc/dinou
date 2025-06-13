@@ -34,10 +34,6 @@ module.exports = {
             ],
           },
         },
-        include: [
-          path.resolve(process.cwd(), "src"),
-          path.resolve(__dirname, "dinou"),
-        ],
         exclude: [/node_modules\/(?!dinou)/, /dist/],
       },
     ],
