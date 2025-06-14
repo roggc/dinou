@@ -96,6 +96,8 @@ dinou main features are:
 
 - [Eject dinou](#eject-dinou)
 
+- [License](#license)
+
 ## Routing system, layouts, pages, not found pages, ...
 
 - Routes are defined by defining a `page.tsx` file (or `.jsx`, `.js`) in a folder.
@@ -846,3 +848,7 @@ Run `npm run build` to build the app and `npm start` to run it.
 ## Eject dinou
 
 - You can eject dinou with the command `npm run eject`. This will copy the files defining dinou in the root folder of the project (grouped in a `dinou` folder). You will have full control and customization capabilities.
+
+## License
+
+dinou is licensed under the [MIT License](LICENSE.md).

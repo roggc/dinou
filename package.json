@@ -15,6 +15,10 @@
   ],
   "author": "Roger Gomez Castells (@roggc)",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/roggc/dinou.git"
+  },
   "dependencies": {
     "@babel/core": "^7.27.1",
     "@babel/plugin-syntax-import-meta": "^7.10.4",
