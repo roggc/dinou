@@ -6,6 +6,7 @@ const {
   writeFileSync,
   rmSync,
 } = require("fs");
+const fs = require("fs").promises;
 const React = require("react");
 const { asyncRenderJSXToClientJSX } = require("./render-jsx-to-client-jsx");
 const {
@@ -319,10 +320,12 @@ async function buildStaticPages() {
       );
 
       let pageFunctionsProps;
+      let revalidate;
 
       if (pageFunctionsPath) {
         const pageFunctionsModule = require(pageFunctionsPath);
         const getProps = pageFunctionsModule.getProps;
+        revalidate = pageFunctionsModule.revalidate;
         pageFunctionsProps = await getProps?.(params);
         props = { ...props, ...(pageFunctionsProps?.page ?? {}) };
       }
@@ -391,7 +394,14 @@ async function buildStaticPages() {
 
       const jsonPath = path.join(outputPath, "index.json");
 
-      writeFileSync(jsonPath, JSON.stringify(serializeReactElement(jsx)));
+      writeFileSync(
+        jsonPath,
+        JSON.stringify({
+          jsx: serializeReactElement(jsx),
+          revalidate: revalidate?.(),
+          generatedAt: Date.now(),
+        })
+      );
 
       console.log(
         `Generated static page at ${path.relative(process.cwd(), jsonPath)}`
@@ -403,6 +413,163 @@ async function buildStaticPages() {
   }
 
   console.log(`Static site generated with ${pages.length} pages`);
+}
+
+async function buildStaticPage(reqPath) {
+  const srcFolder = path.resolve(process.cwd(), "src");
+  const distFolder = path.resolve(process.cwd(), "dist");
+  const outputPath = path.join(distFolder, reqPath);
+  const jsonPath = path.join(outputPath, "index.json");
+
+  try {
+    const segments = reqPath.split("/").filter(Boolean);
+    let folderPath = srcFolder;
+    let dynamicParams = {};
+
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      const currentPath = path.join(folderPath, segment);
+      if (existsSync(currentPath)) {
+        folderPath = currentPath;
+        continue;
+      }
+
+      const entries = readdirSync(folderPath, { withFileTypes: true });
+      const dynamicEntry = entries.find(
+        (entry) =>
+          entry.isDirectory() &&
+          ((entry.name.startsWith("[") && entry.name.endsWith("]")) ||
+            (entry.name.startsWith("[[") && entry.name.endsWith("]]")))
+      );
+
+      if (dynamicEntry) {
+        folderPath = path.join(folderPath, dynamicEntry.name);
+        const paramName = dynamicEntry.name
+          .replace(/^\[\[?|\]\]?$/g, "")
+          .replace("...", "");
+        if (dynamicEntry.name.includes("...")) {
+          dynamicParams[paramName] = segments.slice(i);
+          break;
+        } else {
+          dynamicParams[paramName] = segment;
+        }
+      } else {
+        throw new Error(`No matching route found for ${reqPath}`);
+      }
+    }
+
+    const [pagePath, dParams] = getFilePathAndDynamicParams(
+      segments,
+      {},
+      folderPath,
+      "page",
+      true,
+      true,
+      undefined,
+      segments.length,
+      dynamicParams
+    );
+    if (!pagePath) throw new Error(`No page found for ${reqPath}`);
+
+    const pageModule = require(pagePath);
+    const Page = pageModule.default ?? pageModule;
+
+    let props = { params: dParams, query: {} };
+    const [pageFunctionsPath] = getFilePathAndDynamicParams(
+      segments,
+      {},
+      folderPath,
+      "page_functions",
+      true,
+      true,
+      undefined,
+      segments.length
+    );
+
+    let pageFunctionsProps;
+    let revalidate;
+    if (pageFunctionsPath) {
+      const pageFunctionsModule = require(pageFunctionsPath);
+      const getProps = pageFunctionsModule.getProps;
+      revalidate = pageFunctionsModule.revalidate;
+      pageFunctionsProps = await getProps?.(dParams);
+      props = { ...props, ...(pageFunctionsProps?.page ?? {}) };
+    }
+
+    let jsx = React.createElement(Page, props);
+    jsx = { ...jsx, __modulePath: pagePath };
+
+    const noLayoutPath = path.join(folderPath, "no_layout");
+    if (!existsSync(noLayoutPath)) {
+      const layouts = getFilePathAndDynamicParams(
+        segments,
+        {},
+        srcFolder,
+        "layout",
+        true,
+        false,
+        undefined,
+        0,
+        {},
+        true
+      );
+      if (layouts && Array.isArray(layouts)) {
+        let index = 0;
+        for (const [layoutPath, dParams, slots] of layouts.reverse()) {
+          const layoutModule = require(layoutPath);
+          const Layout = layoutModule.default ?? layoutModule;
+          const updatedSlots = {};
+          for (const [slotName, slotElement] of Object.entries(slots)) {
+            const slotFolder = path.join(
+              path.dirname(layoutPath),
+              `@${slotName}`
+            );
+            const [slotPath] = getFilePathAndDynamicParams(
+              segments,
+              {},
+              slotFolder,
+              "page",
+              true,
+              true,
+              undefined,
+              segments.length
+            );
+            updatedSlots[slotName] = {
+              ...slotElement,
+              __modulePath: slotPath ?? null,
+            };
+          }
+          let layoutProps = { params: dParams, query: {}, ...updatedSlots };
+          if (index === layouts.length - 1) {
+            layoutProps = {
+              ...layoutProps,
+              ...(pageFunctionsProps?.layout ?? {}),
+            };
+          }
+          jsx = React.createElement(Layout, layoutProps, jsx);
+          jsx = { ...jsx, __modulePath: layoutPath };
+          index++;
+        }
+      }
+    }
+
+    jsx = await asyncRenderJSXToClientJSX(jsx);
+
+    await fs.mkdir(outputPath, { recursive: true });
+    await fs.writeFile(
+      jsonPath,
+      JSON.stringify({
+        jsx: serializeReactElement(jsx),
+        revalidate: revalidate?.(),
+        generatedAt: Date.now(),
+      })
+    );
+
+    console.warn(`Generated static page: ${reqPath}`);
+  } catch (error) {
+    console.error(`Error building page ${reqPath}:`, error);
+    throw error;
+  }
 }
 
 function filterProps(props_) {
@@ -456,4 +623,5 @@ function serializeReactElement(element) {
 
 module.exports = {
   buildStaticPages,
+  buildStaticPage,
 };

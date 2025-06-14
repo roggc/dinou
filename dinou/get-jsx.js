@@ -1,9 +1,10 @@
 const path = require("path");
-const { existsSync } = require("fs");
+const { existsSync, readFileSync } = require("fs");
 const React = require("react");
 const {
   getFilePathAndDynamicParams,
 } = require("./get-file-path-and-dynamic-params");
+const { buildStaticPage } = require("./build-static-pages");
 
 async function getJSX(reqPath, query) {
   const srcFolder = path.resolve(process.cwd(), "src");
@@ -200,18 +201,34 @@ function deserializeReactElement(
   return returnUndefined.value ? undefined : serialized;
 }
 
+const regenerating = new Set();
+
 function getSSGJSX(reqPath) {
   const distFolder = path.resolve(process.cwd(), "dist");
   const jsonPath = path.join(distFolder, reqPath, "index.json");
   if (existsSync(jsonPath)) {
-    return deserializeReactElement(require(jsonPath));
+    const { jsx, revalidate, generatedAt } = JSON.parse(
+      readFileSync(jsonPath, "utf8")
+    );
+    if (
+      typeof revalidate === "number" &&
+      revalidate > 0 &&
+      Date.now() > generatedAt + revalidate &&
+      !regenerating.has(reqPath)
+    ) {
+      buildStaticPage(reqPath)
+        .catch(console.error)
+        .finally(() => regenerating.delete(reqPath));
+    }
+    return deserializeReactElement(jsx);
   }
 }
 
 async function getSSGJSXOrJSX(reqPath, query) {
-  return Object.keys(query).length
+  const result = Object.keys(query).length
     ? await getJSX(reqPath, query)
     : getSSGJSX(reqPath) ?? (await getJSX(reqPath, query));
+  return result;
 }
 
 module.exports = {
