@@ -1,12 +1,14 @@
-# **dinou**: Minimal React 19 Framework
+# **dinou**: **A Minimal React 19 Framework**
 
-dinou is a React 19 framework. dinou means 19 in catalan.
+[**dinou**](https://github.com/roggc/dinou) is a **minimal React 19 framework**. dinou means 19 in catalan. You can create a dinou [app](https://github.com/roggc/dinou-app) by running the command **`npx create-dinou@latest my-app`**.
 
-- You can create an npm project by yourself (`npm init -y`),
+Or you can create one by yourself with the following steps:
+
+- Create an npm project (`npm init -y`)
 
 - Install dependencies (`npm i react react-dom dinou`)
 
-- Create scripts in `package.json`:
+- Create scripts in `package.json` for convenience:
 
   - "dev": "dinou dev"
 
@@ -26,11 +28,9 @@ dinou is a React 19 framework. dinou means 19 in catalan.
   }
   ```
 
-- Run `npm run dev` to see the page in action in your browser.
+- Run `npm run dev` (or `npx dinou dev`) to see the page in action in your browser.
 
-- If you run `npm run eject`, dinou will be ejected and copied to your root project folder, so you can customize it.
-
-- Or you can just run **`npx create-dinou@latest my-app`** to have an [app](https://github.com/roggc/dinou-app) ready to be developed with dinou.
+- If you run `npm run eject` (or `npx dinou eject`), dinou will be ejected and copied to your root project folder, so you can customize it.
 
 dinou main features are:
 
@@ -46,7 +46,7 @@ dinou main features are:
 
 - TypeScript or JavaScript
 
-- Full control and customization through the command `npm run eject`.
+- Full control and customization through the command `npm run eject` (`npx dinou eject`).
 
 ## Table of contents
 
@@ -92,7 +92,11 @@ dinou main features are:
 
   - [Not Found Handling](#not-found-handling)
 
-- [How to run it](#how-to-run-it)
+- [`favicons` folder](#favicons-folder)
+
+- [`.env` file](#env-file)
+
+- [How to run a dinou app](#how-to-run-a-dinou-app)
 
 - [Eject dinou](#eject-dinou)
 
@@ -839,16 +843,30 @@ The routing system is file-based and supports static routes, dynamic routes, opt
 
 - Layouts are applied to `not_found.tsx` pages too, unless a `no_layout` or **`no_layout_not_found`** files (**without extension**) are found in the directory in which the `not_found.tsx` page is defined, in which case layouts will not be applied to `not_found.tsx` page.
 
-## How to run it
+## `favicons` folder
 
-Run `npm run dev` to start the app in development mode. Wait for the logs of Webpack and `Listening on port <port>` to load the page on your browser.
+If you want to show a favicon, generate one with an online tool (e.g. [favicon.io](https://favicon.io/)), unzip the downloaded folder with the favicons, paste it in the root of the project and rename it to `favicons`. Then you will have your favicon in your web app.
 
-Run `npm run build` to build the app and `npm start` to run it.
+## `.env` file
+
+dinou is ready to manage env vars in the code that runs on the Server side (Server Functions, Server Components, and `getProps` function). Create an `.env` file in your project (and add it to your `.gitignore` file to not expose sensitive data to the public) and define there your env variables:
+
+```bash
+# .env
+# define here your env vars
+MY_VAR=my_value
+```
+
+## How to run a dinou app
+
+Run `npm run dev` (or `npx dinou dev`) to start the dinou app in development mode. Wait for the logs of Webpack and `Listening on port <port>` to load the page on your browser.
+
+Run `npm run build` (or `npx dinou build`) to build the app and `npm start` (or `npx dinou start`) to run it.
 
 ## Eject dinou
 
-- You can eject dinou with the command `npm run eject`. This will copy the files defining dinou in the root folder of the project (grouped in a `dinou` folder). You will have full control and customization capabilities.
+- You can eject dinou with the command `npm run eject` (or `npx dinou eject`). This will copy the files defining dinou in the root folder of the project (grouped in a `dinou` folder). You will have full control and customization capabilities.
 
 ## License
 
-dinou is licensed under the [MIT License](LICENSE.md).
+dinou is licensed under the [MIT License](https://github.com/roggc/dinou/blob/master/LICENSE.md).

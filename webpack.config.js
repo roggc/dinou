@@ -2,6 +2,7 @@ require("dotenv/config");
 const path = require("path");
 const ReactServerWebpackPlugin = require("react-server-dom-webpack/plugin");
 const webpack = require("webpack");
+const CopyWebpackPlugin = require("copy-webpack-plugin");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 
@@ -41,6 +42,15 @@ module.exports = {
   plugins: [
     isDevelopment && new webpack.HotModuleReplacementPlugin(),
     new ReactServerWebpackPlugin({ isServer: false }),
+    new CopyWebpackPlugin({
+      patterns: [
+        {
+          from: "favicons",
+          to: ".",
+          noErrorOnMissing: true,
+        },
+      ],
+    }),
   ].filter(Boolean),
   resolve: {
     extensions: [".js", ".jsx", ".ts", ".tsx"],
