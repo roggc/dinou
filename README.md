@@ -845,7 +845,45 @@ The routing system is file-based and supports static routes, dynamic routes, opt
 
 ## `favicons` folder
 
-If you want to show a favicon, generate one with an online tool (e.g. [favicon.io](https://favicon.io/)), unzip the downloaded folder with the favicons, paste it in the root of the project and rename it to `favicons`. Then you will have your favicon in your web app.
+If you want to show a favicon, generate one with an online tool (e.g. [favicon.io](https://favicon.io/)), unzip the downloaded folder with the favicons, paste it in the root of the project and rename it to `favicons`. Then update your `layout` or `page` to include this in the `head` tag:
+
+```typescript
+"use client";
+
+import type { ReactNode } from "react";
+
+export default function Layout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en">
+      <head>
+        <title>dinou app</title>
+        <link rel="icon" type="image/png" href="/favicon.ico" />
+        <link
+          rel="apple-touch-icon"
+          sizes="180x180"
+          href="/apple-touch-icon.png"
+        />
+        <link
+          rel="icon"
+          type="image/png"
+          sizes="32x32"
+          href="/favicon-32x32.png"
+        />
+        <link
+          rel="icon"
+          type="image/png"
+          sizes="16x16"
+          href="/favicon-16x16.png"
+        />
+        <link rel="manifest" href="/site.webmanifest"></link>
+      </head>
+      <body>{children}</body>
+    </html>
+  );
+}
+```
+
+Then you will have your favicon in your web app.
 
 ## `.env` file
 
