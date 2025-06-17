@@ -1,11 +1,12 @@
-require("@babel/register")({
-  ignore: [/[\\\/](build|server|node_modules)[\\\/]/],
-  presets: [
-    ["@babel/preset-react", { runtime: "automatic" }],
-    "@babel/preset-typescript",
-  ],
-  plugins: ["@babel/plugin-transform-modules-commonjs"],
+const { register } = require("esbuild-register/dist/node");
+register({
+  target: "esnext",
+  format: "cjs",
   extensions: [".js", ".jsx", ".ts", ".tsx"],
+});
+const createScopedName = require("./createScopedName");
+require("css-modules-require-hook")({
+  generateScopedName: createScopedName,
 });
 const { renderToPipeableStream } = require("react-dom/server");
 const { getJSX, getSSGJSX } = require("./get-jsx");

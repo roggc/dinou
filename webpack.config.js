@@ -1,14 +1,12 @@
 require("dotenv/config");
 const path = require("path");
-const fs = require("fs");
 const ReactServerWebpackPlugin = require("react-server-dom-webpack/plugin");
 const webpack = require("webpack");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
+const createScopedName = require("./dinou/createScopedName");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
-const stylesPath = path.resolve(process.cwd(), "./src/styles.css");
-const stylesDefaultPath = path.resolve(__dirname, "./dinou/styles.css");
 
 module.exports = {
   mode: isDevelopment ? "development" : "production",
@@ -17,13 +15,10 @@ module.exports = {
       isDevelopment && "webpack-hot-middleware/client?reload=true",
       path.resolve(__dirname, "./dinou/client.jsx"),
     ].filter(Boolean),
-    ...(fs.existsSync(stylesPath)
-      ? { styles: stylesPath }
-      : { styles: stylesDefaultPath }),
   },
   output: {
     path: path.resolve(process.cwd(), "./public"),
-    filename: "[name].js",
+    filename: "main.js",
     publicPath: "/",
     clean: true,
   },
@@ -47,7 +42,26 @@ module.exports = {
         exclude: [/node_modules\/(?!dinou)/, /dist/],
       },
       {
+        test: /\.module\.css$/,
+        use: [
+          MiniCssExtractPlugin.loader,
+          {
+            loader: "css-loader",
+            options: {
+              modules: {
+                getLocalIdent: (context, localIdentName, localName) => {
+                  return createScopedName(localName, context.resourcePath);
+                },
+              },
+              importLoaders: 1,
+            },
+          },
+          "postcss-loader",
+        ],
+      },
+      {
         test: /\.css$/,
+        exclude: /\.module\.css$/,
         use: [
           MiniCssExtractPlugin.loader,
           "css-loader",
@@ -81,5 +95,17 @@ module.exports = {
   ].filter(Boolean),
   resolve: {
     extensions: [".js", ".jsx", ".ts", ".tsx"],
+  },
+  optimization: {
+    splitChunks: {
+      cacheGroups: {
+        styles: {
+          name: "styles",
+          type: "css/mini-extract",
+          chunks: "all",
+          enforce: true,
+        },
+      },
+    },
   },
 };
