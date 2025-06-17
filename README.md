@@ -96,6 +96,8 @@ dinou main features are:
 
 - [`.env` file](#env-file)
 
+- [Styles (Tailwind.css, .module.css, and .css)](#styles-tailwindcss-modulecss-and-css)
+
 - [How to run a dinou app](#how-to-run-a-dinou-app)
 
 - [Eject dinou](#eject-dinou)
@@ -894,6 +896,94 @@ dinou is ready to manage env vars in the code that runs on the Server side (Serv
 # define here your env vars
 MY_VAR=my_value
 ```
+
+## Styles (Tailwind.css, .module.css, and .css)
+
+dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles will be generated in a file in `public` folder named `styles.css`. So you must include this in your `page.tsx` or `layout.tsx` file, in the `head` tag:
+
+```typescript
+<link href="/styles.css" rel="stylesheet"></link>
+```
+
+- Example:
+
+  ```typescript
+  // src/layout.tsx
+  "use client";
+
+  import type { ReactNode } from "react";
+  import "./global.css";
+
+  export default function Layout({ children }: { children: ReactNode }) {
+    return (
+      <html lang="en">
+        <head>
+          <title>dinou app</title>
+          <link rel="icon" type="image/png" href="/favicon.ico" />
+          <link
+            rel="apple-touch-icon"
+            sizes="180x180"
+            href="/apple-touch-icon.png"
+          />
+          <link
+            rel="icon"
+            type="image/png"
+            sizes="32x32"
+            href="/favicon-32x32.png"
+          />
+          <link
+            rel="icon"
+            type="image/png"
+            sizes="16x16"
+            href="/favicon-16x16.png"
+          />
+          <link rel="manifest" href="/site.webmanifest"></link>
+          <link href="/styles.css" rel="stylesheet"></link>
+        </head>
+        <body>{children}</body>
+      </html>
+    );
+  }
+  ```
+
+  ```css
+  /* global.css */
+  @import "tailwindcss";
+
+  .test1 {
+    background-color: purple;
+  }
+  ```
+
+  ```typescript
+  // src/page.tsx
+  "use client";
+
+  import styles from "./page.module.css";
+
+  export default function Page() {
+    return (
+      <div className={`text-red-500 test1 ${styles.test2}`}>hi world!</div>
+    );
+  }
+  ```
+
+  ```css
+  /* src/page.module.css */
+  .test2 {
+    text-decoration: underline;
+  }
+  ```
+
+  ```typescript
+  // src/css.d.ts
+  declare module "*.module.css" {
+    const classes: { [key: string]: string };
+    export default classes;
+  }
+  ```
+
+- The above will produce the text `hi world!` in red, underlined, and with a purple background color.
 
 ## How to run a dinou app
 
