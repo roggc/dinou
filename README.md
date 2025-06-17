@@ -985,6 +985,8 @@ dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles
 
 - The above will produce the text `hi world!` in red, underlined, and with a purple background color.
 
+- **Only styles applied to client components will be detected by Webpack and generated in the `public` folder. This means that styles applied to server components will have no effect.**
+
 ## How to run a dinou app
 
 Run `npm run dev` (or `npx dinou dev`) to start the dinou app in development mode. Wait for the logs of Webpack and `Listening on port <port>` to load the page on your browser.
