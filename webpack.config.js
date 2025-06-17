@@ -1,20 +1,29 @@
 require("dotenv/config");
 const path = require("path");
+const fs = require("fs");
 const ReactServerWebpackPlugin = require("react-server-dom-webpack/plugin");
 const webpack = require("webpack");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
+const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
+const stylesPath = path.resolve(process.cwd(), "./src/styles.css");
+const stylesDefaultPath = path.resolve(__dirname, "./dinou/styles.css");
 
 module.exports = {
   mode: isDevelopment ? "development" : "production",
-  entry: [
-    isDevelopment && "webpack-hot-middleware/client?reload=true",
-    path.resolve(__dirname, "./dinou/client.jsx"),
-  ].filter(Boolean),
+  entry: {
+    main: [
+      isDevelopment && "webpack-hot-middleware/client?reload=true",
+      path.resolve(__dirname, "./dinou/client.jsx"),
+    ].filter(Boolean),
+    ...(fs.existsSync(stylesPath)
+      ? { styles: stylesPath }
+      : { styles: stylesDefaultPath }),
+  },
   output: {
     path: path.resolve(process.cwd(), "./public"),
-    filename: "main.js",
+    filename: "[name].js",
     publicPath: "/",
     clean: true,
   },
@@ -37,6 +46,21 @@ module.exports = {
         },
         exclude: [/node_modules\/(?!dinou)/, /dist/],
       },
+      {
+        test: /\.css$/,
+        use: [
+          MiniCssExtractPlugin.loader,
+          "css-loader",
+          {
+            loader: "postcss-loader",
+            options: {
+              postcssOptions: {
+                config: path.resolve(__dirname, "postcss.config.js"),
+              },
+            },
+          },
+        ],
+      },
     ],
   },
   plugins: [
@@ -50,6 +74,9 @@ module.exports = {
           noErrorOnMissing: true,
         },
       ],
+    }),
+    new MiniCssExtractPlugin({
+      filename: "[name].css",
     }),
   ].filter(Boolean),
   resolve: {
