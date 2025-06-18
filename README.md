@@ -905,7 +905,7 @@ dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles
 <link href="/styles.css" rel="stylesheet"></link>
 ```
 
-- Example:
+- Example with client components:
 
   ```typescript
   // src/layout.tsx
@@ -985,7 +985,87 @@ dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles
 
 - The above will produce the text `hi world!` in red, underlined, and with a purple background color.
 
-- **Only styles applied to client components will be detected by Webpack and generated in the `public` folder. This means that styles applied to server components will have no effect.**
+- **Only styles imported under "use client" directive will be detected by Webpack and generated in a `styles.css` in `public` folder**. This means that if you want to use server components instead of client components, then you must create an additional file (e.g. `styles.ts`) where you use the `"use client"` directive and import all the `.css` files used in server components.
+
+- Example with server components:
+
+  ```typescript
+  // src/layout.tsx
+  import type { ReactNode } from "react";
+
+  export default async function Layout({ children }: { children: ReactNode }) {
+    return (
+      <html lang="en">
+        <head>
+          <title>dinou app</title>
+          <link rel="icon" type="image/png" href="/favicon.ico" />
+          <link
+            rel="apple-touch-icon"
+            sizes="180x180"
+            href="/apple-touch-icon.png"
+          />
+          <link
+            rel="icon"
+            type="image/png"
+            sizes="32x32"
+            href="/favicon-32x32.png"
+          />
+          <link
+            rel="icon"
+            type="image/png"
+            sizes="16x16"
+            href="/favicon-16x16.png"
+          />
+          <link rel="manifest" href="/site.webmanifest"></link>
+          <link href="/styles.css" rel="stylesheet"></link>
+        </head>
+        <body>{children}</body>
+      </html>
+    );
+  }
+  ```
+
+  ```css
+  /* global.css */
+  @import "tailwindcss";
+
+  .test1 {
+    background-color: purple;
+  }
+  ```
+
+  ```typescript
+  // src/page.tsx
+  import styles from "./page.module.css";
+
+  export default async function Page() {
+    return (
+      <div className={`text-red-500 test1 ${styles.test2}`}>hi world!</div>
+    );
+  }
+  ```
+
+  ```css
+  /* src/page.module.css */
+  .test2 {
+    text-decoration: underline;
+  }
+  ```
+
+  ```typescript
+  // src/css.d.ts
+  declare module "*.module.css" {
+    const classes: { [key: string]: string };
+    export default classes;
+  }
+  ```
+
+  ```typescript
+  // src/styles.ts
+  "use client"; // <-- This is key.
+  import "./global.css";
+  import "./page.module.css";
+  ```
 
 ## How to run a dinou app
 
