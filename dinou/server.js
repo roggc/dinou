@@ -1,26 +1,28 @@
 require("dotenv/config");
-const register = require("react-server-dom-webpack/node-register");
+const webpackRegister = require("react-server-dom-webpack/node-register");
 const path = require("path");
 const { readFileSync } = require("fs");
 const { renderToPipeableStream } = require("react-server-dom-webpack/server");
 const express = require("express");
 const { spawn } = require("child_process");
-const babelRegister = require("@babel/register");
+const { register } = require("esbuild-register/dist/node");
 const webpack = require("webpack");
 const webpackDevMiddleware = require("webpack-dev-middleware");
 const webpackHotMiddleware = require("webpack-hot-middleware");
 const webpackConfig = require(path.resolve(__dirname, "../webpack.config.js"));
 const { getSSGJSXOrJSX } = require("./get-jsx.js");
 
-register();
-babelRegister({
-  ignore: [/[\\\/](build|server|node_modules)[\\\/]/],
-  presets: [
-    ["@babel/preset-react", { runtime: "automatic" }],
-    "@babel/preset-typescript",
-  ],
-  plugins: ["@babel/transform-modules-commonjs"],
+webpackRegister();
+register({
+  target: "esnext",
+  format: "cjs",
   extensions: [".js", ".jsx", ".ts", ".tsx"],
+});
+
+const createScopedName = require("./createScopedName");
+
+require("css-modules-require-hook")({
+  generateScopedName: createScopedName,
 });
 
 const app = express();

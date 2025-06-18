@@ -16,6 +16,13 @@ if (fs.existsSync(path.join(modulePath, "webpack.config.js"))) {
   );
 }
 
+if (fs.existsSync(path.join(modulePath, "postcss.config.js"))) {
+  fs.copyFileSync(
+    path.join(modulePath, "postcss.config.js"),
+    path.join(projectRoot, "postcss.config.js")
+  );
+}
+
 fs.copyFileSync(
   path.join(modulePath, "LICENSE.md"),
   path.join(projectRoot, "dinou/LICENSE.md")

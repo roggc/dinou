@@ -1,14 +1,16 @@
-const babelRegister = require("@babel/register");
+const { register } = require("esbuild-register/dist/node");
 const { buildStaticPages } = require("./build-static-pages");
 
-babelRegister({
-  ignore: [/[\\\/](build|server|node_modules)[\\\/]/],
-  presets: [
-    ["@babel/preset-react", { runtime: "automatic" }],
-    "@babel/preset-typescript",
-  ],
-  plugins: ["@babel/transform-modules-commonjs"],
+register({
+  target: "esnext",
+  format: "cjs",
   extensions: [".js", ".jsx", ".ts", ".tsx"],
+});
+
+const createScopedName = require("./createScopedName");
+
+require("css-modules-require-hook")({
+  generateScopedName: createScopedName,
 });
 
 (async () => await buildStaticPages())();
