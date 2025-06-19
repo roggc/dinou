@@ -23,10 +23,11 @@ if (fs.existsSync(path.join(modulePath, "postcss.config.js"))) {
   );
 }
 
-fs.copyFileSync(
-  path.join(modulePath, "LICENSE.md"),
-  path.join(projectRoot, "dinou/LICENSE.md")
-);
+// don't copy the LICENSE.md file, as it is not needed in the project root
+// fs.copyFileSync(
+//   path.join(modulePath, "LICENSE.md"),
+//   path.join(projectRoot, "dinou/LICENSE.md")
+// );
 
 const pkg = require(path.join(projectRoot, "package.json"));
 pkg.scripts.dev =
