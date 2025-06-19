@@ -46,7 +46,11 @@ dinou main features are:
 
 - TypeScript or JavaScript
 
-- Full control and customization through the command `npm run eject` (`npx dinou eject`).
+- Full control and customization through the command `npm run eject` (`npx dinou eject`)
+
+- Support for the use of `.css`, `.module.css`, and `Tailwind.css`
+
+- Support for the use of images in your components (`.png`, `.jpeg`, `.jpg`, `.gif`, `.svg`, `.webp`)
 
 ## Table of contents
 
@@ -97,6 +101,8 @@ dinou main features are:
 - [`.env` file](#env-file)
 
 - [Styles (Tailwind.css, .module.css, and .css)](#styles-tailwindcss-modulecss-and-css)
+
+- [Images (`.png`, `.jpeg`, `.jpg`, `.gif`, `.svg`, and `.webp`)](#images-png-jpeg-jpg-gif-svg-and-webp)
 
 - [How to run a dinou app](#how-to-run-a-dinou-app)
 
@@ -985,7 +991,7 @@ dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles
 
 - The above will produce the text `hi world!` in red, underlined, and with a purple background color.
 
-- **Only styles imported under "use client" directive will be detected by Webpack and generated in a `styles.css` in `public` folder**. This means that if you want to use server components instead of client components, then you must create an additional file (e.g. `styles.ts`) where you use the `"use client"` directive and import all the `.css` files used in server components.
+- **Only styles imported under `"use client"` directive will be detected by Webpack and generated in a `styles.css` in `public` folder**. This means that if you want to use server components instead of client components, then you must create an additional file (e.g. `styles.ts`) where you use the `"use client"` directive and import all the `.css` files used in server components.
 
 - Example with server components:
 
@@ -1067,6 +1073,39 @@ dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles
   import "./page.module.css";
   ```
 
+## Images (`.png`, `.jpeg`, `.jpg`, `.gif`, `.svg`, and `.webp`)
+
+dinou is ready to support the use of images in your components. Just do:
+
+```typescript
+// src/component.tsx
+"use client";
+
+import image from "./image.png"; // import the image from where it is located (inside src folder)
+
+export default function Component() {
+  return <img src={image} alt="image" />;
+}
+```
+
+**Only images imported under `"use client"` directive will be detected by Webpack and generated in `public` folder**. If you use server components, then you must create an additional file (e.g. `images.ts`) with the `"use client"` directive and import there the images too:
+
+```typescript
+// src/images.ts
+"use client";
+
+import "./image.png";
+```
+
+```typescript
+// src/component.tsx
+import image from "./image.png"; // import the image from where it is located (inside src folder)
+
+export default async function Component() {
+  return <img src={image} alt="image" />;
+}
+```
+
 ## How to run a dinou app
 
 Run `npm run dev` (or `npx dinou dev`) to start the dinou app in development mode. Wait for the logs of Webpack and `Listening on port <port>` to load the page on your browser.
@@ -1080,3 +1119,7 @@ Run `npm run build` (or `npx dinou build`) to build the app and `npm start` (or 
 ## License
 
 dinou is licensed under the [MIT License](https://github.com/roggc/dinou/blob/master/LICENSE.md).
+
+```
+
+```

@@ -75,6 +75,26 @@ module.exports = {
           },
         ],
       },
+      {
+        test: /\.(png|jpe?g|gif|svg|webp)$/i,
+        type: "asset/resource",
+        generator: {
+          filename: (pathData) => {
+            const resourcePath =
+              pathData.module.resourceResolveData?.path ||
+              pathData.module.resource;
+
+            const base = path.basename(
+              resourcePath,
+              path.extname(resourcePath)
+            );
+            const scoped = createScopedName(base, resourcePath);
+
+            return `images/${scoped}[ext]`;
+          },
+          publicPath: "/",
+        },
+      },
     ],
   },
   plugins: [
