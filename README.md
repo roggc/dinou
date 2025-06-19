@@ -1119,7 +1119,3 @@ Run `npm run build` (or `npx dinou build`) to build the app and `npm start` (or 
 ## License
 
 dinou is licensed under the [MIT License](https://github.com/roggc/dinou/blob/master/LICENSE.md).
-
-```
-
-```
