@@ -11,18 +11,24 @@ const webpackDevMiddleware = require("webpack-dev-middleware");
 const webpackHotMiddleware = require("webpack-hot-middleware");
 const webpackConfig = require(path.resolve(__dirname, "../webpack.config.js"));
 const { getSSGJSXOrJSX } = require("./get-jsx.js");
-
+const addHook = require("./asset-require-hook.js");
 webpackRegister();
 register({
   target: "esnext",
   format: "cjs",
   extensions: [".js", ".jsx", ".ts", ".tsx"],
 });
-
 const createScopedName = require("./createScopedName");
-
 require("css-modules-require-hook")({
   generateScopedName: createScopedName,
+});
+addHook({
+  extensions: ["png", "jpg", "jpeg", "gif", "svg", "webp"],
+  name: function (localName, filepath) {
+    const result = createScopedName(localName, filepath);
+    return result + ".[ext]";
+  },
+  publicPath: "images/",
 });
 
 const app = express();
@@ -72,22 +78,27 @@ function renderAppToHtml(reqPath, paramsString) {
 
     let errorOutput = "";
     child.stderr.on("data", (data) => {
-      errorOutput += data;
+      errorOutput += data.toString();
+    });
+
+    child.on("error", (error) => {
+      reject(new Error(`Failed to start child process: ${error.message}`));
+    });
+
+    child.on("spawn", () => {
+      resolve(child.stdout);
     });
 
     child.on("close", (code) => {
       if (code !== 0) {
         try {
           const errorResult = JSON.parse(errorOutput);
-          reject(new Error(errorResult.error));
+          reject(new Error(errorResult.error || errorOutput));
         } catch {
           reject(new Error(`Child process failed: ${errorOutput}`));
         }
       }
     });
-
-    // Resolve the stream from the child process
-    resolve(child.stdout);
   });
 }
 
