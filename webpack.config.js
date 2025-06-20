@@ -7,7 +7,6 @@ const CopyWebpackPlugin = require("copy-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const createScopedName = require("./dinou/createScopedName");
 const TsconfigPathsPlugin = require("tsconfig-paths-webpack-plugin");
-const { EsbuildPlugin } = require("esbuild-loader");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 
@@ -40,13 +39,19 @@ module.exports = {
   module: {
     rules: [
       {
-        // Match `.js`, `.jsx`, `.ts` or `.tsx` files
-        test: /\.[jt]sx?$/,
-        loader: "esbuild-loader",
-        options: {
-          // JavaScript version to compile to
-          target: "esnext",
-          jsx: "automatic", // Use React's automatic JSX runtime
+        test: /\.(js|jsx|ts|tsx)$/,
+        use: {
+          loader: "babel-loader",
+          options: {
+            presets: [
+              ["@babel/preset-react", { runtime: "automatic" }],
+              "@babel/preset-typescript",
+            ],
+            plugins: [
+              "@babel/plugin-transform-modules-commonjs",
+              "@babel/plugin-syntax-import-meta",
+            ],
+          },
         },
         exclude: [/node_modules\/(?!dinou)/],
       },
@@ -106,7 +111,7 @@ module.exports = {
 
             return `images/${scoped}[ext]`;
           },
-          publicPath: "/",
+          publicPath: "",
         },
       },
     ],
@@ -149,10 +154,6 @@ module.exports = {
         },
       },
     },
-    minimize: !isDevelopment,
-    minimizer: !isDevelopment
-      ? [new EsbuildPlugin({ target: "esnext", css: true })]
-      : [],
   },
   watchOptions: {
     ignored: /____public____/,
