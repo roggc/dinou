@@ -1,4 +1,5 @@
 require("dotenv/config");
+require("./register-paths");
 const webpackRegister = require("react-server-dom-webpack/node-register");
 const path = require("path");
 const { readFileSync } = require("fs");

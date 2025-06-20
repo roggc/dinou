@@ -1,3 +1,4 @@
+require("./register-paths");
 const babelRegister = require("@babel/register");
 babelRegister({
   ignore: [/[\\\/](build|server|node_modules)[\\\/]/],
