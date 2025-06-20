@@ -46,7 +46,7 @@ if (isDevelopment) {
   app.use(webpackHotMiddleware(compiler));
 }
 
-app.use(express.static(path.resolve(process.cwd(), "public")));
+app.use(express.static(path.resolve(process.cwd(), "____public____")));
 
 app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
   try {
@@ -56,7 +56,7 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
 
     jsx = await getSSGJSXOrJSX(reqPath, { ...req.query });
     const manifest = readFileSync(
-      path.resolve(process.cwd(), "public/react-client-manifest.json"),
+      path.resolve(process.cwd(), "____public____/react-client-manifest.json"),
       "utf8"
     );
     const moduleMap = JSON.parse(manifest);

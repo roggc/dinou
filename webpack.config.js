@@ -7,6 +7,7 @@ const CopyWebpackPlugin = require("copy-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const createScopedName = require("./dinou/createScopedName");
 const TsconfigPathsPlugin = require("tsconfig-paths-webpack-plugin");
+const { EsbuildPlugin } = require("esbuild-loader");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 
@@ -31,7 +32,7 @@ module.exports = {
     ].filter(Boolean),
   },
   output: {
-    path: path.resolve(process.cwd(), "./public"),
+    path: path.resolve(process.cwd(), "./____public____"),
     filename: "main.js",
     publicPath: "/",
     clean: true,
@@ -39,26 +40,25 @@ module.exports = {
   module: {
     rules: [
       {
-        test: /\.(js|jsx|ts|tsx)$/,
-        use: {
-          loader: "babel-loader",
-          options: {
-            presets: [
-              ["@babel/preset-react", { runtime: "automatic" }],
-              "@babel/preset-typescript",
-            ],
-            plugins: [
-              "@babel/plugin-transform-modules-commonjs",
-              "@babel/plugin-syntax-import-meta",
-            ],
-          },
+        // Match `.js`, `.jsx`, `.ts` or `.tsx` files
+        test: /\.[jt]sx?$/,
+        loader: "esbuild-loader",
+        options: {
+          // JavaScript version to compile to
+          target: "esnext",
+          jsx: "automatic", // Use React's automatic JSX runtime
         },
-        exclude: [/node_modules\/(?!dinou)/, /dist/],
+        exclude: [/node_modules\/(?!dinou)/],
       },
       {
         test: /\.module\.css$/,
         use: [
-          MiniCssExtractPlugin.loader,
+          {
+            loader: MiniCssExtractPlugin.loader,
+            options: {
+              defaultExport: true,
+            },
+          },
           {
             loader: "css-loader",
             options: {
@@ -149,5 +149,12 @@ module.exports = {
         },
       },
     },
+    minimize: !isDevelopment,
+    minimizer: !isDevelopment
+      ? [new EsbuildPlugin({ target: "esnext", css: true })]
+      : [],
+  },
+  watchOptions: {
+    ignored: /____public____/,
   },
 };
