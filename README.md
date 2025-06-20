@@ -18,7 +18,7 @@ Or you can create one by yourself with the following steps:
 
   - "eject": "dinou eject"
 
-- Create an `src` folder with a `page.jsx` (or `.tsx`, `.js`)
+- Create an `src` folder with a `page.jsx` (or `.tsx`)
 
   ```typescript
   "use client";
@@ -116,13 +116,13 @@ dinou main features are:
 
 ## Routing system, layouts, pages, not found pages, ...
 
-- Routes are defined by defining a `page.tsx` file (or `.jsx`, `.js`) in a folder.
+- Routes are defined by defining a `page.tsx` file (or `.jsx`) in a folder.
 
 - Route "/" corresponds to the `src` folder.
 
-- You can define layouts and nested layouts by defining a `layout.tsx` (or `.jsx`, `.js`) file in a folder. A layout file found in a folder wraps a layout file found in a more nested folder, and finally composition of all layouts found in a route hierarchy wraps the `page` component or `not_found` component.
+- You can define layouts and nested layouts by defining a `layout.tsx` (or `.jsx`) file in a folder. A layout file found in a folder wraps a layout file found in a more nested folder, and finally composition of all layouts found in a route hierarchy wraps the `page` component or `not_found` component.
 
-- You can define not found pages by defining `not_found.tsx` (or `.jsx`, `.js`) file in a folder. If more than a `not_found.tsx` file is found in a route hierarchy, the more nested one will be used.
+- You can define not found pages by defining `not_found.tsx` (or `.jsx`) file in a folder. If more than a `not_found.tsx` file is found in a route hierarchy, the more nested one will be used.
 
 - If you don't want a `page` to be applied layouts define a `no_layout` file (without extension) in the same folder. A `no_layout` file, if present, also applies to the `not_found` file if present in the same folder. There exists also a `no_layout_not_found` file if you don't want a `not_found` file to be applied layouts but you do in `page` component.
 
@@ -669,11 +669,11 @@ The routing system is file-based and supports static routes, dynamic routes, opt
 
 - All routes are resolved relative to the `src/` directory.
 
-- A route is defined by a `page.tsx` (or `.jsx`, `.js`) file in a directory.
+- A route is defined by a `page.tsx` (or `.jsx`) file in a directory.
 
-- Layouts are defined by `layout.tsx` (or `.jsx`, `.js`) files, which wrap the content of pages or nested layouts.
+- Layouts are defined by `layout.tsx` (or `.jsx`) files, which wrap the content of pages or nested layouts.
 
-- Not found pages are defined by `not_found.tsx` (or `.jsx`, `.js`) files.
+- Not found pages are defined by `not_found.tsx` (or `.jsx`) files.
 
 - Slots are defined by folders starting with `@` (e.g., `@sidebar`), containing a `page.tsx` file.
 
@@ -909,7 +909,7 @@ MY_VAR=my_value
 
 ## Styles (Tailwind.css, .module.css, and .css)
 
-dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles will be generated in a file in `public` folder named `styles.css`. So you must include this in your `page.tsx` or `layout.tsx` file, in the `head` tag:
+dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles will be generated in a file in `____public____` folder named `styles.css`. So you must include this in your `page.tsx` or `layout.tsx` file, in the `head` tag:
 
 ```typescript
 <link href="/styles.css" rel="stylesheet"></link>
@@ -995,7 +995,7 @@ dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles
 
 - The above will produce the text `hi world!` in red, underlined, and with a purple background color.
 
-- **Only styles imported under `"use client"` directive will be detected by Webpack and generated in a `styles.css` in `public` folder**. This means that if you want to use server components instead of client components, then you must create an additional file (e.g. `styles.ts`) where you use the `"use client"` directive and import all the `.css` files used in server components.
+- **Only styles imported under `"use client"` directive will be detected by Webpack and generated in a `styles.css` in `____public____` folder**. This means that if you want to use server components instead of client components, then you must create an additional file (e.g. `styles.ts`) where you use the `"use client"` directive and import all the `.css` files used in server components.
 
 - Example with server components:
 
@@ -1092,7 +1092,7 @@ export default function Component() {
 }
 ```
 
-**Only images imported under `"use client"` directive will be detected by Webpack and generated in `public` folder**. If you use server components, then you must create an additional file (e.g. `images.ts`) with the `"use client"` directive and import there the images too:
+**Only images imported under `"use client"` directive will be detected by Webpack and generated in `____public____` folder**. If you use server components, then you must create an additional file (e.g. `images.ts`) with the `"use client"` directive and import there the images too:
 
 ```typescript
 // src/images.ts
