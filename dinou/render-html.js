@@ -1,11 +1,14 @@
-const addHook = require("./asset-require-hook.js");
-const { register } = require("esbuild-register/dist/node");
-register({
-  target: "esnext",
-  format: "cjs",
+const babelRegister = require("@babel/register");
+babelRegister({
+  ignore: [/[\\\/](build|server|node_modules)[\\\/]/],
+  presets: [
+    ["@babel/preset-react", { runtime: "automatic" }],
+    "@babel/preset-typescript",
+  ],
+  plugins: ["@babel/transform-modules-commonjs"],
   extensions: [".js", ".jsx", ".ts", ".tsx"],
-  jsx: "automatic",
 });
+const addHook = require("./asset-require-hook.js");
 const createScopedName = require("./createScopedName");
 require("css-modules-require-hook")({
   generateScopedName: createScopedName,

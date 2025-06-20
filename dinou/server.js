@@ -5,7 +5,6 @@ const { readFileSync } = require("fs");
 const { renderToPipeableStream } = require("react-server-dom-webpack/server");
 const express = require("express");
 const { spawn } = require("child_process");
-const { register } = require("esbuild-register/dist/node");
 const webpack = require("webpack");
 const webpackDevMiddleware = require("webpack-dev-middleware");
 const webpackHotMiddleware = require("webpack-hot-middleware");
@@ -13,11 +12,15 @@ const webpackConfig = require(path.resolve(__dirname, "../webpack.config.js"));
 const { getSSGJSXOrJSX } = require("./get-jsx.js");
 const addHook = require("./asset-require-hook.js");
 webpackRegister();
-register({
-  target: "esnext",
-  format: "cjs",
+const babelRegister = require("@babel/register");
+babelRegister({
+  ignore: [/[\\\/](build|server|node_modules)[\\\/]/],
+  presets: [
+    ["@babel/preset-react", { runtime: "automatic" }],
+    "@babel/preset-typescript",
+  ],
+  plugins: ["@babel/transform-modules-commonjs"],
   extensions: [".js", ".jsx", ".ts", ".tsx"],
-  jsx: "automatic",
 });
 const createScopedName = require("./createScopedName");
 require("css-modules-require-hook")({
@@ -53,7 +56,6 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
     const reqPath = (
       req.path.endsWith("/") ? req.path : req.path + "/"
     ).replace("/____rsc_payload____", "");
-
     jsx = await getSSGJSXOrJSX(reqPath, { ...req.query });
     const manifest = readFileSync(
       path.resolve(process.cwd(), "____public____/react-client-manifest.json"),
@@ -106,13 +108,11 @@ function renderAppToHtml(reqPath, paramsString) {
 app.get(/^\/.*\/?$/, async (req, res) => {
   try {
     const reqPath = req.path.endsWith("/") ? req.path : req.path + "/";
-
     // Get the stream from the child process
     const appHtmlStream = await renderAppToHtml(
       reqPath,
       JSON.stringify({ ...req.query })
     );
-
     // Set headers for the response
     res.setHeader("Content-Type", "text/html");
 

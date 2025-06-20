@@ -1,12 +1,15 @@
-const { register } = require("esbuild-register/dist/node");
+const babelRegister = require("@babel/register");
+babelRegister({
+  ignore: [/[\\\/](build|server|node_modules)[\\\/]/],
+  presets: [
+    ["@babel/preset-react", { runtime: "automatic" }],
+    "@babel/preset-typescript",
+  ],
+  plugins: ["@babel/transform-modules-commonjs"],
+  extensions: [".js", ".jsx", ".ts", ".tsx"],
+});
 const { buildStaticPages } = require("./build-static-pages");
 const addHook = require("./asset-require-hook.js");
-register({
-  target: "esnext",
-  format: "cjs",
-  extensions: [".js", ".jsx", ".ts", ".tsx"],
-  jsx: "automatic",
-});
 const createScopedName = require("./createScopedName");
 require("css-modules-require-hook")({
   generateScopedName: createScopedName,
