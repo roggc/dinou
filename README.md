@@ -52,6 +52,8 @@ dinou main features are:
 
 - Support for the use of images in your components (`.png`, `.jpeg`, `.jpg`, `.gif`, `.svg`, `.webp`)
 
+- Support for the use of an import alias in `tsconfig.json` or `jsconfig.json` file.
+
 ## Table of contents
 
 - [Routing system, layouts, pages, not found pages, ...](#routing-system-layouts-pages-not-found-pages-)
@@ -103,6 +105,8 @@ dinou main features are:
 - [Styles (Tailwind.css, .module.css, and .css)](#styles-tailwindcss-modulecss-and-css)
 
 - [Images (`.png`, `.jpeg`, `.jpg`, `.gif`, `.svg`, and `.webp`)](#images-png-jpeg-jpg-gif-svg-and-webp)
+
+- [Import alias (e.g. `"@/..."`)](#import-alias-eg-)
 
 - [How to run a dinou app](#how-to-run-a-dinou-app)
 
@@ -1103,6 +1107,38 @@ import image from "./image.png"; // import the image from where it is located (i
 
 export default async function Component() {
   return <img src={image} alt="image" />;
+}
+```
+
+## Import alias (e.g. `"@/..."`)
+
+dinou is ready to support import alias, as `import some from "@/..."`. If you want to use them just define the options in `tsconfig.json` or `jsconfig.json`:
+
+```json
+// tsconfig.json
+{
+  "compilerOptions": {
+    // other options
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": ["src/**/*"]
+  // other configuration fields
+}
+```
+
+```json
+// jsconfig.json
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": ["src"]
 }
 ```
 

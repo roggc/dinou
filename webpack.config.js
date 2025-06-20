@@ -1,12 +1,26 @@
 require("dotenv/config");
 const path = require("path");
+const fs = require("fs");
 const ReactServerWebpackPlugin = require("react-server-dom-webpack/plugin");
 const webpack = require("webpack");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const createScopedName = require("./dinou/createScopedName");
+const TsconfigPathsPlugin = require("tsconfig-paths-webpack-plugin");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
+
+function getConfigFileIfExists() {
+  const tsconfigPath = path.resolve(process.cwd(), "tsconfig.json");
+  const jsconfigPath = path.resolve(process.cwd(), "jsconfig.json");
+
+  if (fs.existsSync(tsconfigPath)) return tsconfigPath;
+  if (fs.existsSync(jsconfigPath)) return jsconfigPath;
+
+  return null;
+}
+
+const configFile = getConfigFileIfExists();
 
 module.exports = {
   mode: isDevelopment ? "development" : "production",
@@ -115,6 +129,14 @@ module.exports = {
   ].filter(Boolean),
   resolve: {
     extensions: [".js", ".jsx", ".ts", ".tsx"],
+    plugins: configFile
+      ? [
+          new TsconfigPathsPlugin({
+            configFile,
+            extensions: [".js", ".jsx", ".ts", ".tsx"],
+          }),
+        ]
+      : [],
   },
   optimization: {
     splitChunks: {
