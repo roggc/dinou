@@ -4,6 +4,7 @@ register({
   target: "esnext",
   format: "cjs",
   extensions: [".js", ".jsx", ".ts", ".tsx"],
+  jsx: "automatic",
 });
 const createScopedName = require("./createScopedName");
 require("css-modules-require-hook")({
