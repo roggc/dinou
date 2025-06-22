@@ -126,6 +126,8 @@ dinou main features are:
 
 - If you don't want a `page` to be applied layouts define a `no_layout` file (without extension) in the same folder. A `no_layout` file, if present, also applies to the `not_found` file if present in the same folder. There exists also a `no_layout_not_found` file if you don't want a `not_found` file to be applied layouts but you do in `page` component.
 
+- `reset_layout` file (without extension) if present in the same folder as a `layout.tsx` file, will ignore previous layouts in the layout hierarchy.
+
 ## page_functions.ts (or `.tsx`, `.js`, `.jsx`)
 
 `page_functions.ts` is a file for defining four diferent possible functions. These are:
@@ -840,6 +842,8 @@ The routing system is file-based and supports static routes, dynamic routes, opt
   - For "/blog/post", the `src/layout.tsx` wraps the `src/blog/layout.tsx`, which wraps the `page.tsx` content.
 
 - If a **`no_layout`** file exists in a directory (**without extension**), the layout hierarchy is skipped, and only the page content is rendered.
+
+- If a **`reset_layout`** file (**without extension**) exists in a directory where a `layout.tsx` file is defined, previous layouts in the hierarchy will be ignored.
 
 ### Not Found Handling
 

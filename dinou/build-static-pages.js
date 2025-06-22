@@ -382,6 +382,18 @@ async function buildStaticPages() {
             }
             jsx = React.createElement(Layout, props, jsx);
             jsx = { ...jsx, __modulePath: layoutPath };
+            const layoutFolderPath = path.dirname(layoutPath);
+            if (
+              getFilePathAndDynamicParams(
+                [],
+                {},
+                layoutFolderPath,
+                "reset_layout",
+                false
+              )[0]
+            ) {
+              break;
+            }
             index++;
           }
         }
@@ -548,6 +560,18 @@ async function buildStaticPage(reqPath) {
           }
           jsx = React.createElement(Layout, layoutProps, jsx);
           jsx = { ...jsx, __modulePath: layoutPath };
+          const layoutFolderPath = path.dirname(layoutPath);
+          if (
+            getFilePathAndDynamicParams(
+              [],
+              {},
+              layoutFolderPath,
+              "reset_layout",
+              false
+            )[0]
+          ) {
+            break;
+          }
           index++;
         }
       }
