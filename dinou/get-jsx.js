@@ -129,6 +129,18 @@ async function getJSX(reqPath, query) {
         props = { ...props, ...(pageFunctionsProps?.layout ?? {}) };
       }
       jsx = React.createElement(Layout, props, jsx);
+      const layoutFolderPath = path.dirname(layoutPath);
+      if (
+        getFilePathAndDynamicParams(
+          [],
+          {},
+          layoutFolderPath,
+          "reset_layout",
+          false
+        )[0]
+      ) {
+        break;
+      }
       index++;
     }
   }
