@@ -29,10 +29,14 @@ module.exports = {
       isDevelopment && "webpack-hot-middleware/client?reload=true",
       path.resolve(__dirname, "./dinou/client.jsx"),
     ].filter(Boolean),
+    error: [
+      isDevelopment && "webpack-hot-middleware/client?reload=true",
+      path.resolve(__dirname, "./dinou/client-error.jsx"),
+    ].filter(Boolean),
   },
   output: {
     path: path.resolve(process.cwd(), "./____public____"),
-    filename: "main.js",
+    filename: "[name].js",
     publicPath: "/",
     clean: true,
   },
