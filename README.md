@@ -54,6 +54,8 @@ dinou main features are:
 
 - Support for the use of an import alias in `tsconfig.json` or `jsconfig.json` file.
 
+- Error handling with `error.tsx` pages, differentiationg behaviour in production and in development.
+
 ## Table of contents
 
 - [Routing system, layouts, pages, not found pages, ...](#routing-system-layouts-pages-not-found-pages-)
@@ -98,6 +100,8 @@ dinou main features are:
 
   - [Not Found Handling](#not-found-handling)
 
+  - [Error Handling](#error-handling)
+
 - [`favicons` folder](#favicons-folder)
 
 - [`.env` file](#env-file)
@@ -127,6 +131,8 @@ dinou main features are:
 - If you don't want a `page` to be applied layouts define a `no_layout` file (without extension) in the same folder. A `no_layout` file, if present, also applies to the `not_found` file if present in the same folder. There exists also a `no_layout_not_found` file if you don't want a `not_found` file to be applied layouts but you do in `page` component.
 
 - `reset_layout` file (without extension) if present in the same folder as a `layout.tsx` file, will ignore previous layouts in the layout hierarchy.
+
+- If found any `error.tsx` (or `.jsx`) page in the route hierarchy, the more nested one will be rendered in case of error in the page. Layouts are also applied to error pages if no `no_layout` or `no_layout_error` files (without extension) exists in the folder where `error.tsx` is defined.
 
 ## page_functions.ts (or `.tsx`, `.js`, `.jsx`)
 
@@ -858,6 +864,51 @@ The routing system is file-based and supports static routes, dynamic routes, opt
 - If no `not_found.tsx` exists, a default "Page not found" message is returned.
 
 - Layouts are applied to `not_found.tsx` pages too, unless a `no_layout` or **`no_layout_not_found`** files (**without extension**) are found in the directory in which the `not_found.tsx` page is defined, in which case layouts will not be applied to `not_found.tsx` page.
+
+### Error Handling
+
+- In case of error in a page, the more nested `error.tsx` (or `.jsx`) page will rendered if exists. **If it does not exist, then in production the error will be written in the console, and in development a default error page will be rendered informing about the error message and the error stack**.
+
+- Layouts are applied to `error.tsx` pages, if no `no_layout` or `no_layout_error` files (without extension) exists in the folder where `error.tsx` is defined.
+
+- `error.tsx` pages are **dynamically rendered**, so avoid using server components (async functions) and fetching data in their body definition because this will delay the rendering of the page. Use `Suspense` instead if you need to fetch data.
+
+- There not exists a `error_functions.ts` functionality, so there is no `getProps` for error pages. Again, if you need to fetch data use `Suspense`.
+
+- The error page receives `params`, `query`, and `error`. `error` is an object with properties `message` and `stack` which are strings.
+
+- Example:
+
+  ```typescript
+  "use client";
+
+  export default function Page({
+    error: { message, stack },
+  }: {
+    error: Error;
+  }) {
+    return (
+      <main className="flex-1 flex flex-col items-center justify-center p-4">
+        <div className="max-w-md w-full text-center space-y-6">
+          <h1 className="text-3xl font-bold text-red-600">Error</h1>
+          <p className="text-lg text-gray-700">
+            An unexpected error has occurred baby. Please try again later.
+          </p>
+          <a
+            href="/"
+            className="inline-block px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+          >
+            Go to Home
+          </a>
+        </div>
+        <div className="mt-6 text-sm text-gray-500">
+          <pre className="whitespace-pre-wrap break-words">{message}</pre>
+          <pre className="whitespace-pre-wrap break-words">{stack}</pre>
+        </div>
+      </main>
+    );
+  }
+  ```
 
 ## `favicons` folder
 

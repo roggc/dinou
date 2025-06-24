@@ -11,6 +11,7 @@ const webpackDevMiddleware = require("webpack-dev-middleware");
 const webpackHotMiddleware = require("webpack-hot-middleware");
 const webpackConfig = require(path.resolve(__dirname, "../webpack.config.js"));
 const { getSSGJSXOrJSX } = require("./get-jsx.js");
+const { getErrorJSX } = require("./get-error-jsx.js");
 const addHook = require("./asset-require-hook.js");
 webpackRegister();
 const babelRegister = require("@babel/register");
@@ -37,6 +38,7 @@ addHook({
 });
 
 const app = express();
+app.use(express.json());
 const isDevelopment = process.env.NODE_ENV !== "production";
 
 if (isDevelopment) {
@@ -57,7 +59,26 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
     const reqPath = (
       req.path.endsWith("/") ? req.path : req.path + "/"
     ).replace("/____rsc_payload____", "");
-    jsx = await getSSGJSXOrJSX(reqPath, { ...req.query });
+    const jsx = await getSSGJSXOrJSX(reqPath, { ...req.query });
+    const manifest = readFileSync(
+      path.resolve(process.cwd(), "____public____/react-client-manifest.json"),
+      "utf8"
+    );
+    const moduleMap = JSON.parse(manifest);
+    const { pipe } = renderToPipeableStream(jsx, moduleMap);
+    pipe(res);
+  } catch (error) {
+    console.error("Error rendering RSC:", error);
+    res.status(500).send("Internal Server Error");
+  }
+});
+
+app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
+  try {
+    const reqPath = (
+      req.path.endsWith("/") ? req.path : req.path + "/"
+    ).replace("/____rsc_payload_error____", "");
+    const jsx = await getErrorJSX(reqPath, { ...req.query }, req.body.error);
     const manifest = readFileSync(
       path.resolve(process.cwd(), "____public____/react-client-manifest.json"),
       "utf8"
@@ -74,11 +95,15 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
 // Render HTML via child process, returning a stream
 function renderAppToHtml(reqPath, paramsString) {
   return new Promise((resolve, reject) => {
-    const child = spawn("node", [
-      path.resolve(__dirname, "render-html.js"),
-      reqPath,
-      paramsString,
-    ]);
+    const child = spawn(
+      "node",
+      [path.resolve(__dirname, "render-html.js"), reqPath, paramsString],
+      {
+        env: {
+          ...process.env,
+        },
+      }
+    );
 
     let errorOutput = "";
     child.stderr.on("data", (data) => {
