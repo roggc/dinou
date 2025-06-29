@@ -20,7 +20,7 @@ addHook({
     const result = createScopedName(localName, filepath);
     return result + ".[ext]";
   },
-  publicPath: "images/",
+  publicPath: "/images/",
 });
 
 const { renderToPipeableStream } = require("react-dom/server");

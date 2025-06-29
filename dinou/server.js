@@ -2,13 +2,7 @@ require("dotenv/config");
 require("./register-paths");
 const webpackRegister = require("react-server-dom-webpack/node-register");
 const path = require("path");
-const {
-  readFileSync,
-  existsSync,
-  // mkdirSync,
-  // createWriteStream,
-  createReadStream,
-} = require("fs");
+const { readFileSync, existsSync, createReadStream } = require("fs");
 const { renderToPipeableStream } = require("react-server-dom-webpack/server");
 const express = require("express");
 const getSSGJSXOrJSX = require("./get-ssg-jsx-or-jsx.js");
@@ -35,9 +29,8 @@ addHook({
     const result = createScopedName(localName, filepath);
     return result + ".[ext]";
   },
-  publicPath: "images/",
+  publicPath: "/images/",
 });
-// const { PassThrough } = require("stream");
 const generateStatic = require("./generate-static.js");
 const renderAppToHtml = require("./render-app-to-html.js");
 const revalidating = require("./revalidating.js");
@@ -67,7 +60,6 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
     if (!isDevelopment) {
       const payloadPath = path.join("dist2", reqPath, "rsc.rsc");
       if (existsSync(payloadPath)) {
-        // console.log(`[RSC] Serving existing payload for ${reqPath}`);
         res.setHeader("Content-Type", "application/octet-stream");
         const readStream = createReadStream(payloadPath);
         readStream.on("error", (err) => {
@@ -78,8 +70,6 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
       }
     }
 
-    // console.log(`[RSC] Payload not found, generating new one for ${reqPath}`);
-
     const jsx = await getSSGJSXOrJSX(reqPath, { ...req.query });
 
     const manifest = JSON.parse(
@@ -89,17 +79,8 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
       )
     );
 
-    // mkdirSync(path.dirname(payloadPath), { recursive: true });
-    // const fileWriteStream = createWriteStream(payloadPath);
-
     const { pipe } = renderToPipeableStream(jsx, manifest);
     pipe(res);
-
-    // Pipe both to response and file
-    // const passThrough = new PassThrough();
-    // pipe(passThrough);
-    // passThrough.pipe(res);
-    // passThrough.pipe(fileWriteStream);
   } catch (error) {
     console.error("Error rendering RSC:", error);
     res.status(500).send("Internal Server Error");
@@ -128,13 +109,12 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
 app.get(/^\/.*\/?$/, async (req, res) => {
   try {
     const reqPath = req.path.endsWith("/") ? req.path : req.path + "/";
-    const htmlPath = path.join("dist2", reqPath, "index.html");
 
     if (!isDevelopment) {
       revalidating(reqPath);
+      const htmlPath = path.join("dist2", reqPath, "index.html");
 
       if (existsSync(htmlPath)) {
-        // console.log("Serving cached HTML:", htmlPath);
         res.setHeader("Content-Type", "text/html");
         return createReadStream(htmlPath).pipe(res);
       }
@@ -145,21 +125,13 @@ app.get(/^\/.*\/?$/, async (req, res) => {
       JSON.stringify({ ...req.query })
     );
 
-    // mkdirSync(path.dirname(htmlPath), { recursive: true });
-
-    // const fileStream = createWriteStream(htmlPath);
     res.setHeader("Content-Type", "text/html");
     appHtmlStream.pipe(res);
-    // appHtmlStream.pipe(fileStream);
 
     appHtmlStream.on("error", (error) => {
       console.error("Stream error:", error);
       res.status(500).send("Internal Server Error");
     });
-
-    // fileStream.on("error", (error) => {
-    //   console.error("File write error:", error);
-    // });
   } catch (error) {
     console.error("Error rendering React app:", error);
     res.status(500).send("Internal Server Error");
