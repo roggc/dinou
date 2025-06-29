@@ -28,6 +28,7 @@ const getJSX = require("./get-jsx");
 const getSSGJSX = require("./get-ssg-jsx.js");
 const { getErrorJSX } = require("./get-error-jsx");
 const { renderJSXToClientJSX } = require("./render-jsx-to-client-jsx");
+const isDevelopment = process.env.NODE_ENV !== "production";
 
 function formatErrorHtml(error) {
   const message = error.message || "Unknown error";
@@ -112,10 +113,11 @@ function formatErrorHtmlProduction(error) {
 
 async function renderToStream(reqPath, query) {
   try {
-    const jsx = Object.keys(query).length
-      ? renderJSXToClientJSX(await getJSX(reqPath, query))
-      : getSSGJSX(reqPath) ??
-        renderJSXToClientJSX(await getJSX(reqPath, query));
+    const jsx =
+      Object.keys(query).length || isDevelopment
+        ? renderJSXToClientJSX(await getJSX(reqPath, query))
+        : getSSGJSX(reqPath) ??
+          renderJSXToClientJSX(await getJSX(reqPath, query));
 
     const stream = renderToPipeableStream(jsx, {
       onError(error) {

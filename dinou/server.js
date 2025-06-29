@@ -70,7 +70,7 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
       }
     }
 
-    const jsx = await getSSGJSXOrJSX(reqPath, { ...req.query });
+    const jsx = await getSSGJSXOrJSX(reqPath, { ...req.query }, isDevelopment);
 
     const manifest = JSON.parse(
       readFileSync(

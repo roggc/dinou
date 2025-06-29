@@ -108,7 +108,7 @@ module.exports = {
             );
             const scoped = createScopedName(base, resourcePath);
 
-            return `images/${scoped}[ext]`;
+            return `/images/${scoped}[ext]`;
           },
           publicPath: "",
         },
