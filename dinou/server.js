@@ -67,7 +67,7 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
     if (!isDevelopment) {
       const payloadPath = path.join("dist2", reqPath, "rsc.rsc");
       if (existsSync(payloadPath)) {
-        console.log(`[RSC] Serving existing payload for ${reqPath}`);
+        // console.log(`[RSC] Serving existing payload for ${reqPath}`);
         res.setHeader("Content-Type", "application/octet-stream");
         const readStream = createReadStream(payloadPath);
         readStream.on("error", (err) => {
@@ -78,7 +78,7 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
       }
     }
 
-    console.log(`[RSC] Payload not found, generating new one for ${reqPath}`);
+    // console.log(`[RSC] Payload not found, generating new one for ${reqPath}`);
 
     const jsx = await getSSGJSXOrJSX(reqPath, { ...req.query });
 
@@ -172,7 +172,7 @@ app.listen(port, async () => {
   if (!isDevelopment) {
     await generateStatic();
   } else {
-    console.log("⚙️ [dinou] Rendering dynamically in dev mode");
+    console.log("⚙️ Rendering dynamically in dev mode");
   }
   console.log(`Listening on port ${port}`);
 });

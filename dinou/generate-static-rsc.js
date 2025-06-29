@@ -13,7 +13,7 @@ async function generateStaticRSC(reqPath) {
   try {
     console.log("🔄 Generating RSC payload for:", finalReqPath);
     const jsx = await getSSGJSXOrJSX(finalReqPath, {});
-    console.log("✅ JSX retrieved for:", finalReqPath);
+    // console.log("✅ JSX retrieved for:", finalReqPath);
 
     const manifest = JSON.parse(
       fs.readFileSync(

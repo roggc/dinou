@@ -12,6 +12,7 @@ async function generateStaticPages(routes) {
     const paramsString = JSON.stringify(query);
 
     try {
+      console.log("🔄 Rendering HTML for:", reqPath);
       const htmlStream = await renderAppToHtml(reqPath, paramsString);
 
       mkdirSync(path.dirname(htmlPath), { recursive: true });
@@ -24,7 +25,7 @@ async function generateStaticPages(routes) {
         fileStream.on("error", reject);
       });
 
-      console.log("✅ Generated:", reqPath);
+      console.log("✅ Generated HTML:", reqPath);
     } catch (error) {
       console.error("❌ Error rendering:", reqPath);
       console.error(error.message);

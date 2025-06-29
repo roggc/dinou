@@ -21,7 +21,7 @@ async function generateStaticRSCs(routes) {
     try {
       console.log("🔄 Generating RSC payload for:", reqPath);
       const jsx = await getSSGJSXOrJSX(reqPath, {});
-      console.log("✅ JSX retrieved for:", reqPath);
+      // console.log("✅ JSX retrieved for:", reqPath);
       fs.mkdirSync(path.dirname(payloadPath), { recursive: true });
 
       const fileStream = fs.createWriteStream(payloadPath);
