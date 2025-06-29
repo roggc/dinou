@@ -48,9 +48,7 @@
     "tsconfig-paths-webpack-plugin": "^4.2.0",
     "webpack": "^5.99.8",
     "webpack-cli": "^6.0.1",
-    "webpack-dev-middleware": "^7.4.2",
-    "webpack-dev-server": "^5.2.2",
-    "webpack-hot-middleware": "^2.26.1"
+    "webpack-dev-server": "^5.2.2"
   },
   "peerDependencies": {
     "react": "^19.1.0",
