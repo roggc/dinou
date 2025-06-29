@@ -6,8 +6,6 @@ const CopyWebpackPlugin = require("copy-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const createScopedName = require("./dinou/createScopedName");
 const TsconfigPathsPlugin = require("tsconfig-paths-webpack-plugin");
-const { exec } = require("child_process");
-const WebpackShellPluginNext = require("webpack-shell-plugin-next");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 
@@ -22,30 +20,6 @@ function getConfigFileIfExists() {
 }
 
 const configFile = getConfigFileIfExists();
-
-class RunAfterEmitPlugin {
-  constructor(command) {
-    this.command = command;
-  }
-
-  apply(compiler) {
-    compiler.hooks.done.tap("RunAfterEmitPlugin", (stats) => {
-      if (stats.hasErrors()) {
-        console.log(
-          "❌ Webpack build had errors. Skipping post-build command."
-        );
-        return;
-      }
-
-      console.log(
-        "✅ Webpack build completed successfully. Running post-build command..."
-      );
-      const child = exec(this.command);
-      child.stdout.pipe(process.stdout);
-      child.stderr.pipe(process.stderr);
-    });
-  }
-}
 
 module.exports = {
   mode: isDevelopment ? "development" : "production",
@@ -142,29 +116,6 @@ module.exports = {
     ],
   },
   plugins: [
-    // isDevelopment &&
-    //   new RunAfterEmitPlugin(
-    //     `node --conditions react-server ${path.join(
-    //       __dirname,
-    //       "dinou/server.js"
-    //     )}`
-    //   ),
-    // isDevelopment &&
-    //   new WebpackShellPluginNext({
-    //     onBuildEnd: {
-    //       scripts: [
-    //         `node --conditions react-server ${path.join(
-    //           __dirname,
-    //           "dinou/server.js"
-    //         )}`,
-    //       ],
-    //       blocking: false,
-    //       parallel: false,
-    //       dev: true,
-    //       safe: true,
-    //       logging: true,
-    //     },
-    //   }),
     new ReactServerWebpackPlugin({ isServer: false }),
     new CopyWebpackPlugin({
       patterns: [
