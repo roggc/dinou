@@ -18,13 +18,18 @@ const runCommand = (command, options = {}) => {
 
 program
   .command("dev")
-  .description("Starts the server")
+  .description("Starts")
   .action(() => {
-    console.log("Starting the server...");
-    runCommand(`node ${path.join(dinouPath, "ssg.js")}`);
-    runCommand(
-      `node --conditions react-server ${path.join(dinouPath, "server.js")}`
-    );
+    console.log("Starting...");
+    const startExpress = `node --conditions react-server ${path.join(
+      dinouPath,
+      "server.js"
+    )}`;
+    const startDevServer = `webpack serve --config ${path.join(
+      __dirname,
+      "webpack.config.js"
+    )}`;
+    runCommand(`npx concurrently "${startExpress}" "${startDevServer}"`);
   });
 
 program
@@ -32,7 +37,6 @@ program
   .description("Builds the app for production")
   .action(() => {
     console.log("Building the app...");
-    runCommand(`node ${path.join(dinouPath, "ssg.js")}`);
     const configPath = path.join(__dirname, "webpack.config.js");
     runCommand(
       `cross-env NODE_ENV=production npx webpack --config ${configPath}`
