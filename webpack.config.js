@@ -2,7 +2,6 @@ require("dotenv/config");
 const path = require("path");
 const fs = require("fs");
 const ReactServerWebpackPlugin = require("react-server-dom-webpack/plugin");
-const webpack = require("webpack");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const createScopedName = require("./dinou/createScopedName");
@@ -25,14 +24,10 @@ const configFile = getConfigFileIfExists();
 module.exports = {
   mode: isDevelopment ? "development" : "production",
   entry: {
-    main: [
-      isDevelopment && "webpack-hot-middleware/client?reload=true",
-      path.resolve(__dirname, "./dinou/client.jsx"),
-    ].filter(Boolean),
-    error: [
-      isDevelopment && "webpack-hot-middleware/client?reload=true",
-      path.resolve(__dirname, "./dinou/client-error.jsx"),
-    ].filter(Boolean),
+    main: [path.resolve(__dirname, "./dinou/client.jsx")].filter(Boolean),
+    error: [path.resolve(__dirname, "./dinou/client-error.jsx")].filter(
+      Boolean
+    ),
   },
   output: {
     path: path.resolve(process.cwd(), "./____public____"),
@@ -121,7 +116,6 @@ module.exports = {
     ],
   },
   plugins: [
-    isDevelopment && new webpack.HotModuleReplacementPlugin(),
     new ReactServerWebpackPlugin({ isServer: false }),
     new CopyWebpackPlugin({
       patterns: [
@@ -162,4 +156,23 @@ module.exports = {
   watchOptions: {
     ignored: /____public____/,
   },
+  ...(isDevelopment
+    ? {
+        devServer: {
+          port: 3001,
+          hot: true,
+          devMiddleware: {
+            index: false,
+            writeToDisk: true,
+          },
+          proxy: [
+            {
+              context: () => true,
+              target: "http://localhost:3000",
+              changeOrigin: true,
+            },
+          ],
+        },
+      }
+    : {}),
 };

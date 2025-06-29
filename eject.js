@@ -23,17 +23,12 @@ if (fs.existsSync(path.join(modulePath, "postcss.config.js"))) {
   );
 }
 
-// don't copy the LICENSE.md file, as it is not needed in the project root
-// fs.copyFileSync(
-//   path.join(modulePath, "LICENSE.md"),
-//   path.join(projectRoot, "dinou/LICENSE.md")
-// );
-
 const pkg = require(path.join(projectRoot, "package.json"));
+pkg.scripts["start:express"] = "node --conditions react-server dinou/server.js";
+pkg.scripts["start:dev-server"] = "webpack serve --config webpack.config.js";
 pkg.scripts.dev =
-  "node dinou/ssg.js && node --conditions react-server dinou/server.js";
-pkg.scripts.build =
-  "node dinou/ssg.js && cross-env NODE_ENV=production webpack";
+  'concurrently "npm run start:express" "npm run start:dev-server"';
+pkg.scripts.build = "cross-env NODE_ENV=production webpack";
 pkg.scripts.start =
   "cross-env NODE_ENV=production node --conditions react-server dinou/server.js";
 delete pkg.scripts.eject;

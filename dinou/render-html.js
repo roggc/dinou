@@ -24,7 +24,8 @@ addHook({
 });
 
 const { renderToPipeableStream } = require("react-dom/server");
-const { getJSX, getSSGJSX } = require("./get-jsx");
+const getJSX = require("./get-jsx");
+const getSSGJSX = require("./get-ssg-jsx.js");
 const { getErrorJSX } = require("./get-error-jsx");
 const { renderJSXToClientJSX } = require("./render-jsx-to-client-jsx");
 
