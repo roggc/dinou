@@ -6,6 +6,7 @@ const CopyWebpackPlugin = require("copy-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const createScopedName = require("./dinou/createScopedName");
 const TsconfigPathsPlugin = require("tsconfig-paths-webpack-plugin");
+const ReactRefreshWebpackPlugin = require("@pmmmwh/react-refresh-webpack-plugin");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 const outputDirectory = isDevelopment ? "____public____" : "dist3";
@@ -50,7 +51,8 @@ module.exports = {
             plugins: [
               "@babel/plugin-transform-modules-commonjs",
               "@babel/plugin-syntax-import-meta",
-            ],
+              isDevelopment && require.resolve("react-refresh/babel"),
+            ].filter(Boolean),
           },
         },
         exclude: [/node_modules\/(?!dinou)/],
@@ -117,6 +119,7 @@ module.exports = {
     ],
   },
   plugins: [
+    isDevelopment && new ReactRefreshWebpackPlugin(),
     new ReactServerWebpackPlugin({ isServer: false }),
     new CopyWebpackPlugin({
       patterns: [
