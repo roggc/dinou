@@ -70,6 +70,8 @@ dinou main features are:
 
 - [Server Components](#server-components)
 
+- [Client Components](#client-components)
+
 - [Dynamic Parameters (`params` prop)](#dynamic-parameters-params-prop)
 
 - [Query Parameters (`query` prop)](#query-parameters-query-prop)
@@ -581,6 +583,10 @@ The framework supports a `page_functions.ts` (or `.tsx`, `.jsx`, `.js`) file in 
 ## Server Components
 
 - Server Components in this implementation are distinguished by the fact they are `async` functions. So when defining them, **make them `async` always**, whether or not they use `await` in their definition or function body. This is necessary for the framework to know they are Server Components and execute them.
+
+## Client Components
+
+- Client components need to have the directive `"use client";` at the top of the file if they are not imported in other client components. That's the case of pages for example, that they are not imported directly in another client component. So when defining pages as client components **remember to use the directive `"use client";`**. The same applies for layouts, not found pages and error pages. In general, to avoid surprises, is a good practice to put the directive `"use client";` in all client components.
 
 ## Dynamic Parameters (`params` prop)
 
