@@ -1,6 +1,6 @@
 # **dinou**: **A Minimal React 19 Framework**
 
-[**dinou**](https://github.com/roggc/dinou) is a **minimal React 19 framework**. dinou means 19 in catalan. You can create a dinou [app](https://github.com/roggc/dinou-app) by running the command **`npx create-dinou@latest my-app`**.
+[**dinou**](https://github.com/roggc/dinou) is a **minimal React 19 framework**. dinou means 19 in Catalan. You can create a dinou [app](https://github.com/roggc/dinou-app) by running the command **`npx create-dinou@latest my-app`**.
 
 Or you can create one by yourself with the following steps:
 
@@ -892,7 +892,7 @@ The routing system is file-based and supports static routes, dynamic routes, opt
         <div className="max-w-md w-full text-center space-y-6">
           <h1 className="text-3xl font-bold text-red-600">Error</h1>
           <p className="text-lg text-gray-700">
-            An unexpected error has occurred baby. Please try again later.
+            An unexpected error has occurred. Please try again later.
           </p>
           <a
             href="/"
@@ -964,7 +964,7 @@ MY_VAR=my_value
 
 ## Styles (Tailwind.css, .module.css, and .css)
 
-dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles will be generated in a file in `____public____` folder named `styles.css`. So you must include this in your `page.tsx` or `layout.tsx` file, in the `head` tag:
+dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles will be generated in a file in webpack folder named `styles.css`. So you must include this in your `page.tsx` or `layout.tsx` file, in the `head` tag:
 
 ```typescript
 <link href="/styles.css" rel="stylesheet"></link>
@@ -1050,7 +1050,7 @@ dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles
 
 - The above will produce the text `hi world!` in red, underlined, and with a purple background color.
 
-- **Only styles imported under `"use client"` directive will be detected by Webpack and generated in a `styles.css` in `____public____` folder**. This means that if you want to use server components instead of client components, then you must create an additional file (e.g. `styles.ts`) where you use the `"use client"` directive and import all the `.css` files used in server components.
+- **Only styles imported under `"use client"` directive will be detected by Webpack and generated in a `styles.css` in webpack folder**. This means that if you want to use server components instead of client components, then you must create an additional file (e.g. `styles.ts`) where you use the `"use client"` directive and import all the `.css` files used in server components.
 
 - Example with server components:
 
@@ -1147,7 +1147,7 @@ export default function Component() {
 }
 ```
 
-**Only images imported under `"use client"` directive will be detected by Webpack and generated in `____public____` folder**. If you use server components, then you must create an additional file (e.g. `images.ts`) with the `"use client"` directive and import there the images too:
+**Only images imported under `"use client"` directive will be detected by Webpack and generated in webpack folder**. If you use server components, then you must create an additional file (e.g. `images.ts`) with the `"use client"` directive and import there the images too:
 
 ```typescript
 // src/images.ts
@@ -1199,9 +1199,9 @@ dinou is ready to support import alias, as `import some from "@/..."`. If you wa
 
 ## How to run a dinou app
 
-Run `npm run dev` (or `npx dinou dev`) to start the dinou app in development mode. Wait for the logs of Webpack and `Listening on port <port>` to load the page on your browser.
+Run `npm run dev` (or `npx dinou dev`) to start the dinou app in development mode. Wait for the logs of Webpack and `Listening on port <port>` to load the page on your browser. In development, webpack will emit his files in `____public____` folder.
 
-Run `npm run build` (or `npx dinou build`) to build the app and `npm start` (or `npx dinou start`) to run it.
+Run `npm run build` (or `npx dinou build`) to build the app and `npm start` (or `npx dinou start`) to run it. In production, webpack will emit his files in `dist3` folder.
 
 ## Eject dinou
 

@@ -35,11 +35,12 @@ const generateStatic = require("./generate-static.js");
 const renderAppToHtml = require("./render-app-to-html.js");
 const revalidating = require("./revalidating.js");
 const isDevelopment = process.env.NODE_ENV !== "production";
+const webpackFolder = isDevelopment ? "____public____" : "dist3";
 const app = express();
 
 app.use(express.json());
 
-app.use(express.static(path.resolve(process.cwd(), "____public____")));
+app.use(express.static(path.resolve(process.cwd(), webpackFolder)));
 
 app.get("/.well-known/appspecific/com.chrome.devtools.json", (req, res) => {
   res.setHeader("Content-Type", "application/json");
@@ -47,7 +48,7 @@ app.get("/.well-known/appspecific/com.chrome.devtools.json", (req, res) => {
     name: "Dinou DevTools",
     description: "Dinou DevTools for Chrome",
     version: "1.0.0",
-    devtools_page: "/____public____/devtools.html",
+    devtools_page: `/${webpackFolder}/devtools.html`,
   });
 });
 
@@ -74,7 +75,7 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
 
     const manifest = JSON.parse(
       readFileSync(
-        path.resolve("____public____/react-client-manifest.json"),
+        path.resolve(`${webpackFolder}/react-client-manifest.json`),
         "utf8"
       )
     );
@@ -94,7 +95,10 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
     ).replace("/____rsc_payload_error____", "");
     const jsx = await getErrorJSX(reqPath, { ...req.query }, req.body.error);
     const manifest = readFileSync(
-      path.resolve(process.cwd(), "____public____/react-client-manifest.json"),
+      path.resolve(
+        process.cwd(),
+        `${webpackFolder}/react-client-manifest.json`
+      ),
       "utf8"
     );
     const moduleMap = JSON.parse(manifest);

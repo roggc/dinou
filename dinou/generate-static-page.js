@@ -11,7 +11,7 @@ async function generateStaticPage(reqPath) {
   const paramsString = JSON.stringify(query);
 
   try {
-    console.log("🔄 Rendering HTML for:", finalReqPath);
+    // console.log("🔄 Rendering HTML for:", finalReqPath);
     const htmlStream = await renderAppToHtml(finalReqPath, paramsString);
 
     mkdirSync(path.dirname(htmlPath), { recursive: true });
