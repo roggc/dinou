@@ -11,15 +11,12 @@ async function generateStaticRSC(reqPath) {
   const payloadPath = path.join(OUT_DIR, finalReqPath, "rsc.rsc");
 
   try {
-    console.log("🔄 Generating RSC payload for:", finalReqPath);
+    // console.log("🔄 Generating RSC payload for:", finalReqPath);
     const jsx = await getSSGJSXOrJSX(finalReqPath, {});
     // console.log("✅ JSX retrieved for:", finalReqPath);
 
     const manifest = JSON.parse(
-      fs.readFileSync(
-        path.resolve("____public____/react-client-manifest.json"),
-        "utf8"
-      )
+      fs.readFileSync(path.resolve("dist3/react-client-manifest.json"), "utf8")
     );
 
     fs.mkdirSync(path.dirname(payloadPath), { recursive: true });

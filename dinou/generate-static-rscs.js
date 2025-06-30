@@ -8,10 +8,7 @@ const OUT_DIR = path.resolve("dist2");
 
 async function generateStaticRSCs(routes) {
   const manifest = JSON.parse(
-    fs.readFileSync(
-      path.resolve("____public____/react-client-manifest.json"),
-      "utf8"
-    )
+    fs.readFileSync(path.resolve("dist3/react-client-manifest.json"), "utf8")
   );
 
   for (const route of routes) {
@@ -19,7 +16,7 @@ async function generateStaticRSCs(routes) {
     const payloadPath = path.join(OUT_DIR, reqPath, "rsc.rsc");
 
     try {
-      console.log("🔄 Generating RSC payload for:", reqPath);
+      // console.log("🔄 Generating RSC payload for:", reqPath);
       const jsx = await getSSGJSXOrJSX(reqPath, {});
       // console.log("✅ JSX retrieved for:", reqPath);
       fs.mkdirSync(path.dirname(payloadPath), { recursive: true });

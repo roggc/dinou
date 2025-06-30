@@ -12,7 +12,7 @@ async function generateStaticPages(routes) {
     const paramsString = JSON.stringify(query);
 
     try {
-      console.log("🔄 Rendering HTML for:", reqPath);
+      // console.log("🔄 Rendering HTML for:", reqPath);
       const htmlStream = await renderAppToHtml(reqPath, paramsString);
 
       mkdirSync(path.dirname(htmlPath), { recursive: true });

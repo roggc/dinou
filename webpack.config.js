@@ -8,6 +8,7 @@ const createScopedName = require("./dinou/createScopedName");
 const TsconfigPathsPlugin = require("tsconfig-paths-webpack-plugin");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
+const outputDirectory = isDevelopment ? "____public____" : "dist3";
 
 function getConfigFileIfExists() {
   const tsconfigPath = path.resolve(process.cwd(), "tsconfig.json");
@@ -30,7 +31,7 @@ module.exports = {
     ),
   },
   output: {
-    path: path.resolve(process.cwd(), "./____public____"),
+    path: path.resolve(process.cwd(), outputDirectory),
     filename: "[name].js",
     publicPath: "/",
     clean: true,
