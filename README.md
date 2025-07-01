@@ -118,6 +118,8 @@ dinou main features are:
 
 - [Eject dinou](#eject-dinou)
 
+-[📦 Changelog](#-changelog)
+
 - [License](#license)
 
 ## Routing system, layouts, pages, not found pages, ...
@@ -1212,6 +1214,10 @@ Run `npm run build` (or `npx dinou build`) to build the app and `npm start` (or 
 ## Eject dinou
 
 - You can eject dinou with the command `npm run eject` (or `npx dinou eject`). This will copy the files defining dinou in the root folder of the project (grouped in a `dinou` folder). You will have full control and customization capabilities.
+
+## 📦 Changelog
+
+For a detailed list of changes, enhancements, and bug fixes across versions, see the [CHANGELOG.md](./CHANGELOG.md).
 
 ## License
 
