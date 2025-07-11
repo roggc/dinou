@@ -119,7 +119,7 @@ module.exports = {
     ],
   },
   plugins: [
-    isDevelopment && new ReactRefreshWebpackPlugin(),
+    isDevelopment && new ReactRefreshWebpackPlugin({ overlay: false }),
     new ReactServerWebpackPlugin({ isServer: false }),
     new CopyWebpackPlugin({
       patterns: [
