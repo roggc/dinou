@@ -118,6 +118,8 @@ dinou main features are:
 
 - [Eject dinou](#eject-dinou)
 
+- [🚀 Deployment](#-deployment)
+
 - [📦 Changelog](#-changelog)
 
 - [License](#license)
@@ -1214,6 +1216,34 @@ Run `npm run build` (or `npx dinou build`) to build the app and `npm start` (or 
 ## Eject dinou
 
 - You can eject dinou with the command `npm run eject` (or `npx dinou eject`). This will copy the files defining dinou in the root folder of the project (grouped in a `dinou` folder). You will have full control and customization capabilities.
+
+## 🚀 Deployment
+
+Projects built with **dinou** can be deployed to any platform that supports Node.js with custom flags.
+
+### ✅ Recommended: DigitalOcean App Platform
+
+dinou works seamlessly on [DigitalOcean App Platform](https://www.digitalocean.com/products/app-platform). You can deploy your project easily without needing any special configuration.
+
+**Why it works well:**
+
+- Full control over the Node.js runtime
+
+- Supports the required `--conditions react-server` flag
+
+- Simple integration via GitHub/GitLab or manual repo
+
+### ❌ Not supported: Netlify
+
+At the moment, **Netlify is not compatible with dinou, because it does not allow passing the `--conditions react-server` flag when starting a Node.js app**. This flag is essential for the app to work.
+
+If Netlify adds support for custom runtime flags in the future, dinou compatibility might become possible.
+
+### 🛠 Other Platforms
+
+If you're deploying on other Node.js-compatible platforms (like Render, Fly.io, Railway, etc.), ensure that:
+
+- You can pass custom flags (`--conditions react-server`) to Node.js
 
 ## 📦 Changelog
 
