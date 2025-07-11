@@ -118,7 +118,7 @@ dinou main features are:
 
 - [Eject dinou](#eject-dinou)
 
--[📦 Changelog](#-changelog)
+- [📦 Changelog](#-changelog)
 
 - [License](#license)
 
