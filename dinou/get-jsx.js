@@ -122,22 +122,21 @@ async function getJSX(reqPath, query) {
     let index = 0;
     for (const [layoutPath, dParams, slots] of layouts.reverse()) {
       const layoutModule = require(layoutPath);
+      const layoutFolderPath = path.dirname(layoutPath);
+      const resetLayoutPath = getFilePathAndDynamicParams(
+        [],
+        {},
+        layoutFolderPath,
+        "reset_layout",
+        false
+      )[0];
       const Layout = layoutModule.default ?? layoutModule;
       let props = { params: dParams, query, ...slots };
-      if (index === layouts.length - 1) {
+      if (index === layouts.length - 1 || resetLayoutPath) {
         props = { ...props, ...(pageFunctionsProps?.layout ?? {}) };
       }
       jsx = React.createElement(Layout, props, jsx);
-      const layoutFolderPath = path.dirname(layoutPath);
-      if (
-        getFilePathAndDynamicParams(
-          [],
-          {},
-          layoutFolderPath,
-          "reset_layout",
-          false
-        )[0]
-      ) {
+      if (resetLayoutPath) {
         break;
       }
       index++;
