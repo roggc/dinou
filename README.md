@@ -110,7 +110,7 @@ dinou main features are:
 
 - [Styles (Tailwind.css, .module.css, and .css)](#styles-tailwindcss-modulecss-and-css)
 
-- [Images (`.png`, `.jpeg`, `.jpg`, `.gif`, `.svg`, and `.webp`)](#images-png-jpeg-jpg-gif-svg-and-webp)
+- [Assets or media files (image, video, and sound)](#assets-or-media-files-image-video-and-sound)
 
 - [Import alias (e.g. `"@/..."`)](#import-alias-eg-)
 
@@ -1142,9 +1142,11 @@ dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles
   import "./page.module.css";
   ```
 
-## Images (`.png`, `.jpeg`, `.jpg`, `.gif`, `.svg`, and `.webp`)
+## Assets or media files (image, video, and sound)
 
-dinou is ready to support the use of images in your components. Just do:
+dinou supports the use of assets in your components. Supported file extensions are: `.png`, `.jpeg`, `.jpg`, `.gif`, `.svg`, `.webp`, `.avif`, `.ico`, `.mp4`, `.webm`, `.ogg`, `.mov`, `.avi`, `.mkv`, `.mp3`, `.wav`, `.flac`, `.m4a`, `.aac`, `.mjpeg`, and `.mjpg`.
+
+To use an asset in your component just import it as a default import:
 
 ```typescript
 // src/component.tsx
@@ -1157,10 +1159,10 @@ export default function Component() {
 }
 ```
 
-**Only images imported under `"use client"` directive will be detected by Webpack and generated in webpack folder**. If you use server components, then you must create an additional file (e.g. `images.ts`) with the `"use client"` directive and import there the images too:
+**Only assets imported under `"use client"` directive will be detected by Webpack and generated in webpack folder**. If you use **server components**, then you must create an additional file (e.g. `assets.ts`) with the `"use client"` directive and import there the assets too:
 
 ```typescript
-// src/images.ts
+// src/assets.ts
 "use client";
 
 import "./image.png";
@@ -1174,6 +1176,30 @@ export default async function Component() {
   return <img src={image} alt="image" />;
 }
 ```
+
+For typescript, you should create a declaration file like this:
+
+```typescript
+// src/assets.d.ts
+declare module "*.jpeg" {
+  const value: string;
+  export default value;
+}
+
+declare module "*.jpg" {
+  const value: string;
+  export default value;
+}
+
+declare module "*.png" {
+  const value: string;
+  export default value;
+}
+
+// and continue with the rest of supported file extensions
+```
+
+If you miss a certain file extension you can eject and customize dinou to meet your requirements. Just eject and add the extension in these three places: `webpack.config.js`, `dinou/server.js`, and `dinou/render-html.js`. Just look for the place were all the extensions are mentioned and add yours in these three files.
 
 ## Import alias (e.g. `"@/..."`)
 
