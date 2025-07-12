@@ -15,12 +15,34 @@ require("css-modules-require-hook")({
   generateScopedName: createScopedName,
 });
 addHook({
-  extensions: ["png", "jpg", "jpeg", "gif", "svg", "webp"],
+  extensions: [
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "svg",
+    "webp",
+    "avif",
+    "ico",
+    "mp4",
+    "webm",
+    "ogg",
+    "mov",
+    "avi",
+    "mkv",
+    "mp3",
+    "wav",
+    "flac",
+    "m4a",
+    "aac",
+    "mjpeg",
+    "mjpg",
+  ],
   name: function (localName, filepath) {
     const result = createScopedName(localName, filepath);
     return result + ".[ext]";
   },
-  publicPath: "/images/",
+  publicPath: "/assets/",
 });
 
 const { renderToPipeableStream } = require("react-dom/server");

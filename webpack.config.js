@@ -97,7 +97,7 @@ module.exports = {
         ],
       },
       {
-        test: /\.(png|jpe?g|gif|svg|webp)$/i,
+        test: /\.(png|jpe?g|gif|svg|webp|avif|ico|mp4|webm|ogg|mov|avi|mkv|mp3|wav|flac|m4a|aac|mjpeg|mjpg)$/i,
         type: "asset/resource",
         generator: {
           filename: (pathData) => {
@@ -111,7 +111,7 @@ module.exports = {
             );
             const scoped = createScopedName(base, resourcePath);
 
-            return `/images/${scoped}[ext]`;
+            return `/assets/${scoped}[ext]`;
           },
           publicPath: "",
         },
