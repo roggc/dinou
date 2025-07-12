@@ -80,7 +80,7 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
       req.path.endsWith("/") ? req.path : req.path + "/"
     ).replace("/____rsc_payload____", "");
 
-    if (!isDevelopment) {
+    if (!isDevelopment && Object.keys({ ...req.query }).length === 0) {
       const payloadPath = path.join("dist2", reqPath, "rsc.rsc");
       if (existsSync(payloadPath)) {
         res.setHeader("Content-Type", "application/octet-stream");
@@ -136,7 +136,7 @@ app.get(/^\/.*\/?$/, async (req, res) => {
   try {
     const reqPath = req.path.endsWith("/") ? req.path : req.path + "/";
 
-    if (!isDevelopment) {
+    if (!isDevelopment && Object.keys({ ...req.query }).length === 0) {
       revalidating(reqPath);
       const htmlPath = path.join("dist2", reqPath, "index.html");
 
