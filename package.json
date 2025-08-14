@@ -34,6 +34,7 @@
     "@rollup/plugin-replace": "^6.0.2",
     "@tailwindcss/postcss": "^4.1.10",
     "autoprefixer": "^10.4.21",
+    "chokidar": "^4.0.3",
     "commander": "^14.0.0",
     "concurrently": "^9.2.0",
     "cross-env": "^7.0.3",

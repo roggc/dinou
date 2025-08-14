@@ -19,7 +19,7 @@ class EsmHmrEngine {
     this.clients = set;
     // console.log("[HMR] Initializing EsmHmrEngine");
     this.dependencyTree = map;
-
+    // console.log("options.server", !!options.server);
     const wss = options.server
       ? new WebSocket.Server({ noServer: true })
       : new WebSocket.Server({ port: 3001 });

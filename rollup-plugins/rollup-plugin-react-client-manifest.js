@@ -1,4 +1,4 @@
-const { readFileSync, writeFileSync, mkdirSync } = require("fs");
+const { readFileSync, writeFileSync, mkdirSync, existsSync } = require("fs");
 const path = require("path");
 const { dirname } = require("path");
 const glob = require("fast-glob");
@@ -44,6 +44,41 @@ function reactClientManifestPlugin({
           id: absPath,
           name: path.basename(absPath, path.extname(absPath)), // ex: 'counter'
         });
+      }
+    },
+    watchChange(id) {
+      // console.log(`File changed: ${id}`);
+      if (
+        !id.endsWith(".tsx") &&
+        !id.endsWith(".jsx") &&
+        !id.endsWith(".js") &&
+        !id.endsWith(".ts")
+      )
+        return;
+      if (!existsSync(id)) {
+        const fileUrl = pathToFileURL(id).href;
+        delete manifest[fileUrl];
+        clientModules.delete(id);
+        return;
+      }
+      const code = readFileSync(id, "utf8");
+
+      const fileUrl = pathToFileURL(id).href;
+
+      if (/^(['"])use client\1/.test(code.trim())) {
+        const relPath =
+          "./" + path.relative(process.cwd(), id).replace(/\\/g, "/");
+        manifest[fileUrl] = {
+          id: relPath,
+          chunks: "default",
+          name: "default",
+        };
+        clientModules.add(id);
+        this.addWatchFile(id); // Make sure Rollup watches it
+      } else {
+        // If it was client but is no longer, remove it
+        delete manifest[fileUrl];
+        clientModules.delete(id);
       }
     },
 
