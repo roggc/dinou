@@ -21,11 +21,13 @@
   },
   "dependencies": {
     "@babel/core": "^7.27.4",
+    "@babel/parser": "^7.28.3",
     "@babel/plugin-syntax-import-meta": "^7.10.4",
     "@babel/plugin-transform-modules-commonjs": "^7.27.1",
     "@babel/preset-react": "^7.27.1",
     "@babel/preset-typescript": "^7.27.1",
     "@babel/register": "^7.27.1",
+    "@babel/traverse": "^7.28.3",
     "@matthamlin/react-server-dom-esm": "file:packages/vendor/react-server-dom-esm",
     "@rollup/plugin-babel": "^6.0.4",
     "@rollup/plugin-commonjs": "^28.0.6",
