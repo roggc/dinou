@@ -57,7 +57,7 @@ const generateStatic = require("./generate-static.js");
 const renderAppToHtml = require("./render-app-to-html.js");
 const revalidating = require("./revalidating.js");
 const isDevelopment = process.env.NODE_ENV !== "production";
-const webpackFolder = isDevelopment ? "____public____" : "dist3";
+const webpackFolder = isDevelopment ? "public" : "dist3";
 const app = express();
 
 app.use(express.json());

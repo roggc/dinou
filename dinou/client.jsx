@@ -1,5 +1,5 @@
 import { use } from "react";
-import { createFromFetch } from "react-server-dom-webpack/client";
+import { createFromFetch } from "@matthamlin/react-server-dom-esm/client";
 import { hydrateRoot } from "react-dom/client";
 
 const cache = new Map();

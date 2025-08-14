@@ -25,10 +25,10 @@ program
       dinouPath,
       "server.js"
     )}`;
-    const startDevServer = `webpack serve --config ${path.join(
+    const startDevServer = `cross-env NODE_ENV=development rollup -c ${path.join(
       __dirname,
-      "webpack.config.js"
-    )}`;
+      "rollup.config.js"
+    )} -w`;
     runCommand(`npx concurrently "${startExpress}" "${startDevServer}"`);
   });
 
@@ -37,10 +37,8 @@ program
   .description("Builds the app for production")
   .action(() => {
     console.log("Building the app...");
-    const configPath = path.join(__dirname, "webpack.config.js");
-    runCommand(
-      `cross-env NODE_ENV=production npx webpack --config ${configPath}`
-    );
+    const configPath = path.join(__dirname, "rollup.config.js");
+    runCommand(`cross-env NODE_ENV=production npx rollup -c ${configPath}`);
   });
 
 program

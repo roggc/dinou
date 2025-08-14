@@ -974,7 +974,7 @@ MY_VAR=my_value
 
 ## Styles (Tailwind.css, .module.css, and .css)
 
-dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles will be generated in a file in webpack folder named `styles.css`. So you must include this in your `page.tsx` or `layout.tsx` file, in the `head` tag:
+dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles will be generated in a file in Rollup folder named `styles.css`. So you must include this in your `page.tsx` or `layout.tsx` file, in the `head` tag:
 
 ```typescript
 <link href="/styles.css" rel="stylesheet"></link>
@@ -1060,7 +1060,7 @@ dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles
 
 - The above will produce the text `hi world!` in red, underlined, and with a purple background color.
 
-- **Only styles imported under `"use client"` directive will be detected by Webpack and generated in a `styles.css` in webpack folder**. This means that if you want to use server components instead of client components, then you must create an additional file (e.g. `styles.ts`) where you use the `"use client"` directive and import all the `.css` files used in server components.
+- **Only styles imported under `"use client"` directive will be detected by Rollup and generated in a `styles.css` in Rollup folder**. This means that if you want to use server components instead of client components, then you must create an additional file (e.g. `styles.ts`) where you use the `"use client"` directive and import all the `.css` files used in server components.
 
 - Example with server components:
 
@@ -1159,7 +1159,7 @@ export default function Component() {
 }
 ```
 
-**Only assets imported under `"use client"` directive will be detected by Webpack and generated in webpack folder**. If you use **server components**, then you must create an additional file (e.g. `assets.ts`) with the `"use client"` directive and import there the assets too:
+**Only assets imported under `"use client"` directive will be detected by Rollup and generated in Rollup folder**. If you use **server components**, then you must create an additional file (e.g. `assets.ts`) with the `"use client"` directive and import there the assets too:
 
 ```typescript
 // src/assets.ts
@@ -1199,7 +1199,7 @@ declare module "*.png" {
 // and continue with the rest of supported file extensions
 ```
 
-If you miss a certain file extension you can eject and customize dinou to meet your requirements. Just eject and add the extension in these three places: `webpack.config.js`, `dinou/server.js`, and `dinou/render-html.js`. Just look for the place were all the extensions are mentioned and add yours in these three files.
+If you miss a certain file extension you can eject and customize dinou to meet your requirements. Just eject and add the extension in these three places: `rollup.config.js`, `dinou/server.js`, and `dinou/render-html.js`. Just look for the place were all the extensions are mentioned and add yours in these three files.
 
 ## Import alias (e.g. `"@/..."`)
 
@@ -1235,9 +1235,9 @@ dinou is ready to support import alias, as `import some from "@/..."`. If you wa
 
 ## How to run a dinou app
 
-Run `npm run dev` (or `npx dinou dev`) to start the dinou app in development mode. Wait for the logs of Webpack and `Listening on port <port>` to load the page on your browser. In development, webpack will emit his files in `____public____` folder.
+Run `npm run dev` (or `npx dinou dev`) to start the dinou app in development mode. Wait for the logs of Rollup and `Listening on port <port>` to load the page on your browser. In development, Rollup will emit his files in `public` folder.
 
-Run `npm run build` (or `npx dinou build`) to build the app and `npm start` (or `npx dinou start`) to run it. In production, webpack will emit his files in `dist3` folder.
+Run `npm run build` (or `npx dinou build`) to build the app and `npm start` (or `npx dinou start`) to run it. In production, Rollup will emit his files in `dist3` folder.
 
 ## Eject dinou
 
