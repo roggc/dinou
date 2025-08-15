@@ -12,52 +12,76 @@ function reactClientManifestPlugin({
 } = {}) {
   const manifest = {};
   const clientModules = new Set();
+  const serverModules = new Set();
+
+  // Función reutilizable para chequear imports en un módulo
+  function checkInvalidImports(code, id, rollupContext) {
+    const normalizedId = id.split(path.sep).join(path.posix.sep);
+    const ast = parser.parse(code, {
+      sourceType: "module",
+      plugins: ["jsx", "typescript", "importAssertions"],
+    });
+    const isProduction = process.env.NODE_ENV === "production";
+
+    traverse(ast, {
+      ImportDeclaration(p) {
+        const importPath = p.node.source.value;
+        rollupContext
+          .resolve(importPath, id)
+          .then((resolved) => {
+            if (
+              resolved &&
+              resolved.id &&
+              !resolved.id.includes("node_modules")
+            ) {
+              const importedAbsPath = resolved.id
+                .split(path.sep)
+                .join(path.posix.sep);
+              if (serverModules.has(importedAbsPath)) {
+                const message = `Invalid import in client component ${normalizedId}: Importing server component ${importedAbsPath}. This can cause runtime hangs. Add 'use client' to the imported file if it's meant to be client, or refactor to avoid this.`;
+                if (isProduction) {
+                  rollupContext.error(message);
+                } else {
+                  console.warn(`⚠️ ${message}`);
+                }
+              }
+            }
+          })
+          .catch((err) => {
+            const message = `Could not resolve import ${importPath} in ${normalizedId}: ${err.message}`;
+            if (isProduction) {
+              rollupContext.error(message);
+            } else {
+              console.warn(`⚠️ ${message}`);
+            }
+          });
+      },
+    });
+  }
 
   return {
     name: "react-client-manifest",
 
-    // async buildStart() {
-    //   const files = await glob(["**/*.{js,jsx,ts,tsx}"], {
-    //     cwd: srcDir,
-    //     absolute: true,
-    //   });
-
-    //   for (const absPath of files) {
-    //     const code = readFileSync(absPath, "utf8");
-
-    //     // Detects 'use client' directive at the top of the file
-    //     if (!/^(['"])use client\1/.test(code.trim())) continue;
-
-    //     const fileUrl = pathToFileURL(absPath).href;
-    //     const relPath =
-    //       "./" + path.relative(process.cwd(), absPath).replace(/\\/g, "/");
-
-    //     manifest[fileUrl] = {
-    //       id: relPath,
-    //       chunks: "default",
-    //       name: "default",
-    //     };
-
-    //     clientModules.add(absPath);
-
-    //     // 👇 Emits this module as a separate chunk entry
-    //     this.emitFile({
-    //       type: "chunk",
-    //       id: absPath,
-    //       name: path.basename(absPath, path.extname(absPath)), // ex: 'counter'
-    //     });
-    //   }
-    // },
     async buildStart() {
       const files = await glob(["**/*.{js,jsx,ts,tsx}"], {
         cwd: srcDir,
         absolute: true,
       });
 
+      // Primera pasada: clasificar módulos
       for (const absPath of files) {
         const code = readFileSync(absPath, "utf8");
+        const normalizedPath = absPath.split(path.sep).join(path.posix.sep);
+        if (/^(['"])use client\1/.test(code.trim())) {
+          clientModules.add(normalizedPath);
+        } else {
+          serverModules.add(normalizedPath);
+        }
+      }
 
-        if (!/^(['"])use client\1/.test(code.trim())) continue;
+      // Segunda pasada: procesar clients
+      for (const absPath of [...clientModules]) {
+        const code = readFileSync(absPath, "utf8");
 
         const fileUrl = pathToFileURL(absPath).href;
         const relPath =
@@ -99,23 +123,16 @@ function reactClientManifestPlugin({
           },
         });
 
-        // if (exports.size === 0) {
-        //   console.warn(`No exports found in client component: ${absPath}`);
-        //   // continue;
-        // }
-
         // Agrega entradas al manifiesto por cada export
         for (const expName of exports) {
           const manifestKey =
             expName === "default" ? fileUrl : `${fileUrl}#${expName}`;
           manifest[manifestKey] = {
             id: relPath,
-            chunks: expName, // Puedes ajustar si usas chunks múltiples
+            chunks: expName,
             name: expName,
           };
         }
-
-        clientModules.add(absPath);
 
         // Emite el chunk para el módulo completo (no por export)
         this.emitFile({
@@ -125,43 +142,18 @@ function reactClientManifestPlugin({
         });
       }
     },
-    // watchChange(id) {
-    //   // console.log(`File changed: ${id}`);
-    //   if (
-    //     !id.endsWith(".tsx") &&
-    //     !id.endsWith(".jsx") &&
-    //     !id.endsWith(".js") &&
-    //     !id.endsWith(".ts")
-    //   )
-    //     return;
-    //   if (!existsSync(id)) {
-    //     const fileUrl = pathToFileURL(id).href;
-    //     delete manifest[fileUrl];
-    //     clientModules.delete(id);
-    //     return;
-    //   }
-    //   const code = readFileSync(id, "utf8");
 
-    //   const fileUrl = pathToFileURL(id).href;
+    async transform(code, id) {
+      const normalizedId = id.split(path.sep).join(path.posix.sep);
+      if (!clientModules.has(normalizedId)) return null;
 
-    //   if (/^(['"])use client\1/.test(code.trim())) {
-    //     const relPath =
-    //       "./" + path.relative(process.cwd(), id).replace(/\\/g, "/");
-    //     manifest[fileUrl] = {
-    //       id: relPath,
-    //       chunks: "default",
-    //       name: "default",
-    //     };
-    //     clientModules.add(id);
-    //     this.addWatchFile(id); // Make sure Rollup watches it
-    //   } else {
-    //     // If it was client but is no longer, remove it
-    //     delete manifest[fileUrl];
-    //     clientModules.delete(id);
-    //   }
-    // },
-    watchChange(id) {
-      console.log(`File changed: ${id}`);
+      checkInvalidImports(code, id, this);
+
+      return code;
+    },
+
+    async watchChange(id) {
+      // console.log(`File changed: ${id}`);
       if (
         !id.endsWith(".tsx") &&
         !id.endsWith(".jsx") &&
@@ -169,16 +161,27 @@ function reactClientManifestPlugin({
         !id.endsWith(".ts")
       )
         return;
+      const normalizedId = id.split(path.sep).join(path.posix.sep);
       if (!existsSync(id)) {
         const fileUrl = pathToFileURL(id).href;
-        delete manifest[fileUrl];
-        clientModules.delete(id);
+        for (const key in manifest) {
+          if (key.startsWith(fileUrl)) {
+            delete manifest[key];
+          }
+        }
+        clientModules.delete(normalizedId);
+        serverModules.delete(normalizedId);
         return;
       }
       const code = readFileSync(id, "utf8");
       const fileUrl = pathToFileURL(id).href;
 
+      // Determina si era cliente antes del cambio
+      const wasClient = clientModules.has(normalizedId);
+
       if (/^(['"])use client\1/.test(code.trim())) {
+        clientModules.add(normalizedId);
+        serverModules.delete(normalizedId);
         // Parsea AST como arriba
         const ast = parser.parse(code, {
           sourceType: "module",
@@ -233,7 +236,6 @@ function reactClientManifestPlugin({
           };
         }
 
-        clientModules.add(id);
         this.addWatchFile(id);
       } else {
         // Remueve todas las entradas para este módulo si ya no es client
@@ -242,29 +244,27 @@ function reactClientManifestPlugin({
             delete manifest[key];
           }
         }
-        clientModules.delete(id);
+        clientModules.delete(normalizedId);
+        serverModules.add(normalizedId);
+      }
+
+      // Si cambió la directiva (client ↔ server), revisa los padres
+      if (wasClient !== clientModules.has(normalizedId)) {
+        const moduleInfo = await this.getModuleInfo(id);
+        if (moduleInfo && moduleInfo.importers) {
+          for (const importerId of moduleInfo.importers) {
+            const normalizedImporterId = importerId
+              .split(path.sep)
+              .join(path.posix.sep);
+            if (clientModules.has(normalizedImporterId)) {
+              const importerCode = readFileSync(importerId, "utf8");
+              checkInvalidImports(importerCode, importerId, this);
+            }
+          }
+        }
       }
     },
-    // generateBundle(outputOptions, bundle) {
-    //   for (const [fileName, chunk] of Object.entries(bundle)) {
-    //     if (chunk.type !== "chunk") continue;
 
-    //     for (const modulePath of Object.keys(chunk.modules)) {
-    //       const absModulePath = path.resolve(modulePath);
-    //       const fileUrl = pathToFileURL(absModulePath).href;
-
-    //       if (manifest[fileUrl]) {
-    //         // manifest[fileUrl].chunks.push(fileName);
-    //         manifest[fileUrl].id = "/" + fileName;
-    //       }
-    //     }
-    //   }
-
-    //   const serialized = JSON.stringify(manifest, null, 2);
-    //   mkdirSync(dirname(manifestPath), { recursive: true });
-    //   writeFileSync(manifestPath, serialized);
-    //   // console.log(`✅ react-client-manifest.json written to ${manifestPath}`);
-    // },
     generateBundle(outputOptions, bundle) {
       for (const [fileName, chunk] of Object.entries(bundle)) {
         if (chunk.type !== "chunk") continue;
@@ -285,7 +285,6 @@ function reactClientManifestPlugin({
       const serialized = JSON.stringify(manifest, null, 2);
       mkdirSync(dirname(manifestPath), { recursive: true });
       writeFileSync(manifestPath, serialized);
-      // console.log(`✅ react-client-manifest.json written to ${manifestPath}`);
     },
   };
 }
