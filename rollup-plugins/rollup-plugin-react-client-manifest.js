@@ -77,9 +77,6 @@ function reactClientManifestPlugin({
           name: expName,
         };
       }
-      clientModules.add(absPath);
-    } else {
-      clientModules.delete(absPath);
     }
   }
 
@@ -91,25 +88,35 @@ function reactClientManifestPlugin({
         absolute: true,
       });
 
+      // Pasada única: procesar clients
       for (const absPath of files) {
         const code = readFileSync(absPath, "utf8");
+        const normalizedPath = absPath.split(path.sep).join(path.posix.sep);
         const isClientModule = /^(['"])use client\1/.test(code.trim());
 
-        if (!isClientModule) continue;
+        if (isClientModule) {
+          clientModules.add(normalizedPath);
+          updateManifestForModule(absPath, code, true);
 
-        updateManifestForModule(absPath, code, true);
-
-        // Emite el chunk para el módulo completo
-        this.emitFile({
-          type: "chunk",
-          id: absPath,
-          name: path.basename(absPath, path.extname(absPath)),
-        });
+          // Emite el chunk para el módulo completo
+          this.emitFile({
+            type: "chunk",
+            id: absPath,
+            name: path.basename(absPath, path.extname(absPath)),
+          });
+        }
       }
     },
-    watchChange(id) {
-      if (!/\.(jsx?|tsx?)$/.test(id)) return;
-
+    async watchChange(id) {
+      // console.log(`File changed: ${id}`);
+      if (
+        !id.endsWith(".tsx") &&
+        !id.endsWith(".jsx") &&
+        !id.endsWith(".js") &&
+        !id.endsWith(".ts")
+      )
+        return;
+      const normalizedId = id.split(path.sep).join(path.posix.sep);
       if (!existsSync(id)) {
         const fileUrl = pathToFileURL(id).href;
         for (const key in manifest) {
@@ -117,17 +124,19 @@ function reactClientManifestPlugin({
             delete manifest[key];
           }
         }
-        clientModules.delete(id);
+        clientModules.delete(normalizedId);
         return;
       }
-
       const code = readFileSync(id, "utf8");
       const isClientModule = /^(['"])use client\1/.test(code.trim());
 
       updateManifestForModule(id, code, isClientModule);
 
       if (isClientModule) {
+        clientModules.add(normalizedId);
         this.addWatchFile(id);
+      } else {
+        clientModules.delete(normalizedId);
       }
     },
     generateBundle(outputOptions, bundle) {
@@ -138,10 +147,10 @@ function reactClientManifestPlugin({
           const absModulePath = path.resolve(modulePath);
           const baseFileUrl = pathToFileURL(absModulePath).href;
 
-          // Actualiza todas las entradas que coincidan con el baseFileUrl
+          // Actualiza todas las entradas que coincidan con el baseFileUrl (incluyendo #export)
           for (const manifestKey in manifest) {
             if (manifestKey.startsWith(baseFileUrl)) {
-              manifest[manifestKey].id = "/" + fileName;
+              manifest[manifestKey].id = "/" + fileName; // Apunta al mismo chunk
             }
           }
         }
