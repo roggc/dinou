@@ -4,8 +4,8 @@ const path = require("node:path");
 const { EsmHmrEngine } = require("./esm-hmr/server");
 const { createServer } = require("node:http");
 const changedIds = new Set();
-// const pendingUpdateUrls = new Set();
-// let needsFullReload = false;
+const pendingUpdateUrls = new Set();
+let needsFullReload = false;
 function esmHmrPlugin({ root = process.cwd() } = {}) {
   let hmrEngine;
   let serverStarted = false;
@@ -83,67 +83,69 @@ function esmHmrPlugin({ root = process.cwd() } = {}) {
         source: fs.readFileSync(clientPath, "utf-8"),
       });
     },
-    writeBundle(options, bundle) {
-      // console.log("[HMR] writeBundle", Object.keys(bundle), changedIds);
-      for (const [fileName, chunkInfo] of Object.entries(bundle)) {
-        for (const modulePath of Object.keys(chunkInfo.modules ?? {})) {
-          if (changedIds.has(modulePath)) {
-            // console.log(`Updated module ${modulePath} is in chunk ${fileName}`);
-            const normalizedId = fileName;
-            const entry = hmrEngine.getEntry(normalizedId);
-            // console.log("[HMR] watchChange", normalizedId, entry);
-
-            if (entry?.isHmrAccepted) {
-              // console.log("[HMR] Broadcasting update for", normalizedId);
-              hmrEngine.broadcastMessage({ type: "update", url: normalizedId });
-              changedIds.delete(modulePath);
-            } else {
-              // console.log("[HMR] Reloading", normalizedId);
-              hmrEngine.broadcastMessage({ type: "reload" });
-              changedIds.clear();
-              break;
-            }
-          }
-        }
-      }
-      if (changedIds.size > 0) {
-        // console.log("[HMR] Reloading", Array.from(changedIds));
-        hmrEngine.broadcastMessage({ type: "reload" });
-        changedIds.clear();
-      }
-    },
-    // writeBundle(_options, bundle) {
+    // writeBundle(options, bundle) {
+    //   // console.log("[HMR] writeBundle", Object.keys(bundle), changedIds);
     //   for (const [fileName, chunkInfo] of Object.entries(bundle)) {
     //     for (const modulePath of Object.keys(chunkInfo.modules ?? {})) {
-    //       if (changedIds.has(path.resolve(modulePath))) {
-    //         const entry = hmrEngine.getEntry(fileName);
+    //       if (changedIds.has(modulePath)) {
+    //         // console.log(`Updated module ${modulePath} is in chunk ${fileName}`);
+    //         const normalizedId = fileName;
+    //         const entry = hmrEngine.getEntry(normalizedId);
+    //         // console.log("[HMR] watchChange", normalizedId, entry);
+
     //         if (entry?.isHmrAccepted) {
-    //           pendingUpdateUrls.add(fileName);
+    //           console.log("[HMR] Broadcasting update for", normalizedId);
+    //           hmrEngine.broadcastMessage({ type: "update", url: normalizedId });
+    //           changedIds.delete(modulePath);
     //         } else {
-    //           needsFullReload = true;
+    //           console.log("[HMR] Reloading", normalizedId);
+    //           hmrEngine.broadcastMessage({ type: "reload" });
+    //           changedIds.clear();
+    //           break;
     //         }
     //       }
     //     }
     //   }
-    // },
-    // closeBundle() {
-    //   // setTimeout(() => {
-    //   if (changedIds.size === 0) return;
-
-    //   if (needsFullReload || pendingUpdateUrls.size === 0) {
-    //     console.log("[HMR] Full reload");
+    //   if (changedIds.size > 0) {
+    //     console.log("[HMR] Reloading", Array.from(changedIds));
     //     hmrEngine.broadcastMessage({ type: "reload" });
-    //   } else {
-    //     for (const url of pendingUpdateUrls) {
-    //       hmrEngine.broadcastMessage({ type: "update", url });
-    //     }
+    //     changedIds.clear();
     //   }
-
-    //   changedIds.clear();
-    //   pendingUpdateUrls.clear();
-    //   needsFullReload = false;
-    //   // });
     // },
+    writeBundle(_options, bundle) {
+      for (const [fileName, chunkInfo] of Object.entries(bundle)) {
+        for (const modulePath of Object.keys(chunkInfo.modules ?? {})) {
+          if (changedIds.has(path.resolve(modulePath))) {
+            // console.log("[HMR] Broadcasting update for", modulePath,fileName);
+            const entry = hmrEngine.getEntry(fileName);
+            if (entry?.isHmrAccepted) {
+              pendingUpdateUrls.add(fileName);
+            } else {
+              needsFullReload = true;
+            }
+          }
+        }
+      }
+    },
+    closeBundle() {
+      // setTimeout(() => {
+      if (changedIds.size === 0) return;
+
+      if (needsFullReload || pendingUpdateUrls.size === 0) {
+        // console.log("[HMR] Full reload");
+        hmrEngine.broadcastMessage({ type: "reload" });
+      } else {
+        for (const url of pendingUpdateUrls) {
+          // console.log("[HMR] Broadcasting update for", url);
+          hmrEngine.broadcastMessage({ type: "update", url });
+        }
+      }
+
+      changedIds.clear();
+      pendingUpdateUrls.clear();
+      needsFullReload = false;
+      // });
+    },
   };
 }
 
