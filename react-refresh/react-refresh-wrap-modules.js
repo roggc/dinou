@@ -24,9 +24,9 @@ window.$RefreshReg$ = (type, id) => {
 };
 window.$RefreshSig$ = RefreshRuntime?.createSignatureFunctionForTransform;
 
-// --- código original ---
+// --- original code ---
 ${code}
-// --- fin código original ---
+// --- end original code ---
 
 window.$RefreshReg$ = prevRefreshReg;
 window.$RefreshSig$ = prevRefreshSig;

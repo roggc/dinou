@@ -69,10 +69,6 @@ class HotModuleState {
       return;
     }
     if (!this.isAccepted) {
-      // console.log(
-      //   `[HMR] Accepting module ${this.id} with dependencies:`,
-      //   _deps
-      // );
       sendSocketMessage({ id: this.id, type: "hotAccept" });
       this.isAccepted = true;
     }
@@ -137,25 +133,18 @@ async function applyUpdate(id) {
 }
 
 socket.addEventListener("message", ({ data: _data }) => {
-  // debug("Received message from server:", _data);
   if (!_data) return;
 
   const data = JSON.parse(_data);
-  // debug("message", data);
 
   if (data.type === "reload") {
-    // debug("message: reload");
     reload();
     return;
   }
 
   if (data.type !== "update") {
-    // debug("message: unknown", data);
     return;
   }
-
-  // debug("message: update", data);
-  // debug(data.url, Object.keys(REGISTERED_MODULES));
 
   applyUpdate(data.url)
     .then((ok) => {

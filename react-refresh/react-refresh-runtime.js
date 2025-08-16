@@ -17,10 +17,6 @@ if (
     refreshTimeout = setTimeout(() => {
       try {
         RefreshRuntime.performReactRefresh();
-        // import.meta.hot.accept(() => {
-        //   // This is a workaround to ensure that the hot module replacement
-        //   //RefreshRuntime.performReactRefresh();
-        // });
       } catch (err) {
         console.warn("React Refresh failed:", err);
       }

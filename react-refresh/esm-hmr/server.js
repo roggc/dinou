@@ -1,8 +1,4 @@
 const WebSocket = require("ws");
-// const path = require("node:path");
-// function normalizeId(id) {
-//   return path.resolve(id).replace(/\\/g, "/");
-// }
 
 /**
  * @typedef {Object} Dependency
@@ -17,9 +13,7 @@ const set = new Set();
 class EsmHmrEngine {
   constructor(options = {}) {
     this.clients = set;
-    // console.log("[HMR] Initializing EsmHmrEngine");
     this.dependencyTree = map;
-    // console.log("options.server", !!options.server);
     const wss = options.server
       ? new WebSocket.Server({ noServer: true })
       : new WebSocket.Server({ port: 3001 });
@@ -44,14 +38,9 @@ class EsmHmrEngine {
   registerListener(client) {
     client.on("message", (data) => {
       const message = JSON.parse(data.toString());
-      // console.log("[HMR] Received message:", message.type, message.id);
       if (message.type === "hotAccept") {
         const entry = this.getEntry(message.id, true);
-        // console.log("entry", entry);
-        // console.log("[HMR] Accepting module", message.id);
         entry.isHmrAccepted = true;
-        // console.log("[HMR] Updated entry:", entry);
-        // console.log("[HMR] Current dependency tree:", this.dependencyTree);
       }
     });
   }
@@ -64,19 +53,13 @@ class EsmHmrEngine {
       isHmrEnabled: false,
       isHmrAccepted: false,
     };
-    // console.log("[HMR] Creating new entry for - in createEntry", sourceUrl);
     this.dependencyTree.set(sourceUrl, newEntry);
     return newEntry;
   }
 
   getEntry(sourceUrl, createIfNotFound = false) {
-    // console.log("this.dependencyTree", this.dependencyTree);
-    // sourceUrl = normalizeId(sourceUrl);
-    // console.log("[HMR] getEntry", sourceUrl);
     const result = this.dependencyTree.get(sourceUrl);
-    // console.log("[HMR] getEntry", sourceUrl, result);
     if (result) return result;
-    // console.log("[HMR] Creating new entry for", sourceUrl);
     if (createIfNotFound) return this.createEntry(sourceUrl);
     return null;
   }
@@ -117,13 +100,10 @@ class EsmHmrEngine {
   }
 
   broadcastMessage(data) {
-    // console.log("[HMR] Broadcasting message:", data);
     this.clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
-        // console.log("[HMR] Sending message to client:", data);
         client.send(JSON.stringify(data));
       } else {
-        // console.log("[HMR] Client not open, disconnecting:", client);
         this.disconnectClient(client);
       }
     });

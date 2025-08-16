@@ -6,7 +6,7 @@ const { createServer } = require("node:http");
 const changedIds = new Set();
 const pendingUpdateUrls = new Set();
 let needsFullReload = false;
-function esmHmrPlugin({ root = process.cwd() } = {}) {
+function esmHmrPlugin() {
   let hmrEngine;
   let serverStarted = false;
 
@@ -16,8 +16,6 @@ function esmHmrPlugin({ root = process.cwd() } = {}) {
     buildStart() {
       if (!serverStarted) {
         const server = createServer();
-        // hmrEngine.clients.clear(); // optional cleanup
-        // console.log("[esm-hmr] Starting WebSocket server...");
         hmrEngine = new EsmHmrEngine({ server });
         server.listen(3001, () => {
           // console.log("[esm-hmr] WebSocket server listening on port 3001");
@@ -55,7 +53,6 @@ function esmHmrPlugin({ root = process.cwd() } = {}) {
       // 🔥 Inject import.meta.hot definition if user accepts HMR
       if (acceptsHmr) {
         const safeId = JSON.stringify(normalizedId);
-        // console.log("[HMR] inject import.meta.hot for", safeId);
         injectCode += `if (!import.meta.hot) import.meta.hot = window.__hotContext?.(${safeId});\n`;
       }
 
@@ -70,12 +67,10 @@ function esmHmrPlugin({ root = process.cwd() } = {}) {
     },
 
     watchChange(id) {
-      // console.log("[HMR] watchChange", id);
       changedIds.add(id);
     },
 
     generateBundle(options, bundle) {
-      // console.log("[HMR] generateBundle", Object.keys(bundle));
       const clientPath = path.resolve(__dirname, "./esm-hmr/client.js");
       this.emitFile({
         type: "asset",
@@ -83,40 +78,10 @@ function esmHmrPlugin({ root = process.cwd() } = {}) {
         source: fs.readFileSync(clientPath, "utf-8"),
       });
     },
-    // writeBundle(options, bundle) {
-    //   // console.log("[HMR] writeBundle", Object.keys(bundle), changedIds);
-    //   for (const [fileName, chunkInfo] of Object.entries(bundle)) {
-    //     for (const modulePath of Object.keys(chunkInfo.modules ?? {})) {
-    //       if (changedIds.has(modulePath)) {
-    //         // console.log(`Updated module ${modulePath} is in chunk ${fileName}`);
-    //         const normalizedId = fileName;
-    //         const entry = hmrEngine.getEntry(normalizedId);
-    //         // console.log("[HMR] watchChange", normalizedId, entry);
-
-    //         if (entry?.isHmrAccepted) {
-    //           console.log("[HMR] Broadcasting update for", normalizedId);
-    //           hmrEngine.broadcastMessage({ type: "update", url: normalizedId });
-    //           changedIds.delete(modulePath);
-    //         } else {
-    //           console.log("[HMR] Reloading", normalizedId);
-    //           hmrEngine.broadcastMessage({ type: "reload" });
-    //           changedIds.clear();
-    //           break;
-    //         }
-    //       }
-    //     }
-    //   }
-    //   if (changedIds.size > 0) {
-    //     console.log("[HMR] Reloading", Array.from(changedIds));
-    //     hmrEngine.broadcastMessage({ type: "reload" });
-    //     changedIds.clear();
-    //   }
-    // },
     writeBundle(_options, bundle) {
       for (const [fileName, chunkInfo] of Object.entries(bundle)) {
         for (const modulePath of Object.keys(chunkInfo.modules ?? {})) {
           if (changedIds.has(path.resolve(modulePath))) {
-            // console.log("[HMR] Broadcasting update for", modulePath,fileName);
             const entry = hmrEngine.getEntry(fileName);
             if (entry?.isHmrAccepted) {
               pendingUpdateUrls.add(fileName);
@@ -128,7 +93,6 @@ function esmHmrPlugin({ root = process.cwd() } = {}) {
       }
     },
     closeBundle() {
-      // setTimeout(() => {
       if (changedIds.size === 0) return;
 
       if (needsFullReload || pendingUpdateUrls.size === 0) {
@@ -144,7 +108,6 @@ function esmHmrPlugin({ root = process.cwd() } = {}) {
       changedIds.clear();
       pendingUpdateUrls.clear();
       needsFullReload = false;
-      // });
     },
   };
 }

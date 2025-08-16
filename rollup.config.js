@@ -104,10 +104,7 @@ module.exports = async function () {
         manifestPath: path.join(outputDirectory, "react-client-manifest.json"),
       }),
       isDevelopment && reactRefreshWrapModules(),
-      isDevelopment &&
-        esmHmrPlugin({
-          root: process.cwd(),
-        }),
+      isDevelopment && esmHmrPlugin(),
     ].filter(Boolean),
     watch: {
       exclude: ["public/**"],
