@@ -13,6 +13,76 @@ function reactClientManifestPlugin({
   const manifest = {};
   const clientModules = new Set();
 
+  // Función para parsear el código y extraer exports
+  function parseExports(code) {
+    const ast = parser.parse(code, {
+      sourceType: "module",
+      plugins: ["jsx", "typescript"],
+    });
+
+    const exports = new Set();
+
+    traverse(ast, {
+      ExportDefaultDeclaration(path) {
+        exports.add("default");
+      },
+      ExportNamedDeclaration(path) {
+        if (path.node.declaration) {
+          if (
+            path.node.declaration.type === "FunctionDeclaration" ||
+            path.node.declaration.type === "ClassDeclaration"
+          ) {
+            exports.add(path.node.declaration.id.name);
+          } else if (path.node.declaration.type === "VariableDeclaration") {
+            path.node.declaration.declarations.forEach((decl) => {
+              if (decl.id.type === "Identifier") {
+                exports.add(decl.id.name);
+              }
+            });
+          }
+        } else if (path.node.specifiers) {
+          path.node.specifiers.forEach((spec) => {
+            if (spec.type === "ExportSpecifier") {
+              exports.add(spec.exported.name);
+            }
+          });
+        }
+      },
+    });
+
+    return exports;
+  }
+
+  // Función para actualizar el manifiesto con un módulo
+  function updateManifestForModule(absPath, code, isClientModule) {
+    const fileUrl = pathToFileURL(absPath).href;
+    const relPath =
+      "./" + path.relative(process.cwd(), absPath).replace(/\\/g, "/");
+
+    // Remueve entradas antiguas para este módulo
+    for (const key in manifest) {
+      if (key.startsWith(fileUrl)) {
+        delete manifest[key];
+      }
+    }
+
+    if (isClientModule) {
+      const exports = parseExports(code);
+      for (const expName of exports) {
+        const manifestKey =
+          expName === "default" ? fileUrl : `${fileUrl}#${expName}`;
+        manifest[manifestKey] = {
+          id: relPath,
+          chunks: expName,
+          name: expName,
+        };
+      }
+      clientModules.add(absPath);
+    } else {
+      clientModules.delete(absPath);
+    }
+  }
+
   return {
     name: "react-client-manifest",
     async buildStart() {
@@ -23,63 +93,13 @@ function reactClientManifestPlugin({
 
       for (const absPath of files) {
         const code = readFileSync(absPath, "utf8");
+        const isClientModule = /^(['"])use client\1/.test(code.trim());
 
-        if (!/^(['"])use client\1/.test(code.trim())) continue;
+        if (!isClientModule) continue;
 
-        const fileUrl = pathToFileURL(absPath).href;
-        const relPath =
-          "./" + path.relative(process.cwd(), absPath).replace(/\\/g, "/");
+        updateManifestForModule(absPath, code, true);
 
-        // Parsea el AST con Babel (soporta TS/JSX)
-        const ast = parser.parse(code, {
-          sourceType: "module",
-          plugins: ["jsx", "typescript"],
-        });
-
-        const exports = new Set(); // Almacena nombres de exports (named + default)
-
-        traverse(ast, {
-          ExportDefaultDeclaration(path) {
-            exports.add("default");
-          },
-          ExportNamedDeclaration(path) {
-            if (path.node.declaration) {
-              if (
-                path.node.declaration.type === "FunctionDeclaration" ||
-                path.node.declaration.type === "ClassDeclaration"
-              ) {
-                exports.add(path.node.declaration.id.name);
-              } else if (path.node.declaration.type === "VariableDeclaration") {
-                path.node.declaration.declarations.forEach((decl) => {
-                  if (decl.id.type === "Identifier") {
-                    exports.add(decl.id.name);
-                  }
-                });
-              }
-            } else if (path.node.specifiers) {
-              path.node.specifiers.forEach((spec) => {
-                if (spec.type === "ExportSpecifier") {
-                  exports.add(spec.exported.name);
-                }
-              });
-            }
-          },
-        });
-
-        // Agrega entradas al manifiesto por cada export
-        for (const expName of exports) {
-          const manifestKey =
-            expName === "default" ? fileUrl : `${fileUrl}#${expName}`;
-          manifest[manifestKey] = {
-            id: relPath,
-            chunks: expName, // Puedes ajustar si usas chunks múltiples
-            name: expName,
-          };
-        }
-
-        clientModules.add(absPath);
-
-        // Emite el chunk para el módulo completo (no por export)
+        // Emite el chunk para el módulo completo
         this.emitFile({
           type: "chunk",
           id: absPath,
@@ -88,88 +108,26 @@ function reactClientManifestPlugin({
       }
     },
     watchChange(id) {
-      // console.log(`File changed: ${id}`);
-      if (
-        !id.endsWith(".tsx") &&
-        !id.endsWith(".jsx") &&
-        !id.endsWith(".js") &&
-        !id.endsWith(".ts")
-      )
-        return;
+      if (!/\.(jsx?|tsx?)$/.test(id)) return;
+
       if (!existsSync(id)) {
         const fileUrl = pathToFileURL(id).href;
-        delete manifest[fileUrl];
+        for (const key in manifest) {
+          if (key.startsWith(fileUrl)) {
+            delete manifest[key];
+          }
+        }
         clientModules.delete(id);
         return;
       }
+
       const code = readFileSync(id, "utf8");
-      const fileUrl = pathToFileURL(id).href;
+      const isClientModule = /^(['"])use client\1/.test(code.trim());
 
-      if (/^(['"])use client\1/.test(code.trim())) {
-        // Parsea AST como arriba
-        const ast = parser.parse(code, {
-          sourceType: "module",
-          plugins: ["jsx", "typescript"],
-        });
-        const exports = new Set();
-        traverse(ast, {
-          ExportDefaultDeclaration(path) {
-            exports.add("default");
-          },
-          ExportNamedDeclaration(path) {
-            if (path.node.declaration) {
-              if (
-                path.node.declaration.type === "FunctionDeclaration" ||
-                path.node.declaration.type === "ClassDeclaration"
-              ) {
-                exports.add(path.node.declaration.id.name);
-              } else if (path.node.declaration.type === "VariableDeclaration") {
-                path.node.declaration.declarations.forEach((decl) => {
-                  if (decl.id.type === "Identifier") {
-                    exports.add(decl.id.name);
-                  }
-                });
-              }
-            } else if (path.node.specifiers) {
-              path.node.specifiers.forEach((spec) => {
-                if (spec.type === "ExportSpecifier") {
-                  exports.add(spec.exported.name);
-                }
-              });
-            }
-          },
-        });
+      updateManifestForModule(id, code, isClientModule);
 
-        // Remueve entradas antiguas para este módulo
-        for (const key in manifest) {
-          if (key.startsWith(fileUrl)) {
-            delete manifest[key];
-          }
-        }
-
-        // Agrega nuevas
-        for (const expName of exports) {
-          const manifestKey =
-            expName === "default" ? fileUrl : `${fileUrl}#${expName}`;
-          const relPath =
-            "./" + path.relative(process.cwd(), id).replace(/\\/g, "/");
-          manifest[manifestKey] = {
-            id: relPath,
-            chunks: expName,
-            name: expName,
-          };
-        }
-
-        clientModules.add(id);
+      if (isClientModule) {
         this.addWatchFile(id);
-      } else {
-        // Remueve todas las entradas para este módulo si ya no es client
-        for (const key in manifest) {
-          if (key.startsWith(fileUrl)) {
-            delete manifest[key];
-          }
-        }
-        clientModules.delete(id);
       }
     },
     generateBundle(outputOptions, bundle) {
@@ -180,10 +138,10 @@ function reactClientManifestPlugin({
           const absModulePath = path.resolve(modulePath);
           const baseFileUrl = pathToFileURL(absModulePath).href;
 
-          // Actualiza todas las entradas que coincidan con el baseFileUrl (incluyendo #export)
+          // Actualiza todas las entradas que coincidan con el baseFileUrl
           for (const manifestKey in manifest) {
             if (manifestKey.startsWith(baseFileUrl)) {
-              manifest[manifestKey].id = "/" + fileName; // Apunta al mismo chunk
+              manifest[manifestKey].id = "/" + fileName;
             }
           }
         }
@@ -192,7 +150,6 @@ function reactClientManifestPlugin({
       const serialized = JSON.stringify(manifest, null, 2);
       mkdirSync(dirname(manifestPath), { recursive: true });
       writeFileSync(manifestPath, serialized);
-      // console.log(`✅ react-client-manifest.json written to ${manifestPath}`);
     },
   };
 }
