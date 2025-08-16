@@ -7,7 +7,8 @@ function reactRefreshWrapModules() {
         !chunk ||
         !/\.(jsx?|tsx?)$/.test(chunk.fileName) ||
         chunk.fileName.includes("refresh.js") ||
-        chunk.fileName.includes("runtime.js")
+        chunk.fileName.includes("runtime.js") ||
+        chunk.fileName.includes("_commonjsHelpers.js")
       ) {
         return null;
       }
@@ -19,9 +20,9 @@ let prevRefreshReg = window.$RefreshReg$;
 let prevRefreshSig = window.$RefreshSig$;
 
 window.$RefreshReg$ = (type, id) => {
-  RefreshRuntime.register(type, ${safeId} + ' %exports%');
+  RefreshRuntime.register(type, ${safeId} + '#' + id);
 };
-window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+window.$RefreshSig$ = RefreshRuntime?.createSignatureFunctionForTransform;
 
 // --- código original ---
 ${code}

@@ -14,56 +14,6 @@ function reactClientManifestPlugin({
   const clientModules = new Set();
   const serverModules = new Set();
 
-  // Función reutilizable para chequear imports en un módulo (ahora async)
-  async function checkInvalidImports(code, id, rollupContext) {
-    const normalizedId = id.split(path.sep).join(path.posix.sep);
-    const ast = parser.parse(code, {
-      sourceType: "module",
-      plugins: ["jsx", "typescript", "importAssertions"],
-    });
-    const isProduction = process.env.NODE_ENV === "production";
-
-    const promises = [];
-
-    traverse(ast, {
-      ImportDeclaration(p) {
-        const importPath = p.node.source.value;
-        const promise = rollupContext
-          .resolve(importPath, id)
-          .then((resolved) => {
-            if (
-              resolved &&
-              resolved.id &&
-              !resolved.id.includes("node_modules")
-            ) {
-              const importedAbsPath = resolved.id
-                .split(path.sep)
-                .join(path.posix.sep);
-              if (serverModules.has(importedAbsPath)) {
-                const message = `Invalid import in client component ${normalizedId}: Importing server component ${importedAbsPath}. This causes runtime hangs. Add 'use client' to the imported file if it's meant to be client, or refactor to avoid this.`;
-                if (isProduction) {
-                  rollupContext.error(message);
-                } else {
-                  console.warn(`⚠️ ${message}⚠️`);
-                }
-              }
-            }
-          })
-          .catch((err) => {
-            const message = `Could not resolve import ${importPath} in ${normalizedId}: ${err.message}`;
-            if (isProduction) {
-              rollupContext.error(message);
-            } else {
-              console.warn(`⚠️ ${message}⚠️`);
-            }
-          });
-        promises.push(promise);
-      },
-    });
-
-    await Promise.all(promises);
-  }
-
   return {
     name: "react-client-manifest",
 
@@ -149,8 +99,6 @@ function reactClientManifestPlugin({
     async transform(code, id) {
       const normalizedId = id.split(path.sep).join(path.posix.sep);
       if (!clientModules.has(normalizedId)) return null;
-
-      await checkInvalidImports(code, id, this);
 
       return code;
     },
@@ -249,22 +197,6 @@ function reactClientManifestPlugin({
         }
         clientModules.delete(normalizedId);
         serverModules.add(normalizedId);
-      }
-
-      // Si cambió la directiva (client ↔ server), revisa los padres
-      if (wasClient !== clientModules.has(normalizedId)) {
-        const moduleInfo = await this.getModuleInfo(id);
-        if (moduleInfo && moduleInfo.importers) {
-          for (const importerId of moduleInfo.importers) {
-            const normalizedImporterId = importerId
-              .split(path.sep)
-              .join(path.posix.sep);
-            if (clientModules.has(normalizedImporterId)) {
-              const importerCode = readFileSync(importerId, "utf8");
-              await checkInvalidImports(importerCode, importerId, this);
-            }
-          }
-        }
       }
     },
 
