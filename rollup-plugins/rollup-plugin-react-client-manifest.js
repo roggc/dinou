@@ -12,98 +12,82 @@ function reactClientManifestPlugin({
 } = {}) {
   const manifest = {};
   const clientModules = new Set();
-  const serverModules = new Set();
 
   return {
     name: "react-client-manifest",
-
     async buildStart() {
       const files = await glob(["**/*.{js,jsx,ts,tsx}"], {
         cwd: srcDir,
         absolute: true,
       });
 
-      // Pasada única: clasificar y procesar clients
       for (const absPath of files) {
         const code = readFileSync(absPath, "utf8");
-        const normalizedPath = absPath.split(path.sep).join(path.posix.sep);
 
-        if (/^(['"])use client\1/.test(code.trim())) {
-          clientModules.add(normalizedPath);
+        if (!/^(['"])use client\1/.test(code.trim())) continue;
 
-          const fileUrl = pathToFileURL(absPath).href;
-          const relPath =
-            "./" + path.relative(process.cwd(), absPath).replace(/\\/g, "/");
+        const fileUrl = pathToFileURL(absPath).href;
+        const relPath =
+          "./" + path.relative(process.cwd(), absPath).replace(/\\/g, "/");
 
-          // Parsea el AST con Babel (soporta TS/JSX)
-          const ast = parser.parse(code, {
-            sourceType: "module",
-            plugins: ["jsx", "typescript"],
-          });
+        // Parsea el AST con Babel (soporta TS/JSX)
+        const ast = parser.parse(code, {
+          sourceType: "module",
+          plugins: ["jsx", "typescript"],
+        });
 
-          const exports = new Set(); // Almacena nombres de exports (named + default)
+        const exports = new Set(); // Almacena nombres de exports (named + default)
 
-          traverse(ast, {
-            ExportDefaultDeclaration(path) {
-              exports.add("default");
-            },
-            ExportNamedDeclaration(path) {
-              if (path.node.declaration) {
-                if (
-                  path.node.declaration.type === "FunctionDeclaration" ||
-                  path.node.declaration.type === "ClassDeclaration"
-                ) {
-                  exports.add(path.node.declaration.id.name);
-                } else if (
-                  path.node.declaration.type === "VariableDeclaration"
-                ) {
-                  path.node.declaration.declarations.forEach((decl) => {
-                    if (decl.id.type === "Identifier") {
-                      exports.add(decl.id.name);
-                    }
-                  });
-                }
-              } else if (path.node.specifiers) {
-                path.node.specifiers.forEach((spec) => {
-                  if (spec.type === "ExportSpecifier") {
-                    exports.add(spec.exported.name);
+        traverse(ast, {
+          ExportDefaultDeclaration(path) {
+            exports.add("default");
+          },
+          ExportNamedDeclaration(path) {
+            if (path.node.declaration) {
+              if (
+                path.node.declaration.type === "FunctionDeclaration" ||
+                path.node.declaration.type === "ClassDeclaration"
+              ) {
+                exports.add(path.node.declaration.id.name);
+              } else if (path.node.declaration.type === "VariableDeclaration") {
+                path.node.declaration.declarations.forEach((decl) => {
+                  if (decl.id.type === "Identifier") {
+                    exports.add(decl.id.name);
                   }
                 });
               }
-            },
-          });
+            } else if (path.node.specifiers) {
+              path.node.specifiers.forEach((spec) => {
+                if (spec.type === "ExportSpecifier") {
+                  exports.add(spec.exported.name);
+                }
+              });
+            }
+          },
+        });
 
-          // Agrega entradas al manifiesto por cada export
-          for (const expName of exports) {
-            const manifestKey =
-              expName === "default" ? fileUrl : `${fileUrl}#${expName}`;
-            manifest[manifestKey] = {
-              id: relPath,
-              chunks: expName,
-              name: expName,
-            };
-          }
-
-          // Emite el chunk para el módulo completo (no por export)
-          this.emitFile({
-            type: "chunk",
-            id: absPath,
-            name: path.basename(absPath, path.extname(absPath)),
-          });
-        } else {
-          serverModules.add(normalizedPath);
+        // Agrega entradas al manifiesto por cada export
+        for (const expName of exports) {
+          const manifestKey =
+            expName === "default" ? fileUrl : `${fileUrl}#${expName}`;
+          manifest[manifestKey] = {
+            id: relPath,
+            chunks: expName, // Puedes ajustar si usas chunks múltiples
+            name: expName,
+          };
         }
+
+        clientModules.add(absPath);
+
+        // Emite el chunk para el módulo completo (no por export)
+        this.emitFile({
+          type: "chunk",
+          id: absPath,
+          name: path.basename(absPath, path.extname(absPath)),
+        });
       }
     },
-
-    async transform(code, id) {
-      const normalizedId = id.split(path.sep).join(path.posix.sep);
-      if (!clientModules.has(normalizedId)) return null;
-
-      return code;
-    },
-
-    async watchChange(id) {
+    watchChange(id) {
       // console.log(`File changed: ${id}`);
       if (
         !id.endsWith(".tsx") &&
@@ -112,27 +96,16 @@ function reactClientManifestPlugin({
         !id.endsWith(".ts")
       )
         return;
-      const normalizedId = id.split(path.sep).join(path.posix.sep);
       if (!existsSync(id)) {
         const fileUrl = pathToFileURL(id).href;
-        for (const key in manifest) {
-          if (key.startsWith(fileUrl)) {
-            delete manifest[key];
-          }
-        }
-        clientModules.delete(normalizedId);
-        serverModules.delete(normalizedId);
+        delete manifest[fileUrl];
+        clientModules.delete(id);
         return;
       }
       const code = readFileSync(id, "utf8");
       const fileUrl = pathToFileURL(id).href;
 
-      // Determina si era cliente antes del cambio
-      const wasClient = clientModules.has(normalizedId);
-
       if (/^(['"])use client\1/.test(code.trim())) {
-        clientModules.add(normalizedId);
-        serverModules.delete(normalizedId);
         // Parsea AST como arriba
         const ast = parser.parse(code, {
           sourceType: "module",
@@ -187,6 +160,7 @@ function reactClientManifestPlugin({
           };
         }
 
+        clientModules.add(id);
         this.addWatchFile(id);
       } else {
         // Remueve todas las entradas para este módulo si ya no es client
@@ -195,11 +169,9 @@ function reactClientManifestPlugin({
             delete manifest[key];
           }
         }
-        clientModules.delete(normalizedId);
-        serverModules.add(normalizedId);
+        clientModules.delete(id);
       }
     },
-
     generateBundle(outputOptions, bundle) {
       for (const [fileName, chunk] of Object.entries(bundle)) {
         if (chunk.type !== "chunk") continue;
@@ -220,6 +192,7 @@ function reactClientManifestPlugin({
       const serialized = JSON.stringify(manifest, null, 2);
       mkdirSync(dirname(manifestPath), { recursive: true });
       writeFileSync(manifestPath, serialized);
+      // console.log(`✅ react-client-manifest.json written to ${manifestPath}`);
     },
   };
 }
