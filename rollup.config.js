@@ -97,8 +97,8 @@ module.exports = async function () {
         },
       }),
       copy({
-        targets: [{ src: "favicons", dest: outputDirectory }],
-        flatten: false,
+        targets: [{ src: "favicons/*", dest: outputDirectory }],
+        flatten: true,
       }),
       reactClientManifest({
         manifestPath: path.join(outputDirectory, "react-client-manifest.json"),
