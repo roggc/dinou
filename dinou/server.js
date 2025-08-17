@@ -57,7 +57,132 @@ const generateStatic = require("./generate-static.js");
 const renderAppToHtml = require("./render-app-to-html.js");
 const revalidating = require("./revalidating.js");
 const isDevelopment = process.env.NODE_ENV !== "production";
-const webpackFolder = isDevelopment ? "____public____" : "dist3";
+const webpackFolder = isDevelopment ? "public" : "dist3";
+const chokidar = require("chokidar");
+const { fileURLToPath } = require("url");
+if (isDevelopment) {
+  const manifestPath = path.resolve(
+    process.cwd(),
+    `${webpackFolder}/react-client-manifest.json`
+  );
+  let currentManifest = {};
+
+  const watcher = chokidar.watch(manifestPath, { persistent: true });
+  let isInitial = true;
+
+  watcher.on("add", () => {
+    if (Object.keys(currentManifest).length === 0 && isInitial) {
+      // console.log("Initial manifest loaded.");
+      currentManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      isInitial = false;
+      return;
+    }
+  });
+
+  function getParents(resolvedPath) {
+    const parents = [];
+    Object.values(require.cache).forEach((mod) => {
+      if (
+        mod.children &&
+        mod.children.some((child) => child.id === resolvedPath)
+      ) {
+        parents.push(mod.id);
+      }
+    });
+    return parents;
+  }
+
+  function clearRequireCache(modulePath, visited = new Set()) {
+    try {
+      const resolved = require.resolve(modulePath);
+      if (visited.has(resolved)) return;
+      visited.add(resolved);
+
+      if (require.cache[resolved]) {
+        delete require.cache[resolved];
+        // console.log(`[Server HMR] Cleared cache for ${resolved}`);
+
+        const parents = getParents(resolved);
+        for (const parent of parents) {
+          // Optional: Skip if parent not in src/ (safety)
+          if (parent.startsWith(path.resolve(process.cwd(), "src"))) {
+            clearRequireCache(parent, visited);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(
+        `[Server HMR] Could not resolve or clear ${modulePath}: ${err.message}`
+      );
+    }
+  }
+
+  // function clearAllUserCache() {
+  //   const srcDir = path.resolve(process.cwd(), "src");
+  //   Object.keys(require.cache).forEach((file) => {
+  //     if (file.startsWith(srcDir)) {
+  //       delete require.cache[file];
+  //     }
+  //   });
+  //   console.log(
+  //     "[Server HMR] Cleared all src/ require caches due to directive change."
+  //   );
+  // }
+
+  watcher.on("change", () => {
+    try {
+      const newManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+      // Handle removed entries: client -> server switch
+      for (const key in currentManifest) {
+        if (!(key in newManifest)) {
+          const absPath = fileURLToPath(key);
+          clearRequireCache(absPath);
+          // console.log(`Cleared cache for ${absPath} (client -> server)`);
+        }
+      }
+
+      // Handle added entries: server -> client switch
+      for (const key in newManifest) {
+        if (!(key in currentManifest)) {
+          const absPath = fileURLToPath(key);
+          clearRequireCache(absPath);
+          // console.log(`Cleared cache for ${absPath} (server -> client)`);
+        }
+      }
+      // if (
+      //   Object.keys(currentManifest).length !== Object.keys(newManifest).length
+      // ) {
+      //   // Only clear if there was a change (add/remove)
+      //   clearAllUserCache();
+      // }
+      currentManifest = newManifest;
+    } catch (err) {
+      console.error("Error handling manifest change:", err);
+    }
+  });
+
+  const srcWatcher = chokidar.watch(path.resolve(process.cwd(), "src"), {
+    persistent: true,
+    ignored: /node_modules/,
+  });
+
+  srcWatcher.on("change", (changedPath) => {
+    const posixPath = changedPath.split(path.sep).join(path.posix.sep);
+
+    const isClientComponent = Object.keys(currentManifest).some((key) =>
+      key.includes(posixPath)
+    );
+
+    if (!isClientComponent) {
+      clearRequireCache(changedPath);
+      // console.log(
+      //   `[Server HMR] Cleared cache for ${changedPath} in srcWatcher`
+      // );
+    }
+  });
+}
+
 const app = express();
 
 app.use(express.json());

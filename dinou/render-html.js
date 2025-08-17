@@ -195,7 +195,14 @@ async function renderToStream(reqPath, query) {
       onShellReady() {
         stream.pipe(process.stdout);
       },
-      bootstrapScripts: ["/main.js"],
+      bootstrapModules: isDevelopment
+        ? ["/main.js", "/runtime.js"]
+        : ["/main.js"],
+      ...(isDevelopment
+        ? {
+            bootstrapScriptContent: `window.HMR_WEBSOCKET_URL="ws://localhost:3001";`,
+          }
+        : {}),
     });
   } catch (error) {
     process.stdout.write(formatErrorHtml(error));
