@@ -41,7 +41,6 @@ module.exports = async function () {
       format: "esm",
       entryFileNames: "[name].js",
       chunkFileNames: "[name].js",
-      // assetFileNames: "assets/[name]-[hash][extname]",
     },
     external: ["/refresh.js", "/__hmr_client__.js"],
     plugins: [
@@ -81,7 +80,6 @@ module.exports = async function () {
         plugins: [
           isDevelopment && require.resolve("react-refresh/babel"),
           "@babel/plugin-syntax-import-meta",
-          // "@babel/plugin-transform-flow-strip-types",
         ].filter(Boolean),
         exclude: /node_modules[\\/](?!dinou|react-refresh)/,
       }),
