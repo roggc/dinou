@@ -55,11 +55,13 @@ async function getJSX(reqPath, query) {
         params: dParams ?? {},
         query,
       });
+      
+      const notFoundDir = path.dirname(notFoundPath);
       const noLayoutNotFoundPath = path.join(
-        notFoundPath.split("\\").slice(0, -1).join("\\"),
+        notFoundDir,
         `no_layout_not_found`
       );
-      if (existsSync(path.resolve(process.cwd(), `${noLayoutNotFoundPath}`))) {
+      if (existsSync(noLayoutNotFoundPath)) {  
         return jsx;
       }
     }
@@ -71,7 +73,8 @@ async function getJSX(reqPath, query) {
       params: dynamicParams,
       query,
     };
-    const pageFolder = pagePath.split("\\").slice(0, -1).join("\\");
+    
+    const pageFolder = path.dirname(pagePath);
     const [pageFunctionsPath] = getFilePathAndDynamicParams(
       reqSegments,
       query,
