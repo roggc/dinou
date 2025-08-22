@@ -357,7 +357,7 @@ async function buildStaticPages() {
             const updatedSlots = {};
             for (const [slotName, slotElement] of Object.entries(slots)) {
               const slotFolder = path.join(
-                layoutPath.split("\\").slice(0, -1).join("\\"),
+                path.dirname(layoutPath),
                 `@${slotName}`
               );
               const [slotPath] = getFilePathAndDynamicParams(

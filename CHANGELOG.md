@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.0.3]
+
+### Fixed
+
+- Fixed cross-platform path handling using Node.js `path` module for macOS/Linux compatibility in `get-jsx.js`, `get-error-jsx.js`, and `build-static-pages.js`.
+- Added `awaitWriteFinish` to `chokidar` in `server.js` to avoid parsing incomplete manifest files on macOS.
+
+## [2.0.2]
+
+### Fixed
+
+- Watch server components in react manifest plugin.
+
+## [2.0.1]
+
+### Fixed
+
+- Use createFromFetch from react-server-dom-esm in client-error.jsx.
+
 ## [2.0.0]
 
 ### Changed

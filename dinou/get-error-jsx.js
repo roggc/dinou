@@ -58,10 +58,10 @@ function getErrorJSX(reqPath, query, error) {
     });
 
     const noLayoutErrorPath = path.join(
-      pagePath.split("\\").slice(0, -1).join("\\"),
+      path.dirname(pagePath),
       `no_layout_error`
     );
-    if (existsSync(path.resolve(process.cwd(), `${noLayoutErrorPath}`))) {
+    if (existsSync(noLayoutErrorPath)) {
       return jsx;
     }
 
