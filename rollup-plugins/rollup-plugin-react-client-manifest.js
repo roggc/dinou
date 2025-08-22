@@ -12,6 +12,7 @@ function reactClientManifestPlugin({
 } = {}) {
   const manifest = {};
   const clientModules = new Set();
+  const serverModules = new Set();
 
   function parseExports(code) {
     const ast = parser.parse(code, {
@@ -77,6 +78,102 @@ function reactClientManifestPlugin({
     }
   }
 
+  function getImports(code, baseFilePath, visited = new Set()) {
+    if (visited.has(baseFilePath)) {
+      return [];
+    }
+    visited.add(baseFilePath);
+
+    const ast = parser.parse(code, {
+      sourceType: "module",
+      plugins: ["jsx", "typescript"],
+    });
+    const imports = new Set();
+
+    traverse(ast, {
+      ImportDeclaration(nodePath) {
+        const source = nodePath.node.source.value;
+        if (source.startsWith(".")) {
+          let absImportPath = path.resolve(path.dirname(baseFilePath), source);
+          const extensions = [".js", ".jsx", ".ts", ".tsx"];
+          if (!extensions.some((ext) => absImportPath.endsWith(ext))) {
+            for (const ext of extensions) {
+              const potentialPath = absImportPath + ext;
+              if (existsSync(potentialPath)) {
+                absImportPath = potentialPath;
+                break;
+              }
+            }
+          }
+          if (existsSync(absImportPath)) {
+            imports.add(absImportPath);
+            try {
+              const importCode = readFileSync(absImportPath, "utf8");
+              const nestedImports = getImports(
+                importCode,
+                absImportPath,
+                visited
+              );
+              nestedImports.forEach((nestedPath) => imports.add(nestedPath));
+            } catch (err) {
+              console.warn(
+                `[react-client-manifest] Could not read import: ${absImportPath}`,
+                err.message
+              );
+            }
+          } else {
+            console.warn(
+              `[react-client-manifest] Import path not found: ${absImportPath}`
+            );
+          }
+        }
+      },
+    });
+
+    return Array.from(imports);
+  }
+
+  function isPageOrLayout(absPath) {
+    const fileName = path.basename(absPath);
+    return fileName.startsWith("page.") || fileName.startsWith("layout.");
+  }
+
+  function isAsyncDefaultExport(code) {
+    const ast = parser.parse(code, {
+      sourceType: "module",
+      plugins: ["jsx", "typescript"],
+    });
+
+    let isAsync = false;
+
+    traverse(ast, {
+      ExportDefaultDeclaration(path) {
+        let decl = path.node.declaration;
+
+        if (decl.type === "Identifier") {
+          const binding = path.scope.getBinding(decl.name);
+          if (binding && binding.path) {
+            decl = binding.path.node;
+            if (decl.type === "VariableDeclarator") {
+              decl = decl.init;
+            }
+          }
+        }
+
+        if (
+          decl &&
+          (decl.type === "FunctionDeclaration" ||
+            decl.type === "ArrowFunctionExpression" ||
+            decl.type === "FunctionExpression")
+        ) {
+          isAsync = decl.async;
+        }
+      },
+    });
+
+    return isAsync;
+  }
+
   return {
     name: "react-client-manifest",
     async buildStart() {
@@ -93,12 +190,23 @@ function reactClientManifestPlugin({
         if (isClientModule) {
           clientModules.add(normalizedPath);
           updateManifestForModule(absPath, code, true);
-
           this.emitFile({
             type: "chunk",
             id: absPath,
             name: path.basename(absPath, path.extname(absPath)),
           });
+        } else if (isPageOrLayout(absPath)) {
+          if (!isAsyncDefaultExport(code)) {
+            this.warn(
+              `[react-client-manifest] The file ${normalizedPath} is a page or layout without "use client" directive, but its default export is not an async function. Add "use client" if it's a client component, or make the default export async if it's a server component.`
+            );
+          }
+          serverModules.add(normalizedPath);
+          this.addWatchFile(absPath);
+          const imports = getImports(code, absPath);
+          for (const importPath of imports) {
+            this.addWatchFile(importPath);
+          }
         }
       }
     },
@@ -119,6 +227,7 @@ function reactClientManifestPlugin({
           }
         }
         clientModules.delete(normalizedId);
+        serverModules.delete(normalizedId);
         return;
       }
       const code = readFileSync(id, "utf8");
@@ -128,19 +237,33 @@ function reactClientManifestPlugin({
 
       if (isClientModule) {
         clientModules.add(normalizedId);
+        serverModules.delete(normalizedId);
         this.addWatchFile(id);
       } else {
         clientModules.delete(normalizedId);
+        if (isPageOrLayout(id)) {
+          if (!isAsyncDefaultExport(code)) {
+            this.warn(
+              `[react-client-manifest] The file ${normalizedId} is a page or layout without "use client" directive, but its default export is not an async function. Add "use client" if it's a client component, or make the default export async if it's a server component.`
+            );
+          }
+          serverModules.add(normalizedId);
+          this.addWatchFile(id);
+          const imports = getImports(code, id);
+          for (const importPath of imports) {
+            this.addWatchFile(importPath);
+          }
+        } else {
+          serverModules.delete(normalizedId);
+        }
       }
     },
     generateBundle(outputOptions, bundle) {
       for (const [fileName, chunk] of Object.entries(bundle)) {
         if (chunk.type !== "chunk") continue;
-
         for (const modulePath of Object.keys(chunk.modules)) {
           const absModulePath = path.resolve(modulePath);
           const baseFileUrl = pathToFileURL(absModulePath).href;
-
           for (const manifestKey in manifest) {
             if (manifestKey.startsWith(baseFileUrl)) {
               manifest[manifestKey].id = "/" + fileName;
@@ -148,7 +271,6 @@ function reactClientManifestPlugin({
           }
         }
       }
-
       const serialized = JSON.stringify(manifest, null, 2);
       mkdirSync(dirname(manifestPath), { recursive: true });
       writeFileSync(manifestPath, serialized);
