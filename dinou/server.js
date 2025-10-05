@@ -289,6 +289,48 @@ app.get(/^\/.*\/?$/, async (req, res) => {
   }
 });
 
+app.post("/____server_function____", async (req, res) => {
+  try {
+    const { id, args } = req.body;
+    const [fileUrl, exportName] = id.split("#");
+
+    let relativePath = fileUrl.replace(/^file:\/\/\/?/, "");
+    const absolutePath = path.resolve(process.cwd(), relativePath);
+
+    const mod = require(absolutePath);
+
+    const fn = exportName === "default" ? mod.default : mod[exportName];
+
+    if (typeof fn !== "function") {
+      return res.status(400).json({ error: "Export is not a function" });
+    }
+
+    const result = await fn(...args);
+
+    if (
+      result &&
+      result.$$typeof === Symbol.for("react.transitional.element")
+    ) {
+      res.setHeader("Content-Type", "text/x-component");
+      const manifest = readFileSync(
+        path.resolve(
+          process.cwd(),
+          `${webpackFolder}/react-client-manifest.json`
+        ),
+        "utf8"
+      );
+      const moduleMap = JSON.parse(manifest);
+      const { pipe } = renderToPipeableStream(result, moduleMap);
+      pipe(res);
+    } else {
+      res.json(result);
+    }
+  } catch (err) {
+    console.error("Server function error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const port = process.env.PORT || 3000;
 
 app.listen(port, async () => {
