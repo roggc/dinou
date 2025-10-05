@@ -51,7 +51,7 @@ module.exports = async function () {
       entryFileNames: "[name].js",
       chunkFileNames: "[name].js",
     },
-    external: ["/refresh.js", "/__hmr_client__.js"],
+    external: ["/refresh.js", "/__hmr_client__.js", "/serverFunctionProxy.js"],
     plugins: [
       del({
         targets: `${outputDirectory}/*`,
