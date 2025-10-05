@@ -12,6 +12,7 @@ const reactRefreshWrapModules = require("./react-refresh/react-refresh-wrap-modu
 const { esmHmrPlugin } = require("./react-refresh/rollup-plugin-esm-hmr.js");
 const dinouAssetPlugin = require("./rollup-plugins/dinou-asset-plugin.js");
 const tsconfigPaths = require("rollup-plugin-tsconfig-paths");
+const serverFunctionsPlugin = require("./rollup-plugins/rollup-plugin-server-functions");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 const outputDirectory = isDevelopment ? "public" : "dist3";
@@ -31,10 +32,18 @@ module.exports = async function () {
           ),
           main: path.resolve(__dirname, "dinou/client.jsx"),
           error: path.resolve(__dirname, "dinou/client-error.jsx"),
+          serverFunctionProxy: path.resolve(
+            __dirname,
+            "dinou/server-function-proxy.js"
+          ),
         }
       : {
           main: path.resolve(__dirname, "dinou/client.jsx"),
           error: path.resolve(__dirname, "dinou/client-error.jsx"),
+          serverFunctionProxy: path.resolve(
+            __dirname,
+            "dinou/server-function-proxy.js"
+          ),
         },
     output: {
       dir: outputDirectory,
@@ -95,7 +104,12 @@ module.exports = async function () {
         },
       }),
       copy({
-        targets: [{ src: "favicons/*", dest: outputDirectory }],
+        targets: [
+          {
+            src: "favicons/*",
+            dest: outputDirectory,
+          },
+        ],
         flatten: true,
       }),
       reactClientManifest({
@@ -103,6 +117,7 @@ module.exports = async function () {
       }),
       isDevelopment && reactRefreshWrapModules(),
       isDevelopment && esmHmrPlugin(),
+      serverFunctionsPlugin(),
     ].filter(Boolean),
     watch: {
       exclude: ["public/**"],
@@ -111,6 +126,9 @@ module.exports = async function () {
       if (
         warning.message.includes(
           'Module level directives cause errors when bundled, "use client"'
+        ) ||
+        warning.message.includes(
+          'Module level directives cause errors when bundled, "use server"'
         )
       ) {
         return;
