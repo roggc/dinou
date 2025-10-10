@@ -133,13 +133,13 @@ function formatErrorHtmlProduction(error) {
   `;
 }
 
-async function renderToStream(reqPath, query) {
+async function renderToStream(reqPath, query, cookies = {}) {
   try {
     const jsx =
-      Object.keys(query).length || isDevelopment
-        ? renderJSXToClientJSX(await getJSX(reqPath, query))
+      Object.keys(query).length || isDevelopment || Object.keys(cookies).length
+        ? renderJSXToClientJSX(await getJSX(reqPath, query, cookies))
         : getSSGJSX(reqPath) ??
-          renderJSXToClientJSX(await getJSX(reqPath, query));
+          renderJSXToClientJSX(await getJSX(reqPath, query, cookies));
 
     const stream = renderToPipeableStream(jsx, {
       onError(error) {
@@ -174,7 +174,7 @@ async function renderToStream(reqPath, query) {
               );
               process.exit(1);
             },
-            bootstrapScripts: ["/error.js"],
+            bootstrapModules: ["/error.js"],
             bootstrapScriptContent: `window.__DINOU_ERROR_MESSAGE__=${JSON.stringify(
               error.message || "Unknown error"
             )};window.__DINOU_ERROR_STACK__=${JSON.stringify(
@@ -218,6 +218,7 @@ async function renderToStream(reqPath, query) {
 
 const reqPath = process.argv[2];
 const query = JSON.parse(process.argv[3]);
+const cookies = JSON.parse(process.argv[4] || "{}");
 
 process.on("uncaughtException", (error) => {
   process.stdout.write(formatErrorHtml(error));
@@ -242,4 +243,4 @@ process.on("unhandledRejection", (reason) => {
   process.exit(1);
 });
 
-renderToStream(reqPath, query);
+renderToStream(reqPath, query, cookies);

@@ -38,6 +38,7 @@
     "chokidar": "^4.0.3",
     "commander": "^14.0.0",
     "concurrently": "^9.2.0",
+    "cookie-parser": "^1.4.7",
     "cross-env": "^7.0.3",
     "css-modules-require-hook": "^4.2.3",
     "dotenv": "^16.5.0",

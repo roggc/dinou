@@ -58,13 +58,14 @@ function getFilePathAndDynamicParams(
             if (!accumulative) return [candidatePath, dParams];
             const slots = getSlots(currentPath, reqSegments, query);
             accumulate.push([candidatePath, dParams, slots]);
-            return accumulate;
-          }
-          if (accumulative) {
-            const slots = getSlots(currentPath, reqSegments, query);
-            accumulate.push([candidatePath, dParams, slots]);
+            if (finalDestination) return accumulate;
           } else {
-            foundInCurrentPath = candidatePath;
+            if (accumulative) {
+              const slots = getSlots(currentPath, reqSegments, query);
+              accumulate.push([candidatePath, dParams, slots]);
+            } else {
+              foundInCurrentPath = candidatePath;
+            }
           }
         }
       }
@@ -76,13 +77,14 @@ function getFilePathAndDynamicParams(
           if (!accumulative) return [candidatePath, dParams];
           const slots = getSlots(currentPath, reqSegments, query);
           accumulate.push([candidatePath, dParams, slots]);
-          return accumulate;
-        }
-        if (accumulative) {
-          const slots = getSlots(currentPath, reqSegments, query);
-          accumulate.push([candidatePath, dParams, slots]);
+          if (finalDestination) return accumulate;
         } else {
-          foundInCurrentPath = candidatePath;
+          if (accumulative) {
+            const slots = getSlots(currentPath, reqSegments, query);
+            accumulate.push([candidatePath, dParams, slots]);
+          } else {
+            foundInCurrentPath = candidatePath;
+          }
         }
       }
     }
