@@ -1,11 +1,16 @@
 const path = require("path");
 const { spawn } = require("child_process");
 
-function renderAppToHtml(reqPath, paramsString) {
+function renderAppToHtml(reqPath, paramsString, cookiesString = "{}") {
   return new Promise((resolve, reject) => {
     const child = spawn(
       "node",
-      [path.resolve(__dirname, "render-html.js"), reqPath, paramsString],
+      [
+        path.resolve(__dirname, "render-html.js"),
+        reqPath,
+        paramsString,
+        cookiesString,
+      ],
       {
         env: {
           ...process.env,

@@ -26,7 +26,7 @@ async function buildStaticPages() {
     mkdirSync(distFolder, { recursive: true });
   }
 
-  function collectPages(currentPath, segments = []) {
+  function collectPages(currentPath, segments = [], params = {}) {
     const entries = readdirSync(currentPath, { withFileTypes: true });
     const pages = [];
 
@@ -74,17 +74,18 @@ async function buildStaticPages() {
             console.log(
               `Found optional catch-all route: ${
                 segments.join("/") ?? ""
-              }/[${paramName}]`
+              }/[[...${paramName}]]`
             );
             try {
               if (getStaticPaths) {
                 const paths = getStaticPaths();
                 for (const path of paths) {
-                  pages.push({
-                    path: dynamicPath,
-                    segments: [...segments, ...path],
-                    params: { [paramName]: path },
-                  });
+                  pages.push(
+                    ...collectPages(dynamicPath, [...segments, ...path], {
+                      ...params,
+                      [paramName]: path,
+                    })
+                  );
                 }
               }
             } catch (err) {
@@ -125,17 +126,18 @@ async function buildStaticPages() {
             console.log(
               `Found catch-all route: ${
                 segments.join("/") ?? ""
-              }/[${paramName}]`
+              }/[...${paramName}]`
             );
             try {
               if (getStaticPaths) {
                 const paths = getStaticPaths();
                 for (const path of paths) {
-                  pages.push({
-                    path: dynamicPath,
-                    segments: [...segments, ...path],
-                    params: { [paramName]: path },
-                  });
+                  pages.push(
+                    ...collectPages(dynamicPath, [...segments, ...path], {
+                      ...params,
+                      [paramName]: path,
+                    })
+                  );
                 }
               }
             } catch (err) {
@@ -177,17 +179,18 @@ async function buildStaticPages() {
             console.log(
               `Found optional dynamic route: ${
                 segments.join("/") ?? ""
-              }/[${paramName}]`
+              }/[[${paramName}]]`
             );
             try {
               if (getStaticPaths) {
                 const paths = getStaticPaths();
                 for (const path of paths) {
-                  pages.push({
-                    path: dynamicPath,
-                    segments: [...segments, path],
-                    params: { [paramName]: path },
-                  });
+                  pages.push(
+                    ...collectPages(dynamicPath, [...segments, path], {
+                      ...params,
+                      [paramName]: path,
+                    })
+                  );
                 }
               }
             } catch (err) {
@@ -232,11 +235,12 @@ async function buildStaticPages() {
               if (getStaticPaths) {
                 const paths = getStaticPaths();
                 for (const path of paths) {
-                  pages.push({
-                    path: dynamicPath,
-                    segments: [...segments, path],
-                    params: { [paramName]: path },
-                  });
+                  pages.push(
+                    ...collectPages(dynamicPath, [...segments, path], {
+                      ...params,
+                      [paramName]: path,
+                    })
+                  );
                 }
               }
             } catch (err) {
@@ -245,10 +249,11 @@ async function buildStaticPages() {
           }
         } else if (!entry.name.startsWith("@")) {
           pages.push(
-            ...collectPages(path.join(currentPath, entry.name), [
-              ...segments,
-              entry.name,
-            ])
+            ...collectPages(
+              path.join(currentPath, entry.name),
+              [...segments, entry.name],
+              params
+            )
           );
         }
       }
@@ -262,7 +267,8 @@ async function buildStaticPages() {
       true,
       true,
       undefined,
-      segments.length
+      segments.length,
+      params
     );
     const [pageFunctionsPath] = getFilePathAndDynamicParams(
       segments,
@@ -326,7 +332,7 @@ async function buildStaticPages() {
         const pageFunctionsModule = require(pageFunctionsPath);
         const getProps = pageFunctionsModule.getProps;
         revalidate = pageFunctionsModule.revalidate;
-        pageFunctionsProps = await getProps?.(params);
+        pageFunctionsProps = await getProps?.(params, {}, {});
         props = { ...props, ...(pageFunctionsProps?.page ?? {}) };
       }
 
@@ -504,7 +510,7 @@ async function buildStaticPage(reqPath) {
       const pageFunctionsModule = require(pageFunctionsPath);
       const getProps = pageFunctionsModule.getProps;
       revalidate = pageFunctionsModule.revalidate;
-      pageFunctionsProps = await getProps?.(dParams);
+      pageFunctionsProps = await getProps?.(dParams, {}, {});
       props = { ...props, ...(pageFunctionsProps?.page ?? {}) };
     }
 

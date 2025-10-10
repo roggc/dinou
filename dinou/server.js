@@ -182,9 +182,10 @@ if (isDevelopment) {
     }
   });
 }
-
+const cookieParser = require("cookie-parser");
+const appUseCookieParser = cookieParser();
 const app = express();
-
+app.use(appUseCookieParser);
 app.use(express.json());
 
 app.use(express.static(path.resolve(process.cwd(), webpackFolder)));
@@ -217,9 +218,12 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
         return readStream.pipe(res);
       }
     }
-
-    const jsx = await getSSGJSXOrJSX(reqPath, { ...req.query }, isDevelopment);
-
+    const jsx = await getSSGJSXOrJSX(
+      reqPath,
+      { ...req.query },
+      { ...req.cookies },
+      isDevelopment
+    );
     const manifest = JSON.parse(
       readFileSync(
         path.resolve(`${webpackFolder}/react-client-manifest.json`),
@@ -273,7 +277,8 @@ app.get(/^\/.*\/?$/, async (req, res) => {
 
     const appHtmlStream = await renderAppToHtml(
       reqPath,
-      JSON.stringify({ ...req.query })
+      JSON.stringify({ ...req.query }),
+      JSON.stringify({ ...req.cookies })
     );
 
     res.setHeader("Content-Type", "text/html");
@@ -305,6 +310,10 @@ app.post("/____server_function____", async (req, res) => {
       return res.status(400).json({ error: "Export is not a function" });
     }
 
+    const context = { req, res };
+    if (fn.length === args.length + 1) {
+      args.push(context);
+    }
     const result = await fn(...args);
 
     if (

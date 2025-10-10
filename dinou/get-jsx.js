@@ -5,7 +5,7 @@ const {
   getFilePathAndDynamicParams,
 } = require("./get-file-path-and-dynamic-params");
 
-async function getJSX(reqPath, query) {
+async function getJSX(reqPath, query, cookies) {
   const srcFolder = path.resolve(process.cwd(), "src");
   const reqSegments = reqPath.split("/").filter(Boolean);
   const folderPath = path.join(srcFolder, ...reqSegments);
@@ -55,13 +55,13 @@ async function getJSX(reqPath, query) {
         params: dParams ?? {},
         query,
       });
-      
+
       const notFoundDir = path.dirname(notFoundPath);
       const noLayoutNotFoundPath = path.join(
         notFoundDir,
         `no_layout_not_found`
       );
-      if (existsSync(noLayoutNotFoundPath)) {  
+      if (existsSync(noLayoutNotFoundPath)) {
         return jsx;
       }
     }
@@ -73,7 +73,7 @@ async function getJSX(reqPath, query) {
       params: dynamicParams,
       query,
     };
-    
+
     const pageFolder = path.dirname(pagePath);
     const [pageFunctionsPath] = getFilePathAndDynamicParams(
       reqSegments,
@@ -85,11 +85,10 @@ async function getJSX(reqPath, query) {
       undefined,
       reqSegments.length
     );
-
     if (pageFunctionsPath) {
       const pageFunctionsModule = require(pageFunctionsPath);
       const getProps = pageFunctionsModule.getProps;
-      pageFunctionsProps = await getProps?.(dynamicParams);
+      pageFunctionsProps = await getProps?.(dynamicParams, query, cookies);
       props = { ...props, ...(pageFunctionsProps?.page ?? {}) };
     }
 
