@@ -21,10 +21,10 @@ program
   .description("Starts")
   .action(() => {
     console.log("Starting...");
-    const startExpress = `node --conditions react-server ${path.join(
+    const startExpress = `node --conditions react-server --import ${path.join(
       dinouPath,
-      "server.js"
-    )}`;
+      "register-loader.mjs"
+    )} ${path.join(dinouPath, "server.js")}`;
     const startDevServer = `cross-env NODE_ENV=development rollup -c ${path.join(
       __dirname,
       "rollup.config.js"
@@ -47,10 +47,10 @@ program
   .action(() => {
     console.log("Starting the app...");
     runCommand(
-      `cross-env NODE_ENV=production node --conditions react-server ${path.join(
+      `cross-env NODE_ENV=production node --conditions react-server --import ${path.join(
         dinouPath,
-        "server.js"
-      )}`
+        "register-loader.mjs"
+      )} ${path.join(dinouPath, "server.js")}`
     );
   });
 
