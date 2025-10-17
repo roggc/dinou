@@ -53,6 +53,7 @@ addHook({
   },
   publicPath: "/assets/",
 });
+const importModule = require("./import-module");
 const generateStatic = require("./generate-static.js");
 const renderAppToHtml = require("./render-app-to-html.js");
 const revalidating = require("./revalidating.js");
@@ -261,7 +262,7 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
   }
 });
 
-app.get(/^\/.*\/?$/, async (req, res) => {
+app.get(/^\/.*\/?$/, (req, res) => {
   try {
     const reqPath = req.path.endsWith("/") ? req.path : req.path + "/";
 
@@ -275,7 +276,7 @@ app.get(/^\/.*\/?$/, async (req, res) => {
       }
     }
 
-    const appHtmlStream = await renderAppToHtml(
+    const appHtmlStream = renderAppToHtml(
       reqPath,
       JSON.stringify({ ...req.query }),
       JSON.stringify({ ...req.cookies })
@@ -302,7 +303,7 @@ app.post("/____server_function____", async (req, res) => {
     let relativePath = fileUrl.replace(/^file:\/\/\/?/, "");
     const absolutePath = path.resolve(process.cwd(), relativePath);
 
-    const mod = require(absolutePath);
+    const mod = await importModule(absolutePath);
 
     const fn = exportName === "default" ? mod.default : mod[exportName];
 
@@ -311,9 +312,7 @@ app.post("/____server_function____", async (req, res) => {
     }
 
     const context = { req, res };
-    if (fn.length === args.length + 1) {
-      args.push(context);
-    }
+    args.push(context);
     const result = await fn(...args);
 
     if (
