@@ -11,7 +11,7 @@ const json = require("@rollup/plugin-json");
 const reactRefreshWrapModules = require("./react-refresh/react-refresh-wrap-modules.js");
 const { esmHmrPlugin } = require("./react-refresh/rollup-plugin-esm-hmr.js");
 const dinouAssetPlugin = require("./rollup-plugins/dinou-asset-plugin.js");
-const tsconfigPaths = require("./rollup-plugins/rollup-plugin-tsconfig-paths.js");
+const tsconfigPaths = require("rollup-plugin-tsconfig-paths");
 const serverFunctionsPlugin = require("./rollup-plugins/rollup-plugin-server-functions");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
@@ -67,7 +67,7 @@ module.exports = async function () {
       }),
       json(),
       resolve({
-        extensions: [".js", ".jsx", ".ts", ".tsx", ".mjs"],
+        extensions: [".js", ".jsx", ".ts", ".tsx"],
         browser: true,
         preferBuiltins: false,
       }),
