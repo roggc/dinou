@@ -104,6 +104,14 @@ exports.resolve = async function resolve(specifier, context, defaultResolve) {
     }
   }
 
+  if (specifier.startsWith("./") || specifier.startsWith("../")) {
+    const parentURL = context.parentURL || pathToFileURL(process.cwd()).href;
+    const parentDir = path.dirname(fileURLToPath(parentURL));
+    const absPath = path.resolve(parentDir, specifier);
+    const found = tryExtensions(absPath);
+    if (found) return { url: pathToFileURL(found).href, shortCircuit: true };
+  }
+
   // Fallback to default resolver
   return defaultResolve(specifier, context, defaultResolve);
 };
