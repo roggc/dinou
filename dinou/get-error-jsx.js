@@ -4,8 +4,9 @@ const React = require("react");
 const {
   getFilePathAndDynamicParams,
 } = require("./get-file-path-and-dynamic-params");
+const importModule = require("./import-module");
 
-function getErrorJSX(reqPath, query, error) {
+async function getErrorJSX(reqPath, query, error) {
   const srcFolder = path.resolve(process.cwd(), "src");
   const reqSegments = reqPath.split("/").filter(Boolean);
   const folderPath = path.join(srcFolder, ...reqSegments);
@@ -49,7 +50,7 @@ function getErrorJSX(reqPath, query, error) {
   }
 
   if (pagePath) {
-    const pageModule = require(pagePath);
+    const pageModule = await importModule(pagePath);
     const Page = pageModule.default ?? pageModule;
     jsx = React.createElement(Page, {
       params: dynamicParams ?? {},
@@ -93,7 +94,7 @@ function getErrorJSX(reqPath, query, error) {
     if (layouts && Array.isArray(layouts)) {
       let index = 0;
       for (const [layoutPath, dParams, slots] of layouts.reverse()) {
-        const layoutModule = require(layoutPath);
+        const layoutModule = await importModule(layoutPath);
         const Layout = layoutModule.default ?? layoutModule;
         let props = { params: dParams, query, ...slots };
         jsx = React.createElement(Layout, props, jsx);

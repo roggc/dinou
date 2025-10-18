@@ -133,6 +133,15 @@ function formatErrorHtmlProduction(error) {
   `;
 }
 
+function writeErrorOutput(error, isProd) {
+  process.stdout.write(
+    isProd ? formatErrorHtmlProduction(error) : formatErrorHtml(error)
+  );
+  process.stderr.write(
+    JSON.stringify({ error: error.message, stack: error.stack })
+  );
+}
+
 async function renderToStream(reqPath, query, cookies = {}) {
   try {
     const jsx =
@@ -143,54 +152,45 @@ async function renderToStream(reqPath, query, cookies = {}) {
 
     const stream = renderToPipeableStream(jsx, {
       onError(error) {
-        const isProd = process.env.NODE_ENV === "production";
+        process.nextTick(async () => {
+          if (stream && !stream.destroyed) {
+            try {
+              stream.unpipe(process.stdout);
+              stream.destroy();
+            } catch {}
+          }
+          const isProd = process.env.NODE_ENV === "production";
 
-        try {
-          const errorJSX = getErrorJSX(reqPath, query, error);
+          try {
+            const errorJSX = await getErrorJSX(reqPath, query, error);
 
-          if (errorJSX === undefined) {
-            process.stdout.write(
-              isProd ? formatErrorHtmlProduction(error) : formatErrorHtml(error)
-            );
-            process.stderr.write(
-              JSON.stringify({ error: error.message, stack: error.stack })
-            );
+            if (errorJSX === undefined) {
+              writeErrorOutput(error, isProd);
+              process.exit(1);
+            }
+
+            const errorStream = renderToPipeableStream(errorJSX, {
+              onShellReady() {
+                errorStream.pipe(process.stdout);
+              },
+              onError(err) {
+                console.error("Error rendering error JSX:", err);
+                writeErrorOutput(error, isProd);
+                process.exit(1);
+              },
+              bootstrapModules: ["/error.js"],
+              bootstrapScriptContent: `window.__DINOU_ERROR_MESSAGE__=${JSON.stringify(
+                error.message || "Unknown error"
+              )};window.__DINOU_ERROR_STACK__=${JSON.stringify(
+                error.stack || "No stack trace available"
+              )};`,
+            });
+          } catch (err) {
+            console.error("Render error (no error.tsx?):", err);
+            writeErrorOutput(error, isProd);
             process.exit(1);
           }
-
-          const errorStream = renderToPipeableStream(errorJSX, {
-            onShellReady() {
-              errorStream.pipe(process.stdout);
-            },
-            onError(err) {
-              console.error("Error rendering error JSX:", err);
-              process.stdout.write(
-                isProd
-                  ? formatErrorHtmlProduction(error)
-                  : formatErrorHtml(error)
-              );
-              process.stderr.write(
-                JSON.stringify({ error: error.message, stack: error.stack })
-              );
-              process.exit(1);
-            },
-            bootstrapModules: ["/error.js"],
-            bootstrapScriptContent: `window.__DINOU_ERROR_MESSAGE__=${JSON.stringify(
-              error.message || "Unknown error"
-            )};window.__DINOU_ERROR_STACK__=${JSON.stringify(
-              error.stack || "No stack trace available"
-            )};`,
-          });
-        } catch (err) {
-          console.error("Render error (no error.tsx?):", err);
-          process.stdout.write(
-            isProd ? formatErrorHtmlProduction(error) : formatErrorHtml(error)
-          );
-          process.stderr.write(
-            JSON.stringify({ error: error.message, stack: error.stack })
-          );
-          process.exit(1);
-        }
+        });
       },
       onShellReady() {
         stream.pipe(process.stdout);
