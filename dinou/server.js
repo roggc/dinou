@@ -118,18 +118,6 @@ if (isDevelopment) {
     }
   }
 
-  // function clearAllUserCache() {
-  //   const srcDir = path.resolve(process.cwd(), "src");
-  //   Object.keys(require.cache).forEach((file) => {
-  //     if (file.startsWith(srcDir)) {
-  //       delete require.cache[file];
-  //     }
-  //   });
-  //   console.log(
-  //     "[Server HMR] Cleared all src/ require caches due to directive change."
-  //   );
-  // }
-
   watcher.on("change", () => {
     try {
       const newManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -151,12 +139,7 @@ if (isDevelopment) {
           // console.log(`Cleared cache for ${absPath} (server -> client)`);
         }
       }
-      // if (
-      //   Object.keys(currentManifest).length !== Object.keys(newManifest).length
-      // ) {
-      //   // Only clear if there was a change (add/remove)
-      //   clearAllUserCache();
-      // }
+
       currentManifest = newManifest;
     } catch (err) {
       console.error("Error handling manifest change:", err);
