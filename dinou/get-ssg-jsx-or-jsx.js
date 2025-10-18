@@ -10,7 +10,7 @@ async function getSSGJSXOrJSX(
   const result =
     Object.keys(query).length || isDevelopment || Object.keys(cookies).length
       ? await getJSX(reqPath, query, cookies)
-      : getSSGJSX(reqPath) ?? (await getJSX(reqPath, query, cookies));
+      : (await getSSGJSX(reqPath)) ?? (await getJSX(reqPath, query, cookies));
   return result;
 }
 

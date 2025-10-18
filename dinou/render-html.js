@@ -126,7 +126,7 @@ async function renderToStream(reqPath, query, cookies = {}) {
     const jsx =
       Object.keys(query).length || isDevelopment || Object.keys(cookies).length
         ? renderJSXToClientJSX(await getJSX(reqPath, query, cookies))
-        : getSSGJSX(reqPath) ??
+        : (await getSSGJSX(reqPath)) ??
           renderJSXToClientJSX(await getJSX(reqPath, query, cookies));
 
     const stream = renderToPipeableStream(jsx, {

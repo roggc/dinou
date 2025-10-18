@@ -1,8 +1,9 @@
 const path = require("path");
 const { existsSync, readFileSync } = require("fs");
 const React = require("react");
+const importModule = require("./import-module");
 
-function deserializeReactElement(
+async function deserializeReactElement(
   serialized,
   returnUndefined = { value: false }
 ) {
@@ -17,7 +18,9 @@ function deserializeReactElement(
     let Component;
     if (modulePath) {
       try {
-        const module = require(path.resolve(process.cwd(), modulePath));
+        const module = await importModule(
+          path.resolve(process.cwd(), modulePath)
+        );
         Component = module.default ?? module;
       } catch (err) {
         console.error(`Error loading module ${modulePath}:`, err);
@@ -67,12 +70,12 @@ function deserializeReactElement(
   return returnUndefined.value ? undefined : serialized;
 }
 
-function getSSGJSX(reqPath) {
+async function getSSGJSX(reqPath) {
   const distFolder = path.resolve(process.cwd(), "dist");
   const jsonPath = path.join(distFolder, reqPath, "index.json");
   if (existsSync(jsonPath)) {
     const { jsx } = JSON.parse(readFileSync(jsonPath, "utf8"));
-    const deserializedJSX = deserializeReactElement(jsx);
+    const deserializedJSX = await deserializeReactElement(jsx);
     return deserializedJSX;
   }
 }
