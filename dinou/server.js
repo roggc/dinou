@@ -8,6 +8,7 @@ const express = require("express");
 const getSSGJSXOrJSX = require("./get-ssg-jsx-or-jsx.js");
 const { getErrorJSX } = require("./get-error-jsx.js");
 const addHook = require("./asset-require-hook.js");
+const { extensions } = require("./asset-extensions.js");
 webpackRegister();
 const babelRegister = require("@babel/register");
 babelRegister({
@@ -24,29 +25,7 @@ require("css-modules-require-hook")({
   generateScopedName: createScopedName,
 });
 addHook({
-  extensions: [
-    "png",
-    "jpg",
-    "jpeg",
-    "gif",
-    "svg",
-    "webp",
-    "avif",
-    "ico",
-    "mp4",
-    "webm",
-    "ogg",
-    "mov",
-    "avi",
-    "mkv",
-    "mp3",
-    "wav",
-    "flac",
-    "m4a",
-    "aac",
-    "mjpeg",
-    "mjpg",
-  ],
+  extensions,
   name: function (localName, filepath) {
     const result = createScopedName(localName, filepath);
     return result + ".[ext]";

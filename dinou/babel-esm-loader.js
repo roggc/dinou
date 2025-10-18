@@ -3,6 +3,7 @@ const path = require("path");
 const { transformAsync } = require("@babel/core");
 const { fileURLToPath, pathToFileURL } = require("url");
 const createScopedName = require("./createScopedName");
+const { extensionsWithDot } = require("./asset-extensions.js");
 
 require("css-modules-require-hook")({
   generateScopedName: createScopedName,
@@ -118,29 +119,7 @@ exports.resolve = async function resolve(specifier, context, defaultResolve) {
 
 exports.load = async function load(url, context, defaultLoad) {
   // --- 🟢 Handle non-JS assets (png, jpg, etc.)
-  const assetExts = [
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".svg",
-    ".webp",
-    ".avif",
-    ".ico",
-    ".mp4",
-    ".webm",
-    ".ogg",
-    ".mov",
-    ".avi",
-    ".mkv",
-    ".mp3",
-    ".wav",
-    ".flac",
-    ".m4a",
-    ".aac",
-    ".mjpeg",
-    ".mjpg",
-  ];
+  const assetExts = extensionsWithDot;
   const ext = path.extname(url.split("?")[0]); // remove query params if any
 
   if (assetExts.includes(ext)) {
