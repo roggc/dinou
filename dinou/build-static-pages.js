@@ -12,6 +12,7 @@ const { asyncRenderJSXToClientJSX } = require("./render-jsx-to-client-jsx");
 const {
   getFilePathAndDynamicParams,
 } = require("./get-file-path-and-dynamic-params");
+const importModule = require("./import-module");
 
 async function buildStaticPages() {
   const srcFolder = path.resolve(process.cwd(), "src");
@@ -26,7 +27,7 @@ async function buildStaticPages() {
     mkdirSync(distFolder, { recursive: true });
   }
 
-  function collectPages(currentPath, segments = [], params = {}) {
+  async function collectPages(currentPath, segments = [], params = {}) {
     const entries = readdirSync(currentPath, { withFileTypes: true });
     const pages = [];
 
@@ -34,7 +35,10 @@ async function buildStaticPages() {
       if (entry.isDirectory()) {
         if (entry.name.startsWith("(") && entry.name.endsWith(")")) {
           pages.push(
-            ...collectPages(path.join(currentPath, entry.name), segments)
+            ...(await collectPages(
+              path.join(currentPath, entry.name),
+              segments
+            ))
           );
         } else if (
           entry.name.startsWith("[[...") &&
@@ -66,7 +70,7 @@ async function buildStaticPages() {
           let dynamic;
           let getStaticPaths;
           if (pageFunctionsPath) {
-            const module = require(pageFunctionsPath);
+            const module = await importModule(pageFunctionsPath);
             getStaticPaths = module.getStaticPaths;
             dynamic = module.dynamic;
           }
@@ -81,10 +85,14 @@ async function buildStaticPages() {
                 const paths = getStaticPaths();
                 for (const path of paths) {
                   pages.push(
-                    ...collectPages(dynamicPath, [...segments, ...path], {
-                      ...params,
-                      [paramName]: path,
-                    })
+                    ...(await collectPages(
+                      dynamicPath,
+                      [...segments, ...path],
+                      {
+                        ...params,
+                        [paramName]: path,
+                      }
+                    ))
                   );
                 }
               }
@@ -118,7 +126,7 @@ async function buildStaticPages() {
           let dynamic;
           let getStaticPaths;
           if (pageFunctionsPath) {
-            const module = require(pageFunctionsPath);
+            const module = await importModule(pageFunctionsPath);
             getStaticPaths = module.getStaticPaths;
             dynamic = module.dynamic;
           }
@@ -133,10 +141,14 @@ async function buildStaticPages() {
                 const paths = getStaticPaths();
                 for (const path of paths) {
                   pages.push(
-                    ...collectPages(dynamicPath, [...segments, ...path], {
-                      ...params,
-                      [paramName]: path,
-                    })
+                    ...(await collectPages(
+                      dynamicPath,
+                      [...segments, ...path],
+                      {
+                        ...params,
+                        [paramName]: path,
+                      }
+                    ))
                   );
                 }
               }
@@ -171,7 +183,7 @@ async function buildStaticPages() {
           let dynamic;
           let getStaticPaths;
           if (pageFunctionsPath) {
-            const module = require(pageFunctionsPath);
+            const module = await importModule(pageFunctionsPath);
             getStaticPaths = module.getStaticPaths;
             dynamic = module.dynamic;
           }
@@ -186,10 +198,10 @@ async function buildStaticPages() {
                 const paths = getStaticPaths();
                 for (const path of paths) {
                   pages.push(
-                    ...collectPages(dynamicPath, [...segments, path], {
+                    ...(await collectPages(dynamicPath, [...segments, path], {
                       ...params,
                       [paramName]: path,
-                    })
+                    }))
                   );
                 }
               }
@@ -223,7 +235,7 @@ async function buildStaticPages() {
           let dynamic;
           let getStaticPaths;
           if (pageFunctionsPath) {
-            const module = require(pageFunctionsPath);
+            const module = await importModule(pageFunctionsPath);
             getStaticPaths = module.getStaticPaths;
             dynamic = module.dynamic;
           }
@@ -236,10 +248,10 @@ async function buildStaticPages() {
                 const paths = getStaticPaths();
                 for (const path of paths) {
                   pages.push(
-                    ...collectPages(dynamicPath, [...segments, path], {
+                    ...(await collectPages(dynamicPath, [...segments, path], {
                       ...params,
                       [paramName]: path,
-                    })
+                    }))
                   );
                 }
               }
@@ -249,11 +261,11 @@ async function buildStaticPages() {
           }
         } else if (!entry.name.startsWith("@")) {
           pages.push(
-            ...collectPages(
+            ...(await collectPages(
               path.join(currentPath, entry.name),
               [...segments, entry.name],
               params
-            )
+            ))
           );
         }
       }
@@ -282,7 +294,7 @@ async function buildStaticPages() {
     );
     let dynamic;
     if (pageFunctionsPath) {
-      const module = require(pageFunctionsPath);
+      const module = await importModule(pageFunctionsPath);
       dynamic = module.dynamic;
     }
     if (pagePath && !dynamic?.()) {
@@ -293,9 +305,9 @@ async function buildStaticPages() {
     return pages;
   }
 
-  const pages = collectPages(srcFolder);
+  const pages = await collectPages(srcFolder);
 
-  for await (const { path: folderPath, segments, params } of pages) {
+  for (const { path: folderPath, segments, params } of pages) {
     try {
       const [pagePath] = getFilePathAndDynamicParams(
         segments,
@@ -307,7 +319,7 @@ async function buildStaticPages() {
         undefined,
         segments.length
       );
-      const pageModule = require(pagePath);
+      const pageModule = await importModule(pagePath);
       const Page = pageModule.default ?? pageModule;
       // Set displayName for better serialization
       // if (!Page.displayName) Page.displayName = "Page";
@@ -329,7 +341,7 @@ async function buildStaticPages() {
       let revalidate;
 
       if (pageFunctionsPath) {
-        const pageFunctionsModule = require(pageFunctionsPath);
+        const pageFunctionsModule = await importModule(pageFunctionsPath);
         const getProps = pageFunctionsModule.getProps;
         revalidate = pageFunctionsModule.revalidate;
         pageFunctionsProps = await getProps?.(params, {}, {});
@@ -357,7 +369,7 @@ async function buildStaticPages() {
         if (layouts && Array.isArray(layouts)) {
           let index = 0;
           for (const [layoutPath, dParams, slots] of layouts.reverse()) {
-            const layoutModule = require(layoutPath);
+            const layoutModule = await importModule(layoutPath);
             const Layout = layoutModule.default ?? layoutModule;
             // if (!Layout.displayName) Layout.displayName = "Layout";
             const updatedSlots = {};
@@ -489,7 +501,7 @@ async function buildStaticPage(reqPath) {
     );
     if (!pagePath) throw new Error(`No page found for ${reqPath}`);
 
-    const pageModule = require(pagePath);
+    const pageModule = await importModule(pagePath);
     const Page = pageModule.default ?? pageModule;
 
     let props = { params: dParams, query: {} };
@@ -507,7 +519,7 @@ async function buildStaticPage(reqPath) {
     let pageFunctionsProps;
     let revalidate;
     if (pageFunctionsPath) {
-      const pageFunctionsModule = require(pageFunctionsPath);
+      const pageFunctionsModule = await importModule(pageFunctionsPath);
       const getProps = pageFunctionsModule.getProps;
       revalidate = pageFunctionsModule.revalidate;
       pageFunctionsProps = await getProps?.(dParams, {}, {});
@@ -534,7 +546,7 @@ async function buildStaticPage(reqPath) {
       if (layouts && Array.isArray(layouts)) {
         let index = 0;
         for (const [layoutPath, dParams, slots] of layouts.reverse()) {
-          const layoutModule = require(layoutPath);
+          const layoutModule = await importModule(layoutPath);
           const Layout = layoutModule.default ?? layoutModule;
           const updatedSlots = {};
           for (const [slotName, slotElement] of Object.entries(slots)) {
