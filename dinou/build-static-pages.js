@@ -31,7 +31,7 @@ async function buildStaticPages() {
     const entries = readdirSync(currentPath, { withFileTypes: true });
     const pages = [];
 
-    for await (const entry of entries) {
+    for (const entry of entries) {
       if (entry.isDirectory()) {
         if (entry.name.startsWith("(") && entry.name.endsWith(")")) {
           pages.push(
@@ -307,7 +307,7 @@ async function buildStaticPages() {
 
   const pages = await collectPages(srcFolder);
 
-  for await (const { path: folderPath, segments, params } of pages) {
+  for (const { path: folderPath, segments, params } of pages) {
     try {
       const [pagePath] = getFilePathAndDynamicParams(
         segments,
@@ -545,7 +545,7 @@ async function buildStaticPage(reqPath) {
       );
       if (layouts && Array.isArray(layouts)) {
         let index = 0;
-        for await (const [layoutPath, dParams, slots] of layouts.reverse()) {
+        for (const [layoutPath, dParams, slots] of layouts.reverse()) {
           const layoutModule = await importModule(layoutPath);
           const Layout = layoutModule.default ?? layoutModule;
           const updatedSlots = {};
