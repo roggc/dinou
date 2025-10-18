@@ -13,6 +13,7 @@ const { esmHmrPlugin } = require("./react-refresh/rollup-plugin-esm-hmr.js");
 const dinouAssetPlugin = require("./rollup-plugins/dinou-asset-plugin.js");
 const tsconfigPaths = require("rollup-plugin-tsconfig-paths");
 const serverFunctionsPlugin = require("./rollup-plugins/rollup-plugin-server-functions");
+const { regex } = require("./dinou/asset-extensions.js");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 const outputDirectory = isDevelopment ? "public" : "dist3";
@@ -76,8 +77,7 @@ module.exports = async function () {
         transformMixedEsModules: true,
       }),
       dinouAssetPlugin({
-        include:
-          /\.(png|jpe?g|gif|svg|webp|avif|ico|mp4|webm|ogg|mov|avi|mkv|mp3|wav|flac|m4a|aac|mjpeg|mjpg)$/i,
+        include: regex,
       }),
       babel({
         babelHelpers: "bundled",

@@ -4,6 +4,7 @@ const React = require("react");
 const {
   getFilePathAndDynamicParams,
 } = require("./get-file-path-and-dynamic-params");
+const importModule = require("./import-module");
 
 async function getJSX(reqPath, query, cookies) {
   const srcFolder = path.resolve(process.cwd(), "src");
@@ -49,7 +50,7 @@ async function getJSX(reqPath, query, cookies) {
         `Page not found: no "page" file found for "${reqPath}"`
       );
     } else {
-      const pageModule = require(notFoundPath);
+      const pageModule = await importModule(notFoundPath);
       const Page = pageModule.default ?? pageModule;
       jsx = React.createElement(Page, {
         params: dParams ?? {},
@@ -66,7 +67,7 @@ async function getJSX(reqPath, query, cookies) {
       }
     }
   } else {
-    const pageModule = require(pagePath);
+    const pageModule = await importModule(pagePath);
     const Page = pageModule.default ?? pageModule;
 
     let props = {
@@ -86,7 +87,7 @@ async function getJSX(reqPath, query, cookies) {
       reqSegments.length
     );
     if (pageFunctionsPath) {
-      const pageFunctionsModule = require(pageFunctionsPath);
+      const pageFunctionsModule = await importModule(pageFunctionsPath);
       const getProps = pageFunctionsModule.getProps;
       pageFunctionsProps = await getProps?.(dynamicParams, query, cookies);
       props = { ...props, ...(pageFunctionsProps?.page ?? {}) };
@@ -123,7 +124,7 @@ async function getJSX(reqPath, query, cookies) {
   if (layouts && Array.isArray(layouts)) {
     let index = 0;
     for (const [layoutPath, dParams, slots] of layouts.reverse()) {
-      const layoutModule = require(layoutPath);
+      const layoutModule = await importModule(layoutPath);
       const layoutFolderPath = path.dirname(layoutPath);
       const resetLayoutPath = getFilePathAndDynamicParams(
         [],

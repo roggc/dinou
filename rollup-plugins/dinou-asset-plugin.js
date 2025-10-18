@@ -1,10 +1,9 @@
 const fs = require("fs");
 const path = require("path");
 const createScopedName = require("../dinou/createScopedName.js");
+const { regex } = require("../dinou/asset-extensions.js");
 
-function dinouAssetPlugin({
-  include = /\.(png|jpe?g|gif|svg|webp|avif|ico|mp4|webm|ogg|mov|avi|mkv|mp3|wav|flac|m4a|aac|mjpeg|mjpg)$/i,
-} = {}) {
+function dinouAssetPlugin({ include = regex } = {}) {
   return {
     name: "dinou-asset-plugin",
     async load(id) {

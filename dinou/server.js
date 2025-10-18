@@ -8,6 +8,7 @@ const express = require("express");
 const getSSGJSXOrJSX = require("./get-ssg-jsx-or-jsx.js");
 const { getErrorJSX } = require("./get-error-jsx.js");
 const addHook = require("./asset-require-hook.js");
+const { extensions } = require("./asset-extensions.js");
 webpackRegister();
 const babelRegister = require("@babel/register");
 babelRegister({
@@ -24,35 +25,14 @@ require("css-modules-require-hook")({
   generateScopedName: createScopedName,
 });
 addHook({
-  extensions: [
-    "png",
-    "jpg",
-    "jpeg",
-    "gif",
-    "svg",
-    "webp",
-    "avif",
-    "ico",
-    "mp4",
-    "webm",
-    "ogg",
-    "mov",
-    "avi",
-    "mkv",
-    "mp3",
-    "wav",
-    "flac",
-    "m4a",
-    "aac",
-    "mjpeg",
-    "mjpg",
-  ],
+  extensions,
   name: function (localName, filepath) {
     const result = createScopedName(localName, filepath);
     return result + ".[ext]";
   },
   publicPath: "/assets/",
 });
+const importModule = require("./import-module");
 const generateStatic = require("./generate-static.js");
 const renderAppToHtml = require("./render-app-to-html.js");
 const revalidating = require("./revalidating.js");
@@ -117,18 +97,6 @@ if (isDevelopment) {
     }
   }
 
-  // function clearAllUserCache() {
-  //   const srcDir = path.resolve(process.cwd(), "src");
-  //   Object.keys(require.cache).forEach((file) => {
-  //     if (file.startsWith(srcDir)) {
-  //       delete require.cache[file];
-  //     }
-  //   });
-  //   console.log(
-  //     "[Server HMR] Cleared all src/ require caches due to directive change."
-  //   );
-  // }
-
   watcher.on("change", () => {
     try {
       const newManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -150,12 +118,7 @@ if (isDevelopment) {
           // console.log(`Cleared cache for ${absPath} (server -> client)`);
         }
       }
-      // if (
-      //   Object.keys(currentManifest).length !== Object.keys(newManifest).length
-      // ) {
-      //   // Only clear if there was a change (add/remove)
-      //   clearAllUserCache();
-      // }
+
       currentManifest = newManifest;
     } catch (err) {
       console.error("Error handling manifest change:", err);
@@ -261,7 +224,7 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
   }
 });
 
-app.get(/^\/.*\/?$/, async (req, res) => {
+app.get(/^\/.*\/?$/, (req, res) => {
   try {
     const reqPath = req.path.endsWith("/") ? req.path : req.path + "/";
 
@@ -275,7 +238,7 @@ app.get(/^\/.*\/?$/, async (req, res) => {
       }
     }
 
-    const appHtmlStream = await renderAppToHtml(
+    const appHtmlStream = renderAppToHtml(
       reqPath,
       JSON.stringify({ ...req.query }),
       JSON.stringify({ ...req.cookies })
@@ -302,7 +265,7 @@ app.post("/____server_function____", async (req, res) => {
     let relativePath = fileUrl.replace(/^file:\/\/\/?/, "");
     const absolutePath = path.resolve(process.cwd(), relativePath);
 
-    const mod = require(absolutePath);
+    const mod = await importModule(absolutePath);
 
     const fn = exportName === "default" ? mod.default : mod[exportName];
 
@@ -311,9 +274,7 @@ app.post("/____server_function____", async (req, res) => {
     }
 
     const context = { req, res };
-    if (fn.length === args.length + 1) {
-      args.push(context);
-    }
+    args.push(context);
     const result = await fn(...args);
 
     if (

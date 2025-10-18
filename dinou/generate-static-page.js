@@ -12,7 +12,7 @@ async function generateStaticPage(reqPath) {
 
   try {
     // console.log("🔄 Rendering HTML for:", finalReqPath);
-    const htmlStream = await renderAppToHtml(finalReqPath, paramsString);
+    const htmlStream = renderAppToHtml(finalReqPath, paramsString);
 
     mkdirSync(path.dirname(htmlPath), { recursive: true });
     const fileStream = createWriteStream(htmlPath);
