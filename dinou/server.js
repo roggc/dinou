@@ -296,7 +296,7 @@ app.post("/____server_function____", async (req, res) => {
       res.json(result);
     }
   } catch (err) {
-    console.error("Server function error:", err);
+    console.error(`Server function error [${req.body.id}]:`, err);
     res.status(500).json({ error: err.message });
   }
 });
