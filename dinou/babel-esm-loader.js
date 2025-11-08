@@ -68,17 +68,18 @@ const aliasMap = loadTsconfigAliases();
 
 // Añadir extensiones si no existen
 function tryExtensions(filePath) {
-  if (fs.existsSync(filePath)) return filePath;
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile())
+    return filePath;
   const exts = [".js", ".ts", ".jsx", ".tsx"];
   for (const ext of exts) {
     const f = filePath + ext;
-    if (fs.existsSync(f)) return f;
+    if (fs.existsSync(f) && fs.statSync(f).isFile()) return f;
   }
   // Si es carpeta, probar index.*
   if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
     for (const ext of exts) {
       const f = path.join(filePath, "index" + ext);
-      if (fs.existsSync(f)) return f;
+      if (fs.existsSync(f) && fs.statSync(f).isFile()) return f;
     }
   }
   return null;
@@ -142,6 +143,7 @@ exports.load = async function load(url, context, defaultLoad) {
     const source = `export default ${JSON.stringify(mod)};`;
     return { format: "module", source, shortCircuit: true, url };
   }
+
   if (/\.(jsx|tsx|ts|js)$/.test(url)) {
     let filename;
     try {
