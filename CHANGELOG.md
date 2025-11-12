@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Now all folders and files ejected are grouped in dinou folder. What was before dinou folder now is dinou/core folder.
+- README.md, updated.
 
 ## [2.3.3]
 
