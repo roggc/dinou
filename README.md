@@ -1,6 +1,6 @@
-# **dinou**: **A Minimal React 19 Framework**
+# **Dinou**: **A React 19 Framework**
 
-[**dinou**](https://dinou.dev) is a **minimal React 19 framework**. dinou means 19 in Catalan. You can create a dinou [app](https://github.com/roggc/dinou-app) by running the command **`npx create-dinou@latest my-app`**.
+[**Dinou**](https://dinou.dev) is a **React 19 framework**. "dinou" means 19 in Catalan. You can create a Dinou [app](https://github.com/roggc/dinou-app) by running the command **`npx create-dinou@latest my-app`**.
 
 Or you can create one by yourself with the following steps:
 
@@ -30,9 +30,9 @@ Or you can create one by yourself with the following steps:
 
 - Run `npm run dev` (or `npx dinou dev`) to see the page in action in your browser.
 
-- If you run `npm run eject` (or `npx dinou eject`), dinou will be ejected and copied to your root project folder, so you can customize it.
+- If you run `npm run eject` (or `npx dinou eject`), Dinou will be ejected and copied to your root project folder, so you can customize it.
 
-dinou main features are:
+Dinou main features are:
 
 - File-based routing system.
 
@@ -54,7 +54,7 @@ dinou main features are:
 
 - Support for the use of an import alias in `tsconfig.json` or `jsconfig.json` file.
 
-- Error handling with `error.tsx` pages, differentiationg behaviour in production and in development.
+- Error handling with `error.tsx` pages, differentiating behaviour in production and in development.
 
 ## Table of contents
 
@@ -71,6 +71,8 @@ dinou main features are:
 - [Server Components](#server-components)
 
 - [Client Components](#client-components)
+
+- [Server Functions](#server-functions)
 
 - [Dynamic Parameters (`params` prop)](#dynamic-parameters-params-prop)
 
@@ -114,9 +116,9 @@ dinou main features are:
 
 - [Import alias (e.g. `"@/..."`)](#import-alias-eg-)
 
-- [How to run a dinou app](#how-to-run-a-dinou-app)
+- [How to run a Dinou app](#how-to-run-a-dinou-app)
 
-- [Eject dinou](#eject-dinou)
+- [Eject Dinou](#eject-dinou)
 
 - [🚀 Deployment](#-deployment)
 
@@ -148,8 +150,11 @@ dinou main features are:
 
   ```typescript
   // src/dynamic/[name]/page_functions.ts
-
-  export async function getProps(params: { name: string }) {
+  export async function getProps(
+    params: { name: string },
+    query: Record<string, string>,
+    cookies: Record<string, string>
+  ) {
     const data = await new Promise<string>((r) =>
       setTimeout(() => r(`Hello ${params.name}`), 2000)
     );
@@ -162,8 +167,11 @@ dinou main features are:
 
   ```typescript
   // src/dynamic/[name]/page_functions.ts
-
-  export async function getProps(params: { name: string }) {
+  export async function getProps(
+    params: { name: string },
+    query: Record<string, string>,
+    cookies: Record<string, string>
+  ) {
     const data = await new Promise<string>((r) =>
       setTimeout(() => r(`Hello ${params.name}`), 2000)
     );
@@ -196,11 +204,10 @@ dinou main features are:
 
 - We have already seen that data can be fetched on the server with the `getProps` function or within the body of a Server Component, but this needs to be accompanied of a mechanism of SSG of the page/s to not increase the FCP.
 
-- There is an alternative that do not increase FCP even when rendering dynamically and that is to use `Suspense` for data fetching, either in the server and in the client.
+- There is an alternative that do not increase FCP even when rendering dynamically and that is to use `Suspense` for data fetching, either in the server (in a Server Component) and in the client (in a Client Component).
 
   ```typescript
   // src/posts/post.tsx
-
   "use client";
 
   export type PostType = {
@@ -220,7 +227,6 @@ dinou main features are:
 
   ```typescript
   // src/posts/get-post.tsx
-
   "use server";
 
   import Post from "./post";
@@ -240,36 +246,41 @@ dinou main features are:
 
   ```typescript
   // src/posts/page.tsx
-
   "use client";
 
-  import { Suspense } from "react";
+  import Suspense from "react-enhanced-suspense";
   import { getPost } from "./get-post";
-  import Post from "./post";
-  import type { PostType } from "./post";
 
-  export default function Page({ data }: { data: string }) {
-    const getPost2 = async () => {
-      const post = await new Promise<PostType>((r) =>
-        setTimeout(
-          () => r({ title: "Post Title2", content: "Post content2" }),
-          1000
-        )
-      );
-
-      return <Post post={post} />;
-    };
-
+  export default function Page() {
     return (
       <>
-        <Suspense fallback={<div>Loading...</div>}>{getPost()}</Suspense>
-        <Suspense fallback={<div>Loading2...</div>}>{getPost2()}</Suspense>
+        <Suspense fallback={<div>Loading...</div>} resourceId="get-post">
+          {() => getPost()}
+        </Suspense>
       </>
     );
   }
   ```
 
-- The same can be done with `page.tsx` being a Server Component.
+- In Client Components, the `resourceId` prop together with passing a function to the `children` prop of `Suspense` from `react-enhanced-suspense` makes the promise returned by the Server Function stable between re-renders, and it is only reinvoked the Server Function whenever the `resourceId` changes.
+
+- The same can be done with `page.tsx` being a Server Component. In that case we would not use the `resourceId` prop and we will call directly the Server Function:
+
+  ```typescript
+  // src/posts/page.tsx
+  import Suspense from "react-enhanced-suspense";
+  import { getPost } from "./get-post";
+
+  export default async function Page({ data }: { data: string }) {
+    return (
+      <>
+        <Suspense fallback={<div>Loading...</div>}>{getPost()}</Suspense>
+      </>
+    );
+  }
+  ```
+
+- `Suspense` from [react-enhanced-suspense](https://www.npmjs.com/package/react-enhanced-suspense) is React's `Suspense` when no extra prop is used.
 
 ## Fetching data in the server without `Suspense` (revisited)
 
@@ -285,7 +296,6 @@ Pages in **dynamic routes** (e.g. `/[id]`, or `/[[id]]`, `[...id]`, `[[...id]]`)
 
   ```typescript
   // src/catch-all-optional/[[..names]]/page.tsx
-
   "use client";
 
   export default function Page({
@@ -306,8 +316,11 @@ Pages in **dynamic routes** (e.g. `/[id]`, or `/[[id]]`, `[...id]`, `[[...id]]`)
 
   ```typescript
   // src/catch-all-optional/[[..names]]/page_functions.ts
-
-  export async function getProps(params: { names: string[] }) {
+  export async function getProps(
+    params: { names: string[] },
+    query: Record<string, string>,
+    cookies: Record<string, string>
+  ) {
     const data = await new Promise<string>((r) =>
       setTimeout(() => r(`Hello ${params.names.join(",")}`), 2000)
     );
@@ -328,7 +341,6 @@ Pages in **dynamic routes** (e.g. `/[id]`, or `/[[id]]`, `[...id]`, `[[...id]]`)
 
   ```typescript
   // src/catch-all/[...names]/page.tsx
-
   "use client";
 
   export default function Page({
@@ -349,8 +361,11 @@ Pages in **dynamic routes** (e.g. `/[id]`, or `/[[id]]`, `[...id]`, `[[...id]]`)
 
   ```typescript
   // src/catch-all/[...names]/page_functions.ts
-
-  export async function getProps(params: { names: string[] }) {
+  export async function getProps(
+    params: { names: string[] },
+    query: Record<string, string>,
+    cookies: Record<string, string>
+  ) {
     const data = await new Promise<string>((r) =>
       setTimeout(() => r(`Hello ${params.names.join(",")}`), 2000)
     );
@@ -371,7 +386,6 @@ Pages in **dynamic routes** (e.g. `/[id]`, or `/[[id]]`, `[...id]`, `[[...id]]`)
 
   ```typescript
   // src/optional/[[name]]/page.tsx
-
   "use client";
 
   export default function Page({
@@ -392,8 +406,11 @@ Pages in **dynamic routes** (e.g. `/[id]`, or `/[[id]]`, `[...id]`, `[[...id]]`)
 
   ```typescript
   // src/optional/[[name]]/page_functions.ts
-
-  export async function getProps(params: { name: string }) {
+  export async function getProps(
+    params: { name: string },
+    query: Record<string, string>,
+    cookies: Record<string, string>
+  ) {
     const data = await new Promise<string>((r) =>
       setTimeout(() => r(`Hello ${params.name ?? ""}`), 2000)
     );
@@ -414,7 +431,6 @@ Pages in **dynamic routes** (e.g. `/[id]`, or `/[[id]]`, `[...id]`, `[[...id]]`)
 
   ```typescript
   // src/dynamic/[name]/page.tsx
-
   "use client";
 
   export default function Page({
@@ -435,8 +451,11 @@ Pages in **dynamic routes** (e.g. `/[id]`, or `/[[id]]`, `[...id]`, `[[...id]]`)
 
   ```typescript
   // src/dynamic/[name]/page_functions.ts
-
-  export async function getProps(params: { name: string }) {
+  export async function getProps(
+    params: { name: string },
+    query: Record<string, string>,
+    cookies: Record<string, string>
+  ) {
     const data = await new Promise<string>((r) =>
       setTimeout(() => r(`Hello ${params.name}`), 2000)
     );
@@ -457,7 +476,6 @@ Pages in **dynamic routes** (e.g. `/[id]`, or `/[[id]]`, `[...id]`, `[[...id]]`)
 
   ```typescript
   // src/static/page.tsx
-
   "use client";
 
   export default function Page({ data }: { data: string }) {
@@ -467,8 +485,11 @@ Pages in **dynamic routes** (e.g. `/[id]`, or `/[[id]]`, `[...id]`, `[[...id]]`)
 
   ```typescript
   // src/static/page_functions.ts
-
-  export async function getProps() {
+  export async function getProps(
+    params: Record<string, string>,
+    query: Record<string, string>,
+    cookies: Record<string, string>
+  ) {
     const data = await new Promise<string>((r) =>
       setTimeout(() => r(`data`), 2000)
     );
@@ -504,7 +525,11 @@ The framework supports a `page_functions.ts` (or `.tsx`, `.jsx`, `.js`) file in 
     return ["1", "2", "3"];
   }
 
-  export async function getProps(params: { id: string }) {
+  export async function getProps(
+    params: { id: string },
+    query: Record<string, string>,
+    cookies: Record<string, string>
+  ) {
     // Fetch data based on the 'id' parameter
     const post = await fetch(`https://api.example.com/posts/${params.id}`).then(
       (res) => res.json()
@@ -590,7 +615,23 @@ The framework supports a `page_functions.ts` (or `.tsx`, `.jsx`, `.js`) file in 
 
 ## Client Components
 
-- Client components need to have the directive `"use client";` at the top of the file if they are not imported in other client components. That's the case of pages for example, that they are not imported directly in another client component. So when defining pages as client components **remember to use the directive `"use client";`**. The same applies for layouts, not found pages and error pages. In general, to avoid surprises, is a good practice to put the directive `"use client";` in all client components.
+- Client Components need to have the directive `"use client";` at the top of the file if they are not imported in other Client Components. That's the case of pages for example, that they are not imported directly in another Client Component. So when defining pages as Client Components **remember to use the directive `"use client";`**. The same applies for layouts, not found pages and error pages. In general, to avoid surprises, is a good practice to put the directive `"use client";` in all Client Components.
+
+## Server Functions
+
+- Server Functions are functions executed in the server. To define a Server Function use the directive `"use server";` at the top of the file where you define the Server Function. **Server Functions** can be invoked from either a Server Component or a Client Component and **can return Client Components**.
+
+- You can access the `req` and `res` objects from express in the Server Function by adding an extra parameter in the definition, the last one:
+
+```typescript
+"use server";
+
+export async function doSomething(myParam, { req, res }) {
+  // ...
+}
+```
+
+- In the previous example, the Server Function should be called only with `myParam` as argument. The last argument with references to `req` and `res` from `express` is added by Dinou.
 
 ## Dynamic Parameters (`params` prop)
 
@@ -820,7 +861,7 @@ The routing system is file-based and supports static routes, dynamic routes, opt
       return (
         <html lang="en">
           <head>
-            <title>dinou app</title>
+            <title>Dinou app</title>
           </head>
           <body>
             {sidebar}
@@ -933,7 +974,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <head>
-        <title>dinou app</title>
+        <title>Dinou app</title>
         <link rel="icon" type="image/png" href="/favicon.ico" />
         <link
           rel="apple-touch-icon"
@@ -964,7 +1005,7 @@ Then you will have your favicon in your web app.
 
 ## `.env` file
 
-dinou is ready to manage env vars in the code that runs on the Server side (Server Functions, Server Components, and `getProps` function). Create an `.env` file in your project (and add it to your `.gitignore` file to not expose sensitive data to the public) and define there your env variables:
+Dinou is ready to manage env vars in the code that runs on the Server side (Server Functions, Server Components, and `getProps` function). Create an `.env` file in your project (and add it to your `.gitignore` file to not expose sensitive data to the public) and define there your env variables:
 
 ```bash
 # .env
@@ -974,26 +1015,26 @@ MY_VAR=my_value
 
 ## Styles (Tailwind.css, .module.css, and .css)
 
-dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles will be generated in a file in `public` folder named `styles.css`. So you must include this in your `page.tsx` or `layout.tsx` file, in the `head` tag:
+Dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles will be generated in a file in `public` folder named `styles.css`. So you must include this in your `page.tsx` or `layout.tsx` file, in the `head` tag:
 
 ```typescript
 <link href="/styles.css" rel="stylesheet"></link>
 ```
 
-- Example with client components:
+- Example with Client Components (is the same for Server Components):
 
   ```typescript
   // src/layout.tsx
   "use client";
 
   import type { ReactNode } from "react";
-  import "./global.css";
+  import "./globals.css";
 
   export default function Layout({ children }: { children: ReactNode }) {
     return (
       <html lang="en">
         <head>
-          <title>dinou app</title>
+          <title>Dinou app</title>
           <link rel="icon" type="image/png" href="/favicon.ico" />
           <link
             rel="apple-touch-icon"
@@ -1022,7 +1063,7 @@ dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles
   ```
 
   ```css
-  /* global.css */
+  /* src/globals.css */
   @import "tailwindcss";
 
   .test1 {
@@ -1060,91 +1101,9 @@ dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles
 
 - The above will produce the text `hi world!` in red, underlined, and with a purple background color.
 
-- **Only styles imported under `"use client"` directive will be detected by dinou and generated in a `styles.css` in `public` folder**. This means that if you want to use server components instead of client components, then you must create an additional file (e.g. `styles.ts`) where you use the `"use client"` directive and import all the `.css` files used in server components.
-
-- Example with server components:
-
-  ```typescript
-  // src/layout.tsx
-  import type { ReactNode } from "react";
-
-  export default async function Layout({ children }: { children: ReactNode }) {
-    return (
-      <html lang="en">
-        <head>
-          <title>dinou app</title>
-          <link rel="icon" type="image/png" href="/favicon.ico" />
-          <link
-            rel="apple-touch-icon"
-            sizes="180x180"
-            href="/apple-touch-icon.png"
-          />
-          <link
-            rel="icon"
-            type="image/png"
-            sizes="32x32"
-            href="/favicon-32x32.png"
-          />
-          <link
-            rel="icon"
-            type="image/png"
-            sizes="16x16"
-            href="/favicon-16x16.png"
-          />
-          <link rel="manifest" href="/site.webmanifest"></link>
-          <link href="/styles.css" rel="stylesheet"></link>
-        </head>
-        <body>{children}</body>
-      </html>
-    );
-  }
-  ```
-
-  ```css
-  /* global.css */
-  @import "tailwindcss";
-
-  .test1 {
-    background-color: purple;
-  }
-  ```
-
-  ```typescript
-  // src/page.tsx
-  import styles from "./page.module.css";
-
-  export default async function Page() {
-    return (
-      <div className={`text-red-500 test1 ${styles.test2}`}>hi world!</div>
-    );
-  }
-  ```
-
-  ```css
-  /* src/page.module.css */
-  .test2 {
-    text-decoration: underline;
-  }
-  ```
-
-  ```typescript
-  // src/css.d.ts
-  declare module "*.module.css" {
-    const classes: { [key: string]: string };
-    export default classes;
-  }
-  ```
-
-  ```typescript
-  // src/styles.ts
-  "use client"; // <-- This is key.
-  import "./global.css";
-  import "./page.module.css";
-  ```
-
 ## Assets or media files (image, video, and sound)
 
-dinou supports the use of assets in your components. Supported file extensions are: `.png`, `.jpeg`, `.jpg`, `.gif`, `.svg`, `.webp`, `.avif`, `.ico`, `.mp4`, `.webm`, `.ogg`, `.mov`, `.avi`, `.mkv`, `.mp3`, `.wav`, `.flac`, `.m4a`, `.aac`, `.mjpeg`, and `.mjpg`.
+Dinou supports the use of assets in your components. Supported file extensions are: `.png`, `.jpeg`, `.jpg`, `.gif`, `.svg`, `.webp`, `.avif`, `.ico`, `.mp4`, `.webm`, `.ogg`, `.mov`, `.avi`, `.mkv`, `.mp3`, `.wav`, `.flac`, `.m4a`, `.aac`, `.mjpeg`, and `.mjpg`.
 
 To use an asset in your component just import it as a default import:
 
@@ -1159,23 +1118,7 @@ export default function Component() {
 }
 ```
 
-**Only assets imported under `"use client"` directive will be detected by dinou and generated in `public` folder**. If you use **server components**, then you must create an additional file (e.g. `assets.ts`) with the `"use client"` directive and import there the assets too:
-
-```typescript
-// src/assets.ts
-"use client";
-
-import "./image.png";
-```
-
-```typescript
-// src/component.tsx
-import image from "./image.png"; // import the image from where it is located (inside src folder)
-
-export default async function Component() {
-  return <img src={image} alt="image" />;
-}
-```
+Works the same for Server Components.
 
 For typescript, you should create a declaration file like this:
 
@@ -1199,57 +1142,61 @@ declare module "*.png" {
 // and continue with the rest of supported file extensions
 ```
 
-If you miss a certain file extension you can eject and customize dinou to meet your requirements. Just eject and add the extension in these three places: `rollup.config.js`, `dinou/server.js`, and `dinou/render-html.js`. Just look for the place were all the extensions are mentioned and add yours in these three files.
+If you miss a certain file extension you can eject and customize Dinou to meet your requirements. Just eject and add the extension in this place: `dinou/core/asset-extensions.js`. Just look for the place were all the extensions are mentioned and add yours in this file.
 
 ## Import alias (e.g. `"@/..."`)
 
-dinou is ready to support import alias, as `import some from "@/..."`. If you want to use them just define the options in `tsconfig.json` or `jsconfig.json`:
+Dinou is ready to support import alias, as `import some from "@/..."`. If you want to use them just define the options in `tsconfig.json`:
 
 ```json
-// tsconfig.json
-{
-  "compilerOptions": {
-    // other options
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"]
-    }
-  },
-  "include": ["src/**/*"]
-  // other configuration fields
-}
-```
-
-```json
-// jsconfig.json
+// tsconfig.json for a js project
 {
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
-    }
+    },
+    "allowJs": true,
+    "noEmit": true
   },
   "include": ["src"]
 }
 ```
 
-## How to run a dinou app
+```json
+// tsconfig.json for a ts project
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "allowJs": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true
+  },
+  "include": ["src"]
+}
+```
 
-Run `npm run dev` (or `npx dinou dev`) to start the dinou app in development mode. Wait for the logs of the bundler (`waiting for changes...`) and the server (`Listening on port <port>`) to load the page on your browser. In development, the bundler will emit its files in `public` folder.
+## How to run a Dinou app
+
+Run `npm run dev` (or `npx dinou dev`) to start the Dinou app in development mode. Wait for the logs of the bundler (`waiting for changes...`) and the server (`Listening on port 3000`) to load the page on your browser. In development, the bundler will emit its files in `public` folder.
 
 Run `npm run build` (or `npx dinou build`) to build the app and `npm start` (or `npx dinou start`) to run it. In production, the bundler will emit its files in `dist3` folder.
 
-## Eject dinou
+## Eject Dinou
 
-- You can eject dinou with the command `npm run eject` (or `npx dinou eject`). This will copy the files defining dinou in the root folder of the project (grouped in a `dinou` folder). You will have full control and customization capabilities.
+- You can eject Dinou with the command `npm run eject` (or `npx dinou eject`). This will copy the files defining Dinou in the root folder of the project (grouped in a `dinou` folder). You will have full control and customization capabilities.
 
 ## 🚀 Deployment
 
-Projects built with **dinou** can be deployed to any platform that supports Node.js with custom flags.
+Projects built with **Dinou** can be deployed to any platform that supports Node.js with custom flags.
 
 ### ✅ Recommended: DigitalOcean App Platform
 
-dinou works seamlessly on [DigitalOcean App Platform](https://www.digitalocean.com/products/app-platform). You can deploy your project easily without needing any special configuration.
+Dinou works seamlessly on [DigitalOcean App Platform](https://www.digitalocean.com/products/app-platform). You can deploy your project easily without needing any special configuration.
 
 **Why it works well:**
 
@@ -1261,9 +1208,9 @@ dinou works seamlessly on [DigitalOcean App Platform](https://www.digitalocean.c
 
 ### ❌ Not supported: Netlify
 
-At the moment, **Netlify is not compatible with dinou, because it does not allow passing the `--conditions react-server` flag when starting a Node.js app**. This flag is essential for the app to work.
+At the moment, **Netlify is not compatible with Dinou, because it does not allow passing the `--conditions react-server` flag when starting a Node.js app**. This flag is essential for the app to work.
 
-If Netlify adds support for custom runtime flags in the future, dinou compatibility might become possible.
+If Netlify adds support for custom runtime flags in the future, Dinou compatibility might become possible.
 
 ### 🛠 Other Platforms
 
@@ -1277,4 +1224,4 @@ For a detailed list of changes, enhancements, and bug fixes across versions, see
 
 ## License
 
-dinou is licensed under the [MIT License](https://github.com/roggc/dinou/blob/master/LICENSE.md).
+Dinou is licensed under the [MIT License](https://github.com/roggc/dinou/blob/master/LICENSE.md).
