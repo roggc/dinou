@@ -5,10 +5,14 @@ const glob = require("fast-glob");
 const { pathToFileURL } = require("url");
 const parser = require("@babel/parser");
 const traverse = require("@babel/traverse").default;
+const { regex } = require("../core/asset-extensions.js");
+const createScopedName = require("../core/createScopedName.js");
+const { getAbsPathWithExt } = require("../core/get-abs-path-with-ext.js");
 
 function reactClientManifestPlugin({
   srcDir = path.resolve("src"),
   manifestPath = "public/react-client-manifest.json",
+  assetInclude = regex,
 } = {}) {
   const manifest = {};
   const clientModules = new Set();
@@ -78,9 +82,15 @@ function reactClientManifestPlugin({
     }
   }
 
-  function getImports(code, baseFilePath, visited = new Set()) {
+  // Updated to async, accepts pluginContext (Rollup's 'this'), resolves aliases/paths via this.resolve
+  async function getImportsAndAssetsAndCsss(
+    code,
+    baseFilePath,
+    visited = new Set(),
+    pluginContext
+  ) {
     if (visited.has(baseFilePath)) {
-      return [];
+      return { imports: [], assets: [], csss: [] };
     }
     visited.add(baseFilePath);
 
@@ -89,48 +99,87 @@ function reactClientManifestPlugin({
       plugins: ["jsx", "typescript"],
     });
     const imports = new Set();
+    const assets = new Set();
+    const csss = new Set();
 
+    // Collect all ImportDeclarations first (to await resolves in batch if needed, but sequential is fine)
+    const importNodes = [];
     traverse(ast, {
       ImportDeclaration(nodePath) {
-        const source = nodePath.node.source.value;
-        if (source.startsWith(".")) {
-          let absImportPath = path.resolve(path.dirname(baseFilePath), source);
-          const extensions = [".js", ".jsx", ".ts", ".tsx"];
-          if (!extensions.some((ext) => absImportPath.endsWith(ext))) {
-            for (const ext of extensions) {
-              const potentialPath = absImportPath + ext;
-              if (existsSync(potentialPath)) {
-                absImportPath = potentialPath;
-                break;
-              }
-            }
-          }
-          if (existsSync(absImportPath)) {
-            imports.add(absImportPath);
-            try {
-              const importCode = readFileSync(absImportPath, "utf8");
-              const nestedImports = getImports(
-                importCode,
-                absImportPath,
-                visited
-              );
-              nestedImports.forEach((nestedPath) => imports.add(nestedPath));
-            } catch (err) {
-              console.warn(
-                `[react-client-manifest] Could not read import: ${absImportPath}`,
-                err.message
-              );
-            }
-          } else {
-            console.warn(
-              `[react-client-manifest] Import path not found: ${absImportPath}`
-            );
-          }
-        }
+        importNodes.push(nodePath);
       },
     });
 
-    return Array.from(imports);
+    for (const nodePath of importNodes) {
+      const source = nodePath.node.source.value;
+      // console.log("source", source);
+
+      // Resolve the import
+      const absImportPathWithExt = getAbsPathWithExt(source, {
+        parentURL: pathToFileURL(baseFilePath).href,
+      });
+      if (!absImportPathWithExt) {
+        // console.warn(`[resolve failed] ${source} from ${baseFilePath}`);
+        continue;
+      }
+
+      // console.log("absImportPath", absImportPath);
+      if (
+        absImportPathWithExt.endsWith(".css") ||
+        absImportPathWithExt.endsWith(".scss") ||
+        absImportPathWithExt.endsWith(".less")
+      ) {
+        csss.add(absImportPathWithExt); // Track for watch
+        continue; // Don’t recurse into styles
+      }
+
+      // Check if it's an asset
+      if (assetInclude.test(absImportPathWithExt)) {
+        assets.add(absImportPathWithExt);
+        continue; // Don't recurse for assets
+      }
+
+      // Otherwise, it's a code import
+      imports.add(absImportPathWithExt);
+
+      try {
+        const importCode = readFileSync(absImportPathWithExt, "utf8");
+        const nested = await getImportsAndAssetsAndCsss(
+          importCode,
+          absImportPathWithExt,
+          visited,
+          pluginContext
+        );
+        nested.imports.forEach((nestedPath) => imports.add(nestedPath));
+        nested.assets.forEach((nestedPath) => assets.add(nestedPath));
+        nested.csss.forEach((nestedPath) => csss.add(nestedPath));
+      } catch (err) {
+        console.warn(
+          `[react-client-manifest] Could not read import: ${absImportPathWithExt}`,
+          err.message
+        );
+      }
+    }
+
+    return {
+      imports: Array.from(imports),
+      assets: Array.from(assets),
+      csss: Array.from(csss),
+    };
+  }
+
+  // New helper to emit a single asset (used in buildStart and watchChange)
+  function emitAsset(absAssetPath, pluginContext) {
+    const source = readFileSync(absAssetPath);
+    const base = path.basename(absAssetPath, path.extname(absAssetPath));
+    const scoped = createScopedName(base, absAssetPath);
+    const ext = path.extname(absAssetPath);
+    const fileName = `assets/${scoped}${ext}`;
+    pluginContext.emitFile({
+      type: "asset",
+      fileName,
+      source,
+    });
   }
 
   function isPageOrLayout(absPath) {
@@ -203,9 +252,29 @@ function reactClientManifestPlugin({
           }
           serverModules.add(normalizedPath);
           this.addWatchFile(absPath);
-          const imports = getImports(code, absPath);
+          const { imports, assets, csss } = await getImportsAndAssetsAndCsss(
+            code,
+            absPath,
+            new Set(),
+            this
+          );
+          // console.log("assets", assets);
           for (const importPath of imports) {
             this.addWatchFile(importPath);
+          }
+          // Emit assets for server components (replicate dinouAssetPlugin logic)
+          for (const assetPath of assets) {
+            this.addWatchFile(assetPath);
+            emitAsset(assetPath, this); // Emit assets
+          }
+          for (const cssPath of csss) {
+            this.addWatchFile(cssPath);
+            // Emit CSS as a Rollup asset so postcss() processes it
+            this.emitFile({
+              type: "chunk",
+              id: cssPath,
+              name: path.basename(cssPath, path.extname(cssPath)),
+            });
           }
         }
       }
@@ -249,9 +318,22 @@ function reactClientManifestPlugin({
           }
           serverModules.add(normalizedId);
           this.addWatchFile(id);
-          const imports = getImports(code, id);
+          const { imports, assets, csss } = await getImportsAndAssetsAndCsss(
+            code,
+            id,
+            new Set(),
+            this
+          );
           for (const importPath of imports) {
             this.addWatchFile(importPath);
+          }
+          // console.log("assets", assets);
+          for (const assetPath of assets) {
+            this.addWatchFile(assetPath);
+            // emitAsset(assetPath, this); // Re-emit assets on server file change
+          }
+          for (const cssPath of csss) {
+            this.addWatchFile(cssPath);
           }
         } else {
           serverModules.delete(normalizedId);

@@ -1,4 +1,3 @@
-const path = require("path");
 function reactRefreshWrapModules() {
   return {
     name: "react-refresh-wrap-modules",
