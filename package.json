@@ -1,6 +1,6 @@
 {
   "name": "dinou",
-  "version": "2.3.3",
+  "version": "2.4.0",
   "description": "Minimal React 19 Framework",
   "main": "index.js",
   "bin": {
