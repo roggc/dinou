@@ -6,6 +6,7 @@ const path = require("path");
 const { pathToFileURL } = require("url");
 
 const dinouPath = path.resolve(__dirname, "dinou");
+const corePath = path.resolve(dinouPath, "core");
 const projectRoot = process.cwd();
 
 const runCommand = (command, options = {}) => {
@@ -23,10 +24,10 @@ program
   .action(() => {
     console.log("Starting...");
     const startExpress = `node --conditions react-server --import ${
-      pathToFileURL(path.join(dinouPath, "register-loader.mjs")).href
-    } ${path.join(dinouPath, "server.js")}`;
+      pathToFileURL(path.join(corePath, "register-loader.mjs")).href
+    } ${path.join(corePath, "server.js")}`;
     const startDevServer = `cross-env NODE_ENV=development rollup -c ${path.join(
-      __dirname,
+      dinouPath,
       "rollup.config.js"
     )} -w`;
     runCommand(`npx concurrently "${startExpress}" "${startDevServer}"`);
@@ -37,7 +38,7 @@ program
   .description("Builds the app for production")
   .action(() => {
     console.log("Building the app...");
-    const configPath = path.join(__dirname, "rollup.config.js");
+    const configPath = path.join(dinouPath, "rollup.config.js");
     runCommand(`cross-env NODE_ENV=production npx rollup -c ${configPath}`);
   });
 
@@ -48,8 +49,8 @@ program
     console.log("Starting the app...");
     runCommand(
       `cross-env NODE_ENV=production node --conditions react-server --import ${
-        pathToFileURL(path.join(dinouPath, "register-loader.mjs")).href
-      } ${path.join(dinouPath, "server.js")}`
+        pathToFileURL(path.join(corePath, "register-loader.mjs")).href
+      } ${path.join(corePath, "server.js")}`
     );
   });
 

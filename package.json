@@ -1,7 +1,7 @@
 {
   "name": "dinou",
-  "version": "2.3.3",
-  "description": "Minimal React 19 Framework",
+  "version": "2.4.0",
+  "description": "Dinou is a modern React 19 framework with React Server Components, Server Functions, and streaming SSR. Built with Rollup for better performance and developer experience.",
   "main": "index.js",
   "bin": {
     "dinou": "./cli.js"
@@ -10,8 +10,17 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
-    "React 19",
-    "Framework"
+    "react",
+    "react-19",
+    "react-server-components",
+    "rsc",
+    "react-server-functions",
+    "framework",
+    "react-framework",
+    "rollup",
+    "ssr",
+    "streaming",
+    "dinou"
   ],
   "author": "Roger Gomez Castells (@roggc)",
   "license": "MIT",
