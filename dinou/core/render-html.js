@@ -23,7 +23,7 @@ addHook({
   },
   publicPath: "/assets/",
 });
-
+const getAssetFromManifest = require("./get-asset-from-manifest.js");
 const { renderToPipeableStream } = require("react-dom/server");
 const getJSX = require("./get-jsx");
 const getSSGJSX = require("./get-ssg-jsx.js");
@@ -157,7 +157,7 @@ async function renderToStream(reqPath, query, cookies = {}) {
                 writeErrorOutput(error, isProd);
                 process.exit(1);
               },
-              bootstrapModules: ["/error.js"],
+              bootstrapModules: [getAssetFromManifest("error.js")],
               bootstrapScriptContent: `window.__DINOU_ERROR_MESSAGE__=${JSON.stringify(
                 error.message || "Unknown error"
               )};window.__DINOU_ERROR_STACK__=${JSON.stringify(
@@ -175,8 +175,8 @@ async function renderToStream(reqPath, query, cookies = {}) {
         stream.pipe(process.stdout);
       },
       bootstrapModules: isDevelopment
-        ? ["/main.js", "/runtime.js"]
-        : ["/main.js"],
+        ? [getAssetFromManifest("main.js"), getAssetFromManifest("runtime.js")]
+        : [getAssetFromManifest("main.js")],
       ...(isDevelopment
         ? {
             bootstrapScriptContent: `window.HMR_WEBSOCKET_URL="ws://localhost:3001";`,
