@@ -14,6 +14,7 @@ const dinouAssetPlugin = require("./rollup-plugins/dinou-asset-plugin.js");
 const tsconfigPaths = require("rollup-plugin-tsconfig-paths");
 const serverFunctionsPlugin = require("./rollup-plugins/rollup-plugin-server-functions");
 const { regex } = require("./core/asset-extensions.js");
+const manifestGeneratorPlugin = require("./rollup-plugins/manifest-generator-plugin.js");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 const outputDirectory = isDevelopment ? "public" : "dist3";
@@ -49,10 +50,14 @@ module.exports = async function () {
     output: {
       dir: outputDirectory,
       format: "esm",
-      entryFileNames: "[name].js",
-      chunkFileNames: "[name].js",
+      entryFileNames: isDevelopment ? "[name].js" : "[name]-[hash].js",
+      chunkFileNames: isDevelopment ? "[name].js" : "[name]-[hash].js",
     },
-    external: ["/refresh.js", "/__hmr_client__.js", "/serverFunctionProxy.js"],
+    external: [
+      "/refresh.js",
+      "/__hmr_client__.js",
+      "/__SERVER_FUNCTION_PROXY__",
+    ],
     plugins: [
       del({
         targets: `${outputDirectory}/*`,
@@ -117,6 +122,7 @@ module.exports = async function () {
       }),
       isDevelopment && reactRefreshWrapModules(),
       isDevelopment && esmHmrPlugin(),
+      !isDevelopment && manifestGeneratorPlugin(),
       serverFunctionsPlugin(),
     ].filter(Boolean),
     watch: {

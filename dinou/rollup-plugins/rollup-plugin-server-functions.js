@@ -2,6 +2,7 @@
 const path = require("path");
 const parser = require("@babel/parser");
 const traverse = require("@babel/traverse").default;
+const manifestGeneratorPlugin = require("./manifest-generator-plugin");
 
 function parseExports(code) {
   const ast = parser.parse(code, {
@@ -51,7 +52,7 @@ function serverFunctionsPlugin() {
 
       // Generamos un módulo que exporta proxies en lugar del código real
       let proxyCode = `
-        import { createServerFunctionProxy } from "/serverFunctionProxy.js";
+        import { createServerFunctionProxy } from "/__SERVER_FUNCTION_PROXY__";
       `;
 
       for (const exp of exports) {
@@ -72,6 +73,23 @@ function serverFunctionsPlugin() {
         code: proxyCode,
         map: null,
       };
+    },
+    // 🪄 After manifest exists, replace the placeholder with the final URL
+    generateBundle(options, bundle) {
+      const manifest = manifestGeneratorPlugin.manifestData;
+      const hashedPath =
+        "/" + (manifest["serverFunctionProxy.js"] || "serverFunctionProxy.js");
+
+      for (const file of Object.keys(bundle)) {
+        const chunk = bundle[file];
+        if (chunk.type === "asset" || !chunk.code) continue;
+        if (chunk.code.includes("/__SERVER_FUNCTION_PROXY__")) {
+          chunk.code = chunk.code.replace(
+            /\/__SERVER_FUNCTION_PROXY__/g,
+            hashedPath
+          );
+        }
+      }
     },
   };
 }
