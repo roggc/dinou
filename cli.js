@@ -131,7 +131,7 @@ program
     const startDevServer = `webpack serve --config ${path.join(
       dinouPath,
       "webpack/webpack.config.js"
-    )} -w`;
+    )}`;
     runCommand(`npx concurrently "${startExpress}" "${startDevServer}"`);
   });
 
