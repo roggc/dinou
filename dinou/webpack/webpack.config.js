@@ -72,6 +72,7 @@ module.exports = {
         include: [
           path.resolve(process.cwd(), "src"),
           path.resolve(process.cwd(), "dinou/core"),
+          path.resolve(__dirname, "../core"),
         ],
         use: {
           loader: "babel-loader",
