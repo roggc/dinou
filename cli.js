@@ -36,7 +36,7 @@ program
   .action(() => {
     console.log("Building the app...");
     const esbuildPath = path.join(dinouPath, "esbuild/build.mjs");
-    runCommand(`cross-env NODE_ENV=production npx node ${esbuildPath}`);
+    runCommand(`cross-env NODE_ENV=production node ${esbuildPath}`);
   });
 
 program
@@ -69,7 +69,7 @@ program
   .action(() => {
     console.log("Building the app...");
     const esbuildPath = path.join(dinouPath, "esbuild/build.mjs");
-    runCommand(`cross-env NODE_ENV=production npx node ${esbuildPath}`);
+    runCommand(`cross-env NODE_ENV=production node ${esbuildPath}`);
   });
 
 program
