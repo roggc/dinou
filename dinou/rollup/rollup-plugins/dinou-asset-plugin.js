@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
-const createScopedName = require("../core/createScopedName.js");
-const { regex } = require("../core/asset-extensions.js");
+const createScopedName = require("../../core/createScopedName.js");
+const { regex } = require("../../core/asset-extensions.js");
 
 function dinouAssetPlugin({ include = regex } = {}) {
   return {
