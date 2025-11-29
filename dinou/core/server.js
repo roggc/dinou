@@ -37,13 +37,13 @@ const generateStatic = require("./generate-static.js");
 const renderAppToHtml = require("./render-app-to-html.js");
 const revalidating = require("./revalidating.js");
 const isDevelopment = process.env.NODE_ENV !== "production";
-const webpackFolder = isDevelopment ? "public" : "dist3";
+const outputFolder = isDevelopment ? "public" : "dist3";
 const chokidar = require("chokidar");
 const { fileURLToPath } = require("url");
 if (isDevelopment) {
   const manifestPath = path.resolve(
     process.cwd(),
-    `${webpackFolder}/react-client-manifest.json`
+    `${outputFolder}/react-client-manifest.json`
   );
   let currentManifest = {};
 
@@ -151,7 +151,7 @@ const app = express();
 app.use(appUseCookieParser);
 app.use(express.json());
 
-app.use(express.static(path.resolve(process.cwd(), webpackFolder)));
+app.use(express.static(path.resolve(process.cwd(), outputFolder)));
 
 app.get("/.well-known/appspecific/com.chrome.devtools.json", (req, res) => {
   res.setHeader("Content-Type", "application/json");
@@ -159,7 +159,7 @@ app.get("/.well-known/appspecific/com.chrome.devtools.json", (req, res) => {
     name: "Dinou DevTools",
     description: "Dinou DevTools for Chrome",
     version: "1.0.0",
-    devtools_page: `/${webpackFolder}/devtools.html`,
+    devtools_page: `/${outputFolder}/devtools.html`,
   });
 });
 
@@ -189,7 +189,7 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
     );
     const manifest = JSON.parse(
       readFileSync(
-        path.resolve(`${webpackFolder}/react-client-manifest.json`),
+        path.resolve(`${outputFolder}/react-client-manifest.json`),
         "utf8"
       )
     );
@@ -209,10 +209,7 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
     ).replace("/____rsc_payload_error____", "");
     const jsx = await getErrorJSX(reqPath, { ...req.query }, req.body.error);
     const manifest = readFileSync(
-      path.resolve(
-        process.cwd(),
-        `${webpackFolder}/react-client-manifest.json`
-      ),
+      path.resolve(process.cwd(), `${outputFolder}/react-client-manifest.json`),
       "utf8"
     );
     const moduleMap = JSON.parse(manifest);
@@ -285,7 +282,7 @@ app.post("/____server_function____", async (req, res) => {
       const manifest = readFileSync(
         path.resolve(
           process.cwd(),
-          `${webpackFolder}/react-client-manifest.json`
+          `${outputFolder}/react-client-manifest.json`
         ),
         "utf8"
       );

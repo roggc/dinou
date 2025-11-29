@@ -5,9 +5,9 @@ const glob = require("fast-glob");
 const { pathToFileURL } = require("url");
 const parser = require("@babel/parser");
 const traverse = require("@babel/traverse").default;
-const { regex } = require("../core/asset-extensions.js");
-const createScopedName = require("../core/createScopedName.js");
-const { getAbsPathWithExt } = require("../core/get-abs-path-with-ext.js");
+const { regex } = require("../../core/asset-extensions.js");
+const createScopedName = require("../../core/createScopedName.js");
+const { getAbsPathWithExt } = require("../../core/get-abs-path-with-ext.js");
 
 function reactClientManifestPlugin({
   srcDir = path.resolve("src"),

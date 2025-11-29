@@ -5,7 +5,7 @@ const resolve = require("@rollup/plugin-node-resolve").default;
 const commonjs = require("@rollup/plugin-commonjs");
 const copy = require("rollup-plugin-copy");
 const reactClientManifest = require("./rollup-plugins/rollup-plugin-react-client-manifest.js");
-const createScopedName = require("./core/createScopedName.js");
+const createScopedName = require("../core/createScopedName.js");
 const replace = require("@rollup/plugin-replace");
 const json = require("@rollup/plugin-json");
 const reactRefreshWrapModules = require("./react-refresh/react-refresh-wrap-modules.js");
@@ -13,7 +13,7 @@ const { esmHmrPlugin } = require("./react-refresh/rollup-plugin-esm-hmr.js");
 const dinouAssetPlugin = require("./rollup-plugins/dinou-asset-plugin.js");
 const tsconfigPaths = require("rollup-plugin-tsconfig-paths");
 const serverFunctionsPlugin = require("./rollup-plugins/rollup-plugin-server-functions");
-const { regex } = require("./core/asset-extensions.js");
+const { regex } = require("../core/asset-extensions.js");
 const manifestGeneratorPlugin = require("./rollup-plugins/manifest-generator-plugin.js");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
@@ -32,19 +32,19 @@ module.exports = async function () {
             __dirname,
             "react-refresh/react-refresh-entry.js"
           ),
-          main: path.resolve(__dirname, "core/client.jsx"),
-          error: path.resolve(__dirname, "core/client-error.jsx"),
+          main: path.resolve(__dirname, "../core/client.jsx"),
+          error: path.resolve(__dirname, "../core/client-error.jsx"),
           serverFunctionProxy: path.resolve(
             __dirname,
-            "core/server-function-proxy.js"
+            "../core/server-function-proxy.js"
           ),
         }
       : {
-          main: path.resolve(__dirname, "core/client.jsx"),
-          error: path.resolve(__dirname, "core/client-error.jsx"),
+          main: path.resolve(__dirname, "../core/client.jsx"),
+          error: path.resolve(__dirname, "../core/client-error.jsx"),
           serverFunctionProxy: path.resolve(
             __dirname,
-            "core/server-function-proxy.js"
+            "../core/server-function-proxy.js"
           ),
         },
     output: {

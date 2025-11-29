@@ -30,6 +30,7 @@ const getSSGJSX = require("./get-ssg-jsx.js");
 const { getErrorJSX } = require("./get-error-jsx");
 const { renderJSXToClientJSX } = require("./render-jsx-to-client-jsx");
 const isDevelopment = process.env.NODE_ENV !== "production";
+const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 
 function formatErrorHtml(error) {
   const message = error.message || "Unknown error";
@@ -175,7 +176,10 @@ async function renderToStream(reqPath, query, cookies = {}) {
         stream.pipe(process.stdout);
       },
       bootstrapModules: isDevelopment
-        ? [getAssetFromManifest("main.js"), getAssetFromManifest("runtime.js")]
+        ? [
+            getAssetFromManifest("main.js"),
+            isWebpack ? undefined : getAssetFromManifest("runtime.js"),
+          ].filter(Boolean)
         : [getAssetFromManifest("main.js")],
       ...(isDevelopment
         ? {
