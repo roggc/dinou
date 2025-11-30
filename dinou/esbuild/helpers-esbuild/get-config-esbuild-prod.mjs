@@ -6,6 +6,7 @@ import assetsPlugin from "../plugins-esbuild/assets-plugin.mjs";
 import copyStaticFiles from "esbuild-copy-static-files";
 import manifestGeneratorPlugin from "../plugins-esbuild/manifest-generator-plugin.mjs";
 import writePlugin from "../plugins-esbuild/write-plugin.mjs";
+import { existsSync } from "node:fs";
 
 const manifestData = {};
 
@@ -14,6 +15,29 @@ export default function getConfigEsbuildProd({
   outdir = "dist3",
   manifest = {},
 }) {
+  let plugins = [
+    TsconfigPathsPlugin({}),
+    cssProcessorPlugin({ outdir }),
+    reactClientManifestPlugin({
+      manifest,
+      manifestPath: `${outdir}/react-client-manifest.json`,
+    }),
+    assetsPlugin(),
+    manifestGeneratorPlugin(manifestData),
+    serverFunctionsPlugin(manifestData),
+    writePlugin(),
+  ];
+
+  if (existsSync("favicons")) {
+    plugins = [
+      copyStaticFiles({
+        src: "favicons",
+        dest: outdir,
+      }),
+      ...plugins,
+    ];
+  }
+
   return {
     entryPoints,
     outdir,
@@ -36,21 +60,6 @@ export default function getConfigEsbuildProd({
       "/__hmr_client__.js",
       "/react-refresh-entry.js",
     ],
-    plugins: [
-      copyStaticFiles({
-        src: "favicons",
-        dest: outdir,
-      }),
-      TsconfigPathsPlugin({}),
-      cssProcessorPlugin({ outdir }),
-      reactClientManifestPlugin({
-        manifest,
-        manifestPath: `${outdir}/react-client-manifest.json`,
-      }),
-      assetsPlugin(),
-      manifestGeneratorPlugin(manifestData),
-      serverFunctionsPlugin(manifestData),
-      writePlugin(),
-    ],
+    plugins,
   };
 }
