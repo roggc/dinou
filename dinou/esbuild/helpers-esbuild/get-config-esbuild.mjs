@@ -7,6 +7,7 @@ import stableChunkNamesAndMapsPlugin from "../plugins-esbuild/stable-chunk-names
 import assetsPlugin from "../plugins-esbuild/assets-plugin.mjs";
 import skipMissingEntryPointsPlugin from "../plugins-esbuild/skip-missing-entry-points-plugin.mjs";
 import copyStaticFiles from "esbuild-copy-static-files";
+import { existsSync } from "node:fs";
 
 export default function getConfigEsbuild({
   entryPoints,
@@ -15,6 +16,27 @@ export default function getConfigEsbuild({
   changedIds,
   hmrEngine,
 }) {
+  let plugins = [
+    skipMissingEntryPointsPlugin(),
+    TsconfigPathsPlugin({}),
+    cssProcessorPlugin(),
+    reactClientManifestPlugin({ manifest }),
+    assetsPlugin(),
+    stableChunkNamesAndMapsPlugin(),
+    serverFunctionsPlugin(),
+    esmHmrPlugin({ entryName: "main", changedIds, hmrEngine }),
+  ];
+
+  if (existsSync("favicons")) {
+    plugins = [
+      copyStaticFiles({
+        src: "favicons",
+        dest: outdir,
+      }),
+      ...plugins,
+    ];
+  }
+
   return {
     entryPoints,
     outdir,
@@ -37,19 +59,6 @@ export default function getConfigEsbuild({
       "/__hmr_client__.js",
       "/react-refresh-entry.js",
     ],
-    plugins: [
-      copyStaticFiles({
-        src: "favicons",
-        dest: outdir,
-      }),
-      skipMissingEntryPointsPlugin(),
-      TsconfigPathsPlugin({}),
-      cssProcessorPlugin(),
-      reactClientManifestPlugin({ manifest }),
-      assetsPlugin(),
-      stableChunkNamesAndMapsPlugin(),
-      serverFunctionsPlugin(),
-      esmHmrPlugin({ entryName: "main", changedIds, hmrEngine }),
-    ],
+    plugins,
   };
 }
