@@ -50,11 +50,40 @@ if (isDevelopment) {
   const watcher = chokidar.watch(manifestPath, { persistent: true });
   let isInitial = true;
 
-  watcher.on("add", () => {
+  async function loadManifestWithRetry(
+    manifestPath,
+    maxRetries = 10,
+    delayMs = 100
+  ) {
+    let attempts = 0;
+    while (attempts < maxRetries) {
+      try {
+        // console.log(`Attempting to load manifest (try ${attempts + 1})...`);
+        return JSON.parse(readFileSync(manifestPath, "utf8"));
+      } catch (err) {
+        if (err.code !== "ENOENT") {
+          throw err; // Rethrow if it's not a file not found error
+        }
+        attempts++;
+        if (attempts >= maxRetries) {
+          throw err; // Rethrow after max retries
+        }
+        // Wait for the specified delay before retrying
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  watcher.on("add", async () => {
     if (Object.keys(currentManifest).length === 0 && isInitial) {
       // console.log("Initial manifest loaded.");
-      currentManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-      isInitial = false;
+      try {
+        currentManifest = await loadManifestWithRetry(manifestPath);
+        // console.log("Loaded initial manifest for HMR.");
+        isInitial = false;
+      } catch (err) {
+        console.error("Failed to load initial manifest after retries:", err);
+      }
       return;
     }
   });
