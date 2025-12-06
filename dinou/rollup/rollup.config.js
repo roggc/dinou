@@ -129,7 +129,7 @@ module.exports = async function () {
       serverFunctionsPlugin(),
     ].filter(Boolean),
     watch: {
-      exclude: ["public/**"],
+      exclude: ["public/**", "react_client_manifest/**"],
     },
     onwarn(warning, warn) {
       if (
