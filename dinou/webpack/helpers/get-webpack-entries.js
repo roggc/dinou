@@ -1,96 +1,28 @@
-import { readFileSync } from "fs";
-import path from "node:path";
-import glob from "fast-glob";
-import { pathToFileURL } from "node:url";
-import parser from "@babel/parser";
-import traverse from "@babel/traverse";
-import crypto from "node:crypto";
-import {
-  regex as assetRegex,
-  globPattern as assetGlobPattern,
-} from "../../core/asset-extensions.js";
-import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
-import normalizePath from "./normalize-path.mjs";
+const { readFileSync } = require("fs");
+const path = require("node:path");
+const glob = require("fast-glob");
+const { pathToFileURL } = require("node:url");
+const parser = require("@babel/parser");
+const traverse = require("@babel/traverse");
+const crypto = require("node:crypto");
+const { regex: assetRegex } = require("../../core/asset-extensions.js");
+const { getAbsPathWithExt } = require("../../core/get-abs-path-with-ext.js");
+
+const normalizePath = (p) => p.split(path.sep).join(path.posix.sep);
 
 function hashFilePath(absPath) {
   return crypto.createHash("sha1").update(absPath).digest("hex").slice(0, 8);
 }
 
-export default async function getEsbuildEntries({
+async function getCSSEntries({
   srcDir = path.resolve("src"),
   assetInclude = assetRegex,
   manifest = {},
 } = {}) {
-  const detectedClientEntries = new Set();
+  // const detectedClientEntries = new Set();
   const detectedCSSEntries = new Set();
-  const detectedAssetEntries = new Set();
-  const serverModules = new Set();
-
-  // ---------- Helpers (ported mostly verbatim) ----------
-  function parseExports(code) {
-    const ast = parser.parse(code, {
-      sourceType: "module",
-      plugins: ["jsx", "typescript"],
-    });
-
-    const exports = new Set();
-
-    traverse.default(ast, {
-      ExportDefaultDeclaration(path) {
-        exports.add("default");
-      },
-      ExportNamedDeclaration(path) {
-        if (path.node.declaration) {
-          if (
-            path.node.declaration.type === "FunctionDeclaration" ||
-            path.node.declaration.type === "ClassDeclaration"
-          ) {
-            exports.add(path.node.declaration.id.name);
-          } else if (path.node.declaration.type === "VariableDeclaration") {
-            path.node.declaration.declarations.forEach((decl) => {
-              if (decl.id.type === "Identifier") {
-                exports.add(decl.id.name);
-              }
-            });
-          }
-        } else if (path.node.specifiers) {
-          path.node.specifiers.forEach((spec) => {
-            if (spec.type === "ExportSpecifier") {
-              exports.add(spec.exported.name);
-            }
-          });
-        }
-      },
-    });
-
-    return exports;
-  }
-
-  function updateManifestForModule(absPath, code, isClientModule) {
-    const fileUrl = pathToFileURL(absPath).href;
-    const relPath =
-      "./" + path.relative(process.cwd(), absPath).replace(/\\/g, "/");
-
-    // Remove previous entries for this fileUrl prefix
-    for (const key in manifest) {
-      if (key.startsWith(fileUrl)) {
-        delete manifest[key];
-      }
-    }
-
-    if (isClientModule) {
-      const exports = parseExports(code);
-      for (const expName of exports) {
-        const manifestKey =
-          expName === "default" ? fileUrl : `${fileUrl}#${expName}`;
-        manifest[manifestKey] = {
-          id: relPath,
-          chunks: expName,
-          name: expName,
-        };
-      }
-    }
-  }
+  // const detectedAssetEntries = new Set();
+  // const serverModules = new Set();
 
   async function getImportsAndAssetsAndCsss(
     code,
@@ -259,41 +191,18 @@ export default async function getEsbuildEntries({
     const normalizedPath = normalizePath(absPath);
 
     if (isClientModule) {
-      const name = path.basename(absPath, path.extname(absPath));
-
-      updateManifestForModule(absPath, code, true);
-      detectedClientEntries.add({
-        absPath: normalizedPath,
-        name,
-      });
-      const { imports } = await getImportsAndAssetsAndCsss(
-        code,
-        absPath,
-        new Set(),
-        true
-      );
-      const clientComponentRegex = /\.(js|jsx|ts|tsx)$/i;
-      imports.forEach((imp) => {
-        if (clientComponentRegex.test(imp) && !imp.includes("node_modules")) {
-          const name = path.basename(imp, path.extname(imp));
-          detectedClientEntries.add({
-            absPath: normalizePath(imp),
-            name,
-          });
-        }
-      });
     } else if (isPageOrLayout(absPath)) {
       if (!isAsyncDefaultExport(code)) {
         console.warn(
           `[react-client-manifest] The file ${normalizedPath} is a page or layout without "use client" directive, but its default export is not an async function.`
         );
       }
-      serverModules.add(normalizedPath);
+      // serverModules.add({
+      //   absPath: normalizedPath,
+      //   name: path.basename(normalizedPath, path.extname(normalizedPath)),
+      // });
       try {
-        const { imports, assets, csss } = await getImportsAndAssetsAndCsss(
-          code,
-          absPath
-        );
+        const { csss } = await getImportsAndAssetsAndCsss(code, absPath);
 
         if (csss.length > 0) {
           detectedCSSEntries.add(
@@ -304,57 +213,20 @@ export default async function getEsbuildEntries({
           );
         }
 
-        assets.forEach((assetPath) => {
-          detectedAssetEntries.add({
-            absPath: normalizePath(assetPath),
-            name: path.basename(assetPath, path.extname(assetPath)),
-          });
-        });
-
-        const serverComponentRegex = /\.(js|jsx|ts|tsx)$/i;
-        imports.forEach((imp) => {
-          if (serverComponentRegex.test(imp) && !imp.includes("node_modules")) {
-            serverModules.add(normalizePath(imp));
-          }
-        });
+        // const serverComponentRegex = /\.(js|jsx|ts|tsx)$/i;
+        // imports.forEach((imp) => {
+        //   if (serverComponentRegex.test(imp) && !imp.includes("node_modules")) {
+        //     serverModules.add({
+        //       absPath: normalizePath(imp),
+        //       name: path.basename(imp, path.extname(imp)),
+        //     });
+        //   }
+        // });
       } catch (err) {
         /* ignore */
       }
     }
   } // end for files
-
-  const csss = await glob(["**/*.css"], {
-    cwd: srcDir,
-    absolute: true,
-  });
-  // console.log("detected css entries from glob:", csss);
-
-  for (const absPath of csss) {
-    detectedCSSEntries.add({
-      absPath: normalizePath(absPath),
-      name: path.basename(absPath, path.extname(absPath)),
-    });
-  }
-  // console.log("final detectedCSSEntries:", detectedCSSEntries);
-
-  const assets = await glob([assetGlobPattern], {
-    cwd: srcDir,
-    absolute: true,
-  });
-
-  for (const absPath of assets) {
-    detectedAssetEntries.add({
-      absPath: normalizePath(absPath),
-      name: path.basename(absPath, path.extname(absPath)),
-    });
-  }
-
-  for (const dCE of detectedClientEntries) {
-    const hash = hashFilePath(dCE.absPath);
-    const outfileName = `${dCE.name}-${hash}`;
-    dCE.outfile = `${outfileName}.js`;
-    dCE.outfileName = outfileName;
-  }
 
   for (const dCSSE of detectedCSSEntries) {
     const hash = hashFilePath(dCSSE.absPath);
@@ -362,18 +234,16 @@ export default async function getEsbuildEntries({
     dCSSE.outfile = `${outfileName}.js`;
     dCSSE.outfileName = outfileName;
   }
+  // console.log("serverModules", serverModules);
+  // for (const sM of serverModules) {
+  //   const hash = hashFilePath(sM.absPath);
+  //   const outfileName = `${sM.name}-${hash}`;
+  //   sM.outfile = `${outfileName}.js`;
+  //   sM.outfileName = outfileName;
+  // }
 
-  for (const dAE of detectedAssetEntries) {
-    const hash = hashFilePath(dAE.absPath);
-    const outfileName = `${dAE.name}-${hash}`;
-    dAE.outfile = `${outfileName}.js`;
-    dAE.outfileName = outfileName;
-  }
-
-  return [
-    detectedClientEntries,
-    detectedCSSEntries,
-    detectedAssetEntries,
-    Array.from(serverModules),
-  ];
+  // console.log("detectedCssEntries", detectedCSSEntries);
+  return [detectedCSSEntries];
 }
+
+module.exports = getCSSEntries;

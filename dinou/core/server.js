@@ -40,68 +40,120 @@ const isDevelopment = process.env.NODE_ENV !== "production";
 const outputFolder = isDevelopment ? "public" : "dist3";
 const chokidar = require("chokidar");
 const { fileURLToPath } = require("url");
+const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 if (isDevelopment) {
   const manifestPath = path.resolve(
     process.cwd(),
-    `${outputFolder}/react-client-manifest.json`
+    isWebpack
+      ? `${outputFolder}/react-client-manifest.json`
+      : `react_client_manifest/react-client-manifest.json`
   );
-  let currentManifest = {};
+  const manifestFolderPath = path.resolve(
+    process.cwd(),
+    isWebpack ? outputFolder : "react_client_manifest"
+  );
 
-  const watcher = chokidar.watch(manifestPath, { persistent: true });
-  let isInitial = true;
+  let manifestWatcher = null;
 
-  watcher.on("add", () => {
-    if (Object.keys(currentManifest).length === 0 && isInitial) {
-      // console.log("Initial manifest loaded.");
-      currentManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-      isInitial = false;
-      return;
-    }
-  });
-
-  function getParents(resolvedPath) {
-    const parents = [];
-    Object.values(require.cache).forEach((mod) => {
-      if (
-        mod.children &&
-        mod.children.some((child) => child.id === resolvedPath)
-      ) {
-        parents.push(mod.id);
+  function startManifestWatcher() {
+    let currentManifest = {};
+    let isInitial = true;
+    // Si ya existe un watcher viejo, ciérralo primero
+    if (manifestWatcher) {
+      try {
+        manifestWatcher.close();
+      } catch (e) {
+        console.warn("Failed closing old watcher:", e);
       }
+    }
+
+    // console.log("[Watcher] Starting watcher");
+
+    manifestWatcher = chokidar.watch(manifestFolderPath, {
+      persistent: true,
+      ignored: /node_modules/,
     });
-    return parents;
-  }
 
-  function clearRequireCache(modulePath, visited = new Set()) {
-    try {
-      const resolved = require.resolve(modulePath);
-      if (visited.has(resolved)) return;
-      visited.add(resolved);
-
-      if (require.cache[resolved]) {
-        delete require.cache[resolved];
-        // console.log(`[Server HMR] Cleared cache for ${resolved}`);
-
-        const parents = getParents(resolved);
-        for (const parent of parents) {
-          // Optional: Skip if parent not in src/ (safety)
-          if (parent.startsWith(path.resolve(process.cwd(), "src"))) {
-            clearRequireCache(parent, visited);
+    async function loadManifestWithRetry({
+      manifestPath,
+      maxRetries = 10,
+      delayMs = 100,
+    } = {}) {
+      let attempts = 0;
+      while (attempts < maxRetries) {
+        try {
+          // console.log(`Attempting to load manifest (try ${attempts + 1})...`);
+          return JSON.parse(readFileSync(manifestPath, "utf8"));
+        } catch (err) {
+          if (err.code !== "ENOENT") {
+            throw err; // Rethrow if it's not a file not found error
           }
+          attempts++;
+          if (attempts >= maxRetries) {
+            throw err; // Rethrow after max retries
+          }
+          // Wait for the specified delay before retrying
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
         }
       }
-    } catch (err) {
-      console.warn(
-        `[Server HMR] Could not resolve or clear ${modulePath}: ${err.message}`
-      );
     }
-  }
 
-  watcher.on("change", () => {
-    try {
-      const newManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    function getParents(resolvedPath) {
+      const parents = [];
+      Object.values(require.cache).forEach((mod) => {
+        if (
+          mod.children &&
+          mod.children.some((child) => child.id === resolvedPath)
+        ) {
+          parents.push(mod.id);
+        }
+      });
+      return parents;
+    }
 
-      // Handle removed entries: client -> server switch
+    function clearRequireCache(modulePath, visited = new Set()) {
+      try {
+        const resolved = require.resolve(modulePath);
+        if (visited.has(resolved)) return;
+        visited.add(resolved);
+
+        if (require.cache[resolved]) {
+          delete require.cache[resolved];
+          // console.log(`[Server HMR] Cleared cache for ${resolved}`);
+
+          const parents = getParents(resolved);
+          for (const parent of parents) {
+            // Optional: Skip if parent not in src/ (safety)
+            if (parent.startsWith(path.resolve(process.cwd(), "src"))) {
+              clearRequireCache(parent, visited);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(
+          `[Server HMR] Could not resolve or clear ${modulePath}: ${err.message}`
+        );
+      }
+    }
+
+    let manifestTimeout;
+
+    function readJSONWithRetry(pathToRead, retries = 4, delay = 10) {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const text = readFileSync(pathToRead, "utf8");
+          if (!text.trim()) throw new Error("Empty JSON");
+          return JSON.parse(text);
+        } catch (err) {
+          if (i === retries - 1) throw err;
+          // tiny sleep
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
+        }
+      }
+    }
+
+    function handleManifestUpdate(newManifest) {
+      // console.log("handle manifest update", newManifest, currentManifest);
       for (const key in currentManifest) {
         if (!(key in newManifest)) {
           const absPath = fileURLToPath(key);
@@ -120,30 +172,50 @@ if (isDevelopment) {
       }
 
       currentManifest = newManifest;
-    } catch (err) {
-      console.error("Error handling manifest change:", err);
     }
-  });
 
-  const srcWatcher = chokidar.watch(path.resolve(process.cwd(), "src"), {
-    persistent: true,
-    ignored: /node_modules/,
-  });
+    async function onManifestChange(chokidarPath, stats, delayMs = 100) {
+      if (isWebpack && chokidarPath !== manifestPath) return;
+      if (Object.keys(currentManifest).length === 0 && isInitial) {
+        try {
+          currentManifest = await loadManifestWithRetry({
+            manifestPath,
+            delayMs,
+          });
+          // console.log("Loaded initial manifest for HMR.", currentManifest);
+          isInitial = false;
+        } catch (err) {
+          console.error("Failed to load initial manifest after retries:", err);
+        }
+        return;
+      }
+      try {
+        // console.log("change event");
+        clearTimeout(manifestTimeout);
 
-  srcWatcher.on("change", (changedPath) => {
-    const posixPath = changedPath.split(path.sep).join(path.posix.sep);
-
-    const isClientComponent = Object.keys(currentManifest).some((key) =>
-      key.includes(posixPath)
-    );
-
-    if (!isClientComponent) {
-      clearRequireCache(changedPath);
-      // console.log(
-      //   `[Server HMR] Cleared cache for ${changedPath} in srcWatcher`
-      // );
+        manifestTimeout = setTimeout(() => {
+          try {
+            const newManifest = readJSONWithRetry(manifestPath);
+            handleManifestUpdate(newManifest);
+          } catch (err) {
+            console.error("Manifest not ready:", err.message);
+          }
+        }, 50);
+      } catch (err) {
+        console.error("Error handling manifest change:", err);
+      }
     }
-  });
+
+    manifestWatcher.on("add", onManifestChange);
+    manifestWatcher.on("unlinkDir", startManifestWatcher);
+    manifestWatcher.on("unlink", () => {
+      isInitial = true;
+      currentManifest = {};
+    });
+    // manifestWatcher.on("all", (event) => console.log("event", event));
+    manifestWatcher.on("change", onManifestChange);
+  }
+  startManifestWatcher();
 }
 const cookieParser = require("cookie-parser");
 const appUseCookieParser = cookieParser();
@@ -189,7 +261,11 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
     );
     const manifest = JSON.parse(
       readFileSync(
-        path.resolve(`${outputFolder}/react-client-manifest.json`),
+        path.resolve(
+          isWebpack
+            ? `${outputFolder}/react-client-manifest.json`
+            : `react_client_manifest/react-client-manifest.json`
+        ),
         "utf8"
       )
     );
@@ -209,7 +285,12 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
     ).replace("/____rsc_payload_error____", "");
     const jsx = await getErrorJSX(reqPath, { ...req.query }, req.body.error);
     const manifest = readFileSync(
-      path.resolve(process.cwd(), `${outputFolder}/react-client-manifest.json`),
+      path.resolve(
+        process.cwd(),
+        isWebpack
+          ? `${outputFolder}/react-client-manifest.json`
+          : `react_client_manifest/react-client-manifest.json`
+      ),
       "utf8"
     );
     const moduleMap = JSON.parse(manifest);
@@ -282,7 +363,9 @@ app.post("/____server_function____", async (req, res) => {
       const manifest = readFileSync(
         path.resolve(
           process.cwd(),
-          `${outputFolder}/react-client-manifest.json`
+          isWebpack
+            ? `${outputFolder}/react-client-manifest.json`
+            : `react_client_manifest/react-client-manifest.json`
         ),
         "utf8"
       );
