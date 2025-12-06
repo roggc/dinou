@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 
 const outdir = "dist3";
 await fs.rm(outdir, { recursive: true, force: true });
+await fs.rm("react_client_manifest", { recursive: true, force: true });
 
 const frameworkEntryPoints = {
   main: path.resolve(__dirname, "../core/client.jsx"),

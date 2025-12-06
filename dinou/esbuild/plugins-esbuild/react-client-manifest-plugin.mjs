@@ -4,7 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 export default function reactClientManifestPlugin({
-  manifestPath = "public/react-client-manifest.json",
+  manifestPath = "react_client_manifest/react-client-manifest.json",
   manifest = {},
 } = {}) {
   return {
@@ -28,18 +28,18 @@ export default function reactClientManifestPlugin({
           }
 
           // ---- NEW BLOCK: check if manifestPath exists ----
-          let finalManifest = {};
+          // let finalManifest = {};
 
-          try {
-            const existing = await fs.readFile(manifestPath, "utf8");
-            const oldManifest = JSON.parse(existing);
+          // try {
+          //   const existing = await fs.readFile(manifestPath, "utf8");
+          //   const oldManifest = JSON.parse(existing);
 
-            // "Append" -> merge old + new (new overrides old)
-            finalManifest = { ...oldManifest, ...manifest };
-          } catch (e) {
-            // File does not exist -> write new manifest
-            finalManifest = manifest;
-          }
+          //   // "Append" -> merge old + new (new overrides old)
+          //   finalManifest = { ...oldManifest, ...manifest };
+          // } catch (e) {
+          //   // File does not exist -> write new manifest
+          //   finalManifest = manifest;
+          // }
 
           // Ensure directory exists
           await fs.mkdir(path.dirname(manifestPath), { recursive: true });
@@ -47,7 +47,7 @@ export default function reactClientManifestPlugin({
           // Write merged manifest
           await fs.writeFile(
             manifestPath,
-            JSON.stringify(finalManifest, null, 2),
+            JSON.stringify(manifest, null, 2),
             "utf8"
           );
         } catch (err) {

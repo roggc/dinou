@@ -40,14 +40,24 @@ const isDevelopment = process.env.NODE_ENV !== "production";
 const outputFolder = isDevelopment ? "public" : "dist3";
 const chokidar = require("chokidar");
 const { fileURLToPath } = require("url");
+const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 if (isDevelopment) {
   const manifestPath = path.resolve(
     process.cwd(),
-    `${outputFolder}/react-client-manifest.json`
+    isWebpack
+      ? `${outputFolder}/react-client-manifest.json`
+      : `react_client_manifest/react-client-manifest.json`
+  );
+  const manifestFolderPath = path.resolve(
+    process.cwd(),
+    isWebpack ? outputFolder : "react_client_manifest"
   );
   let currentManifest = {};
 
-  const watcher = chokidar.watch(manifestPath, { persistent: true });
+  const manifestWatcher = chokidar.watch(manifestFolderPath, {
+    persistent: true,
+    ignored: /node_modules/,
+  });
   let isInitial = true;
 
   async function loadManifestWithRetry(
@@ -74,18 +84,28 @@ if (isDevelopment) {
     }
   }
 
-  watcher.on("add", async () => {
+  manifestWatcher.on("add", async (chokidarPath) => {
     if (Object.keys(currentManifest).length === 0 && isInitial) {
-      // console.log("Initial manifest loaded.");
+      if (isWebpack && chokidarPath !== manifestPath) {
+        // console.log("webpack: not manifest path");
+        return;
+      }
+
       try {
         currentManifest = await loadManifestWithRetry(manifestPath);
-        // console.log("Loaded initial manifest for HMR.");
+        // console.log("Loaded initial manifest for HMR.", currentManifest);
         isInitial = false;
       } catch (err) {
         console.error("Failed to load initial manifest after retries:", err);
       }
       return;
     }
+  });
+
+  manifestWatcher.on("unlink", () => {
+    isInitial = true;
+    currentManifest = {};
+    // console.log("unlinked");
   });
 
   function getParents(resolvedPath) {
@@ -126,11 +146,21 @@ if (isDevelopment) {
     }
   }
 
-  watcher.on("change", () => {
+  manifestWatcher.on("change", (chokidarPath) => {
     try {
+      if (isWebpack && chokidarPath !== manifestPath) {
+        // console.log("webpack change: not manifest");
+        return;
+      }
+      // console.log("[Server HMR] Detected manifest change.");
       const newManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-
       // Handle removed entries: client -> server switch
+      // console.log(
+      //   "currentManifest",
+      //   currentManifest,
+      //   "newManifest",
+      //   newManifest
+      // );
       for (const key in currentManifest) {
         if (!(key in newManifest)) {
           const absPath = fileURLToPath(key);
@@ -151,26 +181,6 @@ if (isDevelopment) {
       currentManifest = newManifest;
     } catch (err) {
       console.error("Error handling manifest change:", err);
-    }
-  });
-
-  const srcWatcher = chokidar.watch(path.resolve(process.cwd(), "src"), {
-    persistent: true,
-    ignored: /node_modules/,
-  });
-
-  srcWatcher.on("change", (changedPath) => {
-    const posixPath = changedPath.split(path.sep).join(path.posix.sep);
-
-    const isClientComponent = Object.keys(currentManifest).some((key) =>
-      key.includes(posixPath)
-    );
-
-    if (!isClientComponent) {
-      clearRequireCache(changedPath);
-      // console.log(
-      //   `[Server HMR] Cleared cache for ${changedPath} in srcWatcher`
-      // );
     }
   });
 }
@@ -218,7 +228,11 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
     );
     const manifest = JSON.parse(
       readFileSync(
-        path.resolve(`${outputFolder}/react-client-manifest.json`),
+        path.resolve(
+          isWebpack
+            ? `${outputFolder}/react-client-manifest.json`
+            : `react_client_manifest/react-client-manifest.json`
+        ),
         "utf8"
       )
     );
@@ -238,7 +252,12 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
     ).replace("/____rsc_payload_error____", "");
     const jsx = await getErrorJSX(reqPath, { ...req.query }, req.body.error);
     const manifest = readFileSync(
-      path.resolve(process.cwd(), `${outputFolder}/react-client-manifest.json`),
+      path.resolve(
+        process.cwd(),
+        isWebpack
+          ? `${outputFolder}/react-client-manifest.json`
+          : `react_client_manifest/react-client-manifest.json`
+      ),
       "utf8"
     );
     const moduleMap = JSON.parse(manifest);
@@ -311,7 +330,9 @@ app.post("/____server_function____", async (req, res) => {
       const manifest = readFileSync(
         path.resolve(
           process.cwd(),
-          `${outputFolder}/react-client-manifest.json`
+          isWebpack
+            ? `${outputFolder}/react-client-manifest.json`
+            : `react_client_manifest/react-client-manifest.json`
         ),
         "utf8"
       );

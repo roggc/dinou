@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- Fix race condition with chokidar in core/server.js affecting react-client-manifest.json on development.
+- Fix esbuild development change between server and client components.
+- Fix rollup development change between server and client components.
+- Fix CSS entries for webpack.
 
 ## [3.0.1]
 

@@ -6,17 +6,19 @@ import chokidar from "chokidar";
 import path from "node:path";
 import { regex as assetRegex } from "../core/asset-extensions.js";
 import normalizePath from "./helpers-esbuild/normalize-path.mjs";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const outdir = "public";
 await fs.rm(outdir, { recursive: true, force: true });
+await fs.rm("react_client_manifest", { recursive: true, force: true });
 
 let currentCtx = null; // Track the active esbuild context
 let debounceTimer = null; // For debouncing recreations
 let clientComponentsPaths = [];
+let currentServerFiles = new Set();
 
 const frameworkEntryPoints = {
   main: path.resolve(__dirname, "../core/client.jsx"),
@@ -42,6 +44,47 @@ const watcher = chokidar.watch("src", {
 
 const codeCssRegex = /.(js|jsx|ts|tsx|css|scss|less)$/i;
 
+let manifest = {};
+let entryPoints = {};
+
+async function updateEntriesAndComponents() {
+  manifest = {};
+  const [
+    esbuildEntries,
+    detectedCSSEntries,
+    detectedAssetEntries,
+    serverFiles,
+  ] = await getEsbuildEntries({ manifest });
+
+  currentServerFiles = new Set(
+    serverFiles.map((f) => normalizePath(path.resolve(f)))
+  );
+
+  const componentEntryPoints = [...esbuildEntries].reduce(
+    (acc, dCE) => ({ ...acc, [dCE.outfileName]: dCE.absPath }),
+    {}
+  );
+
+  clientComponentsPaths = Object.values(componentEntryPoints);
+
+  const cssEntryPoints = [...detectedCSSEntries].reduce(
+    (acc, dCSSE) => ({ ...acc, [dCSSE.outfileName]: dCSSE.absPath }),
+    {}
+  );
+
+  const assetEntryPoints = [...detectedAssetEntries].reduce(
+    (acc, dAE) => ({ ...acc, [dAE.outfileName]: dAE.absPath }),
+    {}
+  );
+
+  entryPoints = {
+    ...frameworkEntryPoints,
+    ...componentEntryPoints,
+    ...cssEntryPoints,
+    ...assetEntryPoints,
+  };
+}
+
 // Function to (re)create esbuild context with current entries
 async function createEsbuildContext() {
   try {
@@ -51,35 +94,7 @@ async function createEsbuildContext() {
     }
 
     await fs.rm(outdir, { recursive: true, force: true });
-
-    const manifest = {};
-    const [esbuildEntries, detectedCSSEntries, detectedAssetEntries] =
-      await getEsbuildEntries({ manifest });
-
-    const componentEntryPoints = [...esbuildEntries].reduce(
-      (acc, dCE) => ({ ...acc, [dCE.outfileName]: dCE.absPath }),
-      {}
-    );
-
-    clientComponentsPaths = Object.values(componentEntryPoints);
-
-    const cssEntryPoints = [...detectedCSSEntries].reduce(
-      (acc, dCSSE) => ({ ...acc, [dCSSE.outfileName]: dCSSE.absPath }),
-      {}
-    );
-
-    const assetEntryPoints = [...detectedAssetEntries].reduce(
-      (acc, dAE) => ({ ...acc, [dAE.outfileName]: dAE.absPath }),
-      {}
-    );
-
-    const entryPoints = {
-      ...frameworkEntryPoints,
-      ...componentEntryPoints,
-      ...cssEntryPoints,
-      ...assetEntryPoints,
-    };
-
+    // console.log("manifest before creating context:", manifest);
     currentCtx = await esbuild.context(
       getConfigEsbuild({
         entryPoints,
@@ -98,6 +113,7 @@ async function createEsbuildContext() {
 
 // Initial setup on ready
 watcher.on("ready", async () => {
+  await updateEntriesAndComponents();
   await createEsbuildContext();
 });
 
@@ -116,11 +132,12 @@ const debounceRecreateAndReload = () => {
   }, 300);
 };
 
-watcher.on("add", (file) => {
+watcher.on("add", async (file) => {
   const ext = path.extname(file);
   if (codeCssRegex.test(ext) || assetRegex.test(ext)) {
     // console.log(`New relevant file detected: ${file}. Recreating context...`);
-    debounceRecreateAndReload(file);
+    await updateEntriesAndComponents();
+    debounceRecreateAndReload();
   }
 });
 
@@ -128,33 +145,59 @@ watcher.on("unlink", async (file) => {
   const ext = path.extname(file);
   if (codeCssRegex.test(ext) || assetRegex.test(ext)) {
     // console.log(`File deleted: ${file}. Recreating context...`);
+    await updateEntriesAndComponents();
     if (currentCtx) {
       await currentCtx.dispose();
       currentCtx = null;
     }
-    debounceRecreate(file);
+    debounceRecreate();
   }
 });
 
-watcher.on("addDir", (dir) => {
+watcher.on("addDir", async () => {
   // console.log(`New directory: ${dir}. Recreating context...`);
-  debounceRecreateAndReload(dir);
+  await updateEntriesAndComponents();
+  debounceRecreateAndReload();
 });
 
-watcher.on("unlinkDir", async (dir) => {
+watcher.on("unlinkDir", async () => {
   // console.log(`Directory deleted: ${dir}. Recreating context...`);
+  await updateEntriesAndComponents();
   if (currentCtx) {
     await currentCtx.dispose();
     currentCtx = null;
   }
-  debounceRecreate(dir);
+  debounceRecreate();
 });
 
-watcher.on("change", (file) => {
+function existsInManifest(resolvedFile, manifest) {
+  const manifestKey = pathToFileURL(resolvedFile).href;
+  // console.log("Checking manifest for key:", manifestKey);
+  for (const key of Object.keys(manifest)) {
+    if (key === manifestKey) {
+      return true;
+    }
+  }
+  return false;
+}
+
+watcher.on("change", async (file) => {
   const resolvedFile = normalizePath(path.resolve(file));
+  const oldManifest = { ...manifest };
+  await updateEntriesAndComponents();
   // Check if changed file is a client component
   const isClientModule = clientComponentsPaths.includes(resolvedFile);
-  if (isClientModule) {
+  const isServerModule = currentServerFiles.has(resolvedFile);
+  // console.log(
+  //   `File changed: ${resolvedFile} | Client Module: ${isClientModule} | Server Module: ${isServerModule}`
+  // );
+  // console.log("currentServerFiles:", currentServerFiles);
+
+  if (
+    isClientModule &&
+    !isServerModule &&
+    existsInManifest(resolvedFile, oldManifest)
+  ) {
     changedIds.add(resolvedFile);
     return;
   }

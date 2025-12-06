@@ -5,6 +5,7 @@ const getSSGJSXOrJSX = require("./get-ssg-jsx-or-jsx.js");
 const { renderToPipeableStream } = require("react-server-dom-webpack/server");
 
 const OUT_DIR = path.resolve("dist2");
+const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 
 async function generateStaticRSC(reqPath) {
   const finalReqPath = reqPath.endsWith("/") ? reqPath : reqPath + "/";
@@ -16,7 +17,14 @@ async function generateStaticRSC(reqPath) {
     // console.log("✅ JSX retrieved for:", finalReqPath);
 
     const manifest = JSON.parse(
-      fs.readFileSync(path.resolve("dist3/react-client-manifest.json"), "utf8")
+      fs.readFileSync(
+        path.resolve(
+          isWebpack
+            ? "dist3/react-client-manifest.json"
+            : "react_client_manifest/react-client-manifest.json"
+        ),
+        "utf8"
+      )
     );
 
     fs.mkdirSync(path.dirname(payloadPath), { recursive: true });

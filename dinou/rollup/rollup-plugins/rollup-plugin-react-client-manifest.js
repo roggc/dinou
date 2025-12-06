@@ -11,7 +11,7 @@ const { getAbsPathWithExt } = require("../../core/get-abs-path-with-ext.js");
 
 function reactClientManifestPlugin({
   srcDir = path.resolve("src"),
-  manifestPath = "public/react-client-manifest.json",
+  manifestPath = "react_client_manifest/react-client-manifest.json",
   assetInclude = regex,
 } = {}) {
   const manifest = {};

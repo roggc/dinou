@@ -20,7 +20,7 @@ export default function getConfigEsbuildProd({
     cssProcessorPlugin({ outdir }),
     reactClientManifestPlugin({
       manifest,
-      manifestPath: `${outdir}/react-client-manifest.json`,
+      manifestPath: `react_client_manifest/react-client-manifest.json`,
     }),
     assetsPlugin(),
     manifestGeneratorPlugin(manifestData),

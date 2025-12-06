@@ -60,7 +60,7 @@ module.exports = async function () {
     ],
     plugins: [
       del({
-        targets: `${outputDirectory}/*`,
+        targets: [`${outputDirectory}/*`, "react_client_manifest/*"],
         runOnce: true,
         hook: "buildStart",
       }),
@@ -118,7 +118,10 @@ module.exports = async function () {
         flatten: true,
       }),
       reactClientManifest({
-        manifestPath: path.join(outputDirectory, "react-client-manifest.json"),
+        manifestPath: path.join(
+          "react_client_manifest",
+          "react-client-manifest.json"
+        ),
       }),
       isDevelopment && reactRefreshWrapModules(),
       isDevelopment && esmHmrPlugin(),
