@@ -18,10 +18,6 @@ export default function manifestGeneratorPlugin(manifestData) {
           return;
         }
 
-        // console.log(
-        //   "[manifest-generator] Generating manifest.json...",
-        //   meta.outputs
-        // );
         for (const [outputFile, info] of Object.entries(meta.outputs)) {
           const entryPoint = info.entryPoint;
           if (entryPoint) {
@@ -42,13 +38,19 @@ export default function manifestGeneratorPlugin(manifestData) {
           }
         }
 
-        const manifestPath = path.join(outdir, "manifest.json");
+        try {
+          const outDir = path.resolve(process.cwd(), outdir);
 
-        await fs.writeFile(
-          manifestPath,
-          JSON.stringify(manifestData, null, 2),
-          "utf8"
-        );
+          await fs.mkdir(outDir, { recursive: true });
+
+          await fs.writeFile(
+            path.join(outDir, "manifest.json"),
+            JSON.stringify(manifestData, null, 2),
+            "utf8"
+          );
+        } catch (e) {
+          console.log("Error writing file: ", e.message);
+        }
       });
     },
   };
