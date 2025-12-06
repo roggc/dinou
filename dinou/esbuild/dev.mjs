@@ -90,7 +90,7 @@ async function createEsbuildContext() {
   try {
     if (currentCtx) {
       await currentCtx.dispose(); // Clean up old context
-      console.log("Disposed old esbuild context");
+      // console.log("Disposed old esbuild context");
     }
 
     await fs.rm(outdir, { recursive: true, force: true });
