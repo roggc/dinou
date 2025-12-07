@@ -78,6 +78,7 @@ export default function assetsPlugin({ include = regex } = {}) {
           if (!include.test(sourceFile)) continue;
 
           const ext = path.extname(sourceFile);
+          if (!oldRelPath.endsWith(ext)) continue;
           const base = path.basename(sourceFile, ext);
           const scoped = createScopedName(base, sourceFile);
           const newLocal = `assets/${scoped}${ext}`;
