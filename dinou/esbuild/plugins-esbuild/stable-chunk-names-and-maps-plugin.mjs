@@ -23,8 +23,12 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true } = {}) {
           if (!sourceFile) continue;
           // Nombre estable basado en el archivo fuente (siempre igual)
           const rel = path.relative("src", sourceFile);
-          const dir = path.dirname(rel);
-          const base = path.basename(rel, path.extname(rel));
+          const normalizedRel = rel.replace(/\\/g, "/");
+          const dir = path.dirname(normalizedRel);
+          const base = path.basename(
+            normalizedRel,
+            path.extname(normalizedRel)
+          );
           const stableName =
             dir === "." ? base : `${dir.replace(/\//g, "-")}-${base}`;
           let finalName;
