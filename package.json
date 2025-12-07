@@ -40,8 +40,8 @@
     "@babel/register": "^7.27.1",
     "@babel/traverse": "^7.28.3",
     "@esbuild-plugins/tsconfig-paths": "^0.1.2",
-    "@matthamlin/react-server-dom-esm": "file:packages/vendor/react-server-dom-esm",
     "@pmmmwh/react-refresh-webpack-plugin": "^0.6.2",
+    "@roggc/react-server-dom-esm": "^0.0.0-380778d2-20251207",
     "@rollup/plugin-babel": "^6.0.4",
     "@rollup/plugin-commonjs": "^28.0.6",
     "@rollup/plugin-json": "^6.1.0",
@@ -85,7 +85,7 @@
     "ws": "^8.18.3"
   },
   "peerDependencies": {
-    "react": ">=19.1.0",
-    "react-dom": ">=19.1.0"
+    "react": ">=19.2.1",
+    "react-dom": ">=19.2.1"
   }
 }

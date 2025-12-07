@@ -1,5 +1,5 @@
 // public/server-function-proxy.js
-import { createFromFetch } from "@matthamlin/react-server-dom-esm/client";
+import { createFromFetch } from "@roggc/react-server-dom-esm/client";
 
 export function createServerFunctionProxy(id) {
   return new Proxy(() => {}, {
