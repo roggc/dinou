@@ -70,7 +70,7 @@
     "postcss-loader": "^8.2.0",
     "postcss-modules": "^6.0.1",
     "react-refresh": "^0.17.0",
-    "react-server-dom-webpack": "^19.2.0",
+    "react-server-dom-webpack": "^19.2.1",
     "rollup": "^4.46.2",
     "rollup-plugin-copy": "^3.5.0",
     "rollup-plugin-delete": "^3.0.1",
