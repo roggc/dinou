@@ -60,7 +60,11 @@ module.exports = async function () {
     ],
     plugins: [
       del({
-        targets: [`${outputDirectory}/*`, "react_client_manifest/*"],
+        targets: [
+          `${outputDirectory}/*`,
+          "react_client_manifest/*",
+          "server_functions_manifest/*",
+        ],
         runOnce: true,
         hook: "buildStart",
       }),

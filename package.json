@@ -41,7 +41,7 @@
     "@babel/traverse": "^7.28.3",
     "@esbuild-plugins/tsconfig-paths": "^0.1.2",
     "@pmmmwh/react-refresh-webpack-plugin": "^0.6.2",
-    "@roggc/react-server-dom-esm": "^0.0.0-380778d2-20251207",
+    "@roggc/react-server-dom-esm": "^0.0.0-b061b597-20251212",
     "@rollup/plugin-babel": "^6.0.4",
     "@rollup/plugin-commonjs": "^28.0.6",
     "@rollup/plugin-json": "^6.1.0",
@@ -70,7 +70,7 @@
     "postcss-loader": "^8.2.0",
     "postcss-modules": "^6.0.1",
     "react-refresh": "^0.17.0",
-    "react-server-dom-webpack": "^19.2.1",
+    "react-server-dom-webpack": "^19.2.3",
     "rollup": "^4.46.2",
     "rollup-plugin-copy": "^3.5.0",
     "rollup-plugin-delete": "^3.0.1",
@@ -85,7 +85,7 @@
     "ws": "^8.18.3"
   },
   "peerDependencies": {
-    "react": ">=19.2.1",
-    "react-dom": ">=19.2.1"
+    "react": ">=19.2.3",
+    "react-dom": ">=19.2.3"
   }
 }

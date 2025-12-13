@@ -1,69 +1,78 @@
-// server-functions-loader.js
-const parser = require("@babel/parser");
-const traverse = require("@babel/traverse").default;
+// server-functions-loader-simple.js
 const path = require("path");
+const parseExports = require("../../core/parse-exports.js");
 
-function parseExports(code) {
-  const ast = parser.parse(code, {
-    sourceType: "module",
-    plugins: ["jsx", "typescript"],
-  });
+module.exports = function (source) {
+  // Detect "use server"
+  const lines = source.split("\n");
+  let hasUseServer = false;
 
-  const exports = new Set();
-
-  traverse(ast, {
-    ExportDefaultDeclaration() {
-      exports.add("default");
-    },
-    ExportNamedDeclaration(p) {
-      if (p.node.declaration) {
-        if (p.node.declaration.type === "FunctionDeclaration") {
-          exports.add(p.node.declaration.id.name);
-        } else if (p.node.declaration.type === "VariableDeclaration") {
-          p.node.declaration.declarations.forEach((d) => {
-            if (d.id.type === "Identifier") {
-              exports.add(d.id.name);
-            }
-          });
-        }
-      } else if (p.node.specifiers) {
-        p.node.specifiers.forEach((s) => {
-          if (s.type === "ExportSpecifier") {
-            exports.add(s.exported.name);
-          }
-        });
-      }
-    },
-  });
-
-  return Array.from(exports);
-}
-
-module.exports = function serverFunctionsLoader(source) {
-  if (!source.trim().startsWith('"use server"')) return source;
-
-  const callback = this.async();
-  const exports = parseExports(source);
-  if (exports.length === 0) return callback(null, source);
-
-  const fileUrl = `file:///${path.relative(process.cwd(), this.resourcePath)}`;
-
-  let out = `import { createServerFunctionProxy } from "__SERVER_FUNCTION_PROXY__";\n`;
-
-  for (const name of exports) {
-    const key =
-      name === "default" ? `${fileUrl}#default` : `${fileUrl}#${name}`;
-
-    if (name === "default") {
-      out += `export default createServerFunctionProxy(${JSON.stringify(
-        key
-      )});\n`;
-    } else {
-      out += `export const ${name} = createServerFunctionProxy(${JSON.stringify(
-        key
-      )});\n`;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (
+      trimmed.startsWith('"use server"') ||
+      trimmed.startsWith("'use server'")
+    ) {
+      hasUseServer = true;
+      break;
     }
   }
 
-  callback(null, out);
+  if (!hasUseServer) return source;
+
+  const exports = parseExports(source);
+  if (exports.length === 0) return source;
+
+  // Build IDs
+  const moduleId = this.resourcePath;
+  const relativePath = path.relative(process.cwd(), moduleId);
+  const normalizedPath = relativePath.replace(/\\/g, "/");
+
+  const fileUrl = `file:///${normalizedPath}`;
+
+  //
+  // IMPORTANT: dynamic import instead of static import
+  //
+  // Webpack will NOT try to resolve "__SERVER_FUNCTION_PROXY__"
+  // as a module → it will remain a string → replaced later → browser loads it.
+
+  let proxyCode = `
+const loadProxy = new Function('return import("/"+"__SERVER_FUNCTION_PROXY__")');
+`;
+
+  for (const exp of exports) {
+    const key = exp === "default" ? `${fileUrl}#default` : `${fileUrl}#${exp}`;
+
+    if (exp === "default") {
+      proxyCode += `
+export default (...args) =>
+  loadProxy().then(mod =>
+    (mod.default ?? mod ?? window.__SERVER_FUNCTION_PROXY_LIB__).createServerFunctionProxy(${JSON.stringify(
+      key
+    )})(...args)
+  );
+`;
+    } else {
+      proxyCode += `
+export const ${exp} = (...args) =>
+  loadProxy().then(mod => (mod.default ?? mod ?? window.__SERVER_FUNCTION_PROXY_LIB__).createServerFunctionProxy(${JSON.stringify(
+    key
+  )})(...args)
+  );
+`;
+    }
+  }
+
+  // Emit manifest entry
+  const manifestEntry = {
+    path: normalizedPath,
+    exports: exports,
+  };
+
+  this.emitFile(
+    `server-functions/${normalizedPath}.json`,
+    JSON.stringify(manifestEntry, null, 2)
+  );
+
+  return proxyCode;
 };

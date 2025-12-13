@@ -6,7 +6,10 @@ export function createServerFunctionProxy(id) {
     apply: async (_target, _thisArg, args) => {
       const res = await fetch("/____server_function____", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-server-function-call": "1",
+        },
         body: JSON.stringify({ id, args }),
       });
       if (!res.ok) throw new Error("Server function failed");
