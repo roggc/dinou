@@ -1,44 +1,82 @@
-// ServerFunctionsPlugin.js
-class ServerFunctionsPlugin {
-  constructor({ manifest }) {
-    this.manifest = manifest;
+// webpack-server-functions-plugin-simple.js
+const path = require("path");
+const fs = require("fs");
+const manifestGeneratorPlugin = require("./manifest-generator-plugin");
+
+class WebpackServerFunctionsPluginSimple {
+  constructor() {
+    this.serverFunctions = new Map();
   }
 
   apply(compiler) {
-    const pluginName = "ServerFunctionsPlugin";
+    const { webpack } = compiler;
+    const { Compilation, sources } = webpack;
 
-    compiler.hooks.thisCompilation.tap(pluginName, (compilation) => {
-      compilation.hooks.processAssets.tap(
-        {
-          name: pluginName,
-          stage: compilation.constructor.PROCESS_ASSETS_STAGE_OPTIMIZE,
-        },
-        (assets) => {
-          const proxyPath =
-            "/" +
-            (this.manifest["serverFunctionProxy.js"] ||
-              "serverFunctionProxy.js");
+    // Recopilar archivos generados por el loader
+    compiler.hooks.thisCompilation.tap(
+      "WebpackServerFunctionsPluginSimple",
+      (compilation) => {
+        compilation.hooks.processAssets.tap(
+          {
+            name: "WebpackServerFunctionsPluginSimple",
+            stage: Compilation.PROCESS_ASSETS_STAGE_REPORT,
+          },
+          (assets) => {
+            // 1. Reemplazar placeholder
+            const manifest = manifestGeneratorPlugin.manifestData;
+            const hashedPath =
+              // "/" +
+              manifest["serverFunctionProxy.js"] || "serverFunctionProxy.js";
 
-          for (const filename of Object.keys(assets)) {
-            let source = assets[filename].source();
-            if (typeof source !== "string") continue;
+            for (const [filename, asset] of Object.entries(assets)) {
+              if (filename.endsWith(".js")) {
+                let code = asset.source();
+                if (code.includes("__SERVER_FUNCTION_PROXY__")) {
+                  code = code.replace(/__SERVER_FUNCTION_PROXY__/g, hashedPath);
+                  compilation.updateAsset(
+                    filename,
+                    new sources.RawSource(code)
+                  );
+                }
+              }
+            }
 
-            if (!source.includes("__SERVER_FUNCTION_PROXY__")) continue;
+            // 2. Recopilar todos los archivos de server functions
+            const serverFunctionsManifest = {};
 
-            const replaced = source.replace(
-              /__SERVER_FUNCTION_PROXY__/g,
-              proxyPath
+            for (const [filename, asset] of Object.entries(assets)) {
+              if (
+                filename.startsWith("server-functions/") &&
+                filename.endsWith(".json")
+              ) {
+                try {
+                  const content = asset.source();
+                  const entry = JSON.parse(content);
+                  serverFunctionsManifest[entry.path] = entry.exports;
+
+                  // Eliminar este archivo temporal
+                  delete assets[filename];
+                } catch (e) {
+                  // Ignorar errores de parsing
+                }
+              }
+            }
+
+            // 3. Generar manifest final
+            const manifestContent = JSON.stringify(
+              serverFunctionsManifest,
+              null,
+              2
             );
-
-            compilation.updateAsset(filename, (old) => ({
-              source: () => replaced,
-              size: () => replaced.length,
-            }));
+            compilation.emitAsset(
+              "server-functions-manifest.json",
+              new sources.RawSource(manifestContent)
+            );
           }
-        }
-      );
-    });
+        );
+      }
+    );
   }
 }
 
-module.exports = ServerFunctionsPlugin;
+module.exports = WebpackServerFunctionsPluginSimple;

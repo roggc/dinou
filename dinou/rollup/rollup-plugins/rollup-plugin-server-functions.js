@@ -1,45 +1,13 @@
 // rollup-plugin-server-functions.js
 const path = require("path");
-const parser = require("@babel/parser");
-const traverse = require("@babel/traverse").default;
+const fs = require("fs/promises");
 const manifestGeneratorPlugin = require("./manifest-generator-plugin");
-
-function parseExports(code) {
-  const ast = parser.parse(code, {
-    sourceType: "module",
-    plugins: ["jsx", "typescript"],
-  });
-  const exports = new Set();
-
-  traverse(ast, {
-    ExportDefaultDeclaration() {
-      exports.add("default");
-    },
-    ExportNamedDeclaration(p) {
-      if (p.node.declaration) {
-        if (p.node.declaration.type === "FunctionDeclaration") {
-          exports.add(p.node.declaration.id.name);
-        } else if (p.node.declaration.type === "VariableDeclaration") {
-          p.node.declaration.declarations.forEach((d) => {
-            if (d.id.type === "Identifier") {
-              exports.add(d.id.name);
-            }
-          });
-        }
-      } else if (p.node.specifiers) {
-        p.node.specifiers.forEach((s) => {
-          if (s.type === "ExportSpecifier") {
-            exports.add(s.exported.name);
-          }
-        });
-      }
-    },
-  });
-
-  return Array.from(exports);
-}
+const parseExports = require("../../core/parse-exports.js");
 
 function serverFunctionsPlugin() {
+  const root = process.cwd();
+  const serverFunctions = new Map(); // Recolectar aquí: Map<relativePath, Set<exports>>
+
   return {
     name: "server-functions-proxy",
     transform(code, id) {
@@ -48,7 +16,10 @@ function serverFunctionsPlugin() {
       const exports = parseExports(code);
       if (exports.length === 0) return null;
 
-      const fileUrl = `file:///${path.relative(process.cwd(), id)}`;
+      const relativePath = path.relative(root, id);
+      serverFunctions.set(relativePath, new Set(exports)); // Guardar exports como Set para uniqueness
+
+      const fileUrl = `file:///${relativePath}`;
 
       // Generamos un módulo que exporta proxies en lugar del código real
       let proxyCode = `
@@ -90,6 +61,26 @@ function serverFunctionsPlugin() {
           );
         }
       }
+
+      // Generar manifest: convertir Map a objeto simple
+      const manifestObj = {};
+      for (const [relPath, exportsSet] of serverFunctions.entries()) {
+        manifestObj[relPath] = Array.from(exportsSet);
+      }
+
+      // Escribir el manifest en la carpeta especificada (ej. mismo lugar que otros assets)
+      const manifestPath = path.join(
+        "server_functions_manifest",
+        "server-functions-manifest.json"
+      );
+      fs.mkdir(path.dirname(manifestPath), { recursive: true })
+        .then(() =>
+          fs.writeFile(manifestPath, JSON.stringify(manifestObj, null, 2))
+        )
+        .then(() => {
+          // console.log(`[rollup-server-functions] Generated manifest at ${manifestPath}`);
+        })
+        .catch(console.error);
     },
   };
 }

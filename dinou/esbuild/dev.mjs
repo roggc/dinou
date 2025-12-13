@@ -14,6 +14,7 @@ const __dirname = path.dirname(__filename);
 const outdir = "public";
 await fs.rm(outdir, { recursive: true, force: true });
 await fs.rm("react_client_manifest", { recursive: true, force: true });
+await fs.rm("server_functions_manifest", { recursive: true, force: true });
 
 let currentCtx = null; // Track the active esbuild context
 let debounceTimer = null; // For debouncing recreations

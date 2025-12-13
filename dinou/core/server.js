@@ -41,6 +41,7 @@ const outputFolder = isDevelopment ? "public" : "dist3";
 const chokidar = require("chokidar");
 const { fileURLToPath } = require("url");
 const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
+const parseExports = require("./parse-exports.js");
 if (isDevelopment) {
   const manifestPath = path.resolve(
     process.cwd(),
@@ -217,6 +218,28 @@ if (isDevelopment) {
   }
   startManifestWatcher();
 }
+let serverFunctionsManifest = null;
+// const devCache = new Map(); // Para dev: Map<absolutePath, Set<exports>>
+
+if (!isDevelopment) {
+  // En prod/build: cargar manifest generado
+  const manifestPath = path.resolve(
+    process.cwd(),
+    isWebpack
+      ? `${outputFolder}/server-functions-manifest.json`
+      : `server_functions_manifest/server-functions-manifest.json`
+  ); // Ajusta 'dist/' a tu outdir
+  if (existsSync(manifestPath)) {
+    serverFunctionsManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    // Convertir arrays a Sets para lookups rápidos
+    for (const key in serverFunctionsManifest) {
+      serverFunctionsManifest[key] = new Set(serverFunctionsManifest[key]);
+    }
+    console.log("[server] Loaded server functions manifest");
+  } else {
+    console.error("[server] Manifest not found - falling back to file reads");
+  }
+}
 const cookieParser = require("cookie-parser");
 const appUseCookieParser = cookieParser();
 const app = express();
@@ -235,6 +258,22 @@ app.get("/.well-known/appspecific/com.chrome.devtools.json", (req, res) => {
   });
 });
 
+let cachedClientManifest = null;
+if (!isDevelopment) {
+  // Carga inicial
+  cachedClientManifest = JSON.parse(
+    readFileSync(
+      path.resolve(
+        process.cwd(),
+        isWebpack
+          ? `${outputFolder}/react-client-manifest.json`
+          : `react_client_manifest/react-client-manifest.json`
+      ),
+      "utf8"
+    )
+  );
+}
+
 app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
   try {
     const reqPath = (
@@ -242,7 +281,17 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
     ).replace("/____rsc_payload____", "");
 
     if (!isDevelopment && Object.keys({ ...req.query }).length === 0) {
-      const payloadPath = path.join("dist2", reqPath, "rsc.rsc");
+      // const payloadPath = path.join("dist2", reqPath, "rsc.rsc");
+      const payloadPath = path.resolve(
+        "dist2",
+        reqPath.replace(/^\//, ""),
+        "rsc.rsc"
+      );
+      const distDir = path.resolve("dist2");
+
+      if (!payloadPath.startsWith(distDir)) {
+        return res.status(403).end();
+      }
       if (existsSync(payloadPath)) {
         res.setHeader("Content-Type", "application/octet-stream");
         const readStream = createReadStream(payloadPath);
@@ -259,16 +308,19 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
       { ...req.cookies },
       isDevelopment
     );
-    const manifest = JSON.parse(
-      readFileSync(
-        path.resolve(
-          isWebpack
-            ? `${outputFolder}/react-client-manifest.json`
-            : `react_client_manifest/react-client-manifest.json`
-        ),
-        "utf8"
-      )
-    );
+    const manifest = isDevelopment
+      ? JSON.parse(
+          readFileSync(
+            path.resolve(
+              process.cwd(),
+              isWebpack
+                ? `${outputFolder}/react-client-manifest.json`
+                : `react_client_manifest/react-client-manifest.json`
+            ),
+            "utf8"
+          )
+        )
+      : cachedClientManifest;
 
     const { pipe } = renderToPipeableStream(jsx, manifest);
     pipe(res);
@@ -284,17 +336,20 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
       req.path.endsWith("/") ? req.path : req.path + "/"
     ).replace("/____rsc_payload_error____", "");
     const jsx = await getErrorJSX(reqPath, { ...req.query }, req.body.error);
-    const manifest = readFileSync(
-      path.resolve(
-        process.cwd(),
-        isWebpack
-          ? `${outputFolder}/react-client-manifest.json`
-          : `react_client_manifest/react-client-manifest.json`
-      ),
-      "utf8"
-    );
-    const moduleMap = JSON.parse(manifest);
-    const { pipe } = renderToPipeableStream(jsx, moduleMap);
+    const manifest = isDevelopment
+      ? JSON.parse(
+          readFileSync(
+            path.resolve(
+              process.cwd(),
+              isWebpack
+                ? `${outputFolder}/react-client-manifest.json`
+                : `react_client_manifest/react-client-manifest.json`
+            ),
+            "utf8"
+          )
+        )
+      : cachedClientManifest;
+    const { pipe } = renderToPipeableStream(jsx, manifest);
     pipe(res);
   } catch (error) {
     console.error("Error rendering RSC:", error);
@@ -337,47 +392,143 @@ app.get(/^\/.*\/?$/, (req, res) => {
 
 app.post("/____server_function____", async (req, res) => {
   try {
+    // 1. Verificar Origin (Prevenir llamadas desde otros dominios)
+    const origin = req.headers.origin;
+    const host = req.headers.host;
+
+    // Nota: En local a veces origin es undefined o null, permitirlo en dev si es necesario
+    if (!isDevelopment && origin && !origin.includes(host)) {
+      return res.status(403).json({ error: "Invalid Origin" });
+    }
+
+    // 2. Verificar Header Personalizado (Defensa CSRF robusta)
+    // Asegúrate de que tu cliente (server-function-proxy.js) envíe este header
+    if (!req.headers["x-server-function-call"]) {
+      return res.status(403).json({ error: "Missing security header" });
+    }
     const { id, args } = req.body;
+
+    // Validación básica de inputs: id debe ser string, args un array
+    if (typeof id !== "string" || !Array.isArray(args)) {
+      return res.status(400).json({ error: "Invalid request body" });
+    }
+
     const [fileUrl, exportName] = id.split("#");
 
-    let relativePath = fileUrl.replace(/^file:\/\/\/?/, "");
+    // Validar fileUrl: debe empezar con 'file://' y no contener caracteres sospechosos
+    if (!fileUrl.startsWith("file://")) {
+      return res.status(400).json({ error: "Invalid file URL format" });
+    }
+
+    // Extraer relativePath y normalizarlo (elimina 'file://' y posibles '/')
+    let relativePath = fileUrl.replace(/^file:\/\/\/?/, "").trim();
+    if (relativePath.startsWith("/") || relativePath.includes("..")) {
+      return res
+        .status(400)
+        .json({ error: "Invalid path: no absolute or traversal allowed" });
+    }
+    // console.log("relPath", relativePath);
+    // Restringir a carpeta 'src/': prepend 'src/' si no está, y resolver absolutePath
+    if (!relativePath.startsWith("src/") && !relativePath.startsWith("src\\")) {
+      relativePath = path.join("src", relativePath);
+    }
     const absolutePath = path.resolve(process.cwd(), relativePath);
 
+    // Verificar que absolutePath esté estrictamente dentro de 'src/'
+    const srcDir = path.resolve(process.cwd(), "src");
+    if (!absolutePath.startsWith(srcDir + path.sep)) {
+      return res
+        .status(403)
+        .json({ error: "Access denied: file outside src directory" });
+    }
+    // console.log("absPath", absolutePath);
+    // Verificar que el archivo exista
+    if (!existsSync(absolutePath)) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    let allowedExports;
+    if (serverFunctionsManifest) {
+      // Prod: usar manifest (relativePath ya está normalizado)
+      allowedExports = serverFunctionsManifest[relativePath];
+    } else {
+      // Dev: usar cache o verificar archivo
+      // allowedExports = devCache.get(absolutePath);
+      // if (!allowedExports) {
+      const fileContent = readFileSync(absolutePath, "utf8"); // Solo lee una vez
+      const firstLine = fileContent.trim().split("\n")[0].trim();
+      if (
+        !firstLine.startsWith('"use server"') &&
+        !firstLine.startsWith("'use server'")
+      ) {
+        return res
+          .status(403)
+          .json({ error: "Not a valid server function file" });
+      }
+      // Parsear exports (necesitas implementar parseExports en server si no lo tienes)
+      const exports = parseExports(fileContent); // Asume que mueves parseExports a un util compartido
+      allowedExports = new Set(exports);
+      // devCache.set(absolutePath, allowedExports);
+      // }
+    }
+
+    // Validar exportName contra allowedExports
+    if (
+      !exportName ||
+      (exportName !== "default" && !allowedExports.has(exportName))
+    ) {
+      return res.status(400).json({ error: "Invalid export name" });
+    }
+
+    // Proceder con la importación (usando tu importModule)
     const mod = await importModule(absolutePath);
 
+    // Validar exportName: solo permitir 'default' u otros si defines una whitelist
+    if (!exportName || (exportName !== "default" && !mod[exportName])) {
+      return res.status(400).json({ error: "Invalid export name" });
+    }
     const fn = exportName === "default" ? mod.default : mod[exportName];
 
     if (typeof fn !== "function") {
       return res.status(400).json({ error: "Export is not a function" });
     }
 
+    // Ejecutar la función con context
     const context = { req, res };
     args.push(context);
+    if (args.length > fn.length + 1) {
+      return res.status(400).json({ error: "Invalid args length" });
+    }
     const result = await fn(...args);
 
+    // Manejo del resultado (igual que antes, pero con chequeos extras si es necesario)
     if (
       result &&
       result.$$typeof === Symbol.for("react.transitional.element")
     ) {
       res.setHeader("Content-Type", "text/x-component");
-      const manifest = readFileSync(
-        path.resolve(
-          process.cwd(),
-          isWebpack
-            ? `${outputFolder}/react-client-manifest.json`
-            : `react_client_manifest/react-client-manifest.json`
-        ),
-        "utf8"
+      const manifestPath = path.resolve(
+        process.cwd(),
+        isWebpack
+          ? `${outputFolder}/react-client-manifest.json`
+          : `react_client_manifest/react-client-manifest.json`
       );
-      const moduleMap = JSON.parse(manifest);
-      const { pipe } = renderToPipeableStream(result, moduleMap);
+      // Verificar que el manifest exista para evitar errores
+      if (!existsSync(manifestPath)) {
+        return res.status(500).json({ error: "Manifest not found" });
+      }
+      const manifest = isDevelopment
+        ? JSON.parse(readFileSync(manifestPath, "utf8"))
+        : cachedClientManifest;
+      const { pipe } = renderToPipeableStream(result, manifest);
       pipe(res);
     } else {
       res.json(result);
     }
   } catch (err) {
-    console.error(`Server function error [${req.body.id}]:`, err);
-    res.status(500).json({ error: err.message });
+    console.error(`Server function error [${req.body?.id}]:`, err);
+    // En producción, no envíes err.message completo para evitar leaks
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

@@ -51,11 +51,24 @@ module.exports = async () => {
         {}
       ),
     },
+    experiments: {
+      outputModule: true,
+    },
     output: {
       path: path.resolve(process.cwd(), outputDirectory),
       filename: "[name]-[contenthash].js",
       publicPath: "/",
       clean: true,
+      library: {
+        type: "module",
+      },
+      environment: {
+        module: true,
+      },
+      // module: true,
+      chunkFormat: "module", // Ensures non-entry chunks (like serverFunctionProxy) output as ESM
+      // // Optional: If webpack renames to .mjs, force .js
+      // chunkFilename: "[name]-[contenthash].js",
     },
     module: {
       noParse: [/dist3/, /public/],
@@ -65,18 +78,7 @@ module.exports = async () => {
         //   include: path.resolve(process.cwd(), "dist3"),
         //   use: "null-loader",
         // },
-        {
-          test: /\.[jt]sx?$/,
-          include: path.resolve(process.cwd(), "src"),
-          use: [
-            {
-              loader: path.resolve(
-                __dirname,
-                "./loaders/server-functions-loader.js"
-              ),
-            },
-          ],
-        },
+
         {
           test: /\.(js|jsx|ts|tsx)$/,
           include: [
@@ -91,7 +93,6 @@ module.exports = async () => {
                 "@babel/preset-typescript",
               ],
               plugins: [
-                "@babel/plugin-transform-modules-commonjs",
                 "@babel/plugin-syntax-import-meta",
                 // isDevelopment && require.resolve("react-refresh/babel"),
               ].filter(Boolean),
@@ -101,6 +102,18 @@ module.exports = async () => {
             /node_modules\/(?!dinou)/,
             path.resolve(process.cwd(), "dist3"),
             path.resolve(process.cwd(), "public"),
+          ],
+        },
+        {
+          test: /\.[jt]sx?$/,
+          include: path.resolve(process.cwd(), "src"),
+          use: [
+            {
+              loader: path.resolve(
+                __dirname,
+                "./loaders/server-functions-loader.js"
+              ),
+            },
           ],
         },
         {
@@ -198,9 +211,11 @@ module.exports = async () => {
           ]
         : [],
     },
-    externals: {
-      __SERVER_FUNCTION_PROXY__: "__SERVER_FUNCTION_PROXY__",
-    },
+    // externals: {
+    //   // __SERVER_FUNCTION_PROXY__: "__SERVER_FUNCTION_PROXY__",
+    //   // "/__SERVER_FUNCTION_PROXY__": "/__SERVER_FUNCTION_PROXY__",
+    //   // serverFunctionProxy: "/serverFunctionProxy.js",
+    // },
     optimization: {
       splitChunks: {
         cacheGroups: {
@@ -215,6 +230,10 @@ module.exports = async () => {
     },
     watchOptions: {
       ignored: ["public/", "dist3/"],
+    },
+    stats: "normal", // o 'verbose' en dev
+    infrastructureLogging: {
+      level: "info",
     },
     ...(isDevelopment
       ? {
@@ -232,6 +251,7 @@ module.exports = async () => {
                 changeOrigin: true,
               },
             ],
+            client: false,
           },
         }
       : {}),
