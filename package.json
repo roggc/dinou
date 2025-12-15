@@ -6,6 +6,10 @@
   "bin": {
     "dinou": "./cli.js"
   },
+  "exports": {
+    ".": "./dinou/index.js"
+  },
+  "types": "./dinou/index.d.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },

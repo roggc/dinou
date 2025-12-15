@@ -42,6 +42,7 @@ const chokidar = require("chokidar");
 const { fileURLToPath } = require("url");
 const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 const parseExports = require("./parse-exports.js");
+const { requestStorage } = require("./request-context.js");
 if (isDevelopment) {
   const manifestPath = path.resolve(
     process.cwd(),
@@ -246,6 +247,25 @@ const app = express();
 app.use(appUseCookieParser);
 app.use(express.json());
 
+function getContext(req, res) {
+  const context = {
+    req: {
+      cookies: { ...req.cookies },
+      headers: { ...req.headers },
+      query: { ...req.query },
+      path: req.path,
+      method: req.method,
+    },
+    res: {
+      clearCookie: res.clearCookie,
+      redirect: res.redirect,
+      setHeader: res.setHeader,
+      status: res.status,
+    },
+  };
+  return context;
+}
+
 app.use(express.static(path.resolve(process.cwd(), outputFolder)));
 
 app.get("/.well-known/appspecific/com.chrome.devtools.json", (req, res) => {
@@ -302,27 +322,31 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
         return readStream.pipe(res);
       }
     }
-    const jsx = await getSSGJSXOrJSX(
-      reqPath,
-      { ...req.query },
-      { ...req.cookies },
-      isDevelopment
-    );
-    const manifest = isDevelopment
-      ? JSON.parse(
-          readFileSync(
-            path.resolve(
-              process.cwd(),
-              isWebpack
-                ? `${outputFolder}/react-client-manifest.json`
-                : `react_client_manifest/react-client-manifest.json`
-            ),
-            "utf8"
+    const context = getContext(req, res);
+    const pipe = await requestStorage.run(context, async () => {
+      const jsx = await getSSGJSXOrJSX(
+        reqPath,
+        { ...req.query },
+        { ...req.cookies },
+        isDevelopment
+      );
+      const manifest = isDevelopment
+        ? JSON.parse(
+            readFileSync(
+              path.resolve(
+                process.cwd(),
+                isWebpack
+                  ? `${outputFolder}/react-client-manifest.json`
+                  : `react_client_manifest/react-client-manifest.json`
+              ),
+              "utf8"
+            )
           )
-        )
-      : cachedClientManifest;
+        : cachedClientManifest;
 
-    const { pipe } = renderToPipeableStream(jsx, manifest);
+      const { pipe } = renderToPipeableStream(jsx, manifest);
+      return pipe;
+    });
     pipe(res);
   } catch (error) {
     console.error("Error rendering RSC:", error);
@@ -371,10 +395,24 @@ app.get(/^\/.*\/?$/, (req, res) => {
       }
     }
 
+    const contextForChild = {
+      req: {
+        // Solo serializa lo necesario para getContext().req
+        query: { ...req.query },
+        cookies: { ...req.cookies },
+        headers: { ...req.headers },
+        path: req.path,
+        method: req.method,
+      },
+      // No incluyas res aquí
+    };
+
     const appHtmlStream = renderAppToHtml(
       reqPath,
       JSON.stringify({ ...req.query }),
-      JSON.stringify({ ...req.cookies })
+      JSON.stringify({ ...req.cookies }),
+      contextForChild,
+      res
     );
 
     res.setHeader("Content-Type", "text/html");
@@ -494,12 +532,11 @@ app.post("/____server_function____", async (req, res) => {
     }
 
     // Ejecutar la función con context
-    const context = { req, res };
-    args.push(context);
-    if (args.length > fn.length + 1) {
-      return res.status(400).json({ error: "Invalid args length" });
-    }
-    const result = await fn(...args);
+    const context = getContext(req, res);
+    const result = await requestStorage.run(context, async () => {
+      // La función del usuario (fn) es llamada SÓLO con los args que envía el cliente.
+      return await fn(...args);
+    });
 
     // Manejo del resultado (igual que antes, pero con chequeos extras si es necesario)
     if (

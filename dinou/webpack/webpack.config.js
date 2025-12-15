@@ -211,11 +211,9 @@ module.exports = async () => {
           ]
         : [],
     },
-    // externals: {
-    //   // __SERVER_FUNCTION_PROXY__: "__SERVER_FUNCTION_PROXY__",
-    //   // "/__SERVER_FUNCTION_PROXY__": "/__SERVER_FUNCTION_PROXY__",
-    //   // serverFunctionProxy: "/serverFunctionProxy.js",
-    // },
+    externals: {
+      dinou: "dinou",
+    },
     optimization: {
       splitChunks: {
         cacheGroups: {

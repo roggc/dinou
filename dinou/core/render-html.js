@@ -31,6 +31,8 @@ const { getErrorJSX } = require("./get-error-jsx");
 const { renderJSXToClientJSX } = require("./render-jsx-to-client-jsx");
 const isDevelopment = process.env.NODE_ENV !== "production";
 const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
+const { requestStorage } = require("./request-context.js"); // Asumimos que está aquí
+const { createResponseProxy } = require("./context-proxy.js"); // ⬅️ Nuevo
 
 function formatErrorHtml(error) {
   const message = error.message || "Unknown error";
@@ -122,13 +124,25 @@ function writeErrorOutput(error, isProd) {
   );
 }
 
-async function renderToStream(reqPath, query, cookies = {}) {
+async function renderToStream(reqPath, query, cookies = {}, serializedBox) {
   try {
-    const jsx =
-      Object.keys(query).length || isDevelopment || Object.keys(cookies).length
+    const context = {
+      // Datos serializados de req (query, headers, cookies, etc.)
+      req: serializedBox.req,
+
+      // Usamos el Proxy en lugar del objeto res real
+      res: createResponseProxy(),
+    };
+    const jsx = await requestStorage.run(context, async () => {
+      // Dentro de aquí, cualquier llamada a getContext() funcionará
+
+      return Object.keys(query).length ||
+        isDevelopment ||
+        Object.keys(cookies).length
         ? renderJSXToClientJSX(await getJSX(reqPath, query, cookies))
         : (await getSSGJSX(reqPath)) ??
-          renderJSXToClientJSX(await getJSX(reqPath, query, cookies));
+            renderJSXToClientJSX(await getJSX(reqPath, query, cookies));
+    });
 
     const stream = renderToPipeableStream(jsx, {
       onError(error) {
@@ -202,6 +216,7 @@ async function renderToStream(reqPath, query, cookies = {}) {
 const reqPath = process.argv[2];
 const query = JSON.parse(process.argv[3]);
 const cookies = JSON.parse(process.argv[4] || "{}");
+const serializedBox = JSON.parse(process.argv[5] || "{}");
 
 process.on("uncaughtException", (error) => {
   process.stdout.write(formatErrorHtml(error));
@@ -226,4 +241,4 @@ process.on("unhandledRejection", (reason) => {
   process.exit(1);
 });
 
-renderToStream(reqPath, query, cookies);
+renderToStream(reqPath, query, cookies, serializedBox);
