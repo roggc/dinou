@@ -7,6 +7,7 @@ const traverse = require("@babel/traverse");
 const crypto = require("node:crypto");
 const { regex: assetRegex } = require("../../core/asset-extensions.js");
 const { getAbsPathWithExt } = require("../../core/get-abs-path-with-ext.js");
+const { useClientRegex, useServerRegex } = require("../../constants.js");
 
 const normalizePath = (p) => p.split(path.sep).join(path.posix.sep);
 
@@ -77,18 +78,14 @@ async function getCSSEntries({
 
       if (!isTopLevelClientComponent) {
         // Verificar si es un client component
-        const isImportedFileClient = /^(['"])use client\1/.test(
-          importedCode.trim()
-        );
+        const isImportedFileClient = useClientRegex.test(importedCode.trim());
 
         // Si es client component, NO procesar recursivamente
         if (isImportedFileClient) {
           continue; // No procesar recursivamente client components
         }
       } else {
-        const isImportedFileServer = /^(['"])use server\1/.test(
-          importedCode.trim()
-        );
+        const isImportedFileServer = useServerRegex.test(importedCode.trim());
 
         if (isImportedFileServer) {
           continue;
@@ -187,7 +184,7 @@ async function getCSSEntries({
   // Gather client modules and update manifest entries
   for (const absPath of files) {
     const code = readFileSync(absPath, "utf8");
-    const isClientModule = /^(['"])use client\1/.test(code.trim());
+    const isClientModule = useClientRegex.test(code.trim());
     const normalizedPath = normalizePath(absPath);
 
     if (isClientModule) {

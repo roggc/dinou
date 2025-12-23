@@ -15,7 +15,10 @@ function parseExports(code) {
     },
     ExportNamedDeclaration(p) {
       if (p.node.declaration) {
-        if (p.node.declaration.type === "FunctionDeclaration") {
+        if (
+          p.node.declaration.type === "FunctionDeclaration" ||
+          p.node.declaration.type === "ClassDeclaration"
+        ) {
           exports.add(p.node.declaration.id.name);
         } else if (p.node.declaration.type === "VariableDeclaration") {
           p.node.declaration.declarations.forEach((d) => {

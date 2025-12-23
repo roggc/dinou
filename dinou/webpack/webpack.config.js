@@ -215,13 +215,34 @@ module.exports = async () => {
       dinou: "dinou",
     },
     optimization: {
+      // 2. RUNTIME CHUNK: Vital para compartir el estado de los módulos entre entry points
+      runtimeChunk: "single",
+
       splitChunks: {
+        chunks: "all", // Aplica a async y sync chunks
         cacheGroups: {
+          // Grupo específico para React y librerías críticas
+          reactVendor: {
+            test: /[\\/]node_modules[\\/](react|react-dom|react-server-dom-webpack|scheduler)[\\/]/,
+            name: "vendor-react",
+            priority: 40, // Prioridad alta para asegurar que se agrupen aquí
+            chunks: "all",
+            enforce: true,
+          },
+          // Tus estilos (lo que ya tenías)
           styles: {
             name: "styles",
             type: "css/mini-extract",
             chunks: "all",
             enforce: true,
+          },
+          // Resto de node_modules
+          defaultVendors: {
+            test: /[\\/]node_modules[\\/]/,
+            name: "vendors",
+            priority: 20,
+            chunks: "all",
+            reuseExistingChunk: true,
           },
         },
       },

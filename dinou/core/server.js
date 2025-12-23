@@ -43,6 +43,8 @@ const { fileURLToPath } = require("url");
 const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 const parseExports = require("./parse-exports.js");
 const { requestStorage } = require("./request-context.js");
+const { useServerRegex } = require("../constants.js");
+const processLimiter = require("./concurrency-manager.js");
 if (isDevelopment) {
   const manifestPath = path.resolve(
     process.cwd(),
@@ -248,19 +250,122 @@ app.use(appUseCookieParser);
 app.use(express.json());
 
 function getContext(req, res) {
+  // Helper para ejecutar métodos de res de forma segura
+  const safeResCall = (methodName, ...args) => {
+    if (res.headersSent) {
+      // console.log(
+      //   `[Dinou] res.${methodName} called but headers already sent. Ignoring.`
+      // );
+      // console.warn(
+      //   `[Dinou Warning] RSC Stream activo. Ignorando res.${methodName}() para evitar crash.`
+      // );
+      return; // Salimos silenciosamente
+    }
+    if (methodName === "redirect") {
+      function safeRedirect(url) {
+        if (url.startsWith("/") && !url.startsWith("//")) {
+          // Es segura (relativa)
+          res.redirect.apply(res, [url]);
+        } else {
+          // Es externa o peligrosa, forzar home o validar dominio
+          res.redirect.apply(res, ["/"]);
+        }
+      }
+      return safeRedirect(args[0]);
+    }
+    // Ejecutamos manteniendo el contexto 'this' con bind/apply
+    return res[methodName].apply(res, args);
+  };
+
   const context = {
     req: {
       cookies: { ...req.cookies },
-      headers: { ...req.headers },
+      headers: {
+        "user-agent": req.headers["user-agent"],
+        cookie: req.headers["cookie"],
+        referer: req.headers["referer"],
+        host: req.headers["host"],
+      },
       query: { ...req.query },
       path: req.path,
       method: req.method,
     },
     res: {
-      clearCookie: res.clearCookie,
-      redirect: res.redirect,
-      setHeader: res.setHeader,
-      status: res.status,
+      // 1. STATUS
+      status: (code) => safeResCall("status", code),
+
+      // 2. SET HEADER
+      setHeader: (name, value) => safeResCall("setHeader", name, value),
+
+      // 3. CLEAR COOKIE
+      // Nota: Si headersSent es true, la cookie NO se borrará en esta petición RSC.
+      // Si es vital borrarla, deberías manejarlo en el Client Component o en una API route aparte.
+      clearCookie: (name, options) => safeResCall("clearCookie", name, options),
+
+      // 4. REDIRECT (Tu wrapper inteligente existente)
+      redirect: (...args) => safeResCall("redirect", ...args),
+      // redirect: (...args) => {
+      //   if (res.headersSent) {
+      //     // No hacemos nada en el objeto res.
+      //     // Confiamos en que tu Server Function devolverá <ClientRedirect />
+      //     return;
+      //   }
+      //   res.redirect.apply(res, args);
+      // },
+    },
+  };
+  return context;
+}
+
+function getContextForServerFunctionEndpoint(req, res) {
+  const context = {
+    req: {
+      cookies: { ...req.cookies },
+      headers: {
+        "user-agent": req.headers["user-agent"],
+        cookie: req.headers["cookie"],
+        referer: req.headers["referer"],
+        host: req.headers["host"],
+      },
+      query: { ...req.query },
+      path: req.path,
+      method: req.method,
+    },
+    res: {
+      redirect: (urlOrStatus, url) => {
+        const targetUrl = url || urlOrStatus;
+        // Lanzamos un objeto especial que el endpoint interceptará
+        throw {
+          $$type: "dinou-internal-redirect",
+          url: targetUrl,
+        };
+      },
+      status: (code) => {
+        res.status(code);
+      },
+      setHeader: (n, v) => {
+        res.setHeader(n, v);
+      },
+      clearCookie: (name, options) => {
+        const path = options?.path || "/";
+
+        if (!res.headersSent) {
+          res.setHeader("Content-Type", "text/x-component");
+        }
+
+        // 🛡️ SOLUCIÓN SEGURA:
+        // 1. Usamos JSON.stringify para que 'name' sea una string válida de JS (ej: "miCookie")
+        // 2. Usamos JSON.stringify para 'path' también (seguridad total)
+        // 3. NO ponemos comillas extra alrededor de ${...} en el template string
+        // 4. Usamos el operador '+' de JavaScript dentro del script para unir las piezas
+
+        const safeName = JSON.stringify(name); // Devuelve: "dinou-cookie"
+        const safePath = JSON.stringify(path); // Devuelve: "/"
+
+        res.write(
+          `<script>document.cookie = ${safeName} + "=; Max-Age=0; path=" + ${safePath} + ";";</script>`
+        );
+      },
     },
   };
   return context;
@@ -400,33 +505,74 @@ app.get(/^\/.*\/?$/, (req, res) => {
         // Solo serializa lo necesario para getContext().req
         query: { ...req.query },
         cookies: { ...req.cookies },
-        headers: { ...req.headers },
+        headers: {
+          "user-agent": req.headers["user-agent"],
+          cookie: req.headers["cookie"],
+          referer: req.headers["referer"],
+          host: req.headers["host"],
+        },
         path: req.path,
         method: req.method,
       },
       // No incluyas res aquí
     };
+    processLimiter
+      .run(async () => {
+        const appHtmlStream = renderAppToHtml(
+          reqPath,
+          JSON.stringify({ ...req.query }),
+          JSON.stringify({ ...req.cookies }),
+          contextForChild,
+          res
+        );
 
-    const appHtmlStream = renderAppToHtml(
-      reqPath,
-      JSON.stringify({ ...req.query }),
-      JSON.stringify({ ...req.cookies }),
-      contextForChild,
-      res
-    );
+        res.setHeader("Content-Type", "text/html");
+        appHtmlStream.pipe(res);
 
-    res.setHeader("Content-Type", "text/html");
-    appHtmlStream.pipe(res);
-
-    appHtmlStream.on("error", (error) => {
-      console.error("Stream error:", error);
-      res.status(500).send("Internal Server Error");
-    });
+        // 💡 TRUCO: Queremos liberar el slot de concurrencia SOLO cuando
+        // el stream haya terminado de enviarse o haya error.
+        await new Promise((resolve) => {
+          appHtmlStream.on("end", resolve);
+          appHtmlStream.on("error", (error) => {
+            console.error("Stream error:", error);
+            resolve();
+            res.status(500).send("Internal Server Error");
+          }); // Liberamos aunque falle
+          res.on("close", resolve); // Si el usuario cierra la pestaña
+        });
+      })
+      .catch((err) => {
+        console.error("Error en SSR limitado:", err);
+        if (!res.headersSent) res.status(500).send("Server Busy or Error");
+      });
   } catch (error) {
     console.error("Error rendering React app:", error);
     res.status(500).send("Internal Server Error");
   }
 });
+
+// Helper function para verificar origen
+function isOriginAllowed(req) {
+  // 1. En entornos server-to-server o tools, a veces no hay Origin.
+  // Si decides que es obligatorio, devuelve false aquí.
+  // Pero navegadores modernos SIEMPRE envían Origin en POST.
+  const origin = req.headers.origin;
+
+  // Si no hay origin (ej: llamada curl o server-side fetch sin headers),
+  // tú decides si ser estricto o permisivo.
+  if (!origin) return false; // Cambia a true si quieres permitir sin origin.
+
+  try {
+    // Parseamos para ignorar protocolo (http/https) y puerto si difieren sutilmente
+    const originHost = new URL(origin).host;
+    const serverHost = req.headers.host;
+
+    // Comparamos el host (dominio:puerto)
+    return originHost === serverHost;
+  } catch (e) {
+    return false; // Si la URL del origin es inválida, rechazar.
+  }
+}
 
 app.post("/____server_function____", async (req, res) => {
   try {
@@ -441,8 +587,16 @@ app.post("/____server_function____", async (req, res) => {
 
     // 2. Verificar Header Personalizado (Defensa CSRF robusta)
     // Asegúrate de que tu cliente (server-function-proxy.js) envíe este header
-    if (!req.headers["x-server-function-call"]) {
+    if (req.headers["x-server-function-call"] !== "1") {
       return res.status(403).json({ error: "Missing security header" });
+    }
+
+    // 2. Check del Origin (NUEVO)
+    if (!isDevelopment && !isOriginAllowed(req)) {
+      console.error(
+        `[Security] Blocked request from origin: ${req.headers.origin}`
+      );
+      return res.status(403).json({ error: "Origin not allowed" });
     }
     const { id, args } = req.body;
 
@@ -494,11 +648,7 @@ app.post("/____server_function____", async (req, res) => {
       // allowedExports = devCache.get(absolutePath);
       // if (!allowedExports) {
       const fileContent = readFileSync(absolutePath, "utf8"); // Solo lee una vez
-      const firstLine = fileContent.trim().split("\n")[0].trim();
-      if (
-        !firstLine.startsWith('"use server"') &&
-        !firstLine.startsWith("'use server'")
-      ) {
+      if (!useServerRegex.test(fileContent)) {
         return res
           .status(403)
           .json({ error: "Not a valid server function file" });
@@ -531,19 +681,42 @@ app.post("/____server_function____", async (req, res) => {
       return res.status(400).json({ error: "Export is not a function" });
     }
 
-    // Ejecutar la función con context
-    const context = getContext(req, res);
-    const result = await requestStorage.run(context, async () => {
-      // La función del usuario (fn) es llamada SÓLO con los args que envía el cliente.
-      return await fn(...args);
-    });
+    await processLimiter.run(async () => {
+      const context = getContextForServerFunctionEndpoint(req, res);
 
-    // Manejo del resultado (igual que antes, pero con chequeos extras si es necesario)
-    if (
-      result &&
-      result.$$typeof === Symbol.for("react.transitional.element")
-    ) {
-      res.setHeader("Content-Type", "text/x-component");
+      let result;
+      try {
+        result = await requestStorage.run(context, async () => {
+          return await fn(...args);
+        });
+      } catch (err) {
+        // 💡 INTERCEPTAMOS LA REDIRECCIÓN
+        if (err && err.$$type === "dinou-internal-redirect") {
+          // 1. Saneamos la URL siempre
+          const safeUrl = JSON.stringify(err.url);
+          const script = `<script>window.location.href = ${safeUrl};</script>`;
+
+          if (!res.headersSent) {
+            // ESCENARIO A: Limpio (Content-Type html)
+            res.setHeader("Content-Type", "text/html");
+            return res.send(script); // res.send hace end() y return detiene la función
+          } else {
+            // ESCENARIO B: Sucio/Stream activo (Content-Type ya fijado por clearCookie)
+            // Escribimos el script en el stream existente
+            res.write(script);
+
+            // ⚠️ IMPORTANTE:
+            // 1. Cerramos la respuesta, ya que redireccionamos y no habrá RSC payload.
+            res.end();
+
+            // 2. DETENEMOS la ejecución para que no siga hacia res.json() abajo.
+            return;
+          }
+        }
+        throw err; // Si es otro error, lo lanzamos al catch externo
+      }
+
+      if (!res.headersSent) res.setHeader("Content-Type", "text/x-component");
       const manifestPath = path.resolve(
         process.cwd(),
         isWebpack
@@ -559,9 +732,7 @@ app.post("/____server_function____", async (req, res) => {
         : cachedClientManifest;
       const { pipe } = renderToPipeableStream(result, manifest);
       pipe(res);
-    } else {
-      res.json(result);
-    }
+    });
   } catch (err) {
     console.error(`Server function error [${req.body?.id}]:`, err);
     // En producción, no envíes err.message completo para evitar leaks

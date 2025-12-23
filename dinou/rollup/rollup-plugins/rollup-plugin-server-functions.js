@@ -3,6 +3,7 @@ const path = require("path");
 const fs = require("fs/promises");
 const manifestGeneratorPlugin = require("./manifest-generator-plugin");
 const parseExports = require("../../core/parse-exports.js");
+const { useServerRegex } = require("../../constants.js");
 
 function serverFunctionsPlugin() {
   const root = process.cwd();
@@ -11,7 +12,7 @@ function serverFunctionsPlugin() {
   return {
     name: "server-functions-proxy",
     transform(code, id) {
-      if (!code.trim().startsWith('"use server"')) return null;
+      if (!useServerRegex.test(code.trim())) return null;
 
       const exports = parseExports(code);
       if (exports.length === 0) return null;

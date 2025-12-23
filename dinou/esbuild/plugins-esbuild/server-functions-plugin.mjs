@@ -1,6 +1,7 @@
 import path from "path";
 import fs from "node:fs/promises";
 import parseExports from "../../core/parse-exports.js";
+import { useServerRegex } from "../../constants.js";
 
 export default function serverFunctionsPlugin(manifestData = {}) {
   return {
@@ -13,7 +14,7 @@ export default function serverFunctionsPlugin(manifestData = {}) {
       build.onLoad({ filter: /\.[jt]sx?$/ }, async (args) => {
         const code = await fs.readFile(args.path, "utf8");
 
-        if (!code.trim().startsWith('"use server"')) return null;
+        if (!useServerRegex.test(code.trim())) return null;
 
         const exports = parseExports(code);
         if (exports.length === 0) return null;

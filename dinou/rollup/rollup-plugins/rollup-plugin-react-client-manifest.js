@@ -8,6 +8,8 @@ const traverse = require("@babel/traverse").default;
 const { regex } = require("../../core/asset-extensions.js");
 const createScopedName = require("../../core/createScopedName.js");
 const { getAbsPathWithExt } = require("../../core/get-abs-path-with-ext.js");
+const { useClientRegex } = require("../../constants.js");
+const { parseExports } = require("../../core/parse-exports.js");
 
 function reactClientManifestPlugin({
   srcDir = path.resolve("src"),
@@ -17,45 +19,6 @@ function reactClientManifestPlugin({
   const manifest = {};
   const clientModules = new Set();
   const serverModules = new Set();
-
-  function parseExports(code) {
-    const ast = parser.parse(code, {
-      sourceType: "module",
-      plugins: ["jsx", "typescript"],
-    });
-
-    const exports = new Set();
-
-    traverse(ast, {
-      ExportDefaultDeclaration(path) {
-        exports.add("default");
-      },
-      ExportNamedDeclaration(path) {
-        if (path.node.declaration) {
-          if (
-            path.node.declaration.type === "FunctionDeclaration" ||
-            path.node.declaration.type === "ClassDeclaration"
-          ) {
-            exports.add(path.node.declaration.id.name);
-          } else if (path.node.declaration.type === "VariableDeclaration") {
-            path.node.declaration.declarations.forEach((decl) => {
-              if (decl.id.type === "Identifier") {
-                exports.add(decl.id.name);
-              }
-            });
-          }
-        } else if (path.node.specifiers) {
-          path.node.specifiers.forEach((spec) => {
-            if (spec.type === "ExportSpecifier") {
-              exports.add(spec.exported.name);
-            }
-          });
-        }
-      },
-    });
-
-    return exports;
-  }
 
   function updateManifestForModule(absPath, code, isClientModule) {
     const fileUrl = pathToFileURL(absPath).href;
@@ -234,7 +197,7 @@ function reactClientManifestPlugin({
       for (const absPath of files) {
         const code = readFileSync(absPath, "utf8");
         const normalizedPath = absPath.split(path.sep).join(path.posix.sep);
-        const isClientModule = /^(['"])use client\1/.test(code.trim());
+        const isClientModule = useClientRegex.test(code.trim());
 
         if (isClientModule) {
           clientModules.add(normalizedPath);
@@ -300,7 +263,7 @@ function reactClientManifestPlugin({
         return;
       }
       const code = readFileSync(id, "utf8");
-      const isClientModule = /^(['"])use client\1/.test(code.trim());
+      const isClientModule = useClientRegex.test(code.trim());
 
       updateManifestForModule(id, code, isClientModule);
 

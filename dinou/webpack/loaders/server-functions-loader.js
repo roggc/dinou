@@ -1,6 +1,7 @@
 // server-functions-loader-simple.js
 const path = require("path");
 const parseExports = require("../../core/parse-exports.js");
+const { useServerRegex } = require("../../constants.js");
 
 module.exports = function (source) {
   // Detect "use server"
@@ -8,11 +9,7 @@ module.exports = function (source) {
   let hasUseServer = false;
 
   for (const line of lines) {
-    const trimmed = line.trim();
-    if (
-      trimmed.startsWith('"use server"') ||
-      trimmed.startsWith("'use server'")
-    ) {
+    if (useServerRegex.test(line.trim())) {
       hasUseServer = true;
       break;
     }

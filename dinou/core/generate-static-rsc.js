@@ -41,7 +41,7 @@ async function generateStaticRSC(reqPath) {
       fileStream.on("error", reject);
     });
 
-    console.log("✅ Generated RSC payload:", finalReqPath);
+    console.log("✅ Generated RSC payload (ISR):", finalReqPath);
   } catch (error) {
     console.error("❌ Error generating RSC payload for:", finalReqPath, error);
   }
