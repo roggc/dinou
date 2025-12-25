@@ -9,7 +9,7 @@ const { regex } = require("../../core/asset-extensions.js");
 const createScopedName = require("../../core/createScopedName.js");
 const { getAbsPathWithExt } = require("../../core/get-abs-path-with-ext.js");
 const { useClientRegex } = require("../../constants.js");
-const { parseExports } = require("../../core/parse-exports.js");
+const parseExports = require("../../core/parse-exports.js");
 
 function reactClientManifestPlugin({
   srcDir = path.resolve("src"),

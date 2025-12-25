@@ -373,6 +373,44 @@ function getContextForServerFunctionEndpoint(req, res) {
 
 app.use(express.static(path.resolve(process.cwd(), outputFolder)));
 
+app.use((req, res, next) => {
+  // Asegúrate de NO devolver 200 si lo que piden es un .js que no existe
+  if (
+    req.path.endsWith(".js") ||
+    req.path.endsWith(".css") ||
+    req.path.endsWith(".png") ||
+    req.path.endsWith(".jpg") ||
+    req.path.endsWith(".svg") ||
+    req.path.endsWith(".webp") ||
+    req.path.endsWith(".ico") ||
+    req.path.endsWith(".json")
+  ) {
+    return res.status(404).send("Not found");
+  }
+  next();
+  // ... renderizado de Dinou ...
+});
+
+let isReady = isDevelopment; // En dev siempre estamos listos (o casi)
+
+// 1. Middleware de "Bloqueo" (Poner ANTES de tus rutas de Dinou, pero DESPUÉS de express.static)
+// Orden ideal:
+// app.use(express.static(...));
+// app.use(middlewareDeAssets404QueHicimosAntes);
+
+app.use((req, res, next) => {
+  // Si estamos en PROD y aun no terminó generateStatic...
+  if (!isReady) {
+    // Opcional: Permitir health-checks o assets si quieres
+    // if (req.path.endsWith('.js')) return next();
+
+    // Devolvemos 503 (Service Unavailable)
+    // Playwright entiende que 503 significa "Sigue esperando"
+    return res.status(503).send("Server warming up (generating static)...");
+  }
+  next();
+});
+
 app.get("/.well-known/appspecific/com.chrome.devtools.json", (req, res) => {
   res.setHeader("Content-Type", "application/json");
   res.json({
@@ -748,5 +786,6 @@ app.listen(port, async () => {
   } else {
     console.log("⚙️ Rendering dynamically in dev mode");
   }
+  isReady = true;
   console.log(`Listening on port ${port}`);
 });

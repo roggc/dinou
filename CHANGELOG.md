@@ -5,15 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.0.0]
+
+### Security
+
+- BREAKING: Server functions no longer receive context as the last argument.
+- FEATURE: Added getContext() for cleaner, import-based context access.
+
+### Fixed
+
+- FIX: Fixed BigInt/Map serialization using RSC stream instead of JSON.
+
 ## [3.0.6]
 
-## Security
+### Security
 
 - Fix: Use fixes from React versions 19.2.3 and improve security of server function endpoint.
 
 ## [3.0.5]
 
-## Security
+### Security
 
 - Fix: set minimum version for react-server-dom-webpack to 19.2.1.
 
