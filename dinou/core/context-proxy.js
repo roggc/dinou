@@ -2,13 +2,15 @@
 
 /**
  * Crea un objeto proxy que intercepta las llamadas a métodos de respuesta
- * (como clearCookie) y las envía al proceso padre (Express Handler) a través de IPC.
+ * y las envía al proceso padre (Express Handler) a través de IPC.
  * @returns {object} El objeto proxy que simula la respuesta de Express.
  */
 function createResponseProxy() {
+  // const proxyId = Math.random().toString(36).substring(7);
+  // console.log(`[Proxy] Creado nuevo proxy con ID: ${proxyId}`);
   // Función central para enviar comandos al proceso padre
   function sendCommand(command, args) {
-    // fork garantiza que process.send exista en el proceso hijo
+    // console.log(`[Dinou] Sending context command to parent: ${command}`, args);
     if (typeof process.send === "function") {
       process.send({
         type: "DINOU_CONTEXT_COMMAND",
@@ -16,7 +18,6 @@ function createResponseProxy() {
         args,
       });
     } else {
-      // Esto solo debería ocurrir si el componente se ejecuta fuera del entorno Dinou
       console.warn(
         `[Dinou] Attempted to run context command "${command}" outside of a child process.`
       );
@@ -24,32 +25,41 @@ function createResponseProxy() {
   }
 
   return {
-    // 1. Proxy para eliminar/limpiar cookies
+    // _proxyId: proxyId,
+    // 1. Proxy para eliminar cookies
     clearCookie: (name, options) => {
       sendCommand("clearCookie", [name, options]);
     },
 
-    // 2. Proxy para establecer encabezados (headers)
-    setHeader: (name, value) => {
-      sendCommand("setHeader", [name, options]);
+    // 2. 👇 AÑADIDO: Proxy para establecer cookies
+    // Esto enviará [name, value, options] al 'render-app-to-html.js'
+    cookie: (name, value, options) => {
+      // console.warn(`[Dinou] Proxying cookie set command for cookie: ${name}`);
+      sendCommand("cookie", [name, value, options]);
     },
 
-    // 3. Proxy para redirigir (opcional, pero útil para SSR)
-    // Nota: Esto solo envía el comando, el proceso padre debe detener el renderizado
-    redirect: (status, url) => {
-      if (typeof url === "undefined") {
-        url = status;
-        status = 302;
-      }
-      // Enviamos el comando y el estado de la respuesta
-      sendCommand("status", [status]);
-      sendCommand("redirect", [url]);
+    // 3. Proxy para establecer encabezados
+    setHeader: (name, value) => {
+      sendCommand("setHeader", [name, value]);
     },
+
+    // 4. Proxy para redirigir
+    // MEJORA: Pasamos los argumentos tal cual al padre para que él aplique
+    // la lógica de seguridad (safeRedirect) y decida el status.
+    redirect: (arg1, arg2) => {
+      // arg1 puede ser status o url
+      // arg2 es url (si arg1 es status) o undefined
+      if (arg2) {
+        sendCommand("redirect", [arg1, arg2]); // [status, url]
+      } else {
+        sendCommand("redirect", [arg1]); // [url]
+      }
+    },
+
+    // 5. Proxy para status code
     status: (code) => {
       sendCommand("status", [code]);
     },
-
-    // Si necesitas más funciones de respuesta (ej. set, send, etc.), añádelas aquí.
   };
 }
 

@@ -43,6 +43,14 @@ async function generateStaticPages(routes) {
       // ---------------------------------------------------------
       const mockRes = {
         headersSent: true, // Forzamos modo "streaming/script injection"
+        _cookies: [], // Opcional: para debug
+
+        // 👇 AÑADIR ESTE MÉTODO
+        cookie(name, value, options) {
+          // En SSG no hacemos nada real, pero guardamos registro si quieres debuguear
+          // console.log(`[SSG] Cookie set ignored: ${name}=${value}`);
+          this._cookies.push({ name, value, options });
+        },
 
         write: (chunk) => {
           if (!fileStream.writableEnded) fileStream.write(chunk);

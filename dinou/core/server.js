@@ -253,25 +253,37 @@ function getContext(req, res) {
   // Helper para ejecutar métodos de res de forma segura
   const safeResCall = (methodName, ...args) => {
     if (res.headersSent) {
-      // console.log(
-      //   `[Dinou] res.${methodName} called but headers already sent. Ignoring.`
-      // );
+      console.log(
+        `[Dinou] res.${methodName} called but headers already sent. Ignoring.`
+      );
       // console.warn(
       //   `[Dinou Warning] RSC Stream activo. Ignorando res.${methodName}() para evitar crash.`
       // );
       return; // Salimos silenciosamente
     }
     if (methodName === "redirect") {
-      function safeRedirect(url) {
-        if (url.startsWith("/") && !url.startsWith("//")) {
-          // Es segura (relativa)
-          res.redirect.apply(res, [url]);
+      // 1. Normalizar argumentos (Status y URL)
+      let url = args[0];
+      let status = 302; // Default
+
+      if (args.length === 2) {
+        status = args[0];
+        url = args[1];
+      }
+
+      function safeRedirect(targetUrl) {
+        // Validamos que sea string antes de llamar a startsWith
+        if (
+          typeof targetUrl === "string" &&
+          targetUrl.startsWith("/") &&
+          !targetUrl.startsWith("//")
+        ) {
+          res.redirect.apply(res, [status, targetUrl]);
         } else {
-          // Es externa o peligrosa, forzar home o validar dominio
-          res.redirect.apply(res, ["/"]);
+          res.redirect.apply(res, [status, "/"]);
         }
       }
-      return safeRedirect(args[0]);
+      return safeRedirect(url);
     }
     // Ejecutamos manteniendo el contexto 'this' con bind/apply
     return res[methodName].apply(res, args);
@@ -301,6 +313,8 @@ function getContext(req, res) {
       // Nota: Si headersSent es true, la cookie NO se borrará en esta petición RSC.
       // Si es vital borrarla, deberías manejarlo en el Client Component o en una API route aparte.
       clearCookie: (name, options) => safeResCall("clearCookie", name, options),
+      cookie: (name, value, options) =>
+        safeResCall("cookie", name, value, options),
 
       // 4. REDIRECT (Tu wrapper inteligente existente)
       redirect: (...args) => safeResCall("redirect", ...args),
@@ -341,26 +355,71 @@ function getContextForServerFunctionEndpoint(req, res) {
         };
       },
       status: (code) => {
-        res.status(code);
+        // Si ya hay stream, no podemos cambiar el status, lo ignoramos o logueamos warning
+        if (!res.headersSent) res.status(code);
       },
       setHeader: (n, v) => {
-        res.setHeader(n, v);
+        if (!res.headersSent) res.setHeader(n, v);
       },
+
+      // ============================================================
+      // IMPLEMENTACIÓN DE COOKIE (Híbrida: Headers + Script Injection)
+      // ============================================================
+      cookie: (name, value, options) => {
+        // ESCENARIO A: Aún no hemos empezado a responder
+        // Usamos el método nativo de Express. Es lo mejor.
+        if (!res.headersSent) {
+          // Aseguramos el Content-Type correcto si es el primer write
+          res.setHeader("Content-Type", "text/x-component");
+          res.cookie(name, value, options);
+          return;
+        }
+
+        // ESCENARIO B: Streaming activo (Headers Sent)
+        // Inyectamos JavaScript.
+
+        // 🛑 Seguridad: JS no puede escribir cookies HttpOnly
+        if (options && options.httpOnly) {
+          console.error(
+            `[Dinou Error] Cannot set HttpOnly cookie '${name}' in Server Function endpoint because streaming has started.`
+          );
+          return;
+        }
+
+        // Construcción manual de la cookie string
+        // Formato: key=value; attributes...
+        let cookieStr = `${name}=${encodeURIComponent(value)}`;
+
+        if (options) {
+          if (options.path) cookieStr += `; path=${options.path}`;
+          if (options.domain) cookieStr += `; domain=${options.domain}`;
+          if (options.maxAge) cookieStr += `; max-age=${options.maxAge}`;
+          if (options.expires)
+            cookieStr += `; expires=${new Date(options.expires).toUTCString()}`;
+          if (options.secure) cookieStr += `; secure`;
+          if (options.sameSite) cookieStr += `; samesite=${options.sameSite}`;
+        }
+
+        // Empaquetado seguro para inyección
+        const safeCookieStr = JSON.stringify(cookieStr);
+
+        // Escribimos en el stream
+        res.write(`<script>document.cookie = ${safeCookieStr};</script>`);
+      },
+
       clearCookie: (name, options) => {
         const path = options?.path || "/";
 
+        // ESCENARIO A: Nativo
         if (!res.headersSent) {
           res.setHeader("Content-Type", "text/x-component");
+          res.clearCookie(name, options);
+          return;
         }
 
-        // 🛡️ SOLUCIÓN SEGURA:
-        // 1. Usamos JSON.stringify para que 'name' sea una string válida de JS (ej: "miCookie")
-        // 2. Usamos JSON.stringify para 'path' también (seguridad total)
-        // 3. NO ponemos comillas extra alrededor de ${...} en el template string
-        // 4. Usamos el operador '+' de JavaScript dentro del script para unir las piezas
-
-        const safeName = JSON.stringify(name); // Devuelve: "dinou-cookie"
-        const safePath = JSON.stringify(path); // Devuelve: "/"
+        // ESCENARIO B: Script Injection
+        const safeName = JSON.stringify(name);
+        const safePath = JSON.stringify(path);
 
         res.write(
           `<script>document.cookie = ${safeName} + "=; Max-Age=0; path=" + ${safePath} + ";";</script>`
@@ -466,7 +525,7 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
       }
     }
     const context = getContext(req, res);
-    const pipe = await requestStorage.run(context, async () => {
+    await requestStorage.run(context, async () => {
       const jsx = await getSSGJSXOrJSX(
         reqPath,
         { ...req.query },
@@ -488,9 +547,8 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
         : cachedClientManifest;
 
       const { pipe } = renderToPipeableStream(jsx, manifest);
-      return pipe;
+      pipe(res);
     });
-    pipe(res);
   } catch (error) {
     console.error("Error rendering RSC:", error);
     res.status(500).send("Internal Server Error");
@@ -780,12 +838,74 @@ app.post("/____server_function____", async (req, res) => {
 
 const port = process.env.PORT || 3000;
 
-app.listen(port, async () => {
-  if (!isDevelopment) {
-    await generateStatic();
-  } else {
-    console.log("⚙️ Rendering dynamically in dev mode");
+const http = require("http");
+
+// Envolvemos todo el arranque en una IIFE asíncrona para usar await limpiamente
+(async () => {
+  try {
+    // ============================================================
+    // FASE 1: GENERACIÓN ESTÁTICA (Build Time)
+    // ============================================================
+    // Hacemos esto ANTES de crear el servidor. Así, si generateStatic
+    // hace limpiezas agresivas de memoria, no mata al servidor HTTP.
+    if (!isDevelopment) {
+      console.log("🏗️  [Startup] Starting static generation (SSG/ISR)...");
+      try {
+        await generateStatic();
+        console.log("✅ [Startup] Static generation finished successfully.");
+      } catch (buildError) {
+        console.error("❌ [Startup] Static generation failed:", buildError);
+        // Dependiendo de tu política, podrías salir (process.exit(1)) o continuar
+        // Si decides continuar, el servidor arrancará pero quizás falten archivos.
+        process.exit(1);
+      }
+    } else {
+      console.log(
+        "⚙️  [Startup] Running in Development Mode (Dynamic Rendering)"
+      );
+    }
+
+    // ============================================================
+    // FASE 2: CREACIÓN DEL SERVIDOR
+    // ============================================================
+    console.log("👉 [Startup] Initializing HTTP Server...");
+
+    // Pasamos 'app' a createServer. Esto desacopla Express de la red.
+    const server = http.createServer(app);
+
+    // ============================================================
+    // FASE 3: MANEJO DE ERRORES (Anti-Zombies)
+    // ============================================================
+    // Esto captura errores como EADDRINUSE antes de que crasheen el proceso silenciosamente
+    server.on("error", (error) => {
+      if (error.code === "EADDRINUSE") {
+        console.error(`\n❌ FATAL ERROR: Port ${port} is already in use!`);
+        console.error(
+          `   Cause: A previous instance, a zombie test runner, or another app is holding the port.`
+        );
+        console.error(
+          `   Action: Run 'netstat -ano | findstr :${port}' (Win) or 'lsof -i :${port}' to find the PID and kill it.\n`
+        );
+      } else {
+        console.error("❌ [Server Error]:", error);
+      }
+      process.exit(1); // Salimos explícitamente con código de error
+    });
+
+    // ============================================================
+    // FASE 4: ARRANQUE (Listen)
+    // ============================================================
+    server.listen(port, () => {
+      isReady = true;
+      console.log(
+        `\n🚀 Dinou Server is ready and listening on http://localhost:${port}`
+      );
+      console.log(
+        `   Environment: ${isDevelopment ? "Development" : "Production"}\n`
+      );
+    });
+  } catch (error) {
+    console.error("💥 [Fatal Startup Error]:", error);
+    process.exit(1);
   }
-  isReady = true;
-  console.log(`Listening on port ${port}`);
-});
+})();

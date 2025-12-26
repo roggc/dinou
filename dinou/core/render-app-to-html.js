@@ -62,130 +62,153 @@ function renderAppToHtml(
   child.on("message", (message) => {
     if (message && message.type === "DINOU_CONTEXT_COMMAND") {
       const { command, args } = message;
-
-      // // Caso Especial: Redirección
-      // if (command === "redirect") {
-      //   // args puede ser [url] o [status, url]
-      //   // Normalizamos para obtener la URL
-      //   const url = args.length === 1 ? args[0] : args[1];
-
-      //   // 💡 AQUÍ ESTÁ LA MAGIA
-      //   if (res.headersSent) {
-      //     // ESCENARIO A: El streaming ya empezó (headers enviados).
-      //     // No podemos usar HTTP 302. Inyectamos JS en el stream.
-      //     console.log(
-      //       `[Dinou] Streaming activo. Redirigiendo vía JS a: ${url}`
-      //     );
-
-      //     // Escribimos directamente en el stream de respuesta
-      //     res.write(`<script>window.location.href = "${url}";</script>`);
-      //     res.end(); // Cerramos la respuesta
-
-      //     // Opcional: Matar al proceso hijo para ahorrar recursos ya que nos vamos
-      //     // child.kill();
-      //     return;
-      //   }
-      //   // else {
-      //   //   // ESCENARIO B: Aún no se ha enviado nada.
-      //   //   // Usamos la redirección HTTP nativa de Express.
-      //   //   console.log(
-      //   //     `[Dinou] Headers limpios. Redirigiendo vía HTTP a: ${url}`
-      //   //   );
-      //   //   if (typeof res.redirect === "function") {
-      //   //     res.redirect(...args);
-      //   //   }
-      //   // }
-      //   // return; // Salimos para no ejecutar el bloque genérico de abajo
-      // }
-
+      // console.log(
+      //   `[Dinou] Received context command from child: ${command}`,
+      //   args
+      // );
+      // Lista de comandos soportados para chequeo rápido
       if (
         command === "setHeader" ||
         command === "clearCookie" ||
+        command === "cookie" || // ⬅️ AÑADIDO
         command === "status" ||
         command === "redirect"
       ) {
-        // SI EL STREAMING YA EMPEZÓ (Headers enviados)
+        // ============================================================
+        // ESCENARIO 1: EL STREAMING YA EMPEZÓ (Headers enviados)
+        // ============================================================
         if (res.headersSent) {
+          // --- REDIRECT (JS Injection) ---
           if (command === "redirect") {
-            // args puede ser [url] o [status, url]
-            // Normalizamos para obtener la URL
             const url = args.length === 1 ? args[0] : args[1];
-
-            // 💡 AQUÍ ESTÁ LA MAGIA
-            // ESCENARIO A: El streaming ya empezó (headers enviados).
-            // No podemos usar HTTP 302. Inyectamos JS en el stream.
             console.log(
               `[Dinou] Streaming active. Redirecting via JavaScript to: ${url}`
             );
-
             const safeUrl = JSON.stringify(url);
-
-            // 2. Inyectar SIN añadir comillas extra alrededor de ${safeUrl}
             res.write(`<script>window.location.href = ${safeUrl};</script>`);
-            res.end(); // Cerramos la respuesta
-
-            // Opcional: Matar al proceso hijo para ahorrar recursos ya que nos vamos
-            // child.kill();
+            res.end();
             return;
           }
 
-          // 🛑 COMANDO STATUS (NO HAY MAGIA)
+          // --- STATUS (Warning) ---
           if (command === "status") {
             console.warn(
-              `[Dinou Warning] The HTTP status code '${args[0]}' cannot be set because streaming has already started. The status code will remain 200 OK.`
+              `[Dinou Warning] HTTP status '${args[0]}' ignored because streaming started.`
             );
-            // Si la intención era un error, la UI debe renderizar la página de error.
             return;
           }
-          // 🍪 MAGIA PARA CLEAR COOKIE
+
+          // --- CLEAR COOKIE (JS Injection - Solo Non-HttpOnly) ---
           if (command === "clearCookie") {
             const [name, options] = args;
             const path = options && options.path ? options.path : "/";
-
             console.log(
-              `[Dinou] Streaming active. Deleting cookie '${name}' via JavaScript.`
+              `[Dinou] Streaming active. Clearing cookie '${name}' via JS.`
             );
-
-            // Inyectamos script para borrar la cookie (poniendo fecha en el pasado)
-            // Nota: Esto solo funciona si la cookie NO es HttpOnly.
-            const safeName = JSON.stringify(name); // Devuelve: "dinou-cookie"
-            const safePath = JSON.stringify(path); // Devuelve: "/"
-
+            const safeName = JSON.stringify(name);
+            const safePath = JSON.stringify(path);
             res.write(
               `<script>document.cookie = ${safeName} + "=; Max-Age=0; path=" + ${safePath} + ";";</script>`
             );
             return;
           }
 
-          // ❌ SET HEADER (Sin solución)
+          // --- 🍪 SET COOKIE (Nuevo - JS Injection) ---
+          if (command === "cookie") {
+            const [name, value, options] = args;
+
+            // ⚠️ ADVERTENCIA CRÍTICA:
+            // Si la cookie es HttpOnly, JS no puede escribirla.
+            if (options && options.httpOnly) {
+              console.error(
+                `[Dinou Error] Cannot set HttpOnly cookie '${name}' because streaming has already started. ` +
+                  `Headers are sent, and document.cookie cannot write HttpOnly cookies.`
+              );
+              return; // No hacemos nada porque fallaría silenciosamente en el navegador
+            }
+
+            console.log(
+              `[Dinou] Streaming active. Setting cookie '${name}' via JS.`
+            );
+
+            // Construimos el string de la cookie manualmente para JS
+            // Formato: name=value; path=/; max-age=...
+            let cookieStr = `${name}=${encodeURIComponent(value)}`;
+
+            if (options) {
+              if (options.path) cookieStr += `; path=${options.path}`;
+              if (options.domain) cookieStr += `; domain=${options.domain}`;
+              if (options.maxAge) cookieStr += `; max-age=${options.maxAge}`;
+              if (options.expires)
+                cookieStr += `; expires=${new Date(
+                  options.expires
+                ).toUTCString()}`;
+              if (options.secure) cookieStr += `; secure`;
+              if (options.sameSite)
+                cookieStr += `; samesite=${options.sameSite}`;
+            }
+
+            // console.log(`[Dinou] Cookie string to set: ${cookieStr}`);
+            const safeCookieStr = JSON.stringify(cookieStr);
+            res.write(`<script>document.cookie = ${safeCookieStr};</script>`);
+            return;
+          }
+
+          // --- SET HEADER (Warning) ---
           if (command === "setHeader") {
             console.warn(
-              `[Dinou Warning] Cannot set header '${args[0]}' because streaming has already started.`
+              `[Dinou Warning] Cannot set header '${args[0]}' because streaming started.`
             );
             return;
           }
         }
       }
 
-      // Ejecutar el comando real de Express usando el 'res' pasado
+      // ============================================================
+      // ESCENARIO 2: HEADERS AÚN NO ENVIADOS (Uso normal de Express)
+      // ============================================================
       if (typeof res[command] === "function") {
+        // Manejo especial de redirect seguro
         if (command === "redirect") {
-          function safeRedirect(url) {
-            if (url.startsWith("/") && !url.startsWith("//")) {
-              // Es segura (relativa)
-              res.redirect.apply(res, [url]);
-            } else {
-              // Es externa o peligrosa, forzar home o validar dominio
-              res.redirect.apply(res, ["/"]);
-            }
+          // 1. Normalizar argumentos (Status y URL)
+          let status = 302; // Default de Express
+          let rawUrl = "";
+
+          if (args.length === 2) {
+            // Firma: redirect(status, url)
+            status = args[0];
+            rawUrl = args[1];
+          } else {
+            // Firma: redirect(url)
+            rawUrl = args[0];
           }
-          return safeRedirect(args[0]);
+
+          // 2. Lógica de Seguridad (Safe Redirect)
+          // Permitimos solo rutas relativas que empiezan por '/' pero no por '//'
+          let finalUrl = "/";
+
+          if (
+            typeof rawUrl === "string" &&
+            rawUrl.startsWith("/") &&
+            !rawUrl.startsWith("//")
+          ) {
+            finalUrl = rawUrl;
+          } else {
+            console.warn(
+              `[Dinou Security] Blocked unsafe redirect to: ${rawUrl}`
+            );
+            // finalUrl se queda en "/"
+          }
+
+          // 3. Ejecutar redirect seguro usando siempre (status, url)
+          res.redirect.apply(res, [status, finalUrl]);
+          return;
         }
+
+        // Ejecución estándar (cookie, clearCookie, status, setHeader)
         res[command].apply(res, args);
       } else {
-        console.error(
-          `[Dinou] Unknown context command or not supported by proxy: ${command}`
-        );
+        console.error(`[Dinou] Unknown context command: ${command}`);
       }
     }
   });

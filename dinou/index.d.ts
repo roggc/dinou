@@ -23,11 +23,31 @@ export type Headers = IncomingHttpHeaders; // Usamos el tipo estándar de Node p
 // RESPONSE PROXY INTERFACE (RES)
 // ====================================================================
 
+export type CookieOptions = {
+  domain?: string;
+  encode?: (val: string) => string;
+  expires?: Date;
+  httpOnly?: boolean;
+  maxAge?: number;
+  path?: string;
+  priority?: "low" | "medium" | "high";
+  sameSite?: boolean | "lax" | "strict" | "none";
+  secure?: boolean;
+  signed?: boolean;
+};
+
 /**
  * Interface that simulates Express response functions (res),
  * but which send IPC commands to the main process during SSR.
  */
 export interface ResponseProxy {
+  /**
+   * Sends a command to set a cookie.
+   * @param name The name of the cookie.
+   * @param value The value of the cookie.
+   * @param options Configuration options for the cookie.
+   */
+  cookie(name: string, value: string, options?: CookieOptions): void; // ⬅️ AÑADIR ESTO
   /**
    * Sends a command to the main process to clear a cookie.
    * @param name Name of the cookie to clear.

@@ -125,92 +125,91 @@ function writeErrorOutput(error, isProd) {
 }
 
 async function renderToStream(reqPath, query, cookies = {}, serializedBox) {
-  try {
-    const context = {
-      // Datos serializados de req (query, headers, cookies, etc.)
-      req: serializedBox.req,
+  const context = {
+    // Datos serializados de req (query, headers, cookies, etc.)
+    req: serializedBox.req,
 
-      // Usamos el Proxy en lugar del objeto res real
-      res: createResponseProxy(),
-    };
-    const jsx = await requestStorage.run(context, async () => {
-      // Dentro de aquí, cualquier llamada a getContext() funcionará
-
-      return Object.keys(query).length ||
+    // Usamos el Proxy en lugar del objeto res real
+    res: createResponseProxy(),
+  };
+  requestStorage.run(context, async () => {
+    try {
+      const jsx =
+        Object.keys(query).length ||
         isDevelopment ||
         Object.keys(cookies).length
-        ? renderJSXToClientJSX(await getJSX(reqPath, query, cookies))
-        : (await getSSGJSX(reqPath)) ??
+          ? renderJSXToClientJSX(await getJSX(reqPath, query, cookies))
+          : (await getSSGJSX(reqPath)) ??
             renderJSXToClientJSX(await getJSX(reqPath, query, cookies));
-    });
 
-    const stream = renderToPipeableStream(jsx, {
-      onError(error) {
-        process.nextTick(async () => {
-          if (stream && !stream.destroyed) {
+      const stream = renderToPipeableStream(jsx, {
+        onError(error) {
+          process.nextTick(async () => {
+            if (stream && !stream.destroyed) {
+              try {
+                stream.unpipe(process.stdout);
+                stream.destroy();
+              } catch {}
+            }
+            const isProd = process.env.NODE_ENV === "production";
+
             try {
-              stream.unpipe(process.stdout);
-              stream.destroy();
-            } catch {}
-          }
-          const isProd = process.env.NODE_ENV === "production";
+              const errorJSX = await getErrorJSX(reqPath, query, error);
 
-          try {
-            const errorJSX = await getErrorJSX(reqPath, query, error);
+              if (errorJSX === undefined) {
+                writeErrorOutput(error, isProd);
+                process.exit(1);
+              }
 
-            if (errorJSX === undefined) {
+              const errorStream = renderToPipeableStream(errorJSX, {
+                onShellReady() {
+                  errorStream.pipe(process.stdout);
+                },
+                onError(err) {
+                  console.error("Error rendering error JSX:", err);
+                  writeErrorOutput(error, isProd);
+                  process.exit(1);
+                },
+                bootstrapModules: [getAssetFromManifest("error.js")],
+                bootstrapScriptContent: `window.__DINOU_ERROR_MESSAGE__=${JSON.stringify(
+                  error.message || "Unknown error"
+                )};window.__DINOU_ERROR_STACK__=${JSON.stringify(
+                  error.stack || "No stack trace available"
+                )};`,
+              });
+            } catch (err) {
+              console.error("Render error (no error.tsx?):", err);
               writeErrorOutput(error, isProd);
               process.exit(1);
             }
-
-            const errorStream = renderToPipeableStream(errorJSX, {
-              onShellReady() {
-                errorStream.pipe(process.stdout);
-              },
-              onError(err) {
-                console.error("Error rendering error JSX:", err);
-                writeErrorOutput(error, isProd);
-                process.exit(1);
-              },
-              bootstrapModules: [getAssetFromManifest("error.js")],
-              bootstrapScriptContent: `window.__DINOU_ERROR_MESSAGE__=${JSON.stringify(
-                error.message || "Unknown error"
-              )};window.__DINOU_ERROR_STACK__=${JSON.stringify(
-                error.stack || "No stack trace available"
-              )};`,
-            });
-          } catch (err) {
-            console.error("Render error (no error.tsx?):", err);
-            writeErrorOutput(error, isProd);
-            process.exit(1);
-          }
-        });
-      },
-      onShellReady() {
-        stream.pipe(process.stdout);
-      },
-      bootstrapModules: isDevelopment
-        ? [
-            getAssetFromManifest("main.js"),
-            isWebpack ? undefined : getAssetFromManifest("runtime.js"),
-          ].filter(Boolean)
-        : [getAssetFromManifest("main.js")],
-      ...(isDevelopment
-        ? {
-            bootstrapScriptContent: `window.HMR_WEBSOCKET_URL="ws://localhost:3001";`,
-          }
-        : {}),
-    });
-  } catch (error) {
-    process.stdout.write(formatErrorHtml(error));
-    process.stderr.write(
-      JSON.stringify({
-        error: error.message,
-        stack: error.stack,
-      })
-    );
-    process.exit(1);
-  }
+          });
+        },
+        onShellReady() {
+          stream.pipe(process.stdout);
+        },
+        bootstrapModules: isDevelopment
+          ? [
+              getAssetFromManifest("main.js"),
+              isWebpack ? undefined : getAssetFromManifest("runtime.js"),
+            ].filter(Boolean)
+          : [getAssetFromManifest("main.js")],
+        ...(isDevelopment
+          ? {
+              bootstrapScriptContent: `window.HMR_WEBSOCKET_URL="ws://localhost:3001";`,
+            }
+          : {}),
+      });
+    } catch (error) {
+      process.stdout.write(formatErrorHtml(error));
+      process.stderr.write(
+        JSON.stringify({
+          error: error.message,
+          stack: error.stack,
+        })
+      );
+      process.exit(1);
+    }
+  });
 }
 
 const reqPath = process.argv[2];
