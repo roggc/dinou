@@ -1,13 +1,16 @@
 require("./register-paths");
+require("./register-hooks.js");
+const babelPluginRegisterImports = require("./babel-plugin-register-imports.js");
 const babelRegister = require("@babel/register");
 babelRegister({
-  ignore: [/[\\\/](build|server|node_modules)[\\\/]/],
+  ignore: [/[\\\/](node_modules)[\\\/]/],
   presets: [
     ["@babel/preset-react", { runtime: "automatic" }],
     "@babel/preset-typescript",
   ],
-  plugins: ["@babel/transform-modules-commonjs"],
+  plugins: [babelPluginRegisterImports, "@babel/transform-modules-commonjs"],
   extensions: [".js", ".jsx", ".ts", ".tsx"],
+  cache: false,
 });
 const addHook = require("./asset-require-hook.js");
 const { extensions } = require("./asset-extensions.js");
@@ -132,7 +135,7 @@ async function renderToStream(reqPath, query, cookies = {}, serializedBox) {
     // Usamos el Proxy en lugar del objeto res real
     res: createResponseProxy(),
   };
-  requestStorage.run(context, async () => {
+  await requestStorage.run(context, async () => {
     try {
       const jsx =
         Object.keys(query).length ||
@@ -240,4 +243,7 @@ process.on("unhandledRejection", (reason) => {
   process.exit(1);
 });
 
-renderToStream(reqPath, query, cookies, serializedBox);
+renderToStream(reqPath, query, cookies, serializedBox).catch((err) => {
+  console.error("❌ Fatal error starting render stream:", err);
+  process.exit(1);
+});

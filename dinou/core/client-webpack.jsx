@@ -8,7 +8,13 @@ const route = window.location.href.replace(window.location.origin, "");
 function Root() {
   let content = cache.get(route);
   if (!content) {
-    content = createFromFetch(fetch("/____rsc_payload____" + route));
+    content = createFromFetch(
+      fetch(
+        window.__DINOU_USE_OLD_RSC__
+          ? "/____rsc_payload_old____" + route
+          : "/____rsc_payload____" + route
+      )
+    );
     cache.set(route, content);
   }
 

@@ -1,5 +1,6 @@
 require("dotenv/config");
 require("./register-paths");
+require("./register-hooks.js");
 const webpackRegister = require("react-server-dom-webpack/node-register");
 const path = require("path");
 const { readFileSync, existsSync, createReadStream } = require("fs");
@@ -10,15 +11,17 @@ const { getErrorJSX } = require("./get-error-jsx.js");
 const addHook = require("./asset-require-hook.js");
 const { extensions } = require("./asset-extensions.js");
 webpackRegister();
+const babelPluginRegisterImports = require("./babel-plugin-register-imports.js");
 const babelRegister = require("@babel/register");
 babelRegister({
-  ignore: [/[\\\/](build|server|node_modules)[\\\/]/],
+  ignore: [/[\\\/](node_modules)[\\\/]/],
   presets: [
     ["@babel/preset-react", { runtime: "automatic" }],
     "@babel/preset-typescript",
   ],
-  plugins: ["@babel/transform-modules-commonjs"],
+  plugins: [babelPluginRegisterImports, "@babel/transform-modules-commonjs"],
   extensions: [".js", ".jsx", ".ts", ".tsx"],
+  cache: false,
 });
 const createScopedName = require("./createScopedName");
 require("css-modules-require-hook")({
@@ -35,7 +38,7 @@ addHook({
 const importModule = require("./import-module");
 const generateStatic = require("./generate-static.js");
 const renderAppToHtml = require("./render-app-to-html.js");
-const revalidating = require("./revalidating.js");
+const { revalidating, regenerating } = require("./revalidating.js");
 const isDevelopment = process.env.NODE_ENV !== "production";
 const outputFolder = isDevelopment ? "public" : "dist3";
 const chokidar = require("chokidar");
@@ -496,18 +499,17 @@ if (!isDevelopment) {
   );
 }
 
-app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
+async function serveRSCPayload(req, res, isOld = false) {
   try {
     const reqPath = (
       req.path.endsWith("/") ? req.path : req.path + "/"
-    ).replace("/____rsc_payload____", "");
+    ).replace(isOld ? "/____rsc_payload_old____" : "/____rsc_payload____", "");
 
     if (!isDevelopment && Object.keys({ ...req.query }).length === 0) {
-      // const payloadPath = path.join("dist2", reqPath, "rsc.rsc");
       const payloadPath = path.resolve(
         "dist2",
         reqPath.replace(/^\//, ""),
-        "rsc.rsc"
+        isOld ? "rsc._old.rsc" : "rsc.rsc"
       );
       const distDir = path.resolve("dist2");
 
@@ -521,6 +523,16 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
           console.error("Error reading RSC file:", err);
           res.status(500).end();
         });
+        // readStream.on("end", () => {
+        //   if (!regenerating.has(reqPath)) {
+        //     // La regeneración ya terminó, borramos el viejo
+        //     try {
+        //       unlinkSync(payloadPathOld);
+        //     } catch (err) {
+        //       console.error("Error deleting old RSC file:", err);
+        //     }
+        //   }
+        // });
         return readStream.pipe(res);
       }
     }
@@ -553,6 +565,14 @@ app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
     console.error("Error rendering RSC:", error);
     res.status(500).send("Internal Server Error");
   }
+}
+
+app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
+  await serveRSCPayload(req, res, false);
+});
+
+app.get(/^\/____rsc_payload_old____\/.*\/?$/, async (req, res) => {
+  await serveRSCPayload(req, res, true);
 });
 
 app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
@@ -588,11 +608,50 @@ app.get(/^\/.*\/?$/, (req, res) => {
 
     if (!isDevelopment && Object.keys({ ...req.query }).length === 0) {
       revalidating(reqPath);
+      let htmlPathOld;
+      if (regenerating.has(reqPath)) {
+        // Todavía se está regenerando, servir el HTML viejo si existe
+        htmlPathOld = path.join("dist2", reqPath, "index._old.html");
+      }
       const htmlPath = path.join("dist2", reqPath, "index.html");
+      // Decidimos qué archivo leer
+      const fileToRead = htmlPathOld || htmlPath;
 
-      if (existsSync(htmlPath)) {
+      if (existsSync(fileToRead)) {
         res.setHeader("Content-Type", "text/html");
-        return createReadStream(htmlPath).pipe(res);
+
+        const rStream = createReadStream(fileToRead);
+
+        rStream.on("error", (err) => {
+          console.error("Error reading HTML file:", err);
+          if (!res.headersSent) res.status(500).send("Server Error");
+        });
+
+        // 1. IMPORTANTE: Usamos { end: false } para que el pipe no cierre la respuesta
+        rStream.pipe(res, { end: false });
+
+        // 2. Cuando el archivo termina de enviarse...
+        rStream.on("end", () => {
+          // 3. Escribimos nuestro contenido adicional
+          if (htmlPathOld) {
+            res.write("<script>window.__DINOU_USE_OLD_RSC__=true</script>");
+          }
+
+          // 4. Cerramos manualmente la respuesta (ahora sí)
+          res.end();
+
+          // // 5. Lógica de limpieza opcional (async para no bloquear)
+          // if (htmlPathOld && !regenerating.has(reqPath)) {
+          //   // Es mejor usar fs.promises para no bloquear el bucle de eventos
+          //   require("fs")
+          //     .promises.unlink(htmlPathOld)
+          //     .catch((err) => {
+          //       console.error("Error deleting old HTML file:", err);
+          //     });
+          // }
+        });
+
+        return; // El stream ya está fluyendo
       }
     }
 

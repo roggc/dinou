@@ -3,71 +3,82 @@ const { existsSync, readFileSync } = require("fs");
 const React = require("react");
 const importModule = require("./import-module");
 
-async function deserializeReactElement(
-  serialized,
-  returnUndefined = { value: false }
-) {
-  // Check if serialized is a React element object
+async function deserializeReactElement(serialized) {
+  // 1. Guard Clause: Si no parece un objeto serializado válido, devuélvelo tal cual
   if (
-    serialized &&
-    typeof serialized === "object" &&
-    "type" in serialized &&
-    "props" in serialized
+    !serialized ||
+    typeof serialized !== "object" ||
+    !("props" in serialized) // Solo exigimos props como mínimo
   ) {
-    const { type, modulePath, props } = serialized;
-    let Component;
-    if (modulePath) {
-      try {
-        const module = await importModule(
-          path.resolve(process.cwd(), modulePath)
-        );
-        Component = module.default ?? module;
-      } catch (err) {
-        console.error(`Error loading module ${modulePath}:`, err);
-        Component = type; // Fallback
-      }
-    } else if (type === "__clientComponent__") {
-      returnUndefined.value = true;
-    } else if (typeof type === "string" && type !== "Fragment") {
-      Component = type; // HTML elements (e.g., "html", "div")
-    } else if (type === "Fragment") {
-      Component = React.Fragment;
-    } else {
-      Component = type; // Fallback for unknown types
-    }
-
-    // Deserialize all props that are React elements
-    const deserializedProps = {};
-    for (const [key, value] of Object.entries(props)) {
-      if (key === "children") {
-        deserializedProps[key] = Array.isArray(value)
-          ? value.map((child) =>
-              deserializeReactElement(child, returnUndefined)
-            )
-          : value
-          ? deserializeReactElement(value, returnUndefined)
-          : null;
-      } else if (
-        value &&
-        typeof value === "object" &&
-        "type" in value &&
-        "props" in value
-      ) {
-        deserializedProps[key] = deserializeReactElement(
-          value,
-          returnUndefined
-        );
-      } else {
-        deserializedProps[key] = value;
-      }
-    }
-
-    return returnUndefined.value
-      ? undefined
-      : React.createElement(Component, deserializedProps);
+    return serialized;
   }
-  // Pass through non-serialized values (e.g., strings, null)
-  return returnUndefined.value ? undefined : serialized;
+
+  const { type, modulePath, props, name, isPackage } = serialized;
+  let Component = type; // Por defecto es el tipo (string o undefined)
+
+  // Variable LOCAL
+  let isInvalidComponent = false;
+
+  if (modulePath) {
+    try {
+      const mod = await importModule(
+        isPackage ? modulePath : path.resolve(process.cwd(), modulePath)
+      );
+
+      if (name && name !== "default" && mod[name]) {
+        Component = mod[name];
+      } else {
+        Component = mod.default ?? mod;
+      }
+    } catch (err) {
+      console.error(`Error loading module ${modulePath}:`, err);
+      // Fallback seguro: Fragment para que no rompa el árbol
+      Component = React.Fragment;
+    }
+  } else if (type === "__clientComponent__") {
+    isInvalidComponent = true;
+  } else if (type === "Suspense") {
+    Component = React.Suspense;
+  } else if (type === "Fragment") {
+    Component = React.Fragment;
+  }
+
+  // 🛡️ PROTECCIÓN FINAL: Si Component es undefined (porque faltaba 'type' en el JSON),
+  // lo convertimos en un Fragmento vacío para evitar el crash de React.
+  if (!Component) {
+    // console.warn("Elemento sin tipo detectado, usando Fragment:", serialized);
+    Component = React.Fragment;
+  }
+
+  if (isInvalidComponent) {
+    return undefined;
+  }
+
+  // Deserialize props recursivamente
+  const deserializedProps = {};
+  for (const [key, value] of Object.entries(props)) {
+    if (key === "children") {
+      deserializedProps[key] = Array.isArray(value)
+        ? await Promise.all(
+            value.map((child) => deserializeReactElement(child))
+          )
+        : value
+        ? await deserializeReactElement(value)
+        : null;
+    } else if (
+      value &&
+      typeof value === "object" &&
+      // 🟢 CAMBIO CRÍTICO: Detectamos el objeto aunque le falte el type
+      "props" in value &&
+      "modulePath" in value
+    ) {
+      deserializedProps[key] = await deserializeReactElement(value);
+    } else {
+      deserializedProps[key] = value;
+    }
+  }
+
+  return React.createElement(Component, deserializedProps);
 }
 
 async function getSSGJSX(reqPath) {

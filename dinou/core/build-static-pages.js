@@ -13,6 +13,7 @@ const {
   getFilePathAndDynamicParams,
 } = require("./get-file-path-and-dynamic-params");
 const importModule = require("./import-module");
+const { requestStorage } = require("./request-context.js");
 
 async function buildStaticPages() {
   const srcFolder = path.resolve(process.cwd(), "src");
@@ -416,13 +417,96 @@ async function buildStaticPages() {
           }
         }
       }
+      const reqPath = "/" + segments.join("/");
+      // ====================================================================
+      // 1. MOCK RES: Cumpliendo la interfaz ResponseProxy
+      // ====================================================================
+      // Aunque el contrato dice que devuelve void, internamente guardamos
+      // el estado por si quieres loguear errores (ej. un redirect en build time).
+      const mockRes = {
+        _statusCode: 200,
+        _headers: {},
+        _redirectUrl: null,
+        _cookies: [], // Opcional: para debug
 
-      jsx = await asyncRenderJSXToClientJSX(jsx);
+        // 👇 AÑADIR ESTE MÉTODO
+        cookie(name, value, options) {
+          // En SSG no hacemos nada real, pero guardamos registro si quieres debuguear
+          // console.log(`[SSG] Cookie set ignored: ${name}=${value}`);
+          this._cookies.push({ name, value, options, isClear: false });
+        },
+
+        clearCookie(name, options) {
+          this._cookies.push({ name, value: "", options, isClear: true });
+        },
+
+        // setHeader(name: string, value: string | ReadonlyArray<string>): void;
+        setHeader(name, value) {
+          this._headers[name.toLowerCase()] = value;
+        },
+
+        // status(code: number): void;
+        status(code) {
+          this._statusCode = code;
+        },
+
+        // redirect(status: number, url: string): void;
+        // redirect(url: string): void;
+        redirect(arg1, arg2) {
+          let status = 302;
+          let url = "";
+
+          if (typeof arg1 === "number") {
+            status = arg1;
+            url = arg2;
+          } else {
+            url = arg1;
+          }
+
+          this._statusCode = status;
+          this._redirectUrl = url;
+
+          // Logueamos advertencia porque un redirect en SSG suele ser problemático
+          console.warn(
+            `⚠️ [SSG] Redirect detected in ${reqPath} -> ${url} (${status})`
+          );
+        },
+      };
+
+      // ====================================================================
+      // 2. MOCK REQ: Cumpliendo RequestContextStore['req']
+      // ====================================================================
+      const mockReq = {
+        query: {},
+        cookies: {},
+        headers: {
+          "user-agent": "Dinou-SSG-Builder",
+          host: "localhost",
+          // Añade aquí cualquier header default que necesites
+        },
+        path: reqPath,
+        method: "GET",
+      };
+
+      // 3. CONTEXTO COMPLETO
+      const mockContext = {
+        req: mockReq,
+        res: mockRes,
+      };
+
+      jsx = await requestStorage.run(mockContext, async () => {
+        return await asyncRenderJSXToClientJSX(jsx);
+      });
 
       const outputPath = path.join(distFolder, segments.join("/"));
       mkdirSync(outputPath, { recursive: true });
 
       const jsonPath = path.join(outputPath, "index.json");
+
+      const sideEffects = {
+        redirect: mockRes._redirectUrl,
+        cookies: mockRes._cookies,
+      };
 
       writeFileSync(
         jsonPath,
@@ -430,6 +514,7 @@ async function buildStaticPages() {
           jsx: serializeReactElement(jsx),
           revalidate: revalidate?.(),
           generatedAt: Date.now(),
+          metadata: { effects: sideEffects },
         })
       );
 
@@ -595,7 +680,90 @@ async function buildStaticPage(reqPath) {
       }
     }
 
-    jsx = await asyncRenderJSXToClientJSX(jsx);
+    // ====================================================================
+    // 1. MOCK RES: Cumpliendo la interfaz ResponseProxy
+    // ====================================================================
+    // Aunque el contrato dice que devuelve void, internamente guardamos
+    // el estado por si quieres loguear errores (ej. un redirect en build time).
+    const mockRes = {
+      _statusCode: 200,
+      _headers: {},
+      _redirectUrl: null,
+      _cookies: [], // Opcional: para debug
+
+      // 👇 AÑADIR ESTE MÉTODO
+      cookie(name, value, options) {
+        // En SSG no hacemos nada real, pero guardamos registro si quieres debuguear
+        // console.log(`[SSG] Cookie set ignored: ${name}=${value}`);
+        this._cookies.push({ name, value, options, isClear: false });
+      },
+
+      clearCookie(name, options) {
+        this._cookies.push({ name, value: "", options, isClear: true });
+      },
+
+      // setHeader(name: string, value: string | ReadonlyArray<string>): void;
+      setHeader(name, value) {
+        this._headers[name.toLowerCase()] = value;
+      },
+
+      // status(code: number): void;
+      status(code) {
+        this._statusCode = code;
+      },
+
+      // redirect(status: number, url: string): void;
+      // redirect(url: string): void;
+      redirect(arg1, arg2) {
+        let status = 302;
+        let url = "";
+
+        if (typeof arg1 === "number") {
+          status = arg1;
+          url = arg2;
+        } else {
+          url = arg1;
+        }
+
+        this._statusCode = status;
+        this._redirectUrl = url;
+
+        // Logueamos advertencia porque un redirect en SSG suele ser problemático
+        console.warn(
+          `⚠️ [SSG] Redirect detected in ${reqPath} -> ${url} (${status})`
+        );
+      },
+    };
+
+    // ====================================================================
+    // 2. MOCK REQ: Cumpliendo RequestContextStore['req']
+    // ====================================================================
+    const mockReq = {
+      query: {},
+      cookies: {},
+      headers: {
+        "user-agent": "Dinou-SSG-Builder",
+        host: "localhost",
+        // Añade aquí cualquier header default que necesites
+      },
+      path: reqPath,
+      method: "GET",
+    };
+
+    // 3. CONTEXTO COMPLETO
+    const mockContext = {
+      req: mockReq,
+      res: mockRes,
+    };
+
+    jsx = await requestStorage.run(mockContext, async () => {
+      return await asyncRenderJSXToClientJSX(jsx);
+    });
+
+    const sideEffects = {
+      redirect: mockRes._redirectUrl,
+      cookies: mockRes._cookies,
+    };
 
     await fs.mkdir(outputPath, { recursive: true });
     await fs.writeFile(
@@ -604,6 +772,7 @@ async function buildStaticPage(reqPath) {
         jsx: serializeReactElement(jsx),
         revalidate: revalidate?.(),
         generatedAt: Date.now(),
+        metadata: { effects: sideEffects },
       })
     );
 
@@ -636,19 +805,44 @@ function filterProps(props_) {
 function serializeReactElement(element) {
   if (React.isValidElement(element)) {
     let type;
+    let modulePath = null;
+    let componentName = null;
+    let isPackage = false;
+
     if (typeof element.type === "string") {
-      type = element.type; // HTML elements (e.g., "html", "div")
+      type = element.type;
     } else if (element.type === Symbol.for("react.fragment")) {
       type = "Fragment";
-    } else if (typeof element.type === "function") {
-      type = "__clientComponent__";
+    } else if (element.type === Symbol.for("react.suspense")) {
+      type = "Suspense";
     } else {
-      type = element.type.displayName ?? element.type.name ?? "Unknown";
+      modulePath = element.__modulePath;
+      if (modulePath) {
+        type = "__clientComponent__";
+      }
+      try {
+        componentName = element.type.displayName || element.type.name;
+      } catch (e) {}
+
+      if (!modulePath && global.__DINOU_MODULE_MAP) {
+        const meta = global.__DINOU_MODULE_MAP.get(element.type);
+        modulePath = meta?.id;
+        isPackage = meta?.isPackage;
+        if (!isPackage && modulePath) {
+          type = "__clientComponent__";
+        }
+      }
     }
-    const modulePath = element.__modulePath;
+
     return {
       type,
-      modulePath: modulePath ? path.relative(process.cwd(), modulePath) : null,
+      name: componentName, // 👈 GUARDAMOS EL NOMBRE (ej: "ClientRedirect")
+      isPackage,
+      modulePath: isPackage
+        ? modulePath
+        : modulePath
+        ? path.relative(process.cwd(), modulePath).split(path.sep).join("/")
+        : null,
       props: {
         ...filterProps(element.props),
         children: Array.isArray(element.props.children)
@@ -659,7 +853,6 @@ function serializeReactElement(element) {
       },
     };
   }
-  // Handle non-React elements (strings, numbers, null)
   return element;
 }
 

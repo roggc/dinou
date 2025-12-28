@@ -2,6 +2,7 @@
 const path = require("path");
 const { mkdirSync, createWriteStream } = require("fs");
 const renderAppToHtml = require("./render-app-to-html.js");
+const getSSGMetadata = require("./get-ssg-metadata.js");
 
 const OUT_DIR = path.resolve("dist2");
 
@@ -90,8 +91,12 @@ async function generateStaticPages(routes) {
         contextForChild, // ✅ Pasamos el MockReq
         mockRes
       );
-
+      const sideEffectScripts = getSSGMetadata(reqPath);
       await new Promise((resolve, reject) => {
+        // 🟢 INYECCIÓN DE SCRIPTS
+        if (sideEffectScripts) {
+          fileStream.write(sideEffectScripts);
+        }
         // Conectamos standard output al archivo
         htmlStream.pipe(fileStream, { end: false }); // end: false nos da control manual en el mockRes
 
