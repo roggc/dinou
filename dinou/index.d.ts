@@ -1,3 +1,4 @@
+// dinou/index.d.ts
 import { IncomingHttpHeaders } from "http";
 
 // ====================================================================
@@ -17,7 +18,7 @@ export type Cookies = Record<string, string>;
 /**
  * Represents the serialized headers object.
  */
-export type Headers = IncomingHttpHeaders; // Usamos el tipo estándar de Node para headers
+export type Headers = IncomingHttpHeaders;
 
 // ====================================================================
 // RESPONSE PROXY INTERFACE (RES)
@@ -47,7 +48,8 @@ export interface ResponseProxy {
    * @param value The value of the cookie.
    * @param options Configuration options for the cookie.
    */
-  cookie(name: string, value: string, options?: CookieOptions): void; // ⬅️ AÑADIR ESTO
+  cookie(name: string, value: string, options?: CookieOptions): void;
+
   /**
    * Sends a command to the main process to clear a cookie.
    * @param name Name of the cookie to clear.
@@ -64,9 +66,6 @@ export interface ResponseProxy {
 
   /**
    * Sends commands to the main process to set the status and redirect.
-   * The overloads are: redirect(url) [302] or redirect(status, url).
-   * @param statusOrUrl The HTTP status (e.g., 301) or the target URL.
-   * @param url The target URL (if the first argument is the status).
    */
   redirect(status: number, url: string): void;
   redirect(url: string): void;
@@ -100,7 +99,7 @@ export interface RequestContextStore {
 }
 
 // ====================================================================
-// MAIN EXPORTED FUNCTIONS
+// MAIN EXPORTED FUNCTIONS (SERVER SIDE)
 // ====================================================================
 
 /**
@@ -109,6 +108,32 @@ export interface RequestContextStore {
  * wrapped inside requestStorage.run().
  * * NOTE: If no context is active, this function returns undefined.
  * The consumer must handle the guard clause (e.g., if (!context) return;).
- * * @returns {RequestContextStore | undefined} The current context object or undefined if called out of scope.
+ * @returns {RequestContextStore | undefined} The current context object or undefined if called out of scope.
  */
-export declare function getContext(): RequestContextStore | undefined; // ⬅️ CAMBIO CLAVE
+export declare function getContext(): RequestContextStore | undefined;
+
+// ====================================================================
+// CLIENT NAVIGATION HOOKS (CLIENT SIDE)
+// ====================================================================
+
+/**
+ * A Client Component hook that lets you read the current URL's pathname.
+ * This hook triggers a re-render when the route changes.
+ *
+ * @returns {string} The current pathname (e.g., "/dashboard") without query parameters.
+ * @example
+ * const pathname = usePathname();
+ * if (pathname === '/active') { ... }
+ */
+export declare function usePathname(): string;
+
+/**
+ * A Client Component hook that lets you read the current URL's search parameters.
+ * This hook triggers a re-render when the route changes.
+ *
+ * @returns {URLSearchParams} A read-only version of the standard URLSearchParams interface.
+ * @example
+ * const searchParams = useSearchParams();
+ * const page = searchParams.get('page');
+ */
+export declare function useSearchParams(): URLSearchParams;

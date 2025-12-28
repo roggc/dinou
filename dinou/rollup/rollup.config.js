@@ -57,7 +57,7 @@ module.exports = async function () {
       "/refresh.js",
       "/__hmr_client__.js",
       "/__SERVER_FUNCTION_PROXY__",
-      "dinou",
+      // "dinou",
     ],
     plugins: [
       del({

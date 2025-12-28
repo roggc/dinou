@@ -11,6 +11,7 @@
 // Re-exporta getContext y requestStorage
 // Asegúrate de que la ruta aquí es la correcta (ej. si 'context.js' está en la raíz)
 const contextModule = require("./core/request-context.js");
+const navigationModule = require("./core/navigation.js");
 
 // Puedes usar re-exportación nombrada
 module.exports = {
@@ -18,6 +19,8 @@ module.exports = {
 
   // API de Contexto
   getContext: contextModule.getContext,
+  usePathname: navigationModule.usePathname,
+  useSearchParams: navigationModule.useSearchParams,
 
   // Otras utilidades que puedas añadir en el futuro, ej:
   // cache: require('./cache.js').cache,

@@ -211,9 +211,9 @@ module.exports = async () => {
           ]
         : [],
     },
-    externals: {
-      dinou: "dinou",
-    },
+    // externals: {
+    //   dinou: "dinou",
+    // },
     optimization: {
       // 2. RUNTIME CHUNK: Vital para compartir el estado de los módulos entre entry points
       runtimeChunk: "single",

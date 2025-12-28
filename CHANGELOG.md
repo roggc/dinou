@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - FIX: Fixed BigInt/Map serialization using RSC stream instead of JSON.
+- FIX: ISR (Serialization and deserialization of JSX)
+
+### Added
+
+- End to End tests with playwright
+- Soft navigation
 
 ## [3.0.6]
 
