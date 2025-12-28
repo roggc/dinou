@@ -1,4 +1,5 @@
 const path = require("path");
+const fs = require("fs");
 const postcss = require("rollup-plugin-postcss");
 const babel = require("@rollup/plugin-babel").default;
 const resolve = require("@rollup/plugin-node-resolve").default;
@@ -18,6 +19,39 @@ const manifestGeneratorPlugin = require("./rollup-plugins/manifest-generator-plu
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 const outputDirectory = isDevelopment ? "public" : "dist3";
+
+const localDinouPath = path.resolve(process.cwd(), "dinou/index.js");
+// const localNavigationPath = path.resolve(
+//   process.cwd(),
+//   "dinou/core/navigation.js"
+// );
+const isEjected = fs.existsSync(localDinouPath);
+
+console.log(
+  isEjected
+    ? "🚀 [Dinou] Modo Eyectado detectado (Usando código local)"
+    : "📦 [Dinou] Modo Librería detectado (Usando node_modules)"
+);
+
+// ----------------------------------------------------------------------
+// 🛠️ MICRO-PLUGIN DE ALIAS (Cero Dependencias)
+// ----------------------------------------------------------------------
+function localDinouAlias() {
+  return {
+    name: "local-dinou-alias",
+    resolveId(source) {
+      // Si importan "dinou", devolvemos la ruta absoluta local
+      if (source === "dinou") {
+        return localDinouPath;
+      }
+      // // Si importan "dinou/navigation", devolvemos la ruta absoluta local
+      // if (source === "dinou/navigation") {
+      //   return localNavigationPath;
+      // }
+      return null; // Si no es dinou, dejamos que otros plugins resuelvan
+    },
+  };
+}
 
 module.exports = async function () {
   const del = (await import("rollup-plugin-delete")).default;
@@ -60,6 +94,7 @@ module.exports = async function () {
       // "dinou",
     ],
     plugins: [
+      isEjected && localDinouAlias(),
       del({
         targets: [
           `${outputDirectory}/*`,
@@ -83,7 +118,7 @@ module.exports = async function () {
         preferBuiltins: false,
       }),
       commonjs({
-        include: /node_modules/,
+        include: isEjected ? [/node_modules/, /dinou/] : /node_modules/,
         transformMixedEsModules: true,
       }),
       dinouAssetPlugin({
@@ -137,6 +172,15 @@ module.exports = async function () {
       exclude: ["public/**", "react_client_manifest/**"],
     },
     onwarn(warning, warn) {
+      // Ignorar warning de eval si viene de nuestro archivo request-context
+      if (warning.code === "EVAL") {
+        // Opcional: Si quieres ser muy específico y solo permitirlo en ese archivo:
+        if (warning.loc && warning.loc.file.includes("request-context.js")) {
+          return;
+        }
+        // Si quieres matarlo siempre que aparezca (más seguro para evitar ruido):
+        // return;
+      }
       if (
         warning.message.includes(
           'Module level directives cause errors when bundled, "use client"'
