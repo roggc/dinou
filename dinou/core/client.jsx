@@ -5,51 +5,116 @@ import {
   useEffect,
   useTransition,
   useLayoutEffect,
-  useMemo, // 1. Añadimos useMemo
+  useMemo,
 } from "react";
 import { createFromFetch } from "@roggc/react-server-dom-esm/client";
 import { hydrateRoot } from "react-dom/client";
 import { RouterContext } from "./navigation.js";
+import { resolveUrl } from "./navigation-utils.js";
 
+// ====================================================================
+// 1. ESTADO GLOBAL (Fuera del componente)
+// ====================================================================
 const cache = new Map();
 const scrollCache = new Map();
 
 const getCurrentRoute = () => window.location.pathname + window.location.search;
 
+// ====================================================================
+// 2. HELPERS PUROS
+// ====================================================================
+
+// Helper para detectar si solo cambiamos el hash en la misma página
+const isHashChangeOnly = (finalPath) => {
+  const targetUrl = new URL(finalPath, window.location.origin);
+  const normalize = (p) =>
+    p.length > 1 && p.endsWith("/") ? p.slice(0, -1) : p;
+
+  const targetPath = normalize(targetUrl.pathname);
+  const currentPath = normalize(window.location.pathname);
+
+  return (
+    targetPath + targetUrl.search === currentPath + window.location.search &&
+    targetUrl.hash !== ""
+  );
+};
+
+// 📦 Lógica de Fetching RSC (Movida fuera)
+const getRSCPayload = (url) => {
+  // Importante: url ya debe venir normalizada aquí
+  if (cache.has(url)) return cache.get(url);
+
+  const payloadUrl = window.__DINOU_USE_OLD_RSC__
+    ? "/____rsc_payload_old____" + url
+    : "/____rsc_payload____" + url;
+
+  const content = createFromFetch(fetch(payloadUrl));
+  cache.set(url, content);
+  return content;
+};
+
+// ====================================================================
+// 3. COMPONENTE ROUTER
+// ====================================================================
+
 function Router() {
   const [route, setRoute] = useState(getCurrentRoute());
   const [isPopState, setIsPopState] = useState(false);
-  // ⚡️ HOOK DE TRANSICIÓN
-  // isPending será true mientras React espera el fetch del RSC y el renderizado
   const [isPending, startTransition] = useTransition();
 
+  // 🔌 EFECTO 1: Exponer Prefetch Global
   useEffect(() => {
-    document.body.setAttribute("data-hydrated", "true");
-  }, []);
+    window.__DINOU_PREFETCH__ = (url) => {
+      // 🛡️ PROTECCIÓN PREFETCH: Si es un hash local, no hacemos nada
+      if (isHashChangeOnly(url)) return;
+      getRSCPayload(url);
+    };
 
-  // ⚡️ NUEVA FUNCIÓN: navigate
-  // Esta es la pieza clave que expone la lógica al mundo
+    // Hidratación
+    document.body.setAttribute("data-hydrated", "true");
+  }, []); // Solo al montar
+
+  // 🧭 FUNCIÓN NAVIGATE (Core Logic)
   const navigate = (href, options = {}) => {
-    // 1. Guardar scroll actual
+    const finalPath = resolveUrl(href, window.location.pathname);
+
+    // 🛡️ PROTECCIÓN NAVIGATE: Detección de Hash
+    if (isHashChangeOnly(finalPath)) {
+      if (options.replace) {
+        window.history.replaceState(null, "", finalPath);
+      } else {
+        window.history.pushState(null, "", finalPath);
+      }
+
+      // Scroll manual
+      const hash = new URL(finalPath, window.location.origin).hash;
+      const id = hash.replace("#", "");
+      const element = document.getElementById(id);
+      if (element) {
+        element.scrollIntoView({ behavior: "auto" });
+      }
+      return; // STOP CRÍTICO
+    }
+
+    // Navegación RSC Normal
     scrollCache.set(
       window.location.pathname + window.location.search,
       window.scrollY
     );
 
-    // 2. Actualizar Historial (Soporte para replace o push)
     if (options.replace) {
-      window.history.replaceState(null, "", href);
+      window.history.replaceState(null, "", finalPath);
     } else {
-      window.history.pushState(null, "", href);
+      window.history.pushState(null, "", finalPath);
     }
 
-    // 3. Actualizar React
     startTransition(() => {
       setIsPopState(false);
-      setRoute(href);
+      setRoute(finalPath);
     });
   };
 
+  // 🔌 EFECTO 2: Listeners Globales (Click y PopState)
   useEffect(() => {
     if ("scrollRestoration" in window.history) {
       window.history.scrollRestoration = "manual";
@@ -69,11 +134,18 @@ function Router() {
       }
 
       const href = anchor.getAttribute("href");
-      if (!href || !href.startsWith("/")) return;
+      if (!href || href.startsWith("mailto:") || href.startsWith("tel:"))
+        return;
+
+      // Usamos el helper unificado
+      const finalPath = resolveUrl(href, window.location.pathname);
+
+      // Usamos el mismo helper de detección de hash para consistencia
+      if (isHashChangeOnly(finalPath)) {
+        return; // El navegador lo maneja nativamente o el navigate lo manejaría
+      }
 
       e.preventDefault();
-
-      // ♻️ REUTILIZAMOS LA FUNCIÓN NAVIGATE
       navigate(href);
     };
 
@@ -91,10 +163,13 @@ function Router() {
       window.removeEventListener("click", onNavigate);
       window.removeEventListener("popstate", onPopState);
     };
-  }, []); // Dependencias vacías, navigate es estable dentro del closure, pero mejor así.
+  }, []);
 
+  // 🔌 EFECTO 3: Gestión de Scroll (Restauración)
   useLayoutEffect(() => {
     requestAnimationFrame(() => {
+      if (window.location.hash) return;
+
       if (isPopState) {
         const key = route;
         const savedY = scrollCache.get(key);
@@ -107,23 +182,27 @@ function Router() {
     });
   }, [route, isPopState]);
 
+  // 🔌 EFECTO 4: Gestión de Scroll (Hash en página nueva)
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (!hash) return;
+
+    requestAnimationFrame(() => {
+      const id = hash.replace("#", "");
+      const element = document.getElementById(id);
+      if (element) {
+        element.scrollIntoView({ behavior: "auto" });
+      }
+    });
+  }, [route]);
+
   // Lógica RSC
-  let content = cache.get(route);
-  if (!content) {
-    const payloadUrl = window.__DINOU_USE_OLD_RSC__
-      ? "/____rsc_payload_old____" + route
-      : "/____rsc_payload____" + route;
+  let content = getRSCPayload(route);
 
-    content = createFromFetch(fetch(payloadUrl));
-    cache.set(route, content);
-  }
-
-  // 📦 VALOR DEL CONTEXTO: Ahora es un Objeto
-  // Usamos useMemo para evitar re-renders innecesarios si algo más cambiara
   const contextValue = useMemo(
     () => ({
-      url: route, // La URL actual
-      navigate, // La función para navegar
+      url: route,
+      navigate,
       isPending,
     }),
     [route, isPending]

@@ -203,3 +203,49 @@ export declare function useRouter(): {
  * @returns {boolean} True if navigation is pending, false otherwise.
  */
 export declare function useNavigationLoading(): boolean;
+
+import type { AnchorHTMLAttributes } from "react";
+
+// ====================================================================
+// LINK COMPONENT
+// ====================================================================
+
+/**
+ * Props for the Dinou Link component.
+ * It extends standard HTML <a> attributes, allowing className, style, etc.
+ */
+export interface LinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
+  /**
+   * The destination URL or path.
+   * * Supports absolute paths (e.g., `/dashboard`).
+   * * Supports relative paths (e.g., `../settings` or `details`).
+   */
+  href: string;
+
+  /**
+   * Whether to prefetch the RSC payload when the mouse enters the link area (hover).
+   * This makes navigation feel instant upon clicking.
+   * @default true
+   */
+  prefetch?: boolean;
+}
+
+/**
+ * A client-side navigation component that renders an `<a>` tag.
+ * It automatically handles:
+ * 1. **Soft Navigation:** Transitions between pages without a full browser reload.
+ * 2. **Prefetching:** Loads the target route data on hover (if enabled).
+ * 3. **Relative Routing:** Resolves paths like standard filesystem navigation.
+ * 4. **Scroll Management:** Preserves or resets scroll position intelligently.
+ *
+ * @example
+ * <Link href="/about" className="text-blue-500">
+ * Go to About
+ * </Link>
+ *
+ * @example
+ * <Link href="../contact" prefetch={false}>
+ * Contact (No Prefetch)
+ * </Link>
+ */
+export declare function Link(props: LinkProps): ReactNode;

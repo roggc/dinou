@@ -14,6 +14,7 @@ const contextModule = require("./core/request-context.js");
 const navigationModule = require("./core/navigation.js");
 const clientRedirectModule = require("./core/client-redirect.jsx");
 const redirectModule = require("./core/redirect.jsx");
+const linkModule = require("./core/link.jsx");
 
 // Puedes usar re-exportación nombrada
 module.exports = {
@@ -27,6 +28,7 @@ module.exports = {
   useNavigationLoading: navigationModule.useNavigationLoading,
   redirect: redirectModule.redirect,
   ClientRedirect: clientRedirectModule.ClientRedirect,
+  Link: linkModule.Link,
 
   // Otras utilidades que puedas añadir en el futuro, ej:
   // cache: require('./cache.js').cache,
