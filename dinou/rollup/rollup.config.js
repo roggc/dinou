@@ -72,6 +72,10 @@ module.exports = async function () {
             __dirname,
             "../core/server-function-proxy.js"
           ),
+          dinouClientRedirect: path.resolve(
+            __dirname,
+            "../core/client-redirect.jsx"
+          ),
         }
       : {
           main: path.resolve(__dirname, "../core/client.jsx"),
@@ -80,13 +84,25 @@ module.exports = async function () {
             __dirname,
             "../core/server-function-proxy.js"
           ),
+          dinouClientRedirect: path.resolve(
+            __dirname,
+            "../core/client-redirect.jsx"
+          ),
         },
     output: {
       dir: outputDirectory,
       format: "esm",
       entryFileNames: isDevelopment ? "[name].js" : "[name]-[hash].js",
       chunkFileNames: isDevelopment ? "[name].js" : "[name]-[hash].js",
+      // 🛑 LA SOLUCIÓN MAGICA 👇
+      // Por defecto es 'true' en algunos casos.
+      // Al ponerlo en 'false', obligas a Rollup a usar el nombre original
+      // de la variable exportada en lugar de 'C', 'a', 'b', etc.
+      minifyInternalExports: false,
     },
+    // 🛑 AÑADE ESTA LÍNEA MÁGICA
+    // Le dice a Rollup: "Mantén las firmas (nombres de exportación) de los entry points intactas"
+    preserveEntrySignatures: "exports-only",
     external: [
       "/refresh.js",
       "/__hmr_client__.js",

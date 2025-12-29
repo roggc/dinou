@@ -7,6 +7,7 @@ import path from "node:path";
 import { regex as assetRegex } from "../core/asset-extensions.js";
 import normalizePath from "./helpers-esbuild/normalize-path.mjs";
 import { fileURLToPath, pathToFileURL } from "url";
+import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-module.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,6 +21,10 @@ let currentCtx = null; // Track the active esbuild context
 let debounceTimer = null; // For debouncing recreations
 let clientComponentsPaths = [];
 let currentServerFiles = new Set();
+const absPathToClientRedirect = path.resolve(
+  __dirname,
+  "../core/client-redirect.jsx"
+);
 
 const frameworkEntryPoints = {
   main: path.resolve(__dirname, "../core/client.jsx"),
@@ -33,6 +38,7 @@ const frameworkEntryPoints = {
     __dirname,
     "react-refresh/react-refresh-entry.js"
   ),
+  dinouClientRedirect: absPathToClientRedirect,
 };
 
 const changedIds = new Set();
@@ -56,6 +62,13 @@ async function updateEntriesAndComponents() {
     detectedAssetEntries,
     serverFiles,
   ] = await getEsbuildEntries({ manifest });
+
+  updateManifestForModule(
+    absPathToClientRedirect,
+    await fs.readFile(absPathToClientRedirect, "utf8"),
+    true,
+    manifest
+  );
 
   currentServerFiles = new Set(
     serverFiles.map((f) => normalizePath(path.resolve(f)))

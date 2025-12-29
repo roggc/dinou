@@ -12,7 +12,7 @@ import {
 import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
 import normalizePath from "./normalize-path.mjs";
 import { useClientRegex, useServerRegex } from "../../constants.js";
-import parseExports from "../../core/parse-exports.js";
+import { updateManifestForModule } from "./update-manifest-for-module.mjs";
 
 function hashFilePath(absPath) {
   return crypto.createHash("sha1").update(absPath).digest("hex").slice(0, 8);
@@ -29,33 +29,6 @@ export default async function getEsbuildEntries({
   const serverModules = new Set();
 
   // ---------- Helpers (ported mostly verbatim) ----------
-
-  function updateManifestForModule(absPath, code, isClientModule) {
-    const fileUrl = pathToFileURL(absPath).href;
-    const relPath =
-      "./" + path.relative(process.cwd(), absPath).replace(/\\/g, "/");
-
-    // Remove previous entries for this fileUrl prefix
-    for (const key in manifest) {
-      if (key.startsWith(fileUrl)) {
-        delete manifest[key];
-      }
-    }
-
-    if (isClientModule) {
-      const exports = parseExports(code);
-      for (const expName of exports) {
-        const manifestKey =
-          expName === "default" ? fileUrl : `${fileUrl}#${expName}`;
-        manifest[manifestKey] = {
-          id: relPath,
-          chunks: expName,
-          name: expName,
-        };
-      }
-    }
-  }
-
   async function getImportsAndAssetsAndCsss(
     code,
     baseFilePath,
@@ -221,7 +194,7 @@ export default async function getEsbuildEntries({
     if (isClientModule) {
       const name = path.basename(absPath, path.extname(absPath));
 
-      updateManifestForModule(absPath, code, true);
+      updateManifestForModule(absPath, code, true, manifest);
       detectedClientEntries.add({
         absPath: normalizedPath,
         name,

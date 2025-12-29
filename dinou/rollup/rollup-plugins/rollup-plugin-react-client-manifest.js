@@ -188,13 +188,29 @@ function reactClientManifestPlugin({
 
   return {
     name: "react-client-manifest",
-    async buildStart() {
-      const files = await glob(["**/*.{js,jsx,ts,tsx}"], {
+    async buildStart(options) {
+      const srcFiles = await glob(["**/*.{js,jsx,ts,tsx}"], {
         cwd: srcDir,
         absolute: true,
       });
 
-      for (const absPath of files) {
+      // B. Extraemos los entrypoints de la configuración de Rollup
+      const inputOption = options.input;
+      let entryPoints = [];
+
+      if (typeof inputOption === "string") {
+        // Caso 1: input: "src/index.js"
+        entryPoints = [inputOption];
+      } else if (Array.isArray(inputOption)) {
+        // Caso 2: input: ["src/a.js", "src/b.js"]
+        entryPoints = inputOption;
+      } else if (typeof inputOption === "object" && inputOption !== null) {
+        // Caso 3: input: { main: "src/index.js", other: "src/other.js" }
+        entryPoints = Object.values(inputOption);
+      }
+      const uniqueFiles = new Set([...srcFiles, ...entryPoints]);
+
+      for (const absPath of uniqueFiles) {
         const code = readFileSync(absPath, "utf8");
         const normalizedPath = absPath.split(path.sep).join(path.posix.sep);
         const isClientModule = useClientRegex.test(code.trim());

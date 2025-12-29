@@ -12,6 +12,8 @@
 // Asegúrate de que la ruta aquí es la correcta (ej. si 'context.js' está en la raíz)
 const contextModule = require("./core/request-context.js");
 const navigationModule = require("./core/navigation.js");
+const clientRedirectModule = require("./core/client-redirect.jsx");
+const redirectModule = require("./core/redirect.jsx");
 
 // Puedes usar re-exportación nombrada
 module.exports = {
@@ -21,6 +23,10 @@ module.exports = {
   getContext: contextModule.getContext,
   usePathname: navigationModule.usePathname,
   useSearchParams: navigationModule.useSearchParams,
+  useRouter: navigationModule.useRouter,
+  useNavigationLoading: navigationModule.useNavigationLoading,
+  redirect: redirectModule.redirect,
+  ClientRedirect: clientRedirectModule.ClientRedirect,
 
   // Otras utilidades que puedas añadir en el futuro, ej:
   // cache: require('./cache.js').cache,

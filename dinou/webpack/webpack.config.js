@@ -43,6 +43,10 @@ module.exports = async () => {
         __dirname,
         "../core/server-function-proxy-webpack.js"
       ),
+      dinouClientRedirect: path.resolve(
+        __dirname,
+        "../core/client-redirect.jsx"
+      ),
       ...[...cssEntries].reduce(
         (acc, cssEntry) => ({
           ...acc,

@@ -112,9 +112,45 @@ export interface RequestContextStore {
  */
 export declare function getContext(): RequestContextStore | undefined;
 
+import type { ReactNode } from "react";
+
 // ====================================================================
-// CLIENT NAVIGATION HOOKS (CLIENT SIDE)
+// NAVIGATION UTILITIES & COMPONENTS
 // ====================================================================
+
+/**
+ * Props for the ClientRedirect component.
+ */
+export interface ClientRedirectProps {
+  /** The destination URL to navigate to. */
+  to: string;
+}
+
+/**
+ * A Client Component that triggers a client-side navigation (replace) immediately upon mounting.
+ * * Usually, you don't need to use this directly; use the `redirect()` helper instead.
+ * * @param props - The component props containing the destination.
+ */
+export declare function ClientRedirect(props: ClientRedirectProps): ReactNode;
+
+/**
+ * Universal redirect function for Server Components and Server Functions.
+ * * It handles the logic intelligently based on the context:
+ * 1. **Server-Side (Hard Navigation):** If headers haven't been sent, it performs a real HTTP 307 redirect (better for SEO and performance).
+ * 2. **Client-Side / Streaming (Soft Navigation):** If the response stream has started or we are on the client, it returns a component that triggers a SPA navigation.
+ * * @param destination - The path URL to redirect to (e.g., "/login").
+ * @returns A React Node that handles the redirection.
+ * * @example
+ * // In a Server Component
+ * export default async function Page() {
+ * const user = await getUser();
+ * if (!user) {
+ * return redirect("/login");
+ * }
+ * return <div>Welcome {user.name}</div>;
+ * }
+ */
+export declare function redirect(destination: string): ReactNode;
 
 /**
  * A Client Component hook that lets you read the current URL's pathname.
@@ -137,3 +173,33 @@ export declare function usePathname(): string;
  * const page = searchParams.get('page');
  */
 export declare function useSearchParams(): URLSearchParams;
+
+/**
+ * A Client Component hook that allows you to programmatically navigate between routes.
+ *
+ * @returns {object} An object containing navigation methods.
+ * @example
+ * const router = useRouter();
+ * router.push('/dashboard');
+ */
+export declare function useRouter(): {
+  /**
+   * Navigate to the provided href. Pushes a new entry into the history stack.
+   * @param href - The URL to navigate to (e.g., "/about").
+   */
+  push: (href: string) => void;
+
+  /**
+   * Navigate to the provided href. Replaces the current entry in the history stack.
+   * @param href - The URL to navigate to.
+   */
+  replace: (href: string) => void;
+};
+
+/**
+ * A Client Component hook that returns true if a navigation (SPA transition) is currently in progress.
+ * Useful for showing progress bars or loading spinners globally.
+ *
+ * @returns {boolean} True if navigation is pending, false otherwise.
+ */
+export declare function useNavigationLoading(): boolean;

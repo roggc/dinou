@@ -1,43 +1,62 @@
+// dinou/core/client.jsx
 import {
   use,
   useState,
   useEffect,
-  startTransition,
+  useTransition,
   useLayoutEffect,
+  useMemo, // 1. Añadimos useMemo
 } from "react";
 import { createFromFetch } from "@roggc/react-server-dom-esm/client";
 import { hydrateRoot } from "react-dom/client";
 import { RouterContext } from "./navigation.js";
 
-// Caché global para no volver a pedir payloads de rutas ya visitadas
 const cache = new Map();
 const scrollCache = new Map();
 
-// Función auxiliar para calcular la ruta relativa actual
 const getCurrentRoute = () => window.location.pathname + window.location.search;
 
 function Router() {
-  // 1. Estado que controla la URL actual
   const [route, setRoute] = useState(getCurrentRoute());
-  // Estado para saber si la navegación actual fue por "Pop" (Atrás/Adelante)
   const [isPopState, setIsPopState] = useState(false);
+  // ⚡️ HOOK DE TRANSICIÓN
+  // isPending será true mientras React espera el fetch del RSC y el renderizado
+  const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     document.body.setAttribute("data-hydrated", "true");
   }, []);
 
-  // 2. Efecto para interceptar clicks en enlaces <a>
+  // ⚡️ NUEVA FUNCIÓN: navigate
+  // Esta es la pieza clave que expone la lógica al mundo
+  const navigate = (href, options = {}) => {
+    // 1. Guardar scroll actual
+    scrollCache.set(
+      window.location.pathname + window.location.search,
+      window.scrollY
+    );
+
+    // 2. Actualizar Historial (Soporte para replace o push)
+    if (options.replace) {
+      window.history.replaceState(null, "", href);
+    } else {
+      window.history.pushState(null, "", href);
+    }
+
+    // 3. Actualizar React
+    startTransition(() => {
+      setIsPopState(false);
+      setRoute(href);
+    });
+  };
+
   useEffect(() => {
-    // Desactivar restauración automática del navegador
     if ("scrollRestoration" in window.history) {
       window.history.scrollRestoration = "manual";
     }
 
     const onNavigate = (e) => {
-      // Buscamos si el click fue en un <a> o dentro de uno
       const anchor = e.target.closest("a");
-
-      // Si no es un enlace, o tiene target blank, o teclas modificadoras, ignoramos
       if (
         !anchor ||
         anchor.target ||
@@ -49,33 +68,18 @@ function Router() {
         return;
       }
 
-      // Verificamos que sea un enlace interno (mismo dominio)
       const href = anchor.getAttribute("href");
       if (!href || !href.startsWith("/")) return;
 
-      // 🛑 PREVENIMOS LA RECARGA DEL NAVEGADOR
       e.preventDefault();
 
-      // 1. Guardar scroll actual antes de irnos
-      scrollCache.set(
-        window.location.pathname + window.location.search,
-        window.scrollY
-      );
-
-      // Cambiamos la URL en la barra de direcciones sin recargar
-      window.history.pushState(null, "", href);
-
-      // Usamos startTransition para que la UI no se bloquee mientras llega el payload
-      startTransition(() => {
-        setIsPopState(false); // Es una navegación nueva
-        setRoute(href);
-      });
+      // ♻️ REUTILIZAMOS LA FUNCIÓN NAVIGATE
+      navigate(href);
     };
 
-    // 3. Efecto para manejar los botones Atrás/Adelante del navegador
     const onPopState = () => {
       startTransition(() => {
-        setIsPopState(true); // Es una navegación de historial
+        setIsPopState(true);
         setRoute(getCurrentRoute());
       });
     };
@@ -87,33 +91,24 @@ function Router() {
       window.removeEventListener("click", onNavigate);
       window.removeEventListener("popstate", onPopState);
     };
-  }, []);
+  }, []); // Dependencias vacías, navigate es estable dentro del closure, pero mejor así.
 
   useLayoutEffect(() => {
-    // requestAnimationFrame asegura que el DOM esté listo
     requestAnimationFrame(() => {
       if (isPopState) {
-        const key = route; // Ojo, route ya tiene pathname + search
+        const key = route;
         const savedY = scrollCache.get(key);
-
-        // console.log(
-        //   `[Router] POP detected. Key: ${key}, SavedY: ${savedY}, CurrentHeight: ${document.body.scrollHeight}`
-        // );
-
         if (savedY !== undefined) {
           window.scrollTo(0, savedY);
         }
       } else {
-        // console.log(`[Router] PUSH detected. Scrolling to top.`);
         window.scrollTo(0, 0);
       }
     });
   }, [route, isPopState]);
 
-  // 4. Lógica de Obtención de Datos (RSC)
+  // Lógica RSC
   let content = cache.get(route);
-
-  // Si no está en caché, pedimos el Payload
   if (!content) {
     const payloadUrl = window.__DINOU_USE_OLD_RSC__
       ? "/____rsc_payload_old____" + route
@@ -123,19 +118,26 @@ function Router() {
     cache.set(route, content);
   }
 
-  // 5. PROVIDER: Envolvemos el contenido RSC con el Contexto
-  // Pasamos 'route' (que es la URL completa relativa)
+  // 📦 VALOR DEL CONTEXTO: Ahora es un Objeto
+  // Usamos useMemo para evitar re-renders innecesarios si algo más cambiara
+  const contextValue = useMemo(
+    () => ({
+      url: route, // La URL actual
+      navigate, // La función para navegar
+      isPending,
+    }),
+    [route, isPending]
+  );
+
   return (
-    <RouterContext.Provider value={route}>
+    <RouterContext.Provider value={contextValue}>
       {use(content)}
     </RouterContext.Provider>
   );
 }
 
-// Hidratamos una sola vez con el Router
 hydrateRoot(document, <Router />);
 
-// HMR
 if (import.meta.hot) {
   import.meta.hot.accept();
 }
