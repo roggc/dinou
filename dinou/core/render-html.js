@@ -3,14 +3,13 @@ require("./register-hooks.js");
 const babelPluginRegisterImports = require("./babel-plugin-register-imports.js");
 const babelRegister = require("@babel/register");
 babelRegister({
-  ignore: [/[\\\/](node_modules)[\\\/]/],
+  ignore: [/node_modules[\\/](?!dinou)/],
   presets: [
     ["@babel/preset-react", { runtime: "automatic" }],
     "@babel/preset-typescript",
   ],
   plugins: [babelPluginRegisterImports, "@babel/transform-modules-commonjs"],
   extensions: [".js", ".jsx", ".ts", ".tsx"],
-  cache: false,
 });
 const addHook = require("./asset-require-hook.js");
 const { extensions } = require("./asset-extensions.js");
