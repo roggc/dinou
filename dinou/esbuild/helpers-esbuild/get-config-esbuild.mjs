@@ -24,7 +24,7 @@ export default function getConfigEsbuild({
     assetsPlugin(),
     stableChunkNamesAndMapsPlugin(),
     serverFunctionsPlugin(),
-    esmHmrPlugin({ entryName: "main", changedIds, hmrEngine }),
+    esmHmrPlugin({ entryNames: ["main", "error"], changedIds, hmrEngine }),
   ];
 
   if (existsSync("favicons")) {

@@ -6,7 +6,7 @@ const {
 } = require("./get-file-path-and-dynamic-params");
 const importModule = require("./import-module");
 
-async function getJSX(reqPath, query, cookies) {
+async function getJSX(reqPath, query, cookies, isNotFound = null) {
   const srcFolder = path.resolve(process.cwd(), "src");
   const reqSegments = reqPath.split("/").filter(Boolean);
   const folderPath = path.join(srcFolder, ...reqSegments);
@@ -35,6 +35,7 @@ async function getJSX(reqPath, query, cookies) {
   let pageFunctionsProps;
 
   if (!pagePath) {
+    if (isNotFound) isNotFound.value = true;
     const [notFoundPath, dParams] = getFilePathAndDynamicParams(
       reqSegments,
       query,
@@ -67,6 +68,7 @@ async function getJSX(reqPath, query, cookies) {
       }
     }
   } else {
+    if (isNotFound) isNotFound.value = false;
     const pageModule = await importModule(pagePath);
     const Page = pageModule.default ?? pageModule;
 

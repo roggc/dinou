@@ -1,36 +1,230 @@
-import { use } from "react";
+import {
+  use,
+  useState,
+  useEffect,
+  useTransition,
+  useLayoutEffect,
+  useMemo,
+} from "react";
 import { createFromFetch } from "@roggc/react-server-dom-esm/client";
 import { hydrateRoot } from "react-dom/client";
+import { RouterContext } from "./navigation.js";
+import { resolveUrl } from "./navigation-utils.js";
 
+// ====================================================================
+// 1. ESTADO GLOBAL (Fuera del componente)
+// ====================================================================
 const cache = new Map();
-const route = window.location.href.replace(window.location.origin, "");
+const scrollCache = new Map();
 
-function Root() {
-  let content = cache.get(route);
-  if (!content) {
-    content = createFromFetch(
-      fetch("/____rsc_payload_error____" + route, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+const getCurrentRoute = () => window.location.pathname + window.location.search;
+
+// ====================================================================
+// 2. HELPERS PUROS
+// ====================================================================
+
+// Helper para detectar si solo cambiamos el hash en la misma página
+const isHashChangeOnly = (finalPath) => {
+  const targetUrl = new URL(finalPath, window.location.origin);
+  const normalize = (p) =>
+    p.length > 1 && p.endsWith("/") ? p.slice(0, -1) : p;
+
+  const targetPath = normalize(targetUrl.pathname);
+  const currentPath = normalize(window.location.pathname);
+
+  return (
+    targetPath + targetUrl.search === currentPath + window.location.search &&
+    targetUrl.hash !== ""
+  );
+};
+
+// 📦 Lógica de Fetching RSC (Movida fuera)
+const getRSCPayload = (url) => {
+  // Importante: url ya debe venir normalizada aquí
+  if (cache.has(url)) return cache.get(url);
+
+  const content = createFromFetch(
+    fetch("/____rsc_payload_error____" + url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        error: {
+          message: window.__DINOU_ERROR_MESSAGE__ || "Unknown error",
+          stack: window.__DINOU_ERROR_STACK__ || "No stack trace available",
         },
-        body: JSON.stringify({
-          error: {
-            message: window.__DINOU_ERROR_MESSAGE__ || "Unknown error",
-            stack: window.__DINOU_ERROR_STACK__ || "No stack trace available",
-          },
-        }),
-      })
-    );
-    cache.set(route, content);
-  }
+      }),
+    })
+  );
+  cache.set(url, content);
+  return content;
+};
 
-  return use(content);
+// ====================================================================
+// 3. COMPONENTE ROUTER
+// ====================================================================
+
+function Router() {
+  const [route, setRoute] = useState(getCurrentRoute());
+  const [isPopState, setIsPopState] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  // 🔌 EFECTO 1: Exponer Prefetch Global
+  useEffect(() => {
+    window.__DINOU_PREFETCH__ = (url) => {
+      // 🛡️ PROTECCIÓN PREFETCH: Si es un hash local, no hacemos nada
+      if (isHashChangeOnly(url)) return;
+      getRSCPayload(url);
+    };
+
+    // Hidratación
+    document.body.setAttribute("data-hydrated", "true");
+  }, []); // Solo al montar
+
+  // 🧭 FUNCIÓN NAVIGATE (Core Logic)
+  const navigate = (href, options = {}) => {
+    const finalPath = resolveUrl(href, window.location.pathname);
+
+    // 🛡️ PROTECCIÓN NAVIGATE: Detección de Hash
+    if (isHashChangeOnly(finalPath)) {
+      if (options.replace) {
+        window.history.replaceState(null, "", finalPath);
+      } else {
+        window.history.pushState(null, "", finalPath);
+      }
+
+      // Scroll manual
+      const hash = new URL(finalPath, window.location.origin).hash;
+      const id = hash.replace("#", "");
+      const element = document.getElementById(id);
+      if (element) {
+        element.scrollIntoView({ behavior: "auto" });
+      }
+      return; // STOP CRÍTICO
+    }
+
+    // Navegación RSC Normal
+    scrollCache.set(
+      window.location.pathname + window.location.search,
+      window.scrollY
+    );
+
+    if (options.replace) {
+      window.history.replaceState(null, "", finalPath);
+    } else {
+      window.history.pushState(null, "", finalPath);
+    }
+
+    startTransition(() => {
+      setIsPopState(false);
+      setRoute(finalPath);
+    });
+  };
+
+  // 🔌 EFECTO 2: Listeners Globales (Click y PopState)
+  useEffect(() => {
+    if ("scrollRestoration" in window.history) {
+      window.history.scrollRestoration = "manual";
+    }
+
+    const onNavigate = (e) => {
+      const anchor = e.target.closest("a");
+      if (
+        !anchor ||
+        anchor.target ||
+        e.metaKey ||
+        e.ctrlKey ||
+        e.shiftKey ||
+        e.altKey
+      ) {
+        return;
+      }
+
+      const href = anchor.getAttribute("href");
+      if (!href || href.startsWith("mailto:") || href.startsWith("tel:"))
+        return;
+
+      // Usamos el helper unificado
+      const finalPath = resolveUrl(href, window.location.pathname);
+
+      // Usamos el mismo helper de detección de hash para consistencia
+      if (isHashChangeOnly(finalPath)) {
+        return; // El navegador lo maneja nativamente o el navigate lo manejaría
+      }
+
+      e.preventDefault();
+      navigate(href);
+    };
+
+    const onPopState = () => {
+      startTransition(() => {
+        setIsPopState(true);
+        setRoute(getCurrentRoute());
+      });
+    };
+
+    window.addEventListener("click", onNavigate);
+    window.addEventListener("popstate", onPopState);
+
+    return () => {
+      window.removeEventListener("click", onNavigate);
+      window.removeEventListener("popstate", onPopState);
+    };
+  }, []);
+
+  // 🔌 EFECTO 3: Gestión de Scroll (Restauración)
+  useLayoutEffect(() => {
+    requestAnimationFrame(() => {
+      if (window.location.hash) return;
+
+      if (isPopState) {
+        const key = route;
+        const savedY = scrollCache.get(key);
+        if (savedY !== undefined) {
+          window.scrollTo(0, savedY);
+        }
+      } else {
+        window.scrollTo(0, 0);
+      }
+    });
+  }, [route, isPopState]);
+
+  // 🔌 EFECTO 4: Gestión de Scroll (Hash en página nueva)
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (!hash) return;
+
+    requestAnimationFrame(() => {
+      const id = hash.replace("#", "");
+      const element = document.getElementById(id);
+      if (element) {
+        element.scrollIntoView({ behavior: "auto" });
+      }
+    });
+  }, [route]);
+
+  // Lógica RSC
+  let content = getRSCPayload(route);
+
+  const contextValue = useMemo(
+    () => ({
+      url: route,
+      navigate,
+      isPending,
+    }),
+    [route, isPending]
+  );
+
+  return (
+    <RouterContext.Provider value={contextValue}>
+      {use(content)}
+    </RouterContext.Provider>
+  );
 }
 
-hydrateRoot(document, <Root />);
+hydrateRoot(document, <Router />);
 
-// HMR
 if (import.meta.hot) {
   import.meta.hot.accept();
 }
