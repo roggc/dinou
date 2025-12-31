@@ -434,23 +434,23 @@ function getContextForServerFunctionEndpoint(req, res) {
 
 app.use(express.static(path.resolve(process.cwd(), outputFolder)));
 
-app.use((req, res, next) => {
-  // Asegúrate de NO devolver 200 si lo que piden es un .js que no existe
-  if (
-    req.path.endsWith(".js") ||
-    req.path.endsWith(".css") ||
-    req.path.endsWith(".png") ||
-    req.path.endsWith(".jpg") ||
-    req.path.endsWith(".svg") ||
-    req.path.endsWith(".webp") ||
-    req.path.endsWith(".ico") ||
-    req.path.endsWith(".json")
-  ) {
-    return res.status(404).send("Not found");
-  }
-  next();
-  // ... renderizado de Dinou ...
-});
+// app.use((req, res, next) => {
+//   // Asegúrate de NO devolver 200 si lo que piden es un .js que no existe
+//   if (
+//     req.path.endsWith(".js") ||
+//     req.path.endsWith(".css") ||
+//     req.path.endsWith(".png") ||
+//     req.path.endsWith(".jpg") ||
+//     req.path.endsWith(".svg") ||
+//     req.path.endsWith(".webp") ||
+//     req.path.endsWith(".ico") ||
+//     req.path.endsWith(".json")
+//   ) {
+//     return res.status(404).send("Not found");
+//   }
+//   next();
+//   // ... renderizado de Dinou ...
+// });
 
 let isReady = isDevelopment; // En dev siempre estamos listos (o casi)
 
@@ -601,6 +601,8 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
   }
 });
 
+let statusManifest;
+
 app.get(/^\/.*\/?$/, (req, res) => {
   try {
     const reqPath = req.path.endsWith("/") ? req.path : req.path + "/";
@@ -618,7 +620,13 @@ app.get(/^\/.*\/?$/, (req, res) => {
 
       if (existsSync(fileToRead)) {
         res.setHeader("Content-Type", "text/html");
+        const meta = statusManifest[reqPath];
 
+        if (meta && meta.status) {
+          res.statusCode = meta.status;
+        } else {
+          res.statusCode = 200; // Default
+        }
         const rStream = createReadStream(fileToRead);
 
         rStream.on("error", (err) => {
@@ -633,7 +641,7 @@ app.get(/^\/.*\/?$/, (req, res) => {
         rStream.on("end", () => {
           // 3. Escribimos nuestro contenido adicional
           if (htmlPathOld) {
-            res.write("<script>window.__DINOU_USE_OLD_RSC__=true</script>");
+            res.write("<script>window.__DINOU_USE_OLD_RSC__=true;</script>");
           }
 
           // 4. Cerramos manualmente la respuesta (ahora sí)
@@ -911,6 +919,9 @@ const http = require("http");
       try {
         await generateStatic();
         console.log("✅ [Startup] Static generation finished successfully.");
+        statusManifest = JSON.parse(
+          readFileSync(path.join(process.cwd(), "dist2/status-manifest.json"))
+        );
       } catch (buildError) {
         console.error("❌ [Startup] Static generation failed:", buildError);
         // Dependiendo de tu política, podrías salir (process.exit(1)) o continuar

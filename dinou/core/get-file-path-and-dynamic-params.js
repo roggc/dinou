@@ -2,6 +2,14 @@ const path = require("path");
 const { existsSync, readdirSync } = require("fs");
 const React = require("react");
 
+function safeDecode(val) {
+  try {
+    return val ? decodeURIComponent(val) : vale;
+  } catch (e) {
+    return val; // Si falla la decodificación, devolvemos el original
+  }
+}
+
 function getSlots(currentPath, reqSegments, query) {
   const slots = {};
   const slotFolders = readdirSync(currentPath, {
@@ -95,7 +103,9 @@ function getFilePathAndDynamicParams(
           if (entry.name.startsWith("[[...") && entry.name.endsWith("]]")) {
             const paramName = entry.name.slice(5, -2);
             const paramValue =
-              index < reqSegments.length ? reqSegments.slice(index) : [];
+              index < reqSegments.length
+                ? reqSegments.slice(index).map(safeDecode)
+                : [];
             const newParams = {
               ...dParams,
               [paramName]: paramValue,
@@ -136,7 +146,9 @@ function getFilePathAndDynamicParams(
           } else if (entry.name.startsWith("[[") && entry.name.endsWith("]]")) {
             const paramName = entry.name.slice(2, -2);
             const paramValue =
-              index < reqSegments.length ? reqSegments[index] : undefined;
+              index < reqSegments.length
+                ? safeDecode(reqSegments[index])
+                : undefined;
             const newParams = {
               ...dParams,
               [paramName]: paramValue,
@@ -204,7 +216,9 @@ function getFilePathAndDynamicParams(
         if (entry.name.startsWith("[[...") && entry.name.endsWith("]]")) {
           const paramName = entry.name.slice(5, -2);
           const paramValue =
-            index < reqSegments.length ? reqSegments.slice(index) : [];
+            index < reqSegments.length
+              ? reqSegments.slice(index).map(safeDecode)
+              : [];
           const newParams = {
             ...dParams,
             [paramName]: paramValue,
@@ -241,7 +255,7 @@ function getFilePathAndDynamicParams(
             : [foundInCurrentPath ?? lastFound, newParams];
         } else if (entry.name.startsWith("[...") && entry.name.endsWith("]")) {
           const paramName = entry.name.slice(4, -1);
-          const paramValue = reqSegments.slice(index);
+          const paramValue = reqSegments.slice(index).map(safeDecode);
           const newParams = {
             ...dParams,
             [paramName]: paramValue,
@@ -279,7 +293,9 @@ function getFilePathAndDynamicParams(
         } else if (entry.name.startsWith("[[") && entry.name.endsWith("]]")) {
           const paramName = entry.name.slice(2, -2);
           const paramValue =
-            index < reqSegments.length ? reqSegments[index] : undefined;
+            index < reqSegments.length
+              ? safeDecode(reqSegments[index])
+              : undefined;
           const newParams = {
             ...dParams,
             [paramName]: paramValue,
@@ -301,7 +317,7 @@ function getFilePathAndDynamicParams(
           );
         } else if (entry.name.startsWith("[") && entry.name.endsWith("]")) {
           const paramName = entry.name.slice(1, -1);
-          const paramValue = reqSegments[index];
+          const paramValue = safeDecode(reqSegments[index]);
           const newParams = {
             ...dParams,
             [paramName]: paramValue,

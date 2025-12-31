@@ -3,8 +3,6 @@ const path = require("path");
 const { PassThrough } = require("stream");
 const getSSGJSXOrJSX = require("./get-ssg-jsx-or-jsx.js");
 const { renderToPipeableStream } = require("react-server-dom-webpack/server");
-
-// 👇 1. IMPORTAR STORAGE
 const { requestStorage } = require("./request-context.js");
 
 const OUT_DIR = path.resolve("dist2");
@@ -12,43 +10,40 @@ const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 
 async function generateStaticRSC(reqPath) {
   const finalReqPath = reqPath.endsWith("/") ? reqPath : reqPath + "/";
-  const payloadPath = path.join(OUT_DIR, finalReqPath, "rsc.rsc");
 
-  // 👇 2. MOCK RES ROBUSTO (Alineado estrictamente con el contrato ResponseProxy)
+  // 1. RUTAS: Final y Temporal
+  const payloadPath = path.join(OUT_DIR, finalReqPath, "rsc.rsc");
+  const tempPayloadPath = payloadPath + ".tmp"; // 👈 Escribimos aquí
+
+  // 👇 2. MOCK RES (Versión Completa y Robusta)
   const mockRes = {
-    // Propiedades internas para debug o lógica futura (ocultas al contrato TS)
     _statusCode: 200,
     _headers: {},
-    _redirectUrl: null,
-    _cookies: [], // Opcional: para debug
+    _redirectUrl: null, // ✅ Recuperamos esta propiedad
+    _cookies: [],
 
-    // 👇 AÑADIR ESTE MÉTODO
     cookie(name, value, options) {
-      // En SSG no hacemos nada real, pero guardamos registro si quieres debuguear
-      // console.log(`[SSG] Cookie set ignored: ${name}=${value}`);
       this._cookies.push({ name, value, options });
     },
 
-    // clearCookie(name, options): void
     clearCookie(name, options) {
-      // No-op en generación estática/ISR
+      // No-op
     },
 
-    // setHeader(name, value): void
     setHeader(name, value) {
       this._headers[name.toLowerCase()] = value;
     },
 
-    // status(code): void (Nota: El contrato dice void, no permite chaining)
     status(code) {
       this._statusCode = code;
     },
 
-    // redirect: Soporte de sobrecarga (status, url) o (url)
+    // ✅ TU LÓGICA ORIGINAL (La correcta)
     redirect(arg1, arg2) {
       let status = 302;
       let url = "";
 
+      // Manejo de sobrecarga: redirect(url) vs redirect(status, url)
       if (typeof arg1 === "number") {
         status = arg1;
         url = arg2;
@@ -60,16 +55,15 @@ async function generateStaticRSC(reqPath) {
       this._redirectUrl = url;
 
       console.warn(
-        `⚠️ [ISR] Redirect detected during revalidation of ${reqPath} -> ${url} (${status})`
+        `⚠️ [ISR] Redirect detected during RSC generation of ${reqPath} -> ${url} (${status})`
       );
     },
   };
 
-  // 👇 3. MOCK CONTEXT (Req limitado a lo que pide el contrato)
   const mockContext = {
     req: {
       query: {},
-      cookies: {}, // ISR usualmente no tiene cookies de usuario específicas
+      cookies: {},
       headers: {
         "user-agent": "Dinou-ISR-Revalidator",
         host: "localhost",
@@ -78,7 +72,7 @@ async function generateStaticRSC(reqPath) {
       path: finalReqPath,
       method: "GET",
     },
-    res: mockRes, // ✅ Mock seguro
+    res: mockRes,
   };
 
   try {
@@ -95,40 +89,39 @@ async function generateStaticRSC(reqPath) {
 
     fs.mkdirSync(path.dirname(payloadPath), { recursive: true });
 
-    const fileStream = fs.createWriteStream(payloadPath);
+    // 2. ESCRIBIR EN TEMPORAL
+    const fileStream = fs.createWriteStream(tempPayloadPath);
     const passThrough = new PassThrough();
 
-    // ✅ 4. EJECUCIÓN CON CONTEXTO PROTEGIDO
     await requestStorage.run(mockContext, async () => {
       const jsx = await getSSGJSXOrJSX(finalReqPath, {});
-
       const { pipe } = renderToPipeableStream(jsx, manifest);
-
-      // Conectamos los pipes dentro del contexto
       pipe(passThrough);
       passThrough.pipe(fileStream);
 
-      // ESPERAMOS a que el stream termine ANTES de que el contexto se destruya
       await new Promise((resolve, reject) => {
         fileStream.on("finish", resolve);
-        fileStream.on("error", (err) => {
-          console.error(`❌ ISR Error writing RSC for ${finalReqPath}:`, err);
-          reject(err);
-        });
+        fileStream.on("error", reject);
         passThrough.on("error", reject);
       });
     });
 
-    // Validación post-generación (Opcional)
-    if (mockRes._statusCode !== 200) {
-      console.log(
-        `⚠️ ISR Revalidation for ${finalReqPath} resulted in status ${mockRes._statusCode}`
-      );
-    } else {
-      console.log("✅ Generated RSC payload (ISR):", finalReqPath);
-    }
+    // 3. RETORNAR RESULTADO (NO renombramos aquí)
+    const success = mockRes._statusCode !== 500;
+
+    return {
+      success,
+      type: "rsc",
+      reqPath: finalReqPath,
+      tempPath: tempPayloadPath,
+      finalPath: payloadPath,
+      status: mockRes._statusCode,
+    };
   } catch (error) {
-    console.error("❌ Error generating RSC payload for:", finalReqPath, error);
+    console.error("❌ Error generating RSC payload:", error);
+    // Limpieza de emergencia
+    if (fs.existsSync(tempPayloadPath)) fs.unlinkSync(tempPayloadPath);
+    return { success: false, tempPath: tempPayloadPath };
   }
 }
 

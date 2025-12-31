@@ -1,27 +1,26 @@
-// generate-static-page.js
 const path = require("path");
 const { mkdirSync, createWriteStream } = require("fs");
+const fs = require("fs").promises;
 const renderAppToHtml = require("./render-app-to-html.js");
 const getSSGMetadata = require("./get-ssg-metadata.js");
 
 const OUT_DIR = path.resolve("dist2");
 
 async function generateStaticPage(reqPath) {
-  // Normalización
   const finalReqPath = reqPath.endsWith("/") ? reqPath : reqPath + "/";
   const htmlPath = path.join(OUT_DIR, finalReqPath, "index.html");
+  const tempHtmlPath = path.join(OUT_DIR, finalReqPath, "index.html.tmp");
 
-  // Datos simulados
   const query = {};
   const paramsString = JSON.stringify(query);
+  const capturedStatus = {};
 
-  // 1. MOCK REQUEST (Contexto necesario para SSR)
   const contextForChild = {
     req: {
       query: query,
       cookies: {},
       headers: {
-        "user-agent": "Dinou-ISR-Revalidator", // Útil para debug
+        "user-agent": "Dinou-ISR-Revalidator",
         host: "localhost",
         "x-forwarded-proto": "http",
       },
@@ -31,95 +30,75 @@ async function generateStaticPage(reqPath) {
   };
 
   try {
-    // Preparar escritura
     mkdirSync(path.dirname(htmlPath), { recursive: true });
-    const fileStream = createWriteStream(htmlPath);
+    const fileStream = createWriteStream(tempHtmlPath);
     let htmlStream = null;
 
-    // 2. MOCK RESPONSE (Simulación de Express + Fix Webpack)
     const mockRes = {
-      headersSent: true, // Forzamos modo script injection para redirects
-      _cookies: [], // Opcional: para debug
-
-      // 👇 AÑADIR ESTE MÉTODO
+      headersSent: true,
+      _cookies: [],
       cookie(name, value, options) {
-        // En SSG no hacemos nada real, pero guardamos registro si quieres debuguear
-        // console.log(`[SSG] Cookie set ignored: ${name}=${value}`);
         this._cookies.push({ name, value, options });
       },
-
       write: (chunk) => {
         if (!fileStream.writableEnded) fileStream.write(chunk);
       },
-
       end: (chunk) => {
         if (chunk && !fileStream.writableEnded) fileStream.write(chunk);
-
-        // 🔥 FIX WEBPACK: Cortar la conexión inmediatamente si decidimos terminar
-        // (Ej: por un redirect)
-        if (htmlStream) {
-          htmlStream.unpipe(fileStream);
-        }
-
+        if (htmlStream) htmlStream.unpipe(fileStream);
         if (!fileStream.writableEnded) fileStream.end();
       },
-
       status: (code) => {
-        if (code !== 200)
-          console.warn(
-            `[ISR Warning] Status ${code} ignored for ${finalReqPath}`
-          );
+        capturedStatus.value = code;
       },
       setHeader: () => {},
       clearCookie: () => {},
-      redirect: () => {}, // Nunca se ejecuta porque headersSent es true
+      redirect: () => {},
     };
 
-    // 3. Ejecutar Renderizado
     htmlStream = renderAppToHtml(
       finalReqPath,
       paramsString,
       "{}",
-      contextForChild, // ✅ Mock Req
-      mockRes // ✅ Mock Res
+      contextForChild,
+      mockRes,
+      capturedStatus
     );
-    const sideEffectScripts = getSSGMetadata(reqPath);
-    await new Promise((resolve, reject) => {
-      // 🟢 INYECCIÓN DE SCRIPTS
-      if (sideEffectScripts) {
-        fileStream.write(sideEffectScripts);
-      }
-      // Conectar tubería manualmente
-      htmlStream.pipe(fileStream, { end: false });
 
+    const sideEffectScripts = getSSGMetadata(reqPath);
+
+    await new Promise((resolve, reject) => {
+      if (sideEffectScripts) fileStream.write(sideEffectScripts);
+      htmlStream.pipe(fileStream, { end: false });
       htmlStream.on("end", () => {
         if (!fileStream.writableEnded) fileStream.end();
         resolve();
       });
-
       htmlStream.on("error", (err) => {
-        // Ignorar error de carrera de Webpack si ocurre
-        if (err.code === "ERR_STREAM_WRITE_AFTER_END") {
-          resolve();
-        } else {
-          reject(err);
-        }
+        fileStream.end();
+        if (err.code === "ERR_STREAM_WRITE_AFTER_END") resolve();
+        else reject(err);
       });
-
       fileStream.on("error", reject);
     });
 
-    console.log("✅ Generated HTML (ISR):", finalReqPath);
+    // 🛡️ NO RENOMBRAMOS NI ACTUALIZAMOS MANIFIESTO AQUÍ
+    // Solo devolvemos el reporte al orquestador
+    const status = capturedStatus.value || 200;
+    const success = status !== 500;
+
+    return {
+      success,
+      type: "html",
+      reqPath: finalReqPath,
+      tempPath: tempHtmlPath,
+      finalPath: htmlPath,
+      status: status,
+    };
   } catch (error) {
-    if (error.code === "ERR_STREAM_WRITE_AFTER_END") {
-      console.log(
-        "⚠️ Ignored write-after-end race condition for:",
-        finalReqPath
-      );
-    } else {
-      console.error("❌ Error rendering HTML for:", finalReqPath);
-      console.error(error.message);
-    }
+    // En caso de excepción, intentamos limpiar pero delegamos error
+    await fs.unlink(tempHtmlPath).catch(() => {});
+    return { success: false, tempPath: tempHtmlPath };
   }
 }
 

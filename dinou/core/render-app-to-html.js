@@ -31,7 +31,8 @@ function renderAppToHtml(
   paramsString,
   cookiesString = "{}",
   contextForChild,
-  res
+  res,
+  capturedStatus = null
 ) {
   // Replicamos el array de argumentos posicionales que se pasaban al script
   // [renderHtmlPath, reqPath, paramsString, cookiesString]
@@ -95,6 +96,7 @@ function renderAppToHtml(
             console.warn(
               `[Dinou Warning] HTTP status '${args[0]}' ignored because streaming started.`
             );
+            if (capturedStatus) capturedStatus.value = args[0];
             return;
           }
 

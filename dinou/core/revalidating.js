@@ -1,10 +1,36 @@
 const path = require("path");
-const { existsSync, readFileSync, copyFileSync } = require("fs");
+const fs = require("fs").promises; // Usamos promesas
+const { existsSync, readFileSync, copyFileSync, unlinkSync } = require("fs");
 const generateStaticPage = require("./generate-static-page");
 const { buildStaticPage } = require("./build-static-pages");
 const generateStaticRSC = require("./generate-static-rsc");
 
 const regenerating = new Set();
+const OUT_DIR = path.resolve("dist2");
+const MANIFEST_PATH = path.join(OUT_DIR, "status-manifest.json");
+
+// Helper para actualizar el manifiesto (movido aquí)
+async function updateStatusManifest(reqPath, status) {
+  try {
+    let manifest = {};
+    try {
+      const content = await fs.readFile(MANIFEST_PATH, "utf-8");
+      manifest = JSON.parse(content);
+    } catch (e) {}
+
+    const currentStatus = manifest[reqPath]?.status;
+    if (currentStatus === status) return;
+
+    manifest[reqPath] = { status };
+    await fs.writeFile(
+      MANIFEST_PATH,
+      JSON.stringify(manifest, null, 2),
+      "utf-8"
+    );
+  } catch (error) {
+    console.error(`[ISR] Failed to update manifest:`, error);
+  }
+}
 
 function revalidating(reqPath) {
   const distFolder = path.resolve(process.cwd(), "dist");
@@ -23,28 +49,67 @@ function revalidating(reqPath) {
     Date.now() > generatedAt + revalidate;
 
   if (isExpired && !regenerating.has(reqPath)) {
-    copyFileSync(
-      path.join(dist2Folder, reqPath, "index.html"),
-      path.join(dist2Folder, reqPath, "index._old.html")
-    );
-    copyFileSync(
-      path.join(dist2Folder, reqPath, "rsc.rsc"),
-      path.join(dist2Folder, reqPath, "rsc._old.rsc")
-    );
+    // 1. BACKUP (Mantenemos tu lógica de backup para servir algo mientras regeneramos)
+    try {
+      if (existsSync(path.join(dist2Folder, reqPath, "index.html")))
+        copyFileSync(
+          path.join(dist2Folder, reqPath, "index.html"),
+          path.join(dist2Folder, reqPath, "index._old.html")
+        );
+      if (existsSync(path.join(dist2Folder, reqPath, "rsc.rsc")))
+        copyFileSync(
+          path.join(dist2Folder, reqPath, "rsc.rsc"),
+          path.join(dist2Folder, reqPath, "rsc._old.rsc")
+        );
+    } catch (e) {
+      /* Ignorar errores de copia */
+    }
+
     regenerating.add(reqPath);
+
     (async () => {
       try {
-        // 1. Primero construimos el JSON (Base de datos de la página)
+        console.log(`[ISR] Starting regeneration for ${reqPath}...`);
+
+        // A. Construir datos
         await buildStaticPage(reqPath);
 
-        // 2. Una vez tenemos el JSON, generamos el HTML y el RSC en paralelo 🚀
-        await Promise.all([
+        // B. Generar HTML y RSC en PARALELO (Archivos .tmp) 🚀
+        const [pageResult, rscResult] = await Promise.all([
           generateStaticPage(reqPath),
           generateStaticRSC(reqPath),
         ]);
-        console.log(`[ISR] Successfully regenerated: ${reqPath}`);
+
+        // =========================================================
+        // 🔒 COMMIT TRANSACCIONAL (Todo o Nada)
+        // =========================================================
+
+        // Verificamos si AMBOS tuvieron éxito (Status != 500)
+        if (pageResult.success && rscResult.success) {
+          // 1. Renombrar HTML (.tmp -> .html)
+          await fs.rename(pageResult.tempPath, pageResult.finalPath);
+
+          // 2. Renombrar RSC (.tmp -> .rsc)
+          await fs.rename(rscResult.tempPath, rscResult.finalPath);
+
+          // 3. Actualizar Manifiesto (Usamos el status del HTML que es el principal)
+          await updateStatusManifest(reqPath, pageResult.status);
+
+          console.log(
+            `✅ [ISR] Successfully committed ${reqPath} (Status: ${pageResult.status})`
+          );
+        } else {
+          // 🛑 ABORTAR: Al menos uno falló (probablemente 500)
+          console.warn(
+            `⚠️ [ISR] Partial failure for ${reqPath}. Aborting commit.`
+          );
+
+          // Borrar temporales (limpieza)
+          await fs.unlink(pageResult.tempPath).catch(() => {});
+          await fs.unlink(rscResult.tempPath).catch(() => {});
+        }
       } catch (e) {
-        console.error(`[ISR] Error regenerating ${reqPath}:`, err);
+        console.error(`[ISR] Critical error regenerating ${reqPath}:`, e);
       } finally {
         regenerating.delete(reqPath);
       }
