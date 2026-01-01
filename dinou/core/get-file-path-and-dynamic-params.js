@@ -4,39 +4,71 @@ const React = require("react");
 
 function safeDecode(val) {
   try {
-    return val ? decodeURIComponent(val) : vale;
+    return !!val ? decodeURIComponent(val) : val;
   } catch (e) {
     return val; // Si falla la decodificación, devolvemos el original
   }
 }
 
 function getSlots(currentPath, reqSegments, query) {
-  const slots = {};
-  const slotFolders = readdirSync(currentPath, {
-    withFileTypes: true,
-  }).filter((entry) => entry.isDirectory() && entry.name.startsWith("@"));
-  for (const slot of slotFolders) {
-    const [slotPath, slotParams] = getFilePathAndDynamicParams(
-      reqSegments,
-      query,
-      path.join(currentPath, slot.name),
-      "page",
-      true,
-      true,
-      undefined,
-      reqSegments.length
-    );
-    if (slotPath) {
-      const slotModule = require(slotPath);
-      const Slot = slotModule.default ?? slotModule;
-      const slotName = slot.name.slice(1);
-      slots[slotName] = React.createElement(Slot, {
-        params: slotParams,
+  let slots = {};
+
+  // Leemos todo el directorio actual
+  const entries = readdirSync(currentPath, { withFileTypes: true });
+
+  for (const entry of entries) {
+    // Solo nos interesan directorios
+    if (!entry.isDirectory()) continue;
+
+    // ---------------------------------------------------------
+    // CASO 1: Encontramos un Slot directo (@sidebar)
+    // ---------------------------------------------------------
+    if (entry.name.startsWith("@")) {
+      // Usamos tu lógica actual para resolver la página dentro del slot
+      const [slotPath, slotParams] = getFilePathAndDynamicParams(
+        reqSegments,
         query,
-        key: slotName,
-      });
+        path.join(currentPath, entry.name), // Path físico: .../layout/@sidebar
+        "page",
+        true,
+        true,
+        undefined,
+        reqSegments.length // Mantenemos tu lógica de ir directo al final
+      );
+
+      if (slotPath) {
+        const slotModule = require(slotPath);
+        const Slot = slotModule.default ?? slotModule;
+        const slotName = entry.name.slice(1);
+
+        // Guardamos el slot encontrado
+        slots[slotName] = React.createElement(Slot, {
+          params: slotParams,
+          query,
+          key: slotName,
+          // Añadimos esto para tus hacks de Server Components si los necesitas
+          __modulePath: slotPath ?? null,
+        });
+      }
+    }
+
+    // ---------------------------------------------------------
+    // CASO 2: Encontramos un Route Group ((marketing))
+    // ---------------------------------------------------------
+    // Aquí está la magia: Si es un grupo, entramos recursivamente
+    else if (entry.name.startsWith("(") && entry.name.endsWith(")")) {
+      const groupPath = path.join(currentPath, entry.name);
+
+      // 🔄 RECURSIÓN: Buscamos slots dentro del grupo
+      const nestedSlots = getSlots(groupPath, reqSegments, query);
+
+      // Fusionamos los slots encontrados dentro del grupo con los actuales.
+      // Nota: Si hay colisión (mismo slot fuera y dentro), gana el último procesado.
+      // Normalmente object.assign sobreescribe, dando prioridad a lo "último" encontrado.
+      slots = { ...slots, ...nestedSlots };
     }
   }
+
   return slots;
 }
 
@@ -194,7 +226,13 @@ function getFilePathAndDynamicParams(
     }
   }
   const staticPath = path.join(currentPath, reqSegments[index]);
-  if (existsSync(staticPath)) {
+  const isRouterSyntaxInSegment =
+    reqSegments[index] &&
+    ((reqSegments[index].startsWith("(") && reqSegments[index].endsWith(")")) ||
+      (reqSegments[index].startsWith("[") &&
+        reqSegments[index].endsWith("]")) ||
+      reqSegments[index].startsWith("@"));
+  if (existsSync(staticPath) && !isRouterSyntaxInSegment) {
     return getFilePathAndDynamicParams(
       reqSegments,
       query,

@@ -117,4 +117,4 @@ function revalidating(reqPath) {
   }
 }
 
-module.exports = { revalidating, regenerating };
+module.exports = { revalidating, regenerating, updateStatusManifest };

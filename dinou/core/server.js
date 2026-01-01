@@ -47,6 +47,7 @@ const parseExports = require("./parse-exports.js");
 const { requestStorage } = require("./request-context.js");
 const { useServerRegex } = require("../constants.js");
 const processLimiter = require("./concurrency-manager.js");
+const { generatingISG } = require("./generating-isg.js");
 if (isDevelopment) {
   const manifestPath = path.resolve(
     process.cwd(),
@@ -691,15 +692,31 @@ app.get(/^\/.*\/?$/, (req, res) => {
         res.setHeader("Content-Type", "text/html");
         appHtmlStream.pipe(res);
 
+        // 👇 AQUÍ VA EL GATILLO ISG 👇
+        // Usamos 'finish' para asegurarnos de que el usuario ya recibió todo (Status 200).
+        // Es "Fire and Forget": No usamos 'await', corre en background.
+        res.on("finish", () => {
+          if (
+            !isDevelopment &&
+            res.statusCode === 200 && // Solo si fue éxito
+            // req.method === "GET" && // Solo peticiones GET
+            Object.keys({ ...req.query }).length === 0 // Sin query params (evitar duplicados infinitos)
+          ) {
+            generatingISG(reqPath);
+          }
+        });
+        // 👆 FIN DEL GATILLO ISG 👆
+
         // 💡 TRUCO: Queremos liberar el slot de concurrencia SOLO cuando
         // el stream haya terminado de enviarse o haya error.
         await new Promise((resolve) => {
           appHtmlStream.on("end", resolve);
           appHtmlStream.on("error", (error) => {
             console.error("Stream error:", error);
-            resolve();
-            res.status(500).send("Internal Server Error");
-          }); // Liberamos aunque falle
+            // resolve(); // ⚠️ OJO: Si resuelves aquí y luego intentas enviar status 500, podría fallar si headers ya se enviaron
+            if (!res.headersSent) res.status(500).send("Internal Server Error");
+            resolve(); // Mejor resolver al final
+          });
           res.on("close", resolve); // Si el usuario cierra la pestaña
         });
       })
