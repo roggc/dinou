@@ -6,7 +6,7 @@ const path = require("path");
 const { readFileSync, existsSync, createReadStream } = require("fs");
 const { renderToPipeableStream } = require("react-server-dom-webpack/server");
 const express = require("express");
-const getSSGJSXOrJSX = require("./get-ssg-jsx-or-jsx.js");
+const getJSX = require("./get-jsx.js");
 const { getErrorJSX } = require("./get-error-jsx.js");
 const addHook = require("./asset-require-hook.js");
 const { extensions } = require("./asset-extensions.js");
@@ -499,17 +499,48 @@ if (!isDevelopment) {
   );
 }
 
-async function serveRSCPayload(req, res, isOld = false) {
+let statusManifest;
+const isDynamic = new Map();
+
+async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
   try {
     const reqPath = (
       req.path.endsWith("/") ? req.path : req.path + "/"
-    ).replace(isOld ? "/____rsc_payload_old____" : "/____rsc_payload____", "");
+    ).replace(
+      isOld
+        ? isStatic
+          ? "/____rsc_payload_old_static____"
+          : "/____rsc_payload_old____"
+        : isStatic
+        ? "/____rsc_payload_static____"
+        : "/____rsc_payload____",
+      ""
+    );
+    // 1. Inicialización correcta del Map
+    if (!isDynamic.has(reqPath)) {
+      // Inicializamos con un objeto mutable.
+      // Por defecto asumimos que NO es dinámico (false) hasta que se demuestre lo contrario.
+      isDynamic.set(reqPath, { value: false });
+    }
 
-    if (!isDevelopment && Object.keys({ ...req.query }).length === 0) {
+    // Obtenemos la referencia al objeto mutable
+    const dynamicState = isDynamic.get(reqPath);
+    // console.log(
+    //   "rscPayload-> dynamicState.value, isStatic, reqPath",
+    //   dynamicState.value,
+    //   isStatic,
+    //   reqPath
+    // );
+    if (
+      (!isDevelopment &&
+        Object.keys({ ...req.query }).length === 0 &&
+        !dynamicState.value) ||
+      isStatic
+    ) {
       const payloadPath = path.resolve(
         "dist2",
         reqPath.replace(/^\//, ""),
-        isOld ? "rsc._old.rsc" : "rsc.rsc"
+        isOld || regenerating.has(reqPath) ? "rsc._old.rsc" : "rsc.rsc"
       );
       const distDir = path.resolve("dist2");
 
@@ -538,12 +569,13 @@ async function serveRSCPayload(req, res, isOld = false) {
     }
     const context = getContext(req, res);
     await requestStorage.run(context, async () => {
-      const jsx = await getSSGJSXOrJSX(
-        reqPath,
-        { ...req.query },
-        { ...req.cookies },
-        isDevelopment
-      );
+      // const jsx = await getSSGJSXOrJSX(
+      //   reqPath,
+      //   { ...req.query },
+      //   { ...req.cookies },
+      //   isDevelopment
+      // );
+      const jsx = await getJSX(reqPath, { ...req.query }, { ...req.cookies });
       const manifest = isDevelopment
         ? JSON.parse(
             readFileSync(
@@ -568,11 +600,19 @@ async function serveRSCPayload(req, res, isOld = false) {
 }
 
 app.get(/^\/____rsc_payload____\/.*\/?$/, async (req, res) => {
-  await serveRSCPayload(req, res, false);
+  await serveRSCPayload(req, res, false, false);
 });
 
 app.get(/^\/____rsc_payload_old____\/.*\/?$/, async (req, res) => {
-  await serveRSCPayload(req, res, true);
+  await serveRSCPayload(req, res, true, false);
+});
+
+app.get(/^\/____rsc_payload_static____\/.*\/?$/, async (req, res) => {
+  await serveRSCPayload(req, res, false, true);
+});
+
+app.get(/^\/____rsc_payload_old_static____\/.*\/?$/, async (req, res) => {
+  await serveRSCPayload(req, res, true, true);
 });
 
 app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
@@ -602,14 +642,25 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
   }
 });
 
-let statusManifest;
-
 app.get(/^\/.*\/?$/, (req, res) => {
   try {
     const reqPath = req.path.endsWith("/") ? req.path : req.path + "/";
+    // 1. Inicialización correcta del Map
+    if (!isDynamic.has(reqPath)) {
+      // Inicializamos con un objeto mutable.
+      // Por defecto asumimos que NO es dinámico (false) hasta que se demuestre lo contrario.
+      isDynamic.set(reqPath, { value: false });
+    }
 
-    if (!isDevelopment && Object.keys({ ...req.query }).length === 0) {
-      revalidating(reqPath);
+    // Obtenemos la referencia al objeto mutable
+    const dynamicState = isDynamic.get(reqPath);
+    // console.log("dynamicState.value", dynamicState.value);
+    if (
+      !isDevelopment &&
+      Object.keys({ ...req.query }).length === 0 &&
+      !dynamicState.value
+    ) {
+      revalidating(reqPath, dynamicState);
       let htmlPathOld;
       if (regenerating.has(reqPath)) {
         // Todavía se está regenerando, servir el HTML viejo si existe
@@ -619,7 +670,7 @@ app.get(/^\/.*\/?$/, (req, res) => {
       // Decidimos qué archivo leer
       const fileToRead = htmlPathOld || htmlPath;
 
-      if (existsSync(fileToRead)) {
+      if (existsSync(fileToRead) && !dynamicState.value) {
         res.setHeader("Content-Type", "text/html");
         const meta = statusManifest[reqPath];
 
@@ -644,6 +695,7 @@ app.get(/^\/.*\/?$/, (req, res) => {
           if (htmlPathOld) {
             res.write("<script>window.__DINOU_USE_OLD_RSC__=true;</script>");
           }
+          res.write("<script>window.__DINOU_USE_STATIC__=true;</script>");
 
           // 4. Cerramos manualmente la respuesta (ahora sí)
           res.end();
@@ -681,12 +733,14 @@ app.get(/^\/.*\/?$/, (req, res) => {
     };
     processLimiter
       .run(async () => {
+        const isDynamic = true;
         const appHtmlStream = renderAppToHtml(
           reqPath,
           JSON.stringify({ ...req.query }),
           JSON.stringify({ ...req.cookies }),
           contextForChild,
-          res
+          res,
+          isDynamic
         );
 
         res.setHeader("Content-Type", "text/html");
@@ -702,7 +756,7 @@ app.get(/^\/.*\/?$/, (req, res) => {
             // req.method === "GET" && // Solo peticiones GET
             Object.keys({ ...req.query }).length === 0 // Sin query params (evitar duplicados infinitos)
           ) {
-            generatingISG(reqPath);
+            generatingISG(reqPath, dynamicState);
           }
         });
         // 👆 FIN DEL GATILLO ISG 👆

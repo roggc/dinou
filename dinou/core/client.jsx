@@ -39,18 +39,34 @@ const isHashChangeOnly = (finalPath) => {
   );
 };
 
-// 📦 Lógica de Fetching RSC (Movida fuera)
 const getRSCPayload = (url) => {
-  // Importante: url ya debe venir normalizada aquí
-  if (cache.has(url)) return cache.get(url);
+  // 1. Check Idempotencia (Evita el loop infinito de React)
+  if (cache.has(url)) {
+    return cache.get(url);
+  }
 
-  const payloadUrl = window.__DINOU_USE_OLD_RSC__
-    ? "/____rsc_payload_old____" + url
-    : "/____rsc_payload____" + url;
+  // 2. Lógica de Flags Globales (Solo primera vez)
+  let payloadUrl;
+  if (window.__DINOU_USE_OLD_RSC__ || window.__DINOU_USE_STATIC__) {
+    payloadUrl = window.__DINOU_USE_OLD_RSC__
+      ? window.__DINOU_USE_STATIC__
+        ? "/____rsc_payload_old_static____" + url
+        : "/____rsc_payload_old____" + url
+      : window.__DINOU_USE_STATIC__
+      ? "/____rsc_payload_static____" + url
+      : "/____rsc_payload____" + url;
 
-  const content = createFromFetch(fetch(payloadUrl));
-  cache.set(url, content);
-  return content;
+    // Limpiamos flags inmediatamente
+    window.__DINOU_USE_OLD_RSC__ = false;
+    window.__DINOU_USE_STATIC__ = false;
+  } else {
+    payloadUrl = "/____rsc_payload____" + url;
+  }
+
+  // 3. Fetch y Guardado en Caché
+  const promise = createFromFetch(fetch(payloadUrl));
+  cache.set(url, promise); // <--- CLAVE PARA EVITAR LOOP
+  return promise;
 };
 
 // ====================================================================
@@ -101,7 +117,7 @@ function Router() {
       window.location.pathname + window.location.search,
       window.scrollY
     );
-
+    // cache.delete(finalPath);
     if (options.replace) {
       window.history.replaceState(null, "", finalPath);
     } else {
@@ -150,9 +166,11 @@ function Router() {
     };
 
     const onPopState = () => {
+      const target = getCurrentRoute();
+      // Opcional: cache.delete(target); // Descomenta si quieres refresh al volver atrás
       startTransition(() => {
         setIsPopState(true);
-        setRoute(getCurrentRoute());
+        setRoute(target);
       });
     };
 
@@ -197,7 +215,7 @@ function Router() {
   }, [route]);
 
   // Lógica RSC
-  let content = getRSCPayload(route);
+  const content = getRSCPayload(route);
 
   const contextValue = useMemo(
     () => ({

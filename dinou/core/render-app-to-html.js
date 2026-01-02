@@ -32,7 +32,8 @@ function renderAppToHtml(
   cookiesString = "{}",
   contextForChild,
   res,
-  capturedStatus = null
+  capturedStatus = null,
+  isDynamic = false
 ) {
   // Replicamos el array de argumentos posicionales que se pasaban al script
   // [renderHtmlPath, reqPath, paramsString, cookiesString]
@@ -41,6 +42,7 @@ function renderAppToHtml(
     paramsString,
     cookiesString,
     contextForChild ? JSON.stringify(contextForChild) : JSON.stringify({}),
+    isDynamic ? "true" : "false",
   ];
 
   const child = fork(

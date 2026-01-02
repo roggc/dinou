@@ -1,9 +1,10 @@
 const path = require("path");
 const fs = require("fs").promises; // Usamos promesas
-const { existsSync, readFileSync, copyFileSync, unlinkSync } = require("fs");
+const { existsSync, readFileSync, copyFileSync } = require("fs");
 const generateStaticPage = require("./generate-static-page");
 const { buildStaticPage } = require("./build-static-pages");
 const generateStaticRSC = require("./generate-static-rsc");
+const { safeRename } = require("./safe-rename");
 
 const regenerating = new Set();
 const OUT_DIR = path.resolve("dist2");
@@ -32,7 +33,7 @@ async function updateStatusManifest(reqPath, status) {
   }
 }
 
-function revalidating(reqPath) {
+function revalidating(reqPath, isDynamicFromServer) {
   const distFolder = path.resolve(process.cwd(), "dist");
   const dist2Folder = path.resolve(process.cwd(), "dist2");
   const jsonPath = path.join(distFolder, reqPath, "index.json");
@@ -70,10 +71,17 @@ function revalidating(reqPath) {
     (async () => {
       try {
         console.log(`[ISR] Starting regeneration for ${reqPath}...`);
-
+        const isDynamic = {};
         // A. Construir datos
-        await buildStaticPage(reqPath);
+        await buildStaticPage(reqPath, isDynamic);
+        if (isDynamic.value) {
+          isDynamicFromServer.value = true;
+          console.log(
+            `[ISR] Bailout detected for ${reqPath}. Switching to Dynamic.`
+          );
 
+          return; // 👋 Salimos sin hacer nada, la página es dinámica
+        }
         // B. Generar HTML y RSC en PARALELO (Archivos .tmp) 🚀
         const [pageResult, rscResult] = await Promise.all([
           generateStaticPage(reqPath),
@@ -86,15 +94,20 @@ function revalidating(reqPath) {
 
         // Verificamos si AMBOS tuvieron éxito (Status != 500)
         if (pageResult.success && rscResult.success) {
-          // 1. Renombrar HTML (.tmp -> .html)
-          await fs.rename(pageResult.tempPath, pageResult.finalPath);
+          await safeRename(pageResult.tempPath, pageResult.finalPath);
 
           // 2. Renombrar RSC (.tmp -> .rsc)
-          await fs.rename(rscResult.tempPath, rscResult.finalPath);
+          // AQUÍ es donde solía fallar el EPERM
+          await safeRename(rscResult.tempPath, rscResult.finalPath);
+          // // 1. Renombrar HTML (.tmp -> .html)
+          // await fs.rename(pageResult.tempPath, pageResult.finalPath);
+
+          // // 2. Renombrar RSC (.tmp -> .rsc)
+          // await fs.rename(rscResult.tempPath, rscResult.finalPath);
 
           // 3. Actualizar Manifiesto (Usamos el status del HTML que es el principal)
           await updateStatusManifest(reqPath, pageResult.status);
-
+          isDynamicFromServer.value = false;
           console.log(
             `✅ [ISR] Successfully committed ${reqPath} (Status: ${pageResult.status})`
           );

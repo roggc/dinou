@@ -23,6 +23,60 @@ function safeDecode(val) {
   }
 }
 
+/**
+ * Crea un espía que detecta acceso a propiedades y marca la página como dinámica.
+ * @param {Object} target - El objeto real (cookies, headers, query...)
+ * @param {string} label - Nombre para el log (ej: "Headers", "Cookies")
+ * @param {Function} onBailout - Callback para ejecutar cuando se detecta acceso
+ */
+function createBailoutProxy(target, label, onBailout) {
+  // Si no hay target, usamos objeto vacío para evitar crashes,
+  // pero lo ideal es pasar siempre lo que tengas.
+  const safeTarget = target || {};
+
+  return new Proxy(safeTarget, {
+    get(t, prop, receiver) {
+      // Ignorar símbolos internos de Node/Console
+      if (
+        typeof prop === "symbol" ||
+        prop === "inspect" ||
+        prop === "valueOf" ||
+        prop === "toString" // A veces útil ignorar
+      ) {
+        return Reflect.get(t, prop, receiver);
+      }
+
+      // 🚨 ALARMA: Acceso detectado
+      console.log(
+        `[StaticBailout] Acceso a ${label} detectado: "${String(prop)}".`
+      );
+
+      // Ejecutamos la lógica de marcar como dinámico
+      onBailout();
+
+      // IMPORTANTE: Devolvemos el valor real del objeto original
+      return Reflect.get(t, prop, receiver);
+    },
+
+    ownKeys(t) {
+      console.log(`[StaticBailout] Iteración de ${label} detectada.`);
+      onBailout();
+      return Reflect.ownKeys(t);
+    },
+
+    // Opcional: Detectar si intentan preguntar "prop in headers"
+    has(t, prop) {
+      console.log(
+        `[StaticBailout] Chequeo de existencia (IN) en ${label}: "${String(
+          prop
+        )}".`
+      );
+      onBailout();
+      return Reflect.has(t, prop);
+    },
+  });
+}
+
 async function buildStaticPages() {
   const srcFolder = path.resolve(process.cwd(), "src");
   const distFolder = path.resolve(process.cwd(), "dist");
@@ -468,17 +522,33 @@ async function buildStaticPages() {
         },
       };
 
+      let isStatic = true;
+      const markAsDynamic = () => {
+        isStatic = false;
+      };
+
+      // 1. Espía de Cookies
+      const cookiesProxy = createBailoutProxy({}, "Cookies", markAsDynamic);
+
+      // 2. Espía de Headers
+      // Nota: req.headers suele venir de los argumentos o mocks
+      const headersProxy = createBailoutProxy({}, "Headers", markAsDynamic);
+
+      // 3. (Opcional) Espía de Query/SearchParams
+      // Si el usuario lee ?id=5, tampoco debería ser estático (normalmente)
+      const queryProxy = createBailoutProxy({}, "Query", markAsDynamic);
+      // {
+      //           "user-agent": "Dinou-SSG-Builder",
+      //           host: "localhost",
+      //           // Añade aquí cualquier header default que necesites
+      //         }
       // ====================================================================
       // 2. MOCK REQ: Cumpliendo RequestContextStore['req']
       // ====================================================================
       const mockReq = {
-        query: {},
-        cookies: {},
-        headers: {
-          "user-agent": "Dinou-SSG-Builder",
-          host: "localhost",
-          // Añade aquí cualquier header default que necesites
-        },
+        query: queryProxy,
+        cookies: cookiesProxy,
+        headers: headersProxy,
         path: reqPath,
         method: "GET",
       };
@@ -492,6 +562,17 @@ async function buildStaticPages() {
       jsx = await requestStorage.run(mockContext, async () => {
         return await asyncRenderJSXToClientJSX(jsx);
       });
+
+      if (!isStatic) {
+        // ❌ NO guardar archivo.
+        // Se comportará como SSR puro en runtime.
+        console.log(
+          `Skipping static generation for ${segments.join(
+            "/"
+          )} due to dynamic usage.`
+        );
+        continue;
+      }
 
       const outputPath = path.join(distFolder, segments.join("/"));
       mkdirSync(outputPath, { recursive: true });
@@ -725,17 +806,33 @@ async function buildStaticPage(reqPath, isDynamic = null) {
       },
     };
 
+    let isStatic = true;
+    const markAsDynamic = () => {
+      isStatic = false;
+    };
+
+    // 1. Espía de Cookies
+    const cookiesProxy = createBailoutProxy({}, "Cookies", markAsDynamic);
+
+    // 2. Espía de Headers
+    // Nota: req.headers suele venir de los argumentos o mocks
+    const headersProxy = createBailoutProxy({}, "Headers", markAsDynamic);
+
+    // 3. (Opcional) Espía de Query/SearchParams
+    // Si el usuario lee ?id=5, tampoco debería ser estático (normalmente)
+    const queryProxy = createBailoutProxy({}, "Query", markAsDynamic);
+    //  {
+    //         "user-agent": "Dinou-SSG-Builder",
+    //         host: "localhost",
+    //         // Añade aquí cualquier header default que necesites
+    //       }
     // ====================================================================
     // 2. MOCK REQ: Cumpliendo RequestContextStore['req']
     // ====================================================================
     const mockReq = {
-      query: {},
-      cookies: {},
-      headers: {
-        "user-agent": "Dinou-SSG-Builder",
-        host: "localhost",
-        // Añade aquí cualquier header default que necesites
-      },
+      query: queryProxy,
+      cookies: cookiesProxy,
+      headers: headersProxy,
       path: reqPath,
       method: "GET",
     };
@@ -749,6 +846,20 @@ async function buildStaticPage(reqPath, isDynamic = null) {
     jsx = await requestStorage.run(mockContext, async () => {
       return await asyncRenderJSXToClientJSX(jsx);
     });
+
+    if (!isStatic) {
+      // ❌ NO guardar archivo.
+      // Se comportará como SSR puro en runtime.
+      console.log(
+        `Skipping static generation for ${segments.join(
+          "/"
+        )} due to dynamic usage.`
+      );
+      if (isDynamic) {
+        isDynamic.value = true;
+      }
+      return;
+    }
 
     const sideEffects = {
       redirect: mockRes._redirectUrl,

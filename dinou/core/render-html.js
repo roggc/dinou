@@ -126,7 +126,13 @@ function writeErrorOutput(error, isProd) {
   );
 }
 
-async function renderToStream(reqPath, query, cookies = {}, serializedBox) {
+async function renderToStream(
+  reqPath,
+  query,
+  cookies,
+  serializedBox,
+  isDynamic
+) {
   const context = {
     // Datos serializados de req (query, headers, cookies, etc.)
     req: serializedBox.req,
@@ -140,7 +146,8 @@ async function renderToStream(reqPath, query, cookies = {}, serializedBox) {
       const jsx =
         Object.keys(query).length ||
         isDevelopment ||
-        Object.keys(cookies).length
+        Object.keys(cookies).length ||
+        isDynamic
           ? renderJSXToClientJSX(
               await getJSX(reqPath, query, cookies, isNotFound)
             )
@@ -245,6 +252,7 @@ const reqPath = process.argv[2];
 const query = JSON.parse(process.argv[3]);
 const cookies = JSON.parse(process.argv[4] || "{}");
 const serializedBox = JSON.parse(process.argv[5] || "{}");
+const isDynamic = process.argv[6] === "true";
 
 process.on("uncaughtException", (error) => {
   process.stdout.write(formatErrorHtml(error));
@@ -269,7 +277,9 @@ process.on("unhandledRejection", (reason) => {
   process.exit(1);
 });
 
-renderToStream(reqPath, query, cookies, serializedBox).catch((err) => {
-  console.error("❌ Fatal error starting render stream:", err);
-  process.exit(1);
-});
+renderToStream(reqPath, query, cookies, serializedBox, isDynamic).catch(
+  (err) => {
+    console.error("❌ Fatal error starting render stream:", err);
+    process.exit(1);
+  }
+);
