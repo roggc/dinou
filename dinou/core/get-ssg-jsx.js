@@ -1,5 +1,4 @@
 const path = require("path");
-const { existsSync, readFileSync } = require("fs");
 const React = require("react");
 const importModule = require("./import-module");
 
@@ -81,14 +80,11 @@ async function deserializeReactElement(serialized) {
   return React.createElement(Component, deserializedProps);
 }
 
-async function getSSGJSX(reqPath) {
-  const distFolder = path.resolve(process.cwd(), "dist");
-  const jsonPath = path.join(distFolder, reqPath, "index.json");
-  if (existsSync(jsonPath)) {
-    const { jsx } = JSON.parse(readFileSync(jsonPath, "utf8"));
-    const deserializedJSX = await deserializeReactElement(jsx);
-    return deserializedJSX;
-  }
+async function getSSGJSX(jsxJson) {
+  if (!jsxJson) return;
+  const { jsx } = jsxJson;
+  const deserializedJSX = await deserializeReactElement(jsx);
+  return deserializedJSX;
 }
 
 module.exports = getSSGJSX;

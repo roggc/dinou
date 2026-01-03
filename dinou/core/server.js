@@ -48,6 +48,7 @@ const { requestStorage } = require("./request-context.js");
 const { useServerRegex } = require("../constants.js");
 const processLimiter = require("./concurrency-manager.js");
 const { generatingISG } = require("./generating-isg.js");
+const { getStatus } = require("./status-manifest.js");
 if (isDevelopment) {
   const manifestPath = path.resolve(
     process.cwd(),
@@ -499,7 +500,6 @@ if (!isDevelopment) {
   );
 }
 
-let statusManifest;
 const isDynamic = new Map();
 
 async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
@@ -569,12 +569,6 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
     }
     const context = getContext(req, res);
     await requestStorage.run(context, async () => {
-      // const jsx = await getSSGJSXOrJSX(
-      //   reqPath,
-      //   { ...req.query },
-      //   { ...req.cookies },
-      //   isDevelopment
-      // );
       const jsx = await getJSX(reqPath, { ...req.query }, { ...req.cookies });
       const manifest = isDevelopment
         ? JSON.parse(
@@ -672,7 +666,7 @@ app.get(/^\/.*\/?$/, (req, res) => {
 
       if (existsSync(fileToRead) && !dynamicState.value) {
         res.setHeader("Content-Type", "text/html");
-        const meta = statusManifest[reqPath];
+        const meta = getStatus[reqPath];
 
         if (meta && meta.status) {
           res.statusCode = meta.status;
@@ -990,9 +984,6 @@ const http = require("http");
       try {
         await generateStatic();
         console.log("✅ [Startup] Static generation finished successfully.");
-        statusManifest = JSON.parse(
-          readFileSync(path.join(process.cwd(), "dist2/status-manifest.json"))
-        );
       } catch (buildError) {
         console.error("❌ [Startup] Static generation failed:", buildError);
         // Dependiendo de tu política, podrías salir (process.exit(1)) o continuar

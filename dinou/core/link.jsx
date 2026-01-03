@@ -3,11 +3,17 @@
 import { useRouter } from "./navigation.js";
 import { resolveUrl } from "./navigation-utils.js";
 
-export function Link({ href, children, prefetch = true, ...props }) {
+export function Link({
+  href,
+  children,
+  prefetch = true,
+  fresh = false,
+  ...props
+}) {
   const { push } = useRouter();
 
   const handlePrefetch = () => {
-    if (!prefetch || !href) return;
+    if (!prefetch || !href || fresh) return;
     const finalPath = resolveUrl(href, window.location.pathname);
     // Llamamos a la función global que expondremos en client.jsx
     if (window.__DINOU_PREFETCH__) {
@@ -20,7 +26,7 @@ export function Link({ href, children, prefetch = true, ...props }) {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
 
     e.preventDefault();
-    push(href); // navigate ya usará la lógica de resolución interna
+    push(href, { fresh }); // navigate ya usará la lógica de resolución interna
   };
 
   return (

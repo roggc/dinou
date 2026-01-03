@@ -4,6 +4,7 @@ const fs = require("fs").promises;
 async function safeRename(oldPath, newPath, retries = 5, delay = 100) {
   for (let i = 0; i < retries; i++) {
     try {
+      console.log(`attempt rename number ${i}`);
       // Intentamos el renombrado atómico estándar
       await fs.rename(oldPath, newPath);
       return; // ¡Éxito! Salimos.

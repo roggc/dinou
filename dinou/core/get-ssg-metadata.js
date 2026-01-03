@@ -1,5 +1,4 @@
-const path = require("path");
-const { existsSync, readFileSync } = require("fs");
+const { getJSXJSON, hasJSXJSON } = require("./jsx-json");
 
 function processMetadata(metadata) {
   if (!metadata || !metadata.effects) return "";
@@ -36,13 +35,10 @@ function processMetadata(metadata) {
 }
 
 function getSSGMetadata(reqPath) {
-  const distFolder = path.resolve(process.cwd(), "dist");
-  const jsonPath = path.join(distFolder, reqPath, "index.json");
-  if (existsSync(jsonPath)) {
-    const { metadata } = JSON.parse(readFileSync(jsonPath, "utf8"));
-    const script = processMetadata(metadata);
-    return script;
-  }
+  if (!hasJSXJSON(reqPath)) return;
+  const { metadata } = getJSXJSON(reqPath);
+  const script = processMetadata(metadata);
+  return script;
 }
 
 module.exports = getSSGMetadata;

@@ -174,26 +174,81 @@ export declare function usePathname(): string;
  */
 export declare function useSearchParams(): URLSearchParams;
 
+// ====================================================================
+// SHARED TYPES
+// ====================================================================
+
+/**
+ * Configuration options for programmatic navigation.
+ */
+export interface NavigationOptions {
+  /**
+   * If `true`, the router will ignore the client-side cache for the target URL
+   * and force a new request to the server to get fresh data.
+   *
+   * Useful for navigation after mutations or to highly volatile pages.
+   * @default false
+   */
+  fresh?: boolean;
+}
+
 /**
  * A Client Component hook that allows you to programmatically navigate between routes.
  *
  * @returns {object} An object containing navigation methods.
  * @example
  * const router = useRouter();
+ *
+ * // Standard navigation
  * router.push('/dashboard');
+ *
+ * // Force fresh data
+ * router.push('/settings', { fresh: true });
+ *
+ * // Go back
+ * router.back();
+ *
+ * // Soft refresh (re-fetch data without full reload)
+ * router.refresh();
  */
 export declare function useRouter(): {
   /**
    * Navigate to the provided href. Pushes a new entry into the history stack.
    * @param href - The URL to navigate to (e.g., "/about").
+   * @param options - Optional configuration for the navigation (e.g., force fresh data).
    */
-  push: (href: string) => void;
+  push: (href: string, options?: NavigationOptions) => void;
 
   /**
    * Navigate to the provided href. Replaces the current entry in the history stack.
    * @param href - The URL to navigate to.
+   * @param options - Optional configuration for the navigation.
    */
-  replace: (href: string) => void;
+  replace: (href: string, options?: NavigationOptions) => void;
+
+  /**
+   * Navigate back in the browser's history.
+   * Equivalent to clicking the browser's Back button or executing `window.history.back()`.
+   */
+  back: () => void;
+
+  /**
+   * Navigate forward in the browser's history.
+   * Equivalent to clicking the browser's Forward button or executing `window.history.forward()`.
+   */
+  forward: () => void;
+
+  /**
+   * Refresh the current route.
+   *
+   * This triggers a "Soft Reload":
+   * 1. Clears the client-side cache for the current route.
+   * 2. Re-fetches fresh RSC payload from the server.
+   * 3. Re-renders the page components without a full browser refresh.
+   *
+   * Useful for updating the UI after a mutation (e.g., form submission) or to poll for new data.
+   */
+  refresh: () => void;
 };
 
 /**
@@ -228,6 +283,15 @@ export interface LinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
    * @default true
    */
   prefetch?: boolean;
+
+  /**
+   * If `true`, clicking this link will force a fresh fetch from the server,
+   * bypassing the client-side cache (if enabled) for the target route.
+   *
+   * Use this for links to pages where data freshness is critical.
+   * @default false
+   */
+  fresh?: boolean;
 }
 
 /**
@@ -235,8 +299,9 @@ export interface LinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
  * It automatically handles:
  * 1. **Soft Navigation:** Transitions between pages without a full browser reload.
  * 2. **Prefetching:** Loads the target route data on hover (if enabled).
- * 3. **Relative Routing:** Resolves paths like standard filesystem navigation.
- * 4. **Scroll Management:** Preserves or resets scroll position intelligently.
+ * 3. **Freshness:** Can force a re-fetch of data via the `fresh` prop.
+ * 4. **Relative Routing:** Resolves paths like standard filesystem navigation.
+ * 5. **Scroll Management:** Preserves or resets scroll position intelligently.
  *
  * @example
  * <Link href="/about" className="text-blue-500">
@@ -244,8 +309,8 @@ export interface LinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
  * </Link>
  *
  * @example
- * <Link href="../contact" prefetch={false}>
- * Contact (No Prefetch)
+ * <Link href="/dashboard" fresh>
+ * Dashboard (Force Refresh)
  * </Link>
  */
 export declare function Link(props: LinkProps): ReactNode;

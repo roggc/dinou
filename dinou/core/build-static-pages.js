@@ -1,12 +1,5 @@
 const path = require("path");
-const {
-  existsSync,
-  readdirSync,
-  mkdirSync,
-  writeFileSync,
-  rmSync,
-} = require("fs");
-const fs = require("fs").promises;
+const { existsSync, readdirSync, mkdirSync, rmSync } = require("fs");
 const React = require("react");
 const { asyncRenderJSXToClientJSX } = require("./render-jsx-to-client-jsx");
 const {
@@ -14,6 +7,7 @@ const {
 } = require("./get-file-path-and-dynamic-params");
 const importModule = require("./import-module");
 const { requestStorage } = require("./request-context.js");
+const { setJSXJSON } = require("./jsx-json.js");
 
 function safeDecode(val) {
   try {
@@ -466,7 +460,8 @@ async function buildStaticPages() {
           }
         }
       }
-      const reqPath = "/" + segments.join("/");
+      const segmentsJoin = segments.join("/");
+      const reqPath = segments.length ? "/" + segmentsJoin + "/" : "/";
       // ====================================================================
       // 1. MOCK RES: Cumpliendo la interfaz ResponseProxy
       // ====================================================================
@@ -574,29 +569,23 @@ async function buildStaticPages() {
         continue;
       }
 
-      const outputPath = path.join(distFolder, segments.join("/"));
-      mkdirSync(outputPath, { recursive: true });
+      // const outputPath = path.join(distFolder, segments.join("/"));
+      // mkdirSync(outputPath, { recursive: true });
 
-      const jsonPath = path.join(outputPath, "index.json");
+      // const jsonPath = path.join(outputPath, "index.json");
 
       const sideEffects = {
         redirect: mockRes._redirectUrl,
         cookies: mockRes._cookies,
       };
 
-      writeFileSync(
-        jsonPath,
-        JSON.stringify({
-          jsx: serializeReactElement(jsx),
-          revalidate: revalidate?.(),
-          generatedAt: Date.now(),
-          metadata: { effects: sideEffects },
-        })
-      );
-
-      console.log(
-        `Generated static page at ${path.relative(process.cwd(), jsonPath)}`
-      );
+      setJSXJSON(reqPath, {
+        jsx: serializeReactElement(jsx),
+        revalidate: revalidate?.(),
+        generatedAt: Date.now(),
+        metadata: { effects: sideEffects },
+      });
+      console.log(`Serialized JSX for page at ${reqPath}`);
     } catch (err) {
       console.error(`Error building page ${segments.join("/")}:`, err);
       continue;
@@ -608,9 +597,6 @@ async function buildStaticPages() {
 
 async function buildStaticPage(reqPath, isDynamic = null) {
   const srcFolder = path.resolve(process.cwd(), "src");
-  const distFolder = path.resolve(process.cwd(), "dist");
-  const outputPath = path.join(distFolder, reqPath);
-  const jsonPath = path.join(outputPath, "index.json");
 
   try {
     const segments = reqPath.split("/").filter(Boolean);
@@ -866,18 +852,14 @@ async function buildStaticPage(reqPath, isDynamic = null) {
       cookies: mockRes._cookies,
     };
 
-    await fs.mkdir(outputPath, { recursive: true });
-    await fs.writeFile(
-      jsonPath,
-      JSON.stringify({
-        jsx: serializeReactElement(jsx),
-        revalidate: revalidate?.(),
-        generatedAt: Date.now(),
-        metadata: { effects: sideEffects },
-      })
-    );
+    setJSXJSON(reqPath, {
+      jsx: serializeReactElement(jsx),
+      revalidate: revalidate?.(),
+      generatedAt: Date.now(),
+      metadata: { effects: sideEffects },
+    });
 
-    console.warn(`Generated static page: ${reqPath}`);
+    console.warn(`Generated serialized jsx at page: ${reqPath}`);
   } catch (error) {
     console.error(`Error building page ${reqPath}:`, error);
     throw error;

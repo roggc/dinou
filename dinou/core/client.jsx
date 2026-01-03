@@ -77,6 +77,7 @@ function Router() {
   const [route, setRoute] = useState(getCurrentRoute());
   const [isPopState, setIsPopState] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [version, setVersion] = useState(0);
 
   // 🔌 EFECTO 1: Exponer Prefetch Global
   useEffect(() => {
@@ -112,6 +113,11 @@ function Router() {
       return; // STOP CRÍTICO
     }
 
+    if (options.fresh) {
+      // console.log(`[Router] Force refreshing: ${finalPath}`);
+      cache.delete(finalPath);
+    }
+
     // Navegación RSC Normal
     scrollCache.set(
       window.location.pathname + window.location.search,
@@ -127,6 +133,22 @@ function Router() {
     startTransition(() => {
       setIsPopState(false);
       setRoute(finalPath);
+    });
+  };
+
+  const back = () => window.history.back();
+  const forward = () => window.history.forward();
+  const refresh = () => {
+    const currentPath = window.location.pathname + window.location.search;
+    // console.log(`[Router] Soft Refreshing: ${currentPath}`);
+
+    // 1. Borrar caché para asegurar datos frescos
+    cache.delete(currentPath);
+
+    // 2. Iniciar transición (para mostrar isPending si quieres)
+    startTransition(() => {
+      // 3. Incrementamos versión para forzar re-ejecución de useMemo
+      setVersion((v) => v + 1);
     });
   };
 
@@ -221,6 +243,9 @@ function Router() {
     () => ({
       url: route,
       navigate,
+      back,
+      forward,
+      refresh,
       isPending,
     }),
     [route, isPending]

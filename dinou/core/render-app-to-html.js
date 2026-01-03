@@ -1,6 +1,7 @@
 const path = require("path");
 const { fork } = require("child_process"); // ⬅️ CAMBIO 1: Usamos fork
 const url = require("url");
+const { getJSXJSON, hasJSXJSON } = require("./jsx-json");
 
 function toFileUrl(p) {
   // Convierte a file://, cross-platform
@@ -35,6 +36,8 @@ function renderAppToHtml(
   capturedStatus = null,
   isDynamic = false
 ) {
+  const jsxJson = getJSXJSON(reqPath);
+  const hasJsxJson = hasJSXJSON(reqPath);
   // Replicamos el array de argumentos posicionales que se pasaban al script
   // [renderHtmlPath, reqPath, paramsString, cookiesString]
   const scriptArgs = [
@@ -43,6 +46,8 @@ function renderAppToHtml(
     cookiesString,
     contextForChild ? JSON.stringify(contextForChild) : JSON.stringify({}),
     isDynamic ? "true" : "false",
+    hasJsxJson ? "true" : "false",
+    JSON.stringify(hasJsxJson ? jsxJson : {}),
   ];
 
   const child = fork(

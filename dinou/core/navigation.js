@@ -48,16 +48,46 @@ export function useNavigationLoading() {
   return context.isPending;
 }
 
-// 🧭 NUEVO HOOK: useRouter
+/**
+ * A Client Component hook that allows you to programmatically navigate between routes.
+ */
 export function useRouter() {
   const context = useContext(RouterContext);
 
-  // En el servidor (SSR), context.navigate no hará nada, lo cual es correcto.
-  // En el cliente, usará la función definida en client.jsx.
+  // Guardias para SSR (opcional, pero buena práctica)
+  if (!context) {
+    // En el servidor devolvemos funciones vacías para no romper el renderizado
+    return {
+      push: () => {},
+      replace: () => {},
+      back: () => {},
+      forward: () => {},
+      refresh: () => {},
+    };
+  }
+
   return {
-    push: (href) => context.navigate(href),
-    replace: (href) => context.navigate(href, { replace: true }),
-    // Futuro: back(), forward(), refresh()...
+    push: (href, options) => context.navigate(href, options),
+    replace: (href, options) =>
+      context.navigate(href, { replace: true, ...options }),
+
+    /**
+     * Navigate back in the browser's history.
+     * Equivalent to clicking the browser's Back button.
+     */
+    back: () => context.back(),
+
+    /**
+     * Navigate forward in the browser's history.
+     */
+    forward: () => context.forward(),
+
+    /**
+     * Refresh the current route.
+     * Makes a new request to the server for the current URL, clearing the cache,
+     * and re-renders the server component without a full browser reload.
+     */
+    refresh: () => context.refresh(),
   };
 }
 

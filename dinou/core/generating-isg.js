@@ -6,8 +6,8 @@ const generateStaticPage = require("./generate-static-page");
 const generateStaticRSC = require("./generate-static-rsc");
 const { buildStaticPage } = require("./build-static-pages");
 const { regenerating } = require("./revalidating"); // Compartimos el Set de bloqueos
-const { updateStatusManifest } = require("./revalidating"); // Reutilizamos el helper
 const { safeRename } = require("./safe-rename");
+const { updateStatus } = require("./status-manifest");
 
 function generatingISG(reqPath, isDynamicFromServer) {
   const dist2Folder = path.resolve(process.cwd(), "dist2");
@@ -60,7 +60,7 @@ function generatingISG(reqPath, isDynamicFromServer) {
         // await fs.rename(rscResult.tempPath, rscResult.finalPath);
 
         // Actualizar Manifiesto
-        await updateStatusManifest(reqPath, pageResult.status);
+        updateStatus(reqPath, pageResult.status);
         isDynamicFromServer.value = false;
         console.log(`✅ [ISG] Successfully promoted ${reqPath} to static.`);
       } else {
