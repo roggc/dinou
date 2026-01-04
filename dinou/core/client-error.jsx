@@ -1,3 +1,4 @@
+// dinou/core/client.jsx
 import {
   use,
   useState,
@@ -38,7 +39,6 @@ const isHashChangeOnly = (finalPath) => {
   );
 };
 
-// 📦 Lógica de Fetching RSC (Movida fuera)
 const getRSCPayload = (url) => {
   // Importante: url ya debe venir normalizada aquí
   if (cache.has(url)) return cache.get(url);
@@ -69,6 +69,7 @@ function Router() {
   const [route, setRoute] = useState(getCurrentRoute());
   const [isPopState, setIsPopState] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [version, setVersion] = useState(0);
 
   // 🔌 EFECTO 1: Exponer Prefetch Global
   useEffect(() => {
@@ -104,12 +105,17 @@ function Router() {
       return; // STOP CRÍTICO
     }
 
+    if (options.fresh) {
+      // console.log(`[Router] Force refreshing: ${finalPath}`);
+      cache.delete(finalPath);
+    }
+
     // Navegación RSC Normal
     scrollCache.set(
       window.location.pathname + window.location.search,
       window.scrollY
     );
-
+    // cache.delete(finalPath);
     if (options.replace) {
       window.history.replaceState(null, "", finalPath);
     } else {
@@ -122,6 +128,22 @@ function Router() {
     });
   };
 
+  const back = () => window.history.back();
+  const forward = () => window.history.forward();
+  const refresh = () => {
+    const currentPath = window.location.pathname + window.location.search;
+    // console.log(`[Router] Soft Refreshing: ${currentPath}`);
+
+    // 1. Borrar caché para asegurar datos frescos
+    cache.delete(currentPath);
+
+    // 2. Iniciar transición (para mostrar isPending si quieres)
+    startTransition(() => {
+      // 3. Incrementamos versión para forzar re-ejecución de useMemo
+      setVersion((v) => v + 1);
+    });
+  };
+
   // 🔌 EFECTO 2: Listeners Globales (Click y PopState)
   useEffect(() => {
     if ("scrollRestoration" in window.history) {
@@ -129,6 +151,8 @@ function Router() {
     }
 
     const onNavigate = (e) => {
+      // 🛡️ FIX: Si el evento ya fue procesado (preventDefault llamado por Link), lo ignoramos.
+      if (e.defaultPrevented) return;
       const anchor = e.target.closest("a");
       if (
         !anchor ||
@@ -158,9 +182,11 @@ function Router() {
     };
 
     const onPopState = () => {
+      const target = getCurrentRoute();
+      // Opcional: cache.delete(target); // Descomenta si quieres refresh al volver atrás
       startTransition(() => {
         setIsPopState(true);
-        setRoute(getCurrentRoute());
+        setRoute(target);
       });
     };
 
@@ -205,12 +231,15 @@ function Router() {
   }, [route]);
 
   // Lógica RSC
-  let content = getRSCPayload(route);
+  const content = getRSCPayload(route);
 
   const contextValue = useMemo(
     () => ({
       url: route,
       navigate,
+      back,
+      forward,
+      refresh,
       isPending,
     }),
     [route, isPending]

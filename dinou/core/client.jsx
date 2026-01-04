@@ -159,6 +159,8 @@ function Router() {
     }
 
     const onNavigate = (e) => {
+      // 🛡️ FIX: Si el evento ya fue procesado (preventDefault llamado por Link), lo ignoramos.
+      if (e.defaultPrevented) return;
       const anchor = e.target.closest("a");
       if (
         !anchor ||
