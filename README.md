@@ -1,4 +1,344 @@
-# **Dinou**: **A React 19 Framework**
+# **Dinou**
+
+### **A Full-Stack React 19 Framework**
+
+---
+
+Support for React Server Components (RSC), Server-Side Rendering (SSR), Static Generation (SSG), Incremental Static Generation (ISG), and Incremental Static Regeneration (ISR).
+
+## Key Features
+
+- **Native React Server Components:** Built on the React 19 core, leveraging Suspense and Streaming for optimal performance.
+- **Hybrid Rendering Engine:** Static by default (SSG). Automatically switches to Dynamic Rendering (SSR) when request-specific data (cookies, headers) is detected.
+- **Full-Featured Router:** Client-side soft navigation including `push`, `replace`, `back`, `forward`, and `refresh` (soft reload).
+- **Generation Strategies:** Comprehensive support for Incremental Static Regeneration (ISR) and Incremental Static Generation (ISG).
+- **Data Fetching & State:** Optimized patterns using `react-enhanced-suspense` (with `resourceId`) and `jotai-wrapper` for seamless server-client state synchronization and mutations.
+- **Smart Navigation:** `<Link>` component with automatic prefetching and opt-in `fresh` data fetching for volatile states.
+- **File-System Routing:** Automatic routing based on `page.{jsx,tsx,js,ts}` files located within the `src` directory structure.
+
+## Getting Started
+
+### Quick Start (CLI)
+
+The fastest way to scaffold a new application is using the CLI generator:
+
+```bash
+npx create-dinou@latest my-app
+cd my-app
+npm run dev
+```
+
+### Manual Setup
+
+Alternatively, you can set up a project manually:
+
+1.  Install dependencies:+
+
+    ```bash
+    npm install react react-dom dinou
+    ```
+
+2.  Create the structure: Create a `src` directory in the root of your project and add an entry `page.jsx` file:
+
+    ```typescript
+    // src/page.jsx
+    "use client";
+
+    export default function Page() {
+      return <h1>Hello, Dinou!</h1>;
+    }
+    ```
+
+3.  Start the server:
+
+    ```bash
+    npx dinou dev
+    ```
+
+## Routing
+
+Dinou uses a file-system based router. Files named `page.{jsx,tsx,js,ts}` inside the `src` directory automatically become routes.
+
+### Basic & Dynamic Routes
+
+| Pattern                | File Path                           | URL Example   | Params (`params`)           | Search Params (`searchParams`) |
+| :--------------------- | :---------------------------------- | :------------ | :-------------------------- | :----------------------------- |
+| **Static**             | `src/page.jsx`                      | `/`           | `{}`                        | `{}`                           |
+| **Dynamic**            | `src/blog/[slug]/page.jsx?`         | `/blog/hello` | `{ slug: "hello" }`         | `{}`                           |
+| **Optional Dynamic**   | `src/blog/[[slug]]/page.jsx?a`      | `/blog`       | `{}`                        | `{a:""}`                       |
+| **Catch-all**          | `src/blog/[...slug]/page.jsx?a=`    | `/blog/a/b/c` | `{ slug: ["a", "b", "c"] }` | `{a:""}`                       |
+| **Optional Catch-all** | `src/blog/[[...slug]]/page.jsx?a=b` | `/blog`       | `{ slug: [] }`              | `{a:"b"}`                      |
+
+### Advanced Routing
+
+#### Route Groups `(folder)`
+
+Folders wrapped in parentheses are omitted from the URL path. This is useful for organizational purposes.
+
+- `src/(auth)/login/page.jsx` → **`/login`**
+- `src/(marketing)/about/page.jsx` → **`/about`**
+
+#### Parallel Routes `@slot`
+
+You can define slots (e.g., `@sidebar`, `@header`) to render multiple pages in the same layout simultaneously.
+
+- `src/dashboard/@sidebar/page.jsx`
+- `src/dashboard/layout.jsx` → Receives `sidebar` as a prop.
+
+### Navigation
+
+#### Using `<Link>` (Recommended)
+
+The `<Link>` component provides optimized client-side transitions with automatic prefetching.
+
+```jsx
+"use client";
+import { Link } from "dinou";
+
+export default function Menu() {
+  return (
+    <nav>
+      {/* Prefetches data automatically on hover/viewport */}
+      <Link href="/about">About Us</Link>
+
+      {/* Opt-in for fresh data (bypasses cache) */}
+      <Link href="/dashboard" fresh>
+        Dashboard
+      </Link>
+    </nav>
+  );
+}
+```
+
+> **Note:** Standard HTML `<a>` tags also trigger client-side soft navigation via global event delegation in Dinou, but they lack the smart features (prefetching, `fresh` prop) provided by the `<Link>` component.
+
+#### Programmatic Navigation
+
+Use the `useRouter` hook inside Client Components (`"use client"`).
+
+```jsx
+"use client";
+import { useRouter } from "dinou";
+
+export default function Controls() {
+  const router = useRouter();
+
+  return (
+    <div>
+      <button onClick={() => router.push("/home")}>Push</button>
+      <button onClick={() => router.replace("/home")}>Replace</button>
+      <button onClick={() => router.back()}>Go Back</button>
+      <button onClick={() => router.forward()}>Go Forward</button>
+
+      {/* Soft Reload: Refetches server data without a browser refresh */}
+      <button onClick={() => router.refresh()}>Refresh Data</button>
+    </div>
+  );
+}
+```
+
+## Data Fetching & Rendering
+
+Dinou leverages React 19 Server Components to allow direct data access on the server without sending that logic to the client.
+
+### Server Components (Async Data)
+
+You can define a React Server Component by using an `async` function.
+
+```jsx
+// src/blog/page.jsx
+import db from "@/lib/db";
+
+export default async function Page() {
+  const posts = await db.query("SELECT * FROM posts");
+
+  return (
+    <ul>
+      {posts.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Hybrid Rendering Engine
+
+Dinou employs a **Zero-Config Hybrid Model**. You do not need to configure pages as "Static" or "Dynamic" manually. The framework decides at runtime:
+
+1.  **Static (SSG):** Pages are pre-rendered at start time by default.
+2.  **Dynamic (SSR):** If a page utilizes request-specific APIs (Cookies, Headers, Search Params), it automatically opts out of static generation and renders on demand.
+
+    ```jsx
+    import { getContext } from "dinou";
+
+    export default async function Profile() {
+      const ctx = getContext();
+      if (!ctx) return;
+      // accessing cookies automatically switches this page to Dynamic Rendering (SSR)
+      const token = ctx.req.cookies.session_token;
+
+      const user = await fetchUser(token);
+      return <h1>Hello, {user.name}</h1>;
+    }
+    ```
+
+### Incremental Static Regeneration (ISR)
+
+You can enable ISR to update static pages in the background without rebuilding the entire site. Export a `revalidate` function from your `page_functions.ts`.
+
+```jsx
+// This page will regenerate at most once every 60 seconds
+export function revalidate() {
+  return 60000; // ms
+}
+```
+
+### Client Components
+
+To add interactivity (useState, useEffect, event listeners), place the `"use client"` directive at the top of your file.
+
+```jsx
+"use client";
+
+import { useState } from "react";
+
+export default function Counter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount((c) => c + 1)}>{count}</button>;
+}
+```
+
+## Advanced Patterns: The "Dinou Pattern"
+
+Dinou introduces a powerful pattern for handling mutations and list updates without full page reloads. By combining **Server Functions**, **Global State** (e.g., `jotai-wrapper`), and **`react-enhanced-suspense`**, you can achieve granular reactivity.
+
+### The Concept
+
+In Dinou, **Server Functions can return Client Components**. We leverage this to return a "Headless State Updater" component after a mutation. This component renders nothing but updates a global `key` atom, triggering a re-fetch of specific data.
+
+### Implementation
+
+#### 1. The Global Store
+
+Define an atom to hold the `resourceId` key.
+
+```javascript
+// src/atoms.js
+import { atom } from "jotai";
+import getAPIFromAtoms from "jotai-wrapper";
+
+export const { useAtom, useSetAtom, useAtomValue, getAtom, selectAtom } =
+  getAPIFromAtoms({
+    tasksListKey: atom(0),
+    isAddTask: atom(false),
+    // rest of atoms
+  });
+```
+
+#### 2. The Headless Updater (Client Component)
+
+A tiny component whose only job is to update the atoms when it mounts.
+
+```jsx
+"use client";
+import { useEffect } from "react";
+import { useSetAtom } from "@/atoms";
+
+export default function AddTask() {
+  const setTasksListKey = useSetAtom("tasksListKey");
+  const setIsAddTask = useSetAtom("isAddTask");
+
+  useEffect(() => {
+    // Update the key to force a re-fetch
+    setTasksListKey((k) => k + 1);
+    setIsAddTask(false);
+  }, []);
+
+  return null; // It renders nothing visually
+}
+```
+
+#### 3. The Server Function (Mutation)
+
+Performs the database operation and **returns the Client Component**.
+
+```jsx
+"use server";
+import AddTask from "../components/add-task";
+import { tasks } from "./tasks";
+
+export async function addTask(text) {
+  tasks.push(text);
+
+  // 🪄 Magic: Return the updater to run logic on the client
+  return <AddTask />;
+}
+```
+
+#### 4. The Page (Consuming the Pattern)
+
+Use `react-enhanced-suspense` with the `resourceId` prop. When the `resourceId` changes, the Server Function (`tasksList`) is re-evaluated.
+
+```jsx
+"use client";
+import Suspense from "react-enhanced-suspense";
+import { useAtomValue, useAtom } from "@/atoms";
+import { addTask } from "./server-functions/add-task";
+import { tasksList } from "./server-functions/tasks-list";
+import { useState } from "react";
+
+export default function Page() {
+  const tasksListKey = useAtomValue("tasksListKey");
+  const [isAddTask, setIsAddTask] = useAtom("isAddTask");
+  const [text, setText] = useState("");
+
+  return (
+    <div>
+      {/* The Mutation */}
+      <input type="text" onChange={(e) => setText(e.target.value)} />
+      <button onClick={() => setIsAddTask(true)}>Add Task</button>
+      {isAddTask && (
+        <Suspense fallback="adding task..." resourceId="add-task">
+          {() => addTask(text)}
+        </Suspense>
+      )}
+
+      {/* The Reactive List */}
+      {/* Changing resourceId forces Suspense to re-fetch tasksList */}
+      <Suspense
+        fallback={<div>Loading...</div>}
+        resourceId={`tasks-list-${tasksListKey}`}
+      >
+        {() => tasksList()}
+      </Suspense>
+    </div>
+  );
+}
+```
+
+#### 4. The `tasksList` Server Function
+
+```jsx
+"use server";
+
+import { tasks } from "./tasks";
+import TasksList from "../components/tasks-list";
+
+export async function tasksList() {
+  return <TasksList tasks={tasks} />;
+}
+```
+
+#### 4. The `TasksList` Client Component
+
+```jsx
+"use client";
+
+export default function TasksList({ tasks }) {
+  return tasks.map((t) => <div key={t}>{t}</div>);
+}
+```
 
 [**Dinou**](https://dinou.dev) is a **React 19 framework**. "dinou" means 19 in Catalan. You can create a Dinou [app](https://github.com/roggc/dinou-app) by running the command **`npx create-dinou@latest my-app`**.
 
@@ -27,6 +367,8 @@ Or you can create one by yourself with the following steps:
     return <>hi world!</>;
   }
   ```
+
+````
 
 - Run `npm run dev` (or `npx dinou dev`) to see the page in action in your browser.
 
@@ -1225,3 +1567,4 @@ For a detailed list of changes, enhancements, and bug fixes across versions, see
 ## License
 
 Dinou is licensed under the [MIT License](https://github.com/roggc/dinou/blob/master/LICENSE.md).
+````
