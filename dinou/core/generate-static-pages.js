@@ -23,7 +23,7 @@ async function generateStaticPages(routes) {
     // ---------------------------------------------------------
     const contextForChild = {
       req: {
-        query: query,
+        query,
         cookies: {}, // No hay cookies en build time
         headers: {
           "user-agent": "Dinou-SSG-Builder",

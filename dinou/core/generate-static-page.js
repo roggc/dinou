@@ -17,7 +17,7 @@ async function generateStaticPage(reqPath) {
 
   const contextForChild = {
     req: {
-      query: query,
+      query,
       cookies: {},
       headers: {
         "user-agent": "Dinou-ISR-Revalidator",

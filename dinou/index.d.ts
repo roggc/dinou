@@ -156,7 +156,7 @@ export declare function redirect(destination: string): ReactNode;
  * A Client Component hook that lets you read the current URL's pathname.
  * This hook triggers a re-render when the route changes.
  *
- * @returns {string} The current pathname (e.g., "/dashboard") without query parameters.
+ * @returns {string} The current pathname (e.g., "/dashboard") without search parameters.
  * @example
  * const pathname = usePathname();
  * if (pathname === '/active') { ... }

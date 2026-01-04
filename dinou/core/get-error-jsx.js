@@ -31,7 +31,7 @@ async function getErrorJSX(reqPath, query, error) {
       }
     }
   }
-  let dynamicParams;
+  let dynamicParams = {};
 
   if (!pagePath) {
     const [filePath, dParams] = getFilePathAndDynamicParams(
@@ -66,7 +66,7 @@ async function getErrorJSX(reqPath, query, error) {
     const Page = pageModule.default ?? pageModule;
     jsx = React.createElement(Page, {
       params: dynamicParams ?? {},
-      query,
+      searchParams: query,
       error,
     });
 
@@ -146,7 +146,7 @@ async function getErrorJSX(reqPath, query, error) {
 
                 updatedSlotElement = React.createElement(SlotError, {
                   params: slotErrorParams, // Params resueltos (si hubiera)
-                  query,
+                  searchParams: query,
                   key: slotName,
                   error: e, // Pasamos el error capturado
                 });
@@ -168,7 +168,7 @@ async function getErrorJSX(reqPath, query, error) {
             updatedSlots[slotName] = updatedSlotElement;
           }
         }
-        let props = { params: dParams, query, ...updatedSlots };
+        let props = { params: dParams, searchParams: query, ...updatedSlots };
         jsx = React.createElement(Layout, props, jsx);
         const layoutFolderPath = path.dirname(layoutPath);
         if (

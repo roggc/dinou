@@ -35,7 +35,7 @@ async function getJSX(reqPath, query, cookies, isNotFound = null) {
       }
     }
   }
-  let dynamicParams;
+  let dynamicParams = {};
 
   if (!pagePath) {
     const [filePath, dParams] = getFilePathAndDynamicParams(
@@ -71,7 +71,7 @@ async function getJSX(reqPath, query, cookies, isNotFound = null) {
       const Page = pageModule.default ?? pageModule;
       jsx = React.createElement(Page, {
         params: dParams ?? {},
-        query,
+        searchParams: query,
       });
 
       const notFoundDir = path.dirname(notFoundPath);
@@ -90,7 +90,7 @@ async function getJSX(reqPath, query, cookies, isNotFound = null) {
 
     let props = {
       params: dynamicParams,
-      query,
+      searchParams: query,
     };
 
     const pageFolder = path.dirname(pagePath);
@@ -190,7 +190,7 @@ async function getJSX(reqPath, query, cookies, isNotFound = null) {
 
               updatedSlotElement = React.createElement(SlotError, {
                 params: slotErrorParams, // Params resueltos (si hubiera)
-                query,
+                searchParams: query,
                 key: slotName,
                 error: e, // Pasamos el error capturado
               });
@@ -212,7 +212,7 @@ async function getJSX(reqPath, query, cookies, isNotFound = null) {
           updatedSlots[slotName] = updatedSlotElement;
         }
       }
-      let props = { params: dParams, query, ...updatedSlots };
+      let props = { params: dParams, searchParams: query, ...updatedSlots };
       if (index === layouts.length - 1 || resetLayoutPath) {
         props = { ...props, ...(pageFunctionsProps?.layout ?? {}) };
       }
