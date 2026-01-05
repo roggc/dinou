@@ -77,13 +77,16 @@ Folders wrapped in parentheses are omitted from the URL path. This is useful for
 
 - `src/(auth)/login/page.jsx` → **`/login`**
 - `src/(marketing)/about/page.jsx` → **`/about`**
+- `src/(marketing)/(nested)/about/page.jsx` → **`/about`**
 
 #### Parallel Routes `@slot`
 
 You can define slots (e.g., `@sidebar`, `@header`) to render multiple pages in the same layout simultaneously.
 
 - `src/dashboard/@sidebar/page.jsx`
-- `src/dashboard/layout.jsx` → Receives `sidebar` as a prop.
+- `src/dashboard/(group-a)/@bottom/page.jsx`
+- `src/dashboard/not-work/@bottom/page.jsx` → This will not work (slots must be in the same logical folder as the layout for which they serve)
+- `src/dashboard/layout.jsx` → Receives `sidebar` and `bottom` as props.
 
 ### Navigation
 
@@ -136,6 +139,89 @@ export default function Controls() {
   );
 }
 ```
+
+## Layouts & Hierarchical Rendering
+
+Dinou uses a nested routing system. Layouts, Error pages, and Not Found pages cascade down the directory hierarchy.
+
+### Layouts (`layout.jsx`)
+
+Layouts wrap pages and child layouts. They persist across navigation, preserving state and preventing unnecessary re-renders.
+
+A layout component receives a `children` prop plus `params` and `searchParams` props, plus any slot (e.g. `@sidebar`) defined in the same folder (or nested in groups folders) as where layout is defined:
+
+```jsx
+// src/dashboard/layout.jsx
+export default function Layout({ children, params, searchParams, sidebar }) {
+  return (
+    <div className="dashboard-grid">
+      {sidebar}
+      <main>{children}</main>
+    </div>
+  );
+}
+```
+
+Layouts are **nested** by default. A page at `src/dashboard/settings/page.jsx` will be wrapped by:
+
+1. `src/layout.jsx` (Root Layout)
+2. `src/dashboard/layout.jsx` (Dashboard Layout)
+3. `src/dashboard/settings/page.jsx` (The Page)
+
+The Root Layout that applies for a specific page can receive additional props by defining a `getProps` funcion in `page_functions.ts`:
+
+```typescript
+// src/foo/bar/page_functions.ts
+export async function getProps() {
+  // fetch data if necessary
+  const data = await new Promise(/*....*/);
+  return { page: { data }, layout: { data } };
+}
+```
+
+### Error Handling (`error.jsx`)
+
+Create an `error.jsx` file to define an error page to show for a route. If a page throws an error (Server or Client not controlled by Error Boundary), Dinou looks for the closest `error.jsx` in the directory hierarchy (bubbling up).
+
+```jsx
+// Error pages can be Client Components or Server Components
+
+export default async function Page({ error, params, searchParams }) {
+  return (
+    <div>
+      <h2>Something went wrong!</h2>
+      <p>{`${error.name}: ${error.message}`}</p>
+      {error.stack && <div>{error.stack}</div>}
+      {/*error.stack is only defined in development, not in production*/}
+    </div>
+  );
+}
+```
+
+### Not Found (`not_found.jsx`)
+
+Create a `not_found.jsx` file to customize the 404 UI. Like errors, Dinou renders the closest `not_found.jsx` found traversing up from the requested URL. `not_found.tsx` pages also receives `params` and `searchParams` props.
+
+### Advanced Layout Control (Flags)
+
+Sometimes you need to break out of the standard nested hierarchy (e.g., a Landing Page that shouldn't share the App Layout). Dinou uses **"Flag Files"** (empty files with no extension) to control this behavior.
+
+Place these files in the same directory as your component to activate the behavior.
+
+| Flag File             | Applies To                               | Description                                                                                                                                       |
+| :-------------------- | :--------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `reset_layout`        | `layout.jsx`                             | **Resets the layout tree.** This layout becomes the new Root, ignoring all parent layouts. Perfect for separating Marketing pages from App pages. |
+| `no_layout`           | `page.jsx`, `error.jsx`, `not_found.jsx` | Prevents the component from being wrapped by _any_ layout in the hierarchy.                                                                       |
+| `no_layout_error`     | `error.jsx`                              | Specifically prevents layouts only for the Error page.                                                                                            |
+| `no_layout_not_found` | `not_found.jsx`                          | Specifically prevents layouts only for the Not Found page.                                                                                        |
+
+#### Example: Isolate a Landing Page
+
+If you have a marketing page at `src/marketing/page.jsx` and you don't want it to inherit the Root Layout:
+
+1. Create `src/marketing/layout.jsx` (Your marketing layout).
+2. Create an empty file named `reset_layout` inside `src/marketing/`.
+3. **Result:** `src/marketing/page.jsx` will only use the marketing layout, ignoring the global root layout.
 
 ## Data Fetching & Rendering
 
