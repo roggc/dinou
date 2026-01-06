@@ -60,13 +60,38 @@ Dinou uses a file-system based router. Files named `page.{jsx,tsx,js,ts}` inside
 
 ### Basic & Dynamic Routes
 
-| Pattern                | File Path                           | URL Example   | Params (`params`)           | Search Params (`searchParams`) |
-| :--------------------- | :---------------------------------- | :------------ | :-------------------------- | :----------------------------- |
-| **Static**             | `src/page.jsx`                      | `/`           | `{}`                        | `{}`                           |
-| **Dynamic**            | `src/blog/[slug]/page.jsx`          | `/blog/hello` | `{ slug: "hello" }`         | `{}`                           |
-| **Optional Dynamic**   | `src/blog/[[slug]]/page.jsx`        | `/blog`       | `{}`                        | `{}`                           |
-| **Catch-all**          | `src/blog/[...slug]/page.jsx`       | `/blog/a/b/c` | `{ slug: ["a", "b", "c"] }` | `{}`                           |
-| **Optional Catch-all** | `src/blog/[[...slug]]/page.jsx?a=b` | `/blog`       | `{ slug: [] }`              | `{ a: "b" }`                   |
+| Pattern                | File Path                       | URL Example   | Params (`params`)           | Search Params (`searchParams`) |
+| :--------------------- | :------------------------------ | :------------ | :-------------------------- | :----------------------------- |
+| **Static**             | `src/page.jsx`                  | `/`           | `{}`                        | `{}`                           |
+| **Dynamic**            | `src/blog/[slug]/page.jsx`      | `/blog/hello` | `{ slug: "hello" }`         | `{}`                           |
+| **Optional Dynamic**   | `src/blog/[[slug]]/page.jsx`    | `/blog`       | `{ slug: undefined }`       | `{}`                           |
+| **Catch-all**          | `src/blog/[...slug]/page.jsx`   | `/blog/a/b/c` | `{ slug: ["a", "b", "c"] }` | `{}`                           |
+| **Optional Catch-all** | `src/blog/[[...slug]]/page.jsx` | `/blog`       | `{ slug: [] }`              | `{}`                           |
+
+### Important: Optional Segments Rules
+
+Dinou supports deep nesting and complex combinations, but to avoid **URL Ambiguity** during matching, it follows one strict rule:
+
+> **The "Tail-Only" Rule:** An optional segment (`[[slug]]` or `[[...slug]]`) can only be omitted (`undefined` or empty) if it is at the **end of the URL**.
+
+#### ❌ Forbidden: "Intercalated Undefined"
+
+You cannot skip an optional segment if there are more dynamic or mandatory segments following it.
+
+- Structure: `src/blog/[[lang]]/[postId]/page.jsx`
+- Valid: `/blog/es/hello-world` → `{ lang: "es", postId: "hello-world" }`
+- **Invalid:** `/blog/hello-world` → Dinou won't match this to `postId` because `lang` cannot be skipped in the middle.
+
+#### ❌ Forbidden: "Chained Undefined"
+
+Even if all subsequent segments are optional, you cannot skip an intermediate one.
+
+- Structure: `src/inventory/[[warehouse]]/[[aisle]]/page.jsx`
+- Valid: `/inventory/main/a1` → `{ warehouse: "main", aisle: "a1" }`
+- Valid: `/inventory/main` → `{ warehouse: "main", aisle: undefined }`
+- **Invalid:** Omission of `warehouse` while trying to reach `aisle`. You cannot skip `warehouse` even if `aisle` is also omitted.
+
+---
 
 ### Advanced Routing
 
@@ -79,13 +104,7 @@ Folders wrapped in parentheses are omitted from the URL path. This is useful for
 - `src/(marketing)/(nested)/about/page.jsx` → **`/about`**
 
 **Why use them?**
-Route Groups are primarily for **Organizational Purposes**. They allow you to keep your project structure logical without affecting the public URL structure.
-
-For example, you can group all authentication-related routes together:
-
-- `src/(auth)/login/page.jsx` → **`/login`**
-- `src/(auth)/register/page.jsx` → **`/register`**
-- `src/(dashboard)/settings/page.jsx` → **`/settings`**
+Route Groups allow you to keep your project structure logical without affecting the public URL structure. For example, grouping all authentication-related routes together.
 
 #### Parallel Routes `@slot`
 
@@ -95,14 +114,14 @@ You can define slots (e.g., `@sidebar`, `@header`) to render multiple pages in t
 - `src/dashboard/(group-a)/@bottom/page.jsx`
 - `src/dashboard/layout.jsx` → Receives `sidebar` and `bottom` as props.
 
-> **Note:** Slots must be located in the same logical folder as the layout they serve. For example, `src/dashboard/not-work/@bottom/page.jsx` will not work for `src/dashboard/layout.jsx`.
+> **Note:** Slots must be located in the same logical folder as the layout they serve.
 
 **Why use them?**
-Parallel routes allow you to split your UI into independent sections. Beyond organization, this is critical for **Error Containment**:
+Parallel routes allow independent UI sections and **Error Containment**:
 
-1.  **Server Component with `error.jsx`:** If the slot fails, only that specific slot renders the error UI. The rest of the page remains interactive.
-2.  **Server Component without `error.jsx`:** If the slot fails, it will safely render `null` (it simply disappears). The main page **will not crash**.
-3.  **Client Component:** If a slot is a Client Component and throws an unhandled error, it **will crash the entire page** unless you explicitly wrap it in a React Error Boundary.
+1. **Server Component with `error.jsx`:** If the slot fails, only that specific slot renders the error UI.
+2. **Server Component without `error.jsx`:** If the slot fails, it renders `null` safely.
+3. **Client Component:** Without an explicit React Error Boundary, an unhandled error here will crash the entire page.
 
 ### Navigation
 
