@@ -526,11 +526,11 @@ Defines which dynamic paths should be pre-rendered at server start (SSG).
 
 Dinou is flexible with the return format depending on the complexity of your route:
 
-| Route Type                  | Best Format            | Example Return              |
-| :-------------------------- | :--------------------- | :-------------------------- |
-| **Simple** (`[id]`)         | `Array<string>`        | `["1", "2"]`                |
-| **Catch-all** (`[...slug]`) | `Array<Array<string>>` | `[["a", "b"], ["c"]]`       |
-| **Nested / Complex**        | `Array<Object>`        | `[{ id: "1", lang: "en" }]` |
+| Route Type                  | Best Format            | Example Return                    |
+| :-------------------------- | :--------------------- | :-------------------------------- |
+| **Simple** (`[id]`)         | `Array<string>`        | `["1", "2"]`                      |
+| **Catch-all** (`[...slug]`) | `Array<Array<string>>` | `[["a", "b"], ["c"]]`             |
+| **Nested / Complex**        | `Array<Object>`        | `[{ id: "1", category: "tech" }]` |
 
 #### Simple Dynamic Routes
 
@@ -554,29 +554,52 @@ export function getStaticPaths() {
 }
 ```
 
-#### Nested & Complex Routes (Recommended)
+#### Automatic Route Propagation (Recursion)
 
-When you have multiple dynamic segments in a path, you must return an **Object**. This maps each value to its specific parameter name in the folder structure.
+One of Dinou's most powerful features is that **static parameters propagate downwards**. If you define values for a segment, Dinou will automatically generate all static sub-pages nested within that segment.
+
+**Example Structure:**
+
+- `src/blog/[slug]/page.tsx` (+ `page_functions.ts`)
+- `src/blog/[slug]/details/page.tsx` (Nested static page)
+
+If `getStaticPaths` in `blog/[slug]` returns `["post-a", "post-b"]`, Dinou generates **4 pages**:
+
+1.  `/blog/post-a`
+2.  `/blog/post-a/details`
+3.  `/blog/post-b`
+4.  `/blog/post-b/details`
+
+#### Nested & Complex Routes
+
+When you have multiple dynamic segments in a path, return an **Object** to map values to their specific parameter names.
 
 ```typescript
-// Structure: src/shop/[category]/[[brand]]/[...specs]/page_functions.ts
+// Structure: src/shop/[category]/[...specs]/[[brand]]/page_functions.ts
 export function getStaticPaths() {
   return [
     {
       category: "electronics",
+      specs: ["m3", "16gb"],
       brand: "apple",
-      specs: ["m3", "16gb", "512gb"],
     },
     {
       category: "clothing",
-      brand: "nike",
       specs: ["cotton", "white"],
+      brand: undefined, // Valid: optional and at the end of the route
     },
   ];
 }
 ```
 
-> **Note on Normalization:** Dinou automatically ensures that `params` received by your page are consistent. Catch-all parameters will always arrive as an `Array`, even if you returned a single `string` or `undefined` in `getStaticPaths`.
+> **Reminder:** According to the **Tail-Only Rule**, you can only use `undefined` for an optional segment if it is the last segment of the generated URL.
+
+#### Normalization Guarantee
+
+Dinou ensures that `params` are consistent between SSG and SSR:
+
+- **Catch-all** segments will always be an `Array` (e.g., `undefined` becomes `[]`, `"val"` becomes `["val"]`).
+- **Optional Single** segments remain `undefined` if omitted.
 
 ### 3. `revalidate` (ISR)
 
