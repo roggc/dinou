@@ -524,24 +524,59 @@ Defines which dynamic paths should be pre-rendered at server start (SSG).
 
 **Return Format:**
 
-- For **Simple Dynamic Routes** (e.g., `[id]`): Return an array of strings/numbers.
-- For **Catch-all Routes** (e.g., `[...slug]`): Return an array of arrays.
+Dinou is flexible with the return format depending on the complexity of your route:
+
+| Route Type                  | Best Format            | Example Return              |
+| :-------------------------- | :--------------------- | :-------------------------- |
+| **Simple** (`[id]`)         | `Array<string>`        | `["1", "2"]`                |
+| **Catch-all** (`[...slug]`) | `Array<Array<string>>` | `[["a", "b"], ["c"]]`       |
+| **Nested / Complex**        | `Array<Object>`        | `[{ id: "1", lang: "en" }]` |
+
+#### Simple Dynamic Routes
 
 ```typescript
-// Example for src/blog/[id]/page_functions.ts
+// src/blog/[id]/page_functions.ts
 export function getStaticPaths() {
   return ["1", "2", "hello"];
   // Generates: /blog/1, /blog/2, /blog/hello
 }
+```
 
-// Example for src/docs/[...slug]/page_functions.ts
+#### Catch-all Routes
+
+```typescript
+// src/docs/[...slug]/page_functions.ts
 export function getStaticPaths() {
   return [
-    ["getting-started", "install"], // Generates: /docs/getting-started/install
-    ["api", "reference"], // Generates: /docs/api/reference
+    ["intro"], // /docs/intro
+    ["api", "v1", "auth"], // /docs/api/v1/auth
   ];
 }
 ```
+
+#### Nested & Complex Routes (Recommended)
+
+When you have multiple dynamic segments in a path, you must return an **Object**. This maps each value to its specific parameter name in the folder structure.
+
+```typescript
+// Structure: src/shop/[category]/[[brand]]/[...specs]/page_functions.ts
+export function getStaticPaths() {
+  return [
+    {
+      category: "electronics",
+      brand: "apple",
+      specs: ["m3", "16gb", "512gb"],
+    },
+    {
+      category: "clothing",
+      brand: "nike",
+      specs: ["cotton", "white"],
+    },
+  ];
+}
+```
+
+> **Note on Normalization:** Dinou automatically ensures that `params` received by your page are consistent. Catch-all parameters will always arrive as an `Array`, even if you returned a single `string` or `undefined` in `getStaticPaths`.
 
 ### 3. `revalidate` (ISR)
 
