@@ -570,12 +570,55 @@ If `getStaticPaths` in `blog/[slug]` returns `["post-a", "post-b"]`, Dinou gener
 3.  `/blog/post-b`
 4.  `/blog/post-b/details`
 
-#### Nested & Complex Routes
+#### Nested Pages & The "Chain of Responsibility"
 
-When you have multiple dynamic segments in a path, return an **Object** to map values to their specific parameter names.
+When nesting routes, **dependency flows downwards**. If an intermediate segment (whether static or dynamic) contains a `page.tsx`, it becomes a required step in the generation chain.
+
+If a parent page fails to define its own paths (e.g., returns an empty array), **the generator stops there**. It will never reach the child pages, regardless of whether the children have valid `getStaticPaths` defined.
+
+**Scenario:**
+
+- `src/case3/[slug]/page.tsx` (Parent Page)
+- `src/case3/[slug]/[id]/page.tsx` (Child Page)
+
+In this structure, `[id]` depends physically on `[slug]` existing first.
+
+**❌ Broken Chain:**
+If `src/case3/[slug]/page_functions.ts` returns `[]` (no paths):
+
+1. Dinou tries to build `/case3/[slug]`.
+2. No paths are returned. No folders are created.
+3. **Result:** The build process never attempts to generate `[id]`, because the parent directory `/case3/foo/` was never created.
+
+**✅ Functional Chain:**
+The parent must resolve its own level for the children to run.
+
+```typescript
+// src/case3/[slug]/page_functions.ts
+export function getStaticPaths() {
+  // 1. Defines the parent folders
+  return ["foo", "bar"];
+}
+```
+
+```typescript
+// src/case3/[slug]/[id]/page_functions.ts
+export function getStaticPaths() {
+  // 2. Now runs inside /case3/foo/ and /case3/bar/
+  return ["100", "200"];
+}
+```
+
+> **Rule of Thumb:** Every `page.tsx` in the hierarchy is responsible for "opening the door" to its children.
+
+#### Nested & Complex Routes (Pass-through Segments)
+
+When you have multiple dynamic segments in a path **without intermediate pages**, you must return an **Object** to map values to all parameter names involved.
 
 ```typescript
 // Structure: src/shop/[category]/[...specs]/[[brand]]/page_functions.ts
+// (Assuming [category] and [...specs] do NOT have their own page.tsx)
+
 export function getStaticPaths() {
   return [
     {
