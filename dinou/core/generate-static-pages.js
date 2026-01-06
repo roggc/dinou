@@ -90,7 +90,6 @@ async function generateStaticPages(routes) {
       htmlStream = renderAppToHtml(
         reqPath,
         paramsString,
-        "{}",
         contextForChild, // ✅ Pasamos el MockReq
         mockRes,
         capturedStatus

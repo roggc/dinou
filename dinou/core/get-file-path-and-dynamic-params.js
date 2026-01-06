@@ -218,6 +218,27 @@ function getFilePathAndDynamicParams(
             return finalDestination
               ? []
               : [foundInCurrentPath ?? lastFound, newParams];
+          } else if (entry.name.startsWith("(") && entry.name.endsWith(")")) {
+            const groupPath = path.join(currentPath, entry.name);
+            const newIsFound = { value: false };
+            const result = getFilePathAndDynamicParams(
+              reqSegments,
+              query,
+              groupPath,
+              fileName,
+              withExtension,
+              finalDestination,
+              lastFound,
+              index,
+              dParams,
+              accumulative,
+              accumulate,
+              newIsFound
+            );
+            if (newIsFound.value) {
+              isFound.value = true;
+              return result;
+            }
           }
         }
       }

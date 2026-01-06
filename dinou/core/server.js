@@ -568,8 +568,14 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
       }
     }
     const context = getContext(req, res);
+    const isNotFound = null;
     await requestStorage.run(context, async () => {
-      const jsx = await getJSX(reqPath, { ...req.query }, { ...req.cookies });
+      const jsx = await getJSX(
+        reqPath,
+        { ...req.query },
+        isNotFound,
+        isDevelopment
+      );
       const manifest = isDevelopment
         ? JSON.parse(
             readFileSync(
@@ -614,7 +620,12 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
     const reqPath = (
       req.path.endsWith("/") ? req.path : req.path + "/"
     ).replace("/____rsc_payload_error____", "");
-    const jsx = await getErrorJSX(reqPath, { ...req.query }, req.body.error);
+    const jsx = await getErrorJSX(
+      reqPath,
+      { ...req.query },
+      req.body.error,
+      isDevelopment
+    );
     const manifest = isDevelopment
       ? JSON.parse(
           readFileSync(
@@ -728,12 +739,13 @@ app.get(/^\/.*\/?$/, (req, res) => {
     processLimiter
       .run(async () => {
         const isDynamic = true;
+        const capturedStatus = null;
         const appHtmlStream = renderAppToHtml(
           reqPath,
           JSON.stringify({ ...req.query }),
-          JSON.stringify({ ...req.cookies }),
           contextForChild,
           res,
+          capturedStatus,
           isDynamic
         );
 

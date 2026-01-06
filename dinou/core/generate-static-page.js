@@ -59,7 +59,6 @@ async function generateStaticPage(reqPath) {
     htmlStream = renderAppToHtml(
       finalReqPath,
       paramsString,
-      "{}",
       contextForChild,
       mockRes,
       capturedStatus

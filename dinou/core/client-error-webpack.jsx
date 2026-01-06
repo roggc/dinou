@@ -50,8 +50,9 @@ const getRSCPayload = (url) => {
       },
       body: JSON.stringify({
         error: {
-          message: window.__DINOU_ERROR_MESSAGE__ || "Unknown error",
-          stack: window.__DINOU_ERROR_STACK__ || "No stack trace available",
+          message: window.__DINOU_ERROR_MESSAGE__ || "Unknown Error",
+          stack: window.__DINOU_ERROR_STACK__,
+          name: window.__DINOU_ERROR_NAME__,
         },
       }),
     })

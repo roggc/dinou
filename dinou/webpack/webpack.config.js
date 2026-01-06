@@ -28,6 +28,15 @@ function getConfigFileIfExists() {
 
 const configFile = getConfigFileIfExists();
 
+const localDinouPath = path.resolve(process.cwd(), "dinou/index.js");
+const isEjected = fs.existsSync(localDinouPath);
+
+console.log(
+  isEjected
+    ? "🚀 [Dinou] Modo Eyectado detectado (Webpack: Usando código local)"
+    : "📦 [Dinou] Modo Librería detectado (Webpack: Usando node_modules)"
+);
+
 module.exports = async () => {
   const [cssEntries] = await getCSSEntries();
   return {
@@ -47,6 +56,7 @@ module.exports = async () => {
         __dirname,
         "../core/client-redirect.jsx"
       ),
+      dinouLink: path.resolve(__dirname, "../core/link.jsx"),
       ...[...cssEntries].reduce(
         (acc, cssEntry) => ({
           ...acc,
@@ -88,7 +98,9 @@ module.exports = async () => {
           include: [
             path.resolve(process.cwd(), "src"),
             path.resolve(__dirname, "../core"),
-          ],
+            path.resolve(process.cwd(), "node_modules/dinou"),
+            isEjected && path.resolve(process.cwd(), "dinou"),
+          ].filter(Boolean),
           use: {
             loader: "babel-loader",
             options: {
@@ -206,6 +218,10 @@ module.exports = async () => {
     resolve: {
       extensions: [".js", ".jsx", ".ts", ".tsx"],
       modules: ["src", "node_modules"],
+      // 🎯 AÑADIR ESTO:
+      alias: {
+        ...(isEjected ? { dinou: localDinouPath } : {}),
+      },
       plugins: configFile
         ? [
             new TsconfigPathsPlugin({

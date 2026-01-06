@@ -30,7 +30,6 @@ const childExecArgv = ESSENTIAL_NODE_ARGS.concat(loaderArg);
 function renderAppToHtml(
   reqPath,
   paramsString,
-  cookiesString = "{}",
   contextForChild,
   res,
   capturedStatus = null,
@@ -43,7 +42,6 @@ function renderAppToHtml(
   const scriptArgs = [
     reqPath,
     paramsString,
-    cookiesString,
     contextForChild ? JSON.stringify(contextForChild) : JSON.stringify({}),
     isDynamic ? "true" : "false",
     hasJsxJson ? "true" : "false",

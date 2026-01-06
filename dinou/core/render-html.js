@@ -129,7 +129,6 @@ function writeErrorOutput(error, isProd) {
 async function renderToStream(
   reqPath,
   query,
-  cookies,
   serializedBox,
   isDynamic,
   hasJsxJson,
@@ -146,17 +145,13 @@ async function renderToStream(
     try {
       const isNotFound = {};
       const jsx =
-        Object.keys(query).length ||
-        isDevelopment ||
-        Object.keys(cookies).length ||
-        isDynamic ||
-        !hasJsxJson
+        Object.keys(query).length || isDevelopment || isDynamic || !hasJsxJson
           ? renderJSXToClientJSX(
-              await getJSX(reqPath, query, cookies, isNotFound)
+              await getJSX(reqPath, query, isNotFound, isDevelopment)
             )
           : (await getSSGJSX(jsxJson)) ??
             renderJSXToClientJSX(
-              await getJSX(reqPath, query, cookies, isNotFound)
+              await getJSX(reqPath, query, isNotFound, isDevelopment)
             );
       if (isNotFound.value) {
         context.res.status(404);
@@ -173,7 +168,12 @@ async function renderToStream(
             const isProd = process.env.NODE_ENV === "production";
 
             try {
-              const errorJSX = await getErrorJSX(reqPath, query, error);
+              const errorJSX = await getErrorJSX(
+                reqPath,
+                query,
+                error,
+                isDevelopment
+              );
 
               if (!context.res.headersSent) context.res.status(500);
 
@@ -202,9 +202,13 @@ async function renderToStream(
                   : [getAssetFromManifest("error.js")],
                 bootstrapScriptContent: `window.__DINOU_ERROR_MESSAGE__=${JSON.stringify(
                   error.message || "Unknown error"
-                )};window.__DINOU_ERROR_STACK__=${JSON.stringify(
-                  error.stack || "No stack trace available"
-                )};${
+                )};window.__DINOU_ERROR_NAME__=${JSON.stringify(error.name)};${
+                  isDevelopment
+                    ? `window.__DINOU_ERROR_STACK__=${JSON.stringify(
+                        error.stack || "No stack trace available"
+                      )};`
+                    : ""
+                }${
                   isDevelopment
                     ? `window.HMR_WEBSOCKET_URL="ws://localhost:3001";`
                     : ""
@@ -253,11 +257,10 @@ async function renderToStream(
 
 const reqPath = process.argv[2];
 const query = JSON.parse(process.argv[3]);
-const cookies = JSON.parse(process.argv[4] || "{}");
-const serializedBox = JSON.parse(process.argv[5] || "{}");
-const isDynamic = process.argv[6] === "true";
-const hasJsxJson = process.argv[7] === "true";
-const jsxJson = JSON.parse(process.argv[8]);
+const serializedBox = JSON.parse(process.argv[4] || "{}");
+const isDynamic = process.argv[5] === "true";
+const hasJsxJson = process.argv[6] === "true";
+const jsxJson = JSON.parse(process.argv[7]);
 
 process.on("uncaughtException", (error) => {
   process.stdout.write(formatErrorHtml(error));
@@ -285,7 +288,6 @@ process.on("unhandledRejection", (reason) => {
 renderToStream(
   reqPath,
   query,
-  cookies,
   serializedBox,
   isDynamic,
   hasJsxJson,
