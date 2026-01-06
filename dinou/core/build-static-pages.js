@@ -161,6 +161,10 @@ async function buildStaticPages() {
                   let segmentsToAdd;
                   if (isObject) {
                     segmentsToAdd = currentStructure.map((key) => {
+                      const isObject = typeof key === "object" && key !== null;
+                      if (isObject) {
+                        return key.STATIC_PARAM_NAME;
+                      }
                       const val = pathItem[key];
                       // Nota: En optional catch-all, un valor podría ser undefined/vacío si estamos en la raíz,
                       // pero si getStaticPaths devuelve un objeto, esperamos que cumpla la estructura.
@@ -270,6 +274,10 @@ async function buildStaticPages() {
                   if (isObject) {
                     let notValidRoute = false;
                     segmentsToAdd = currentStructure.map((key, i, arr) => {
+                      const isObject = typeof key === "object" && key !== null;
+                      if (isObject) {
+                        return key.STATIC_PARAM_NAME;
+                      }
                       const val = pathItem[key];
 
                       // 🛡️ FIX 1: Validación relajada.
@@ -374,6 +382,10 @@ async function buildStaticPages() {
                   let segmentsToAdd;
                   if (isObject) {
                     segmentsToAdd = currentStructure.map((key) => {
+                      const isObject = typeof key === "object" && key !== null;
+                      if (isObject) {
+                        return key.STATIC_PARAM_NAME;
+                      }
                       const val = pathItem[key];
                       // Permitimos undefined si es el propio optional param el que falta
                       return val;
@@ -475,6 +487,10 @@ async function buildStaticPages() {
                   if (isObject) {
                     let notValidRoute = false;
                     segmentsToAdd = currentStructure.map((key, i, arr) => {
+                      const isObject = typeof key === "object" && key !== null;
+                      if (isObject) {
+                        return key.STATIC_PARAM_NAME;
+                      }
                       const val = pathItem[key];
 
                       // 🛡️ CAMBIO: Solo lanzamos error si falta el parámetro ACTUAL (que es obligatorio).
@@ -527,15 +543,118 @@ async function buildStaticPages() {
             );
           }
         } else if (!entry.name.startsWith("@")) {
-          pages.push(
-            ...(await collectPages(
-              path.join(currentPath, entry.name),
-              [...segments, entry.name],
-              params,
-              dynamicStructure,
-              false
-            ))
-          );
+          if (dynamicStructure.length > 0) {
+            const dynamicPath = path.join(currentPath, entry.name);
+            const [pagePath] = getFilePathAndDynamicParams(
+              segments,
+              {},
+              dynamicPath,
+              "page",
+              true,
+              true,
+              undefined,
+              segments.length
+            );
+            const [pageFunctionsPath] = getFilePathAndDynamicParams(
+              segments,
+              {},
+              dynamicPath,
+              "page_functions",
+              true,
+              true,
+              undefined,
+              segments.length
+            );
+            let dynamic;
+            let getStaticPaths;
+            if (pageFunctionsPath) {
+              const module = await importModule(pageFunctionsPath);
+              getStaticPaths = module.getStaticPaths;
+              dynamic = module.dynamic;
+            }
+            const isLocalPage =
+              pagePath && path.dirname(pagePath) === dynamicPath;
+            if (isLocalPage && !dynamic?.()) {
+              try {
+                if (getStaticPaths) {
+                  const paths = getStaticPaths();
+                  for (const pathItem of paths) {
+                    const currentStructure = dynamicStructure;
+                    const isObject =
+                      typeof pathItem === "object" && pathItem !== null;
+
+                    let segmentsToAdd;
+
+                    if (isObject) {
+                      let notValidRoute = false;
+                      segmentsToAdd = currentStructure.map((key, i, arr) => {
+                        const isObject =
+                          typeof key === "object" && key !== null;
+                        if (isObject) {
+                          return key.STATIC_PARAM_NAME;
+                        }
+                        const val = pathItem[key];
+
+                        // 🛡️ CAMBIO: Solo lanzamos error si falta el parámetro ACTUAL (que es obligatorio).
+                        // Si falta un parámetro padre (key !== paramName), asumimos que podría ser opcional.
+                        if (
+                          (val === undefined || val === null || val === "") &&
+                          i < arr.length - 1
+                        ) {
+                          notValidRoute = true;
+                          // throw new Error(
+                          //   `[Dinou] El parámetro obligatorio '${paramName}' es undefined en ${dynamicPath}.`
+                          // );
+                        }
+                        return val;
+                      });
+                      if (notValidRoute) continue;
+                    } else {
+                      segmentsToAdd = [pathItem];
+                    }
+
+                    // 🛡️ CAMBIO: Filtramos undefineds también aquí, porque un padre pudo ser opcional
+                    const validSegmentsToAdd = segmentsToAdd.flat();
+                    // .filter((s) => s !== undefined && s !== null && s !== "");
+
+                    const paramsToAdd = isObject
+                      ? pathItem
+                      : { [paramName]: pathItem };
+
+                    pages.push(
+                      ...(await collectPages(
+                        dynamicPath,
+                        [...segments, ...validSegmentsToAdd, entry.name], // Usamos la versión filtrada
+                        { ...params, ...paramsToAdd }
+                      ))
+                    );
+                  }
+                }
+              } catch (err) {
+                console.error(`Error loading ${pagePath}:`, err);
+              }
+            } else {
+              pages.push(
+                ...(await collectPages(
+                  path.join(currentPath, entry.name),
+                  segments,
+                  params,
+                  [...dynamicStructure, { STATIC_PARAM_NAME: entry.name }],
+                  true
+                ))
+              );
+            }
+          } else {
+            pages.push(
+              ...(await collectPages(
+                path.join(currentPath, entry.name),
+                [...segments, entry.name],
+                params,
+                dynamicStructure,
+                false
+              ))
+            );
+          }
         }
       }
     }
@@ -568,7 +687,11 @@ async function buildStaticPages() {
     }
 
     if (pagePath && !dynamic?.() && !doNotPushAtEnd) {
-      pages.push({ path: currentPath, segments, params: dParams });
+      pages.push({
+        path: currentPath,
+        segments,
+        params: dParams,
+      });
       console.log(`Found static route: ${segments.join("/") || "/"}`);
     }
 
