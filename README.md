@@ -70,26 +70,35 @@ Dinou uses a file-system based router. Files named `page.{jsx,tsx,js,ts}` inside
 
 ### Important: Optional Segments Rules
 
-Dinou supports deep nesting and complex combinations, but to avoid **URL Ambiguity** during matching, it follows one strict rule:
+Dinou supports deep nesting of optional segments (`[[...]]` or `[[slug]]`), but it enforces a strict **No-Gap Rule**.
 
-> **The "Tail-Only" Rule:** An optional segment (`[[slug]]` or `[[...slug]]`) can only be omitted (`undefined` or empty) if it is at the **end of the URL**.
+> **The Rule:** You cannot skip an intermediate optional segment. You can only omit parameters if they are at the **end of the URL**.
 
-#### ❌ Forbidden: "Intercalated Undefined"
+#### ✅ Allowed: "Trailing Omission"
 
-You cannot skip an optional segment if there are more dynamic or mandatory segments following it.
+You can leave optional segments undefined, but only if they are the last ones in the structure.
 
-- Structure: `src/blog/[[lang]]/[postId]/page.jsx`
-- Valid: `/blog/es/hello-world` → `{ lang: "es", postId: "hello-world" }`
-- **Invalid:** `/blog/hello-world` → Dinou won't match this to `postId` because `lang` cannot be skipped in the middle.
+- **Structure:** `src/inventory/[[warehouse]]/[[aisle]]/page.tsx`
 
-#### ❌ Forbidden: "Chained Undefined"
+| URL                  | Result (`params`)                            | Status                          |
+| :------------------- | :------------------------------------------- | :------------------------------ |
+| `/inventory/main/a1` | `{ warehouse: "main", aisle: "a1" }`         | ✅ **Full**                     |
+| `/inventory/main`    | `{ warehouse: "main", aisle: undefined }`    | ✅ **Valid** (Last one omitted) |
+| `/inventory`         | `{ warehouse: undefined, aisle: undefined }` | ✅ **Valid** (All omitted)      |
 
-Even if all subsequent segments are optional, you cannot skip an intermediate one.
+#### ❌ Forbidden: "Intercalated Undefined" (Gaps)
 
-- Structure: `src/inventory/[[warehouse]]/[[aisle]]/page.jsx`
-- Valid: `/inventory/main/a1` → `{ warehouse: "main", aisle: "a1" }`
-- Valid: `/inventory/main` → `{ warehouse: "main", aisle: undefined }`
-- **Invalid:** Omission of `warehouse` while trying to reach `aisle`. You cannot skip `warehouse` even if `aisle` is also omitted.
+It is **not possible** to define a later segment while skipping an earlier one.
+
+- **Structure:** `src/inventory/[[warehouse]]/[[aisle]]/page.tsx`
+
+| Goal                                    | Result                                                                                 |
+| :-------------------------------------- | :------------------------------------------------------------------------------------- |
+| **Skip `warehouse` but define `aisle`** | ❌ **Forbidden**: You cannot provide an `aisle` without providing a `warehouse` first. |
+
+#### Catch-all Constraints
+
+Due to their "greedy" nature (consuming the rest of the URL), Catch-all segments (`[...]` and `[[...]]`) must always be the **terminal (last) segment** of a route definition. You cannot place other static or dynamic folders inside a Catch-all folder.
 
 ---
 
