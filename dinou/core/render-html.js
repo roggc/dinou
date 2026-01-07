@@ -145,7 +145,9 @@ async function renderToStream(
     try {
       const isNotFound = {};
       const jsx =
-        Object.keys(query).length || isDevelopment || isDynamic || !hasJsxJson
+        /*Object.keys(query).length ||*/ isDevelopment ||
+        isDynamic ||
+        !hasJsxJson
           ? renderJSXToClientJSX(
               await getJSX(reqPath, query, isNotFound, isDevelopment)
             )

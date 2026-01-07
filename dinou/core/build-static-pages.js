@@ -151,58 +151,87 @@ async function buildStaticPages() {
               if (getStaticPaths) {
                 const paths = getStaticPaths();
                 for (const pathItem of paths) {
-                  // LÓGICA ROBUSTA APLICADA AQUÍ
+                  // 1. Preparación de Estructura y Extracción
                   const currentStructure = [...dynamicStructure, paramName];
                   const isObject =
                     typeof pathItem === "object" &&
                     pathItem !== null &&
-                    !Array.isArray(pathItem); // Ojo: Array es object, hay que distinguir
+                    !Array.isArray(pathItem);
 
-                  let segmentsToAdd;
+                  let rawSegments;
+
                   if (isObject) {
-                    segmentsToAdd = currentStructure.map((key) => {
-                      const isObject = typeof key === "object" && key !== null;
-                      if (isObject) {
+                    rawSegments = currentStructure.map((key) => {
+                      // A. Manejo de Puentes Estáticos
+                      const isKeyObject =
+                        typeof key === "object" && key !== null;
+                      if (isKeyObject) {
                         return key.STATIC_PARAM_NAME;
                       }
+
+                      // B. Extracción de valor
                       const val = pathItem[key];
-                      // Nota: En optional catch-all, un valor podría ser undefined/vacío si estamos en la raíz,
-                      // pero si getStaticPaths devuelve un objeto, esperamos que cumpla la estructura.
-                      return val === undefined || val === null || val === ""
-                        ? []
-                        : val;
+
+                      // IMPORTANTE: Para el Gap Check necesitamos mantener el 'undefined' o 'null'
+                      // explícitamente en el array, no convertirlo a [] todavía.
+                      // Si es [] vacío, lo dejamos como tal para que .flat() lo elimine (no cuenta como gap).
+                      return val;
                     });
                   } else {
-                    // Si es array directo o string
-                    segmentsToAdd = [pathItem];
+                    // Si no es objeto, es el valor directo del parámetro actual
+                    rawSegments = [pathItem];
                   }
 
+                  // Aplanamos. Nota: undefined se mantiene en el array. [] desaparece.
+                  const flatSegments = rawSegments.flat();
+
+                  // 🛡️ 2. GAP CHECK (Detección de huecos prohibidos)
+                  // Prohibido: [undefined, "algo"]
+                  // Permitido: ["algo", undefined] o [undefined, undefined]
+                  const hasGap = flatSegments.some((seg, index) => {
+                    const isUndefined =
+                      seg === undefined || seg === null || seg === "";
+                    if (!isUndefined) return false;
+
+                    // Si este es undefined, miramos si queda algo definido a la derecha
+                    const remaining = flatSegments.slice(index + 1);
+                    return remaining.some(
+                      (s) => s !== undefined && s !== null && s !== ""
+                    );
+                  });
+
+                  if (hasGap) {
+                    continue; // Ruta inválida (hueco intermedio)
+                  }
+
+                  // 🛡️ 3. URL CLEANING
+                  // Quitamos undefineds para la URL física
+                  const validSegmentsToAdd = flatSegments.filter(
+                    (s) => s !== undefined && s !== null && s !== ""
+                  );
+
+                  // 🛡️ 4. PARAMS PREPARATION & NORMALIZATION
                   const paramsToAdd = isObject
-                    ? pathItem
+                    ? { ...pathItem } // Clonamos para no mutar
                     : { [paramName]: pathItem };
 
-                  // 🛡️ NORMALIZACIÓN TOTAL CATCH-ALL:
-                  // Queremos que el resultado sea SIEMPRE un Array para que coincida con el modo dinámico.
+                  // Normalización específica para Catch-all: undefined -> []
                   const currentVal = paramsToAdd[paramName];
-
                   if (
                     currentVal === undefined ||
                     currentVal === null ||
                     currentVal === ""
                   ) {
-                    // Caso: undefined -> []
                     paramsToAdd[paramName] = [];
                   } else if (!Array.isArray(currentVal)) {
-                    // Caso: "foo" -> ["foo"]
                     paramsToAdd[paramName] = [currentVal];
                   }
 
                   pages.push(
                     ...(await collectPages(
                       dynamicPath,
-                      [...segments, ...segmentsToAdd.flat()],
+                      [...segments, ...validSegmentsToAdd],
                       { ...params, ...paramsToAdd }
-                      // currentStructure (opcional, rompe recursión estática aquí)
                     ))
                   );
                 }
@@ -374,44 +403,61 @@ async function buildStaticPages() {
               if (getStaticPaths) {
                 const paths = getStaticPaths();
                 for (const pathItem of paths) {
-                  // LÓGICA ROBUSTA
+                  // 1. Preparación de Estructura y Extracción
                   const currentStructure = [...dynamicStructure, paramName];
                   const isObject =
-                    typeof pathItem === "object" && pathItem !== null;
+                    typeof pathItem === "object" && pathItem !== null; // Single param no debería ser array, pero por seguridad.
 
-                  let segmentsToAdd;
+                  let rawSegments;
+
                   if (isObject) {
-                    segmentsToAdd = currentStructure.map((key) => {
-                      const isObject = typeof key === "object" && key !== null;
-                      if (isObject) {
+                    rawSegments = currentStructure.map((key) => {
+                      // A. Manejo de Puentes Estáticos
+                      const isKeyObject =
+                        typeof key === "object" && key !== null;
+                      if (isKeyObject) {
                         return key.STATIC_PARAM_NAME;
                       }
-                      const val = pathItem[key];
-                      // Permitimos undefined si es el propio optional param el que falta
-                      return val;
+
+                      // B. Extracción de valor
+                      // Devolvemos el valor tal cual (undefined se queda como undefined para el check)
+                      return pathItem[key];
                     });
                   } else {
-                    segmentsToAdd = [pathItem];
+                    rawSegments = [pathItem];
                   }
 
-                  // Filtrar undefineds para la URL (segments), pero mantenerlos para params si vienen en el objeto
-                  let validSegmentsToAdd = segmentsToAdd.flat();
-                  // .filter((s) => s !== undefined && s !== null && s !== "");
-                  const lastSegment =
-                    validSegmentsToAdd[validSegmentsToAdd.length - 1];
-                  const doNotTakeAccount =
-                    lastSegment === undefined ||
-                    lastSegment === null ||
-                    lastSegment === "";
-                  if (doNotTakeAccount) {
-                    validSegmentsToAdd = validSegmentsToAdd.slice(0, -1);
+                  // Aplanamos (por si acaso viene algún array anidado raro, aunque en single no debería)
+                  const flatSegments = rawSegments.flat();
+
+                  // 🛡️ 2. GAP CHECK (Detección de huecos prohibidos)
+                  // Permite que /inventory/[[a]]/[[b]] genere /inventory si a y b son undefined
+                  const hasGap = flatSegments.some((seg, index) => {
+                    const isUndefined =
+                      seg === undefined || seg === null || seg === "";
+                    if (!isUndefined) return false;
+
+                    // Miramos a la derecha
+                    const remaining = flatSegments.slice(index + 1);
+                    return remaining.some(
+                      (s) => s !== undefined && s !== null && s !== ""
+                    );
+                  });
+
+                  if (hasGap) {
+                    continue; // Ruta inválida
                   }
+
+                  // 🛡️ 3. URL CLEANING
+                  const validSegmentsToAdd = flatSegments.filter(
+                    (s) => s !== undefined && s !== null && s !== ""
+                  );
+
+                  // 🛡️ 4. PARAMS PREPARATION
+                  // Aquí NO normalizamos a [], porque es un single parameter.
+                  // undefined se queda como undefined.
                   const paramsToAdd = isObject
-                    ? doNotTakeAccount
-                      ? { ...pathItem }
-                      : pathItem
-                    : doNotTakeAccount
-                    ? {}
+                    ? pathItem
                     : { [paramName]: pathItem };
 
                   pages.push(
@@ -717,7 +763,7 @@ async function buildStaticPages() {
       // Set displayName for better serialization
       // if (!Page.displayName) Page.displayName = "Page";
 
-      let props = { params, searchParams: {} };
+      let props = { params /* searchParams: {}*/ };
 
       const [pageFunctionsPath] = getFilePathAndDynamicParams(
         segments,
@@ -774,7 +820,10 @@ async function buildStaticPages() {
                 __modulePath: alreadyFoundPath ?? null,
               };
             }
-            let props = { params: dParams, searchParams: {}, ...updatedSlots };
+            let props = {
+              params: dParams,
+              /*searchParams: {},*/ ...updatedSlots,
+            };
             if (index === layouts.length - 1) {
               props = { ...props, ...(pageFunctionsProps?.layout ?? {}) };
             }
@@ -992,7 +1041,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
     const pageModule = await importModule(pagePath);
     const Page = pageModule.default ?? pageModule;
 
-    let props = { params: dParams, searchParams: {} };
+    let props = { params: dParams /*searchParams: {}*/ };
     const [pageFunctionsPath] = getFilePathAndDynamicParams(
       segments,
       {},
@@ -1049,7 +1098,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
           }
           let layoutProps = {
             params: dParams,
-            searchParams: {},
+            // searchParams: {},
             ...updatedSlots,
           };
           if (index === layouts.length - 1) {

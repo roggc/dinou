@@ -533,7 +533,7 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
     // );
     if (
       (!isDevelopment &&
-        Object.keys({ ...req.query }).length === 0 &&
+        /*Object.keys({ ...req.query }).length === 0 &&*/
         !dynamicState.value) ||
       isStatic
     ) {
@@ -662,7 +662,7 @@ app.get(/^\/.*\/?$/, (req, res) => {
     // console.log("dynamicState.value", dynamicState.value);
     if (
       !isDevelopment &&
-      Object.keys({ ...req.query }).length === 0 &&
+      /*Object.keys({ ...req.query }).length === 0 &&*/
       !dynamicState.value
     ) {
       revalidating(reqPath, dynamicState);
@@ -759,8 +759,8 @@ app.get(/^\/.*\/?$/, (req, res) => {
           if (
             !isDevelopment &&
             res.statusCode === 200 && // Solo si fue éxito
-            // req.method === "GET" && // Solo peticiones GET
-            Object.keys({ ...req.query }).length === 0 // Sin query params (evitar duplicados infinitos)
+            req.method === "GET" // Solo peticiones GET
+            /*Object.keys({ ...req.query }).length === 0*/ // Sin query params (evitar duplicados infinitos)
           ) {
             generatingISG(reqPath, dynamicState);
           }

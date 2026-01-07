@@ -44,7 +44,7 @@ function getSlots(currentPath, reqSegments, query) {
         // Guardamos el slot encontrado
         slots[slotName] = React.createElement(Slot, {
           params: slotParams,
-          searchParams: query,
+          // searchParams: query,
           key: slotName,
           // Añadimos esto para tus hacks de Server Components si los necesitas
           __modulePath: slotPath ?? null,
@@ -213,6 +213,25 @@ function getFilePathAndDynamicParams(
                 }
                 return [candidatePath, newParams];
               }
+            }
+            const newIsFound = { value: false };
+            const result = getFilePathAndDynamicParams(
+              reqSegments,
+              query,
+              dynamicPath,
+              fileName,
+              withExtension,
+              finalDestination,
+              lastFound,
+              index + 1,
+              dParams,
+              accumulative,
+              accumulate,
+              newIsFound
+            );
+            if (newIsFound.value) {
+              isFound.value = true;
+              return result;
             }
             if (accumulative) return accumulate;
             return finalDestination
