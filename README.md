@@ -644,7 +644,7 @@ export function getStaticPaths() {
 }
 ```
 
-> **Reminder:** According to the **Tail-Only Rule**, you can only use `undefined` for an optional segment if it is the last segment of the generated URL.
+> **Reminder:** According to the **No-Gap Rule**, you can use `undefined` for an intermediate optional segment **only if all subsequent segments are also `undefined`**. You cannot leave a "gap" (an undefined segment followed by a defined one).
 
 #### Normalization Guarantee
 
