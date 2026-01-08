@@ -78,6 +78,12 @@ if (typeof window === "undefined") {
 
 // ... Resto del archivo igual ...
 function getContext() {
+  if (typeof window !== "undefined") {
+    console.error(
+      "[Dinou] ❌ You are calling getContext() inside a Client Component running in the browser. This function is Server-Only. Pass the data as props from a Server Component instead."
+    );
+    return {}; // Retorno seguro para evitar crash total, pero avisa al dev.
+  }
   if (!requestStorage) return undefined;
   const store = requestStorage.getStore();
   return store;
