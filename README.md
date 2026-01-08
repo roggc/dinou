@@ -680,6 +680,80 @@ export function dynamic() {
 }
 ```
 
+### ⚠️ Security Warning: `getContext` in Client Components
+
+While `getContext()` technically works during the Server-Side Rendering (SSR) phase of Client Components, **using it directly inside a Client Component is strongly discouraged**.
+
+```javascript
+"use client";
+import { getContext } from "dinou";
+
+// ❌ DANGEROUS PATTERN
+export default function UserProfile() {
+  const ctx = getContext(); // Runs on server during SSR
+  return <div>{ctx.req.headers["authorization"]}</div>;
+  // ⚠️ The sensitive header is now baked into the public HTML source code!
+}
+```
+
+**Risks:**
+
+1.  **Data Leak:** Any data read from `getContext` during SSR is serialized into the initial HTML. If you mistakenly render sensitive data (like tokens or internal headers), it will be visible in the page source (`View Source`), even if React hydration fails later.
+2.  **Hydration Mismatch:** The browser execution will fail because `getContext` is not available in the browser, causing the UI to break or flicker.
+
+**✅ Correct Pattern:**
+Fetch sensitive data in a **Server Component** and pass only the necessary, safe fields as props.
+
+```javascript
+// src/profile/page.tsx (Server Component)
+import { getContext } from "dinou";
+import ClientProfile from "./client-profile";
+
+export default function Page() {
+  const ctx = getContext();
+  // Extract ONLY what is safe for the client
+  const safeUser = { name: ctx.req.cookies.username };
+
+  return <ClientProfile user={safeUser} />;
+}
+```
+
+### `useSearchParams`
+
+A universal hook to access URL query parameters. It works in both Server and Client Components, but behaves differently during the build process.
+
+```javascript
+import { useSearchParams } from "dinou/navigation";
+
+export default function SearchPage() {
+  const searchParams = useSearchParams();
+  const query = searchParams.get("q");
+
+  return <div>Searching for: {query}</div>;
+}
+```
+
+#### Behavior & Static Generation (Bailout)
+
+| Component Type       | Behavior during Build                                       | Result                                                                                                                                    |
+| :------------------- | :---------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
+| **Server Component** | Accessing `useSearchParams` triggers a **Static Bailout**.  | The page automatically opts out of SSG and becomes **Dynamic Rendering** (SSR).                                                           |
+| **Client Component** | Accessing `useSearchParams` does **NOT** trigger a bailout. | The page remains **Static (SSG)**. The initial HTML will render with empty params, and the browser will update the values upon hydration. |
+
+> **⚠️ Important for Client Components:**
+> If you use this hook in a Client Component within a static page, be aware of **Hydration Mismatches**. The server renders with empty params (`null`), but the browser renders with the real URL.
+>
+> **Recommended:** If your Client Component heavily depends on search params for its initial UI (e.g., a filtered list), pass the params from a Server Component as props to force Dynamic Rendering, or handle the loading state gracefully.
+
+#### API
+
+Returns a standard [`URLSearchParams`](https://developer.mozilla.org/en-US/docs/Web/API/URLSearchParams) object.
+
+- `.get(name)`: Returns the first value.
+- `.getAll(name)`: Returns all values (for arrays like `?id=1&id=2`).
+- `.has(name)`: Checks existence.
+- `.toString()`: Returns the query string.
+
 [**Dinou**](https://dinou.dev) is a **React 19 framework**. "dinou" means 19 in Catalan. You can create a Dinou [app](https://github.com/roggc/dinou-app) by running the command **`npx create-dinou@latest my-app`**.
 
 Or you can create one by yourself with the following steps:
