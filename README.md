@@ -680,6 +680,160 @@ export function dynamic() {
 }
 ```
 
+## 📚 API Reference
+
+### 1. Components
+
+#### `<Link>`
+
+The primary way to navigate between pages in Dinou. It enables client-side navigation (SPA feel) without full page reloads.
+
+- **Props:**
+  - `href` (string): The path to navigate to.
+  - `...props`: Standard anchor tag attributes (`className`, `id`, etc.).
+
+```jsx
+import { Link } from "dinou";
+
+<Link href="/about" className="nav-link">
+  Go to About
+</Link>;
+```
+
+---
+
+### 2. Universal Utilities
+
+Functions that work in both Server and Client environments to handle flow control.
+
+#### `redirect(destination)`
+
+Redirects the user to a new URL.
+
+- **Server Behavior:** Sets HTTP 307 status header (if headers haven't been sent) for SEO-friendly redirects.
+- **Client Behavior:** Renders a component that triggers an immediate client-side navigation.
+- **Usage:** Should be used with `return` to stop the current component rendering.
+
+```jsx
+import { redirect, getContext } from "dinou";
+
+export default function Dashboard() {
+  const { req } = getContext();
+  const user = req.cookies.token;
+
+  if (!user) {
+    // ✋ Stops rendering and redirects
+    return redirect("/login");
+  }
+
+  return <div>Welcome back!</div>;
+}
+```
+
+---
+
+### 3. Server-Only Utilities
+
+Functions available **only** for Server Components.
+
+#### `getContext()`
+
+Retrieves the current request and response context.
+
+- **Returns:** Object `{ req, res }`.
+- **req:** Access to `headers`, `cookies`, `query`, `path`, `method`.
+- **res:** Methods to set `status`, `setHeader`, or server-side `redirect`.
+- **⚠️ Warning:** Do not use inside Client Components. It causes hydration mismatches and exposes sensitive server data in the HTML source.
+
+```javascript
+import { getContext } from "dinou";
+
+export default function Page() {
+  const { req } = getContext();
+  console.log(req.headers["user-agent"]);
+}
+```
+
+---
+
+### 4. Navigation Hooks
+
+Hooks to access routing information. They work in both environments but trigger **Static Bailout** when used in Server Components.
+
+#### `useSearchParams()`
+
+Read the current URL query parameters.
+
+- **Returns:** [`URLSearchParams`](https://developer.mozilla.org/en-US/docs/Web/API/URLSearchParams).
+- **Note:** In Server Components, accessing this opts the page out of Static Generation.
+
+#### `usePathname()`
+
+Read the current URL pathname (e.g., `/blog/post-1`).
+
+- **Returns:** `string`.
+
+#### `useRouter()` (Client Only)
+
+Programmatic navigation for Client Components (`"use client"`).
+
+- **Methods:**
+  - `.push(href)`: Navigate to a new route.
+  - `.replace(href)`: Navigate without adding to history.
+  - `.back()`: Go back in history.
+
+#### `useNavigationLoading()` (Client Only)
+
+A hook to detect if a client-side navigation is currently in progress. Useful for showing global progress bars or spinners.
+
+- **Returns:** `boolean` (`true` when navigating, `false` when idle).
+
+```jsx
+"use client";
+import { useNavigationLoading } from "dinou/navigation";
+
+export default function LoadingBar() {
+  const isLoading = useNavigationLoading();
+  return isLoading ? <div className="spinner" /> : null;
+}
+```
+
+---
+
+### 5. Page Configuration (`page_functions.ts`)
+
+Exports used to configure the behavior of a `page.tsx` during the build process.
+
+#### `getStaticPaths()`
+
+Defines a list of paths to be statically generated at build time (SSG).
+
+- **Returns:** `Array<string | string[] | Object>`.
+- **Features:** Supports deep nesting, optional segments, and static bridges.
+
+```typescript
+export function getStaticPaths() {
+  return [
+    { slug: "hello", lang: "en" }, // Complex route
+    ["a", "b"], // Catch-all route
+  ];
+}
+```
+
+#### `dynamic`
+
+Controls the rendering mode of the page.
+
+- **Values:**
+  - `undefined` (default): Auto-detect. Static if possible, Dynamic if bailout detected (headers/cookies/searchParams).
+  - `"force-dynamic"`: Skips static generation entirely. Always SSR.
+  - `"force-static"`: Forces static generation. Build will fail if dynamic data is accessed.
+
+```typescript
+// page_functions.ts
+export const dynamic = "force-dynamic";
+```
+
 ### ⚠️ Security Warning: `getContext` in Client Components
 
 While `getContext()` technically works during the Server-Side Rendering (SSR) phase of Client Components, **using it directly inside a Client Component is strongly discouraged**.
