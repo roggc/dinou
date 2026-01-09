@@ -50,16 +50,21 @@ Support for React Server Components (RSC), Server-Side Rendering (SSR), Static G
   - [3. Server-Only Utilities (`dinou`)](#3-server-only-utilities-dinou)
   - [4. Page Configuration (`page_functions.ts`)](#4-page-configuration-page_functionsts)
   - [5. File Conventions Cheatsheet](#5-file-conventions-cheatsheet)
-- [`favicons` folder](#favicons-folder)
-- [`.env` file](#env-file)
-- [Styles (Tailwind.css, .module.css, and .css)](#styles-tailwindcss-modulecss-and-css)
-- [Assets or media files (image, video, and sound)](#assets-or-media-files-image-video-and-sound)
-- [Import alias (e.g. `"@/..."`)](#import-alias-eg-)
-- [How to run a Dinou app](#how-to-run-a-dinou-app)
-- [Eject Dinou](#eject-dinou)
+- [🎨 Favicons](#-favicons)
+- [🔐 Environment Variables (`.env`)](#-environment-variables-env)
+- [💅 Styles (Tailwind, CSS Modules, & Global CSS)](#-styles-tailwind-css-modules--global-css)
+  - [1. Link the Stylesheet](#1-link-the-stylesheet)
+  - [2. Full Example (Layout + Global CSS + Modules)](#2-full-example-layout--global-css--modules)
+- [🖼️ Assets & Media](#️-assets--media)
+- [🔗 Import Aliases (`@/`)](#-import-aliases-)
+- [⚡ Bundlers & Running the App](#-bundlers--running-the-app)
+  - [Development](#development)
+  - [Production Build](#production-build)
+  - [Start Production Server](#start-production-server)
+- [⏏️ Eject Dinou](#️-eject-dinou)
 - [🚀 Deployment](#-deployment)
 - [📦 Changelog](#-changelog)
-- [License](#license)
+- [📄 License](#-license)
 
 ## Getting Started
 
@@ -977,9 +982,14 @@ Create these empty files to alter how layouts apply to a specific route director
 | `no_layout_error`     | The `error.tsx` in this folder will render without any layout.                                       |
 | `no_layout_not_found` | The `not-found.tsx` in this folder will render without any layout.                                   |
 
-## `favicons` folder
+## 🎨 Favicons
 
-If you want to show a favicon, generate one with an online tool (e.g. [favicon.io](https://favicon.io/)), unzip the downloaded folder with the favicons, paste it in the root of the project and rename it to `favicons`. Then update your `layout` or `page` to include this in the `head` tag:
+To add a favicon to your application:
+
+1. Generate your assets using a tool like [favicon.io](https://favicon.io/).
+2. Unzip the downloaded folder.
+3. Rename the folder to `favicons` and place it in the **root** of your project.
+4. Update your root `layout.tsx` (or `page.tsx`) to include the references in the `<head>` tag:
 
 ```typescript
 "use client";
@@ -990,7 +1000,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <head>
-        <title>Dinou app</title>
+        <title>Dinou App</title>
         <link rel="icon" type="image/png" href="/favicon.ico" />
         <link
           rel="apple-touch-icon"
@@ -1009,7 +1019,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           sizes="16x16"
           href="/favicon-16x16.png"
         />
-        <link rel="manifest" href="/site.webmanifest"></link>
+        <link rel="manifest" href="/site.webmanifest" />
       </head>
       <body>{children}</body>
     </html>
@@ -1017,170 +1027,139 @@ export default function Layout({ children }: { children: ReactNode }) {
 }
 ```
 
-Then you will have your favicon in your web app.
+## 🔐 Environment Variables (`.env`)
 
-## `.env` file
+Dinou automatically loads environment variables for server-side code (Server Components, Server Functions, and `getProps`).
 
-Dinou is ready to manage env vars in the code that runs on the Server side (Server Functions, Server Components, and `getProps` function). Create an `.env` file in your project (and add it to your `.gitignore` file to not expose sensitive data to the public) and define there your env variables:
+1. Create a `.env` file in the root of your project.
+2. Add `.env` to your `.gitignore` to prevent exposing sensitive keys.
 
 ```bash
 # .env
-# define here your env vars
-MY_VAR=my_value
+API_SECRET=my_secret_value
+DB_HOST=localhost
 ```
 
-## Styles (Tailwind.css, .module.css, and .css)
+## 💅 Styles (Tailwind, CSS Modules, & Global CSS)
 
-Dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles will be generated in a file in `public` folder named `styles.css`. So you must include this in your `page.tsx` or `layout.tsx` file, in the `head` tag:
+Dinou supports **Tailwind CSS**, **CSS Modules** (`.module.css`), and standard **Global CSS** (`.css`) out of the box.
+
+Dinou bundles all your styles into a single file served at `/styles.css`. You **must** manually link this file in your root layout or page.
+
+### 1. Link the Stylesheet
+
+Add the link tag to the `<head>` of your root component:
 
 ```typescript
-<link href="/styles.css" rel="stylesheet"></link>
+<link href="/styles.css" rel="stylesheet" />
 ```
 
-- Example with Client Components (is the same for Server Components):
+### 2. Full Example (Layout + Global CSS + Modules)
 
-  ```typescript
-  // src/layout.tsx
-  "use client";
+**`src/layout.tsx`** (Client Component example):
 
-  import type { ReactNode } from "react";
-  import "./globals.css";
+```typescript
+"use client";
 
-  export default function Layout({ children }: { children: ReactNode }) {
-    return (
-      <html lang="en">
-        <head>
-          <title>Dinou app</title>
-          <link rel="icon" type="image/png" href="/favicon.ico" />
-          <link
-            rel="apple-touch-icon"
-            sizes="180x180"
-            href="/apple-touch-icon.png"
-          />
-          <link
-            rel="icon"
-            type="image/png"
-            sizes="32x32"
-            href="/favicon-32x32.png"
-          />
-          <link
-            rel="icon"
-            type="image/png"
-            sizes="16x16"
-            href="/favicon-16x16.png"
-          />
-          <link rel="manifest" href="/site.webmanifest"></link>
-          <link href="/styles.css" rel="stylesheet"></link>
-        </head>
-        <body>{children}</body>
-      </html>
-    );
-  }
-  ```
+import type { ReactNode } from "react";
+import "./globals.css"; // Import global styles here
 
-  ```css
-  /* src/globals.css */
-  @import "tailwindcss";
+export default function Layout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en">
+      <head>
+        <title>Dinou App</title>
+        {/* Favicons omitted for brevity */}
+        <link href="/styles.css" rel="stylesheet" />
+      </head>
+      <body>{children}</body>
+    </html>
+  );
+}
+```
 
-  .test1 {
-    background-color: purple;
-  }
-  ```
+**`src/globals.css`** (Tailwind setup):
 
-  ```typescript
-  // src/page.tsx
-  "use client";
+```css
+@import "tailwindcss";
 
-  import styles from "./page.module.css";
+.custom-bg {
+  background-color: purple;
+}
+```
 
-  export default function Page() {
-    return (
-      <div className={`text-red-500 test1 ${styles.test2}`}>hi world!</div>
-    );
-  }
-  ```
+**`src/page.tsx`** (Using CSS Modules):
 
-  ```css
-  /* src/page.module.css */
-  .test2 {
-    text-decoration: underline;
-  }
-  ```
+```typescript
+"use client";
 
-  ```typescript
-  // src/css.d.ts
-  declare module "*.module.css" {
-    const classes: { [key: string]: string };
-    export default classes;
-  }
-  ```
+import styles from "./page.module.css";
 
-- The above will produce the text `hi world!` in red, underlined, and with a purple background color.
+export default function Page() {
+  return (
+    <div className={`text-red-500 custom-bg ${styles.underlined}`}>
+      Hello World!
+    </div>
+  );
+}
+```
 
-## Assets or media files (image, video, and sound)
+**`src/page.module.css`**:
 
-Dinou supports the use of assets in your components. Supported file extensions are: `.png`, `.jpeg`, `.jpg`, `.gif`, `.svg`, `.webp`, `.avif`, `.ico`, `.mp4`, `.webm`, `.ogg`, `.mov`, `.avi`, `.mkv`, `.mp3`, `.wav`, `.flac`, `.m4a`, `.aac`, `.mjpeg`, and `.mjpg`.
+```css
+.underlined {
+  text-decoration: underline;
+}
+```
 
-To use an asset in your component just import it as a default import:
+**`src/css.d.ts`** (TypeScript support for modules):
+
+```typescript
+declare module "*.module.css" {
+  const classes: { [key: string]: string };
+  export default classes;
+}
+```
+
+## 🖼️ Assets & Media
+
+You can import media files directly into your components. Dinou supports a wide range of extensions:
+
+- **Images:** `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.avif`, `.ico`, `.mjpeg`, `.mjpg`
+- **Audio/Video:** `.mp4`, `.webm`, `.ogg`, `.mov`, `.avi`, `.mkv`, `.mp3`, `.wav`, `.flac`, `.m4a`, `.aac`
+
+**Usage:**
 
 ```typescript
 // src/component.tsx
 "use client";
-
-import image from "./image.png"; // import the image from where it is located (inside src folder)
+import logo from "./logo.png";
 
 export default function Component() {
-  return <img src={image} alt="image" />;
+  return <img src={logo} alt="Logo" />;
 }
 ```
 
-Works the same for Server Components.
-
-For typescript, you should create a declaration file like this:
+**TypeScript Configuration:**
+To avoid type errors, create a declaration file (e.g., `src/assets.d.ts`):
 
 ```typescript
-// src/assets.d.ts
-declare module "*.jpeg" {
-  const value: string;
-  export default value;
-}
-
-declare module "*.jpg" {
-  const value: string;
-  export default value;
-}
-
 declare module "*.png" {
   const value: string;
   export default value;
 }
-
-// and continue with the rest of supported file extensions
+// Repeat for other extensions used (jpg, svg, mp4, etc.)
 ```
 
-If you miss a certain file extension you can eject and customize Dinou to meet your requirements. Just eject and add the extension in this place: `dinou/core/asset-extensions.js`. Just look for the place were all the extensions are mentioned and add yours in this file.
+> **Customization:** If you need to support additional extensions, you can [eject](#-eject-dinou) Dinou and modify `dinou/core/asset-extensions.js`.
 
-## Import alias (e.g. `"@/..."`)
+## 🔗 Import Aliases (`@/`)
 
-Dinou is ready to support import alias, as `import some from "@/..."`. If you want to use them just define the options in `tsconfig.json`:
+Dinou supports import aliases (e.g., `import Button from "@/components/Button"`). Configure paths in your `tsconfig.json`.
 
-```json
-// tsconfig.json for a js project
-{
-  "compilerOptions": {
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"]
-    },
-    "allowJs": true,
-    "noEmit": true
-  },
-  "include": ["src"]
-}
-```
+**`tsconfig.json` (TypeScript):**
 
 ```json
-// tsconfig.json for a ts project
 {
   "compilerOptions": {
     "baseUrl": ".",
@@ -1196,52 +1175,81 @@ Dinou is ready to support import alias, as `import some from "@/..."`. If you wa
 }
 ```
 
-## How to run a Dinou app
+## ⚡ Bundlers & Running the App
 
-Run `npm run dev` (or `npx dinou dev`) to start the Dinou app in development mode. Wait for the logs of the bundler (`waiting for changes...`) and the server (`Listening on port 3000`) to load the page on your browser. In development, the bundler will emit its files in `public` folder.
+Dinou is flexible and integrates with three major bundlers: **esbuild** (default), **Rollup**, and **Webpack**.
 
-Run `npm run build` (or `npx dinou build`) to build the app and `npm start` (or `npx dinou start`) to run it. In production, the bundler will emit its files in `dist3` folder.
+### Development
 
-## Eject Dinou
+Starts the development server with hot reloading. Files are emitted to the `public` folder.
 
-- You can eject Dinou with the command `npm run eject` (or `npx dinou eject`). This will copy the files defining Dinou in the root folder of the project (grouped in a `dinou` folder). You will have full control and customization capabilities.
+| Command               | Bundler     | Description                |
+| :-------------------- | :---------- | :------------------------- |
+| `npm run dev`         | **esbuild** | Default. Fastest startup.  |
+| `npm run dev:esbuild` | **esbuild** | Explicit esbuild command.  |
+| `npm run dev:rollup`  | **Rollup**  | Uses Rollup for bundling.  |
+| `npm run dev:webpack` | **Webpack** | Uses Webpack for bundling. |
+
+### Production Build
+
+Compiles the application for production. Files are emitted to the `dist3` folder.
+
+| Command                 | Bundler                |
+| :---------------------- | :--------------------- |
+| `npm run build`         | **esbuild** (Default)  |
+| `npm run build:esbuild` | **esbuild** (Explicit) |
+| `npm run build:rollup`  | **Rollup**             |
+| `npm run build:webpack` | **Webpack**            |
+
+### Start Production Server
+
+Runs the built application from the `dist3` folder.
+
+| Command                 | Description                         |
+| :---------------------- | :---------------------------------- |
+| `npm start`             | Same as `npm run start:esbuild`.    |
+| `npm run start:esbuild` | Use it after building with esbuild. |
+| `npm run start:rollup`  | Use it after building with Rollup.  |
+| `npm run start:webpack` | Use it after building with Webpack. |
+
+## ⏏️ Eject Dinou
+
+If you need full control over the configuration or internal logic, you can "eject" the framework.
+
+```bash
+npm run eject
+# or
+npx dinou eject
+```
+
+This will copy the entire Dinou core into a `dinou/` folder in your project root, allowing you to modify build scripts, server logic, and configuration files directly.
 
 ## 🚀 Deployment
 
-Projects built with **Dinou** can be deployed to any platform that supports Node.js with custom flags.
+Dinou apps can be deployed to any platform supporting Node.js, provided you can pass custom flags.
 
 ### ✅ Recommended: DigitalOcean App Platform
 
-Dinou works seamlessly on [DigitalOcean App Platform](https://www.digitalocean.com/products/app-platform). You can deploy your project easily without needing any special configuration.
+Dinou works seamlessly on DigitalOcean. It allows full control over the runtime command, essential for the required `--conditions react-server` flag.
 
-**Why it works well:**
+### ❌ Not Supported: Netlify
 
-- Full control over the Node.js runtime
+Netlify is currently incompatible because it does not support passing custom Node.js flags (`--conditions react-server`) during runtime.
 
-- Supports the required `--conditions react-server` flag
+### 🛠 Other Platforms (Render, Fly.io, Railway, etc.)
 
-- Simple integration via GitHub/GitLab or manual repo
+Ensure your platform allows customization of the start command. Your start command should look like:
 
-### ❌ Not supported: Netlify
+```bash
+node --conditions react-server dist3/index.js
+```
 
-At the moment, **Netlify is not compatible with Dinou, because it does not allow passing the `--conditions react-server` flag when starting a Node.js app**. This flag is essential for the app to work.
-
-If Netlify adds support for custom runtime flags in the future, Dinou compatibility might become possible.
-
-### 🛠 Other Platforms
-
-If you're deploying on other Node.js-compatible platforms (like Render, Fly.io, Railway, etc.), ensure that:
-
-- You can pass custom flags (`--conditions react-server`) to Node.js
+_(Or use `npm start` if your package.json scripts are configured correctly)._
 
 ## 📦 Changelog
 
 For a detailed list of changes, enhancements, and bug fixes across versions, see the [CHANGELOG.md](./CHANGELOG.md).
 
-## License
+## 📄 License
 
-Dinou is licensed under the [MIT License](https://github.com/roggc/dinou/blob/master/LICENSE.md).
-
-```
-
-```
+Dinou is licensed under the [MIT License](./LICENSE.md).
