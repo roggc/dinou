@@ -9,7 +9,7 @@ Support for React Server Components (RSC), Server-Side Rendering (SSR), Static G
 ## Key Features
 
 - **Native React Server Components:** Built on the React 19 core, leveraging Suspense and Streaming for optimal performance.
-- **Hybrid Rendering Engine:** Static by default (SSG). Automatically switches to Dynamic Rendering (SSR) when request-specific data (cookies, headers) is detected.
+- **Hybrid Rendering Engine:** Static by default (SSG). Automatically switches to Dynamic Rendering (SSR) when request-specific data (cookies, headers, search params) is detected.
 - **Full-Featured Router:** Client-side soft navigation including `push`, `replace`, `back`, `forward`, and `refresh` (soft reload).
 - **Generation Strategies:** Comprehensive support for Incremental Static Regeneration (ISR) and Incremental Static Generation (ISG).
 - **Data Fetching & State:** Optimized patterns using `react-enhanced-suspense` (with `resourceId`) and `jotai-wrapper` for seamless server-client state synchronization and mutations.
@@ -110,13 +110,15 @@ Dinou uses a file-system based router. Files named `page.{jsx,tsx,js,ts}` inside
 
 ### Basic & Dynamic Routes
 
-| Pattern                | File Path                       | URL Example   | Params (`params`)           | Search Params (`searchParams`) |
-| :--------------------- | :------------------------------ | :------------ | :-------------------------- | :----------------------------- |
-| **Static**             | `src/page.jsx`                  | `/`           | `{}`                        | `{}`                           |
-| **Dynamic**            | `src/blog/[slug]/page.jsx`      | `/blog/hello` | `{ slug: "hello" }`         | `{}`                           |
-| **Optional Dynamic**   | `src/blog/[[slug]]/page.jsx`    | `/blog`       | `{ slug: undefined }`       | `{}`                           |
-| **Catch-all**          | `src/blog/[...slug]/page.jsx`   | `/blog/a/b/c` | `{ slug: ["a", "b", "c"] }` | `{}`                           |
-| **Optional Catch-all** | `src/blog/[[...slug]]/page.jsx` | `/blog`       | `{ slug: [] }`              | `{}`                           |
+| Pattern                | File Path                       | URL Example   | Params (`params`)           |
+| :--------------------- | :------------------------------ | :------------ | :-------------------------- |
+| **Static**             | `src/page.jsx`                  | `/`           | `{}`                        |
+| **Dynamic**            | `src/blog/[slug]/page.jsx`      | `/blog/hello` | `{ slug: "hello" }`         |
+| **Optional Dynamic**   | `src/blog/[[slug]]/page.jsx`    | `/blog`       | `{ slug: undefined }`       |
+| **Catch-all**          | `src/blog/[...slug]/page.jsx`   | `/blog/a/b/c` | `{ slug: ["a", "b", "c"] }` |
+| **Optional Catch-all** | `src/blog/[[...slug]]/page.jsx` | `/blog`       | `{ slug: [] }`              |
+
+> **Note:** To access query parameters (e.g. `?q=hello`), use the `useSearchParams()` hook. They are NOT passed as props.
 
 ### Important: Optional Segments Rules
 
@@ -242,20 +244,20 @@ Dinou uses a nested routing system. Layouts, Error pages, and Not Found pages ca
 
 Layouts wrap pages and child layouts. They persist across navigation, preserving state and preventing unnecessary re-renders.
 
-A layout component receives a `children` prop, `params`, `searchParams`, and any parallel slot (e.g., `sidebar`) defined in the same folder scope.
+A layout component receives a `children` prop, `params` (route parameters), and any parallel slot (e.g., `sidebar`) defined in the same folder scope.
+
+> **Note:** `searchParams` are NOT passed to layouts.
 
 ```jsx
 // src/dashboard/layout.jsx
-export default async function Layout({
-  children,
-  params,
-  searchParams,
-  sidebar,
-}) {
+export default async function Layout({ children, params, sidebar }) {
   return (
     <div className="dashboard-grid">
-      {sidebar}
-      <main>{children}</main>
+      <aside>{sidebar}</aside>
+      <main>
+        <h1>Dashboard for {params.teamId}</h1>
+        {children}
+      </main>
     </div>
   );
 }
@@ -272,27 +274,29 @@ The Root Layout that applies to a specific page can receive additional props by 
 
 ```typescript
 // src/foo/bar/page_functions.ts
-export async function getProps() {
-  // fetch data if necessary
-  const data = await fetchData();
-  return { page: { data }, layout: { data } };
+export async function getProps({ params }) {
+  // fetch data using route params
+  const data = await fetchData(params.id);
+  // 'layout' props are injected into the Root Layout for this page
+  return { page: { data }, layout: { title: data.name } };
 }
 ```
 
 ### Error Handling (`error.jsx`)
 
-Create an `error.jsx` file to define an error page for a route segment. If a page throws an error (Server or Client not controlled by an Error Boundary), Dinou looks for the closest `error.jsx` in the directory hierarchy (bubbling up). `error.jsx` pages also receive `params` and `searchParams` props.
+Create an `error.jsx` file to define an error page for a route segment. If a page throws an error (Server or Client not controlled by an Error Boundary), Dinou looks for the closest `error.jsx` in the directory hierarchy (bubbling up).
+
+`error.jsx` receives `error` (object) and `params` as props.
 
 ```jsx
 // Error pages can be Client Components or Server Components
 "use client";
 
-export default function Page({ error, params, searchParams }) {
+export default function Page({ error, params }) {
   return (
     <div>
-      <h2>Something went wrong!</h2>
+      <h2>Something went wrong in {params.slug}!</h2>
       <p>{`${error.name}: ${error.message}`}</p>
-
       {/* error.stack is only defined in development, not in production */}
       {error.stack && (
         <pre style={{ background: "#eee", padding: "1rem" }}>{error.stack}</pre>
@@ -304,7 +308,9 @@ export default function Page({ error, params, searchParams }) {
 
 ### Not Found (`not_found.jsx`)
 
-Create a `not_found.jsx` file to customize the 404 UI. Like errors, Dinou renders the closest `not_found.jsx` found traversing up from the requested URL. `not_found.jsx` pages also receive `params` and `searchParams` props.
+Create a `not_found.jsx` file to customize the 404 UI. Like errors, Dinou renders the closest `not_found.jsx` found traversing up from the requested URL.
+
+`not_found.jsx` receives `params` as a prop. To access search parameters, use `useSearchParams()`.
 
 ### Advanced Layout Control (Flags)
 
@@ -553,15 +559,15 @@ For advanced control over rendering behavior, data fetching, and static generati
 
 Use this function to fetch data based on the **route parameters** and inject it into your Page and Layout.
 
-> **Design Note:** `getProps` only receives `params`. To use request-specific data like `searchParams` or `cookies`, fetch data directly inside your Server Components using `Suspense` to avoid blocking the initial HTML render.
+> **Design Note:** `getProps` only receives `params`. To use request-specific data like `searchParams` or `cookies`, fetch data directly inside your Server Components using `Suspense` or Hooks to avoid blocking the initial HTML render.
 
-- **Arguments:** `params` (The dynamic route parameters).
+- **Arguments:** `{ params }` (The dynamic route parameters).
 - **Returns:** An object with `page` and `layout` keys containing the props.
 
 ```typescript
 // src/blog/[slug]/page_functions.ts
 
-export async function getProps(params) {
+export async function getProps({ params }) {
   // 1. Fetch data based on the URL path (e.g., /blog/my-post)
   const post = await db.getPost(params.slug);
 
