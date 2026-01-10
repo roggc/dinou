@@ -3,19 +3,17 @@ const React = require("react");
 const importModule = require("./import-module");
 
 async function deserializeReactElement(serialized) {
-  // 1. Guard Clause: Si no parece un objeto serializado válido, devuélvelo tal cual
   if (
     !serialized ||
     typeof serialized !== "object" ||
-    !("props" in serialized) // Solo exigimos props como mínimo
+    !("props" in serialized)
   ) {
     return serialized;
   }
 
   const { type, modulePath, props, name, isPackage } = serialized;
-  let Component = type; // Por defecto es el tipo (string o undefined)
+  let Component = type;
 
-  // Variable LOCAL
   let isInvalidComponent = false;
 
   if (modulePath) {
@@ -31,7 +29,6 @@ async function deserializeReactElement(serialized) {
       }
     } catch (err) {
       console.error(`Error loading module ${modulePath}:`, err);
-      // Fallback seguro: Fragment para que no rompa el árbol
       Component = React.Fragment;
     }
   } else if (type === "__clientComponent__") {
@@ -42,10 +39,7 @@ async function deserializeReactElement(serialized) {
     Component = React.Fragment;
   }
 
-  // 🛡️ PROTECCIÓN FINAL: Si Component es undefined (porque faltaba 'type' en el JSON),
-  // lo convertimos en un Fragmento vacío para evitar el crash de React.
   if (!Component) {
-    // console.warn("Elemento sin tipo detectado, usando Fragment:", serialized);
     Component = React.Fragment;
   }
 
@@ -53,7 +47,7 @@ async function deserializeReactElement(serialized) {
     return undefined;
   }
 
-  // Deserialize props recursivamente
+  // Deserialize props
   const deserializedProps = {};
   for (const [key, value] of Object.entries(props)) {
     if (key === "children") {
@@ -67,7 +61,6 @@ async function deserializeReactElement(serialized) {
     } else if (
       value &&
       typeof value === "object" &&
-      // 🟢 CAMBIO CRÍTICO: Detectamos el objeto aunque le falte el type
       "props" in value &&
       "modulePath" in value
     ) {

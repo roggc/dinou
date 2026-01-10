@@ -66,7 +66,7 @@ if (isDevelopment) {
   function startManifestWatcher() {
     let currentManifest = {};
     let isInitial = true;
-    // Si ya existe un watcher viejo, ciérralo primero
+    // If an old watcher already exists, close it first
     if (manifestWatcher) {
       try {
         manifestWatcher.close();
@@ -226,19 +226,19 @@ if (isDevelopment) {
   startManifestWatcher();
 }
 let serverFunctionsManifest = null;
-// const devCache = new Map(); // Para dev: Map<absolutePath, Set<exports>>
+// const devCache = new Map(); // For dev: Map<absolutePath, Set<exports>>
 
 if (!isDevelopment) {
-  // En prod/build: cargar manifest generado
+  // In prod/build: load generated manifest
   const manifestPath = path.resolve(
     process.cwd(),
     isWebpack
       ? `${outputFolder}/server-functions-manifest.json`
       : `server_functions_manifest/server-functions-manifest.json`
-  ); // Ajusta 'dist/' a tu outdir
+  ); // Adjust 'dist/' to your outdir
   if (existsSync(manifestPath)) {
     serverFunctionsManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    // Convertir arrays a Sets para lookups rápidos
+    // Convert arrays to Sets for fast lookups
     for (const key in serverFunctionsManifest) {
       serverFunctionsManifest[key] = new Set(serverFunctionsManifest[key]);
     }
@@ -254,19 +254,19 @@ app.use(appUseCookieParser);
 app.use(express.json());
 
 function getContext(req, res) {
-  // Helper para ejecutar métodos de res de forma segura
+  // Helper to execute res methods safely
   const safeResCall = (methodName, ...args) => {
     if (res.headersSent) {
       console.log(
         `[Dinou] res.${methodName} called but headers already sent. Ignoring.`
       );
       // console.warn(
-      //   `[Dinou Warning] RSC Stream activo. Ignorando res.${methodName}() para evitar crash.`
+      //   `[Dinou Warning] RSC Stream active. Ignoring res.${methodName}() to avoid crash.`
       // );
-      return; // Salimos silenciosamente
+      return; // Exit silently
     }
     if (methodName === "redirect") {
-      // 1. Normalizar argumentos (Status y URL)
+      // 1. Normalize arguments (Status and URL)
       let url = args[0];
       let status = 302; // Default
 
@@ -276,7 +276,7 @@ function getContext(req, res) {
       }
 
       function safeRedirect(targetUrl) {
-        // Validamos que sea string antes de llamar a startsWith
+        // Validate it's a string before calling startsWith
         if (
           typeof targetUrl === "string" &&
           targetUrl.startsWith("/") &&
@@ -289,7 +289,7 @@ function getContext(req, res) {
       }
       return safeRedirect(url);
     }
-    // Ejecutamos manteniendo el contexto 'this' con bind/apply
+    // Execute maintaining 'this' context with bind/apply
     return res[methodName].apply(res, args);
   };
 
@@ -314,18 +314,18 @@ function getContext(req, res) {
       setHeader: (name, value) => safeResCall("setHeader", name, value),
 
       // 3. CLEAR COOKIE
-      // Nota: Si headersSent es true, la cookie NO se borrará en esta petición RSC.
-      // Si es vital borrarla, deberías manejarlo en el Client Component o en una API route aparte.
+      // Note: If headersSent is true, the cookie will NOT be cleared in this RSC request.
+      // If clearing it is vital, you should handle it in the Client Component or separate API route.
       clearCookie: (name, options) => safeResCall("clearCookie", name, options),
       cookie: (name, value, options) =>
         safeResCall("cookie", name, value, options),
 
-      // 4. REDIRECT (Tu wrapper inteligente existente)
+      // 4. REDIRECT (Your existing smart wrapper)
       redirect: (...args) => safeResCall("redirect", ...args),
       // redirect: (...args) => {
       //   if (res.headersSent) {
-      //     // No hacemos nada en el objeto res.
-      //     // Confiamos en que tu Server Function devolverá <ClientRedirect />
+      //     // Do nothing on res object.
+      //     // We trust that your Server Function will return <ClientRedirect />
       //     return;
       //   }
       //   res.redirect.apply(res, args);
@@ -352,14 +352,14 @@ function getContextForServerFunctionEndpoint(req, res) {
     res: {
       redirect: (urlOrStatus, url) => {
         const targetUrl = url || urlOrStatus;
-        // Lanzamos un objeto especial que el endpoint interceptará
+        // We throw a special object that the endpoint will intercept
         throw {
           $$type: "dinou-internal-redirect",
           url: targetUrl,
         };
       },
       status: (code) => {
-        // Si ya hay stream, no podemos cambiar el status, lo ignoramos o logueamos warning
+        // If there is already a stream, we can't change the status, ignore or log warning
         if (!res.headersSent) res.status(code);
       },
       setHeader: (n, v) => {
@@ -367,22 +367,22 @@ function getContextForServerFunctionEndpoint(req, res) {
       },
 
       // ============================================================
-      // IMPLEMENTACIÓN DE COOKIE (Híbrida: Headers + Script Injection)
+      // COOKIE IMPLEMENTATION (Hybrid: Headers + Script Injection)
       // ============================================================
       cookie: (name, value, options) => {
-        // ESCENARIO A: Aún no hemos empezado a responder
-        // Usamos el método nativo de Express. Es lo mejor.
+        // SCENARIO A: We haven't started responding yet
+        // Use Express native method. It's the best.
         if (!res.headersSent) {
-          // Aseguramos el Content-Type correcto si es el primer write
+          // Ensure correct Content-Type if it's the first write
           res.setHeader("Content-Type", "text/x-component");
           res.cookie(name, value, options);
           return;
         }
 
-        // ESCENARIO B: Streaming activo (Headers Sent)
-        // Inyectamos JavaScript.
+        // SCENARIO B: Streaming active (Headers Sent)
+        // Inject JavaScript.
 
-        // 🛑 Seguridad: JS no puede escribir cookies HttpOnly
+        // 🛑 Security: JS cannot write HttpOnly cookies
         if (options && options.httpOnly) {
           console.error(
             `[Dinou Error] Cannot set HttpOnly cookie '${name}' in Server Function endpoint because streaming has started.`
@@ -390,8 +390,8 @@ function getContextForServerFunctionEndpoint(req, res) {
           return;
         }
 
-        // Construcción manual de la cookie string
-        // Formato: key=value; attributes...
+        // Manual cookie string construction
+        // Format: key=value; attributes...
         let cookieStr = `${name}=${encodeURIComponent(value)}`;
 
         if (options) {
@@ -404,24 +404,24 @@ function getContextForServerFunctionEndpoint(req, res) {
           if (options.sameSite) cookieStr += `; samesite=${options.sameSite}`;
         }
 
-        // Empaquetado seguro para inyección
+        // Safe packaging for injection
         const safeCookieStr = JSON.stringify(cookieStr);
 
-        // Escribimos en el stream
+        // Write to stream
         res.write(`<script>document.cookie = ${safeCookieStr};</script>`);
       },
 
       clearCookie: (name, options) => {
         const path = options?.path || "/";
 
-        // ESCENARIO A: Nativo
+        // SCENARIO A: Native
         if (!res.headersSent) {
           res.setHeader("Content-Type", "text/x-component");
           res.clearCookie(name, options);
           return;
         }
 
-        // ESCENARIO B: Script Injection
+        // SCENARIO B: Script Injection
         const safeName = JSON.stringify(name);
         const safePath = JSON.stringify(path);
 
@@ -437,7 +437,7 @@ function getContextForServerFunctionEndpoint(req, res) {
 app.use(express.static(path.resolve(process.cwd(), outputFolder)));
 
 // app.use((req, res, next) => {
-//   // Asegúrate de NO devolver 200 si lo que piden es un .js que no existe
+//   // Make sure NOT to return 200 if what is requested is a .js that doesn't exist
 //   if (
 //     req.path.endsWith(".js") ||
 //     req.path.endsWith(".css") ||
@@ -451,24 +451,24 @@ app.use(express.static(path.resolve(process.cwd(), outputFolder)));
 //     return res.status(404).send("Not found");
 //   }
 //   next();
-//   // ... renderizado de Dinou ...
+//   // ... Dinou rendering ...
 // });
 
-let isReady = isDevelopment; // En dev siempre estamos listos (o casi)
+let isReady = isDevelopment; // In dev we are always ready (or almost)
 
-// 1. Middleware de "Bloqueo" (Poner ANTES de tus rutas de Dinou, pero DESPUÉS de express.static)
-// Orden ideal:
+// 1. "Blocking" Middleware (Put BEFORE your Dinou routes, but AFTER express.static)
+// Ideal order:
 // app.use(express.static(...));
-// app.use(middlewareDeAssets404QueHicimosAntes);
+// app.use(404AssetsMiddlewareWeMadeBefore);
 
 app.use((req, res, next) => {
-  // Si estamos en PROD y aun no terminó generateStatic...
+  // If we are in PROD and generateStatic hasn't finished yet...
   if (!isReady) {
-    // Opcional: Permitir health-checks o assets si quieres
+    // Optional: Allow health-checks or assets if you want
     // if (req.path.endsWith('.js')) return next();
 
-    // Devolvemos 503 (Service Unavailable)
-    // Playwright entiende que 503 significa "Sigue esperando"
+    // Return 503 (Service Unavailable)
+    // Playwright understands that 503 means "Keep waiting"
     return res.status(503).send("Server warming up (generating static)...");
   }
   next();
@@ -486,7 +486,7 @@ app.get("/.well-known/appspecific/com.chrome.devtools.json", (req, res) => {
 
 let cachedClientManifest = null;
 if (!isDevelopment) {
-  // Carga inicial
+  // Initial load
   cachedClientManifest = JSON.parse(
     readFileSync(
       path.resolve(
@@ -516,14 +516,14 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
         : "/____rsc_payload____",
       ""
     );
-    // 1. Inicialización correcta del Map
+    // 1. Correct Map initialization
     if (!isDynamic.has(reqPath)) {
-      // Inicializamos con un objeto mutable.
-      // Por defecto asumimos que NO es dinámico (false) hasta que se demuestre lo contrario.
+      // Initialize with a mutable object.
+      // By default we assume it is NOT dynamic (false) until proven otherwise.
       isDynamic.set(reqPath, { value: false });
     }
 
-    // Obtenemos la referencia al objeto mutable
+    // Get reference to the mutable object
     const dynamicState = isDynamic.get(reqPath);
     // console.log(
     //   "rscPayload-> dynamicState.value, isStatic, reqPath",
@@ -556,7 +556,7 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
         });
         // readStream.on("end", () => {
         //   if (!regenerating.has(reqPath)) {
-        //     // La regeneración ya terminó, borramos el viejo
+        //     // Regeneration has finished, delete the old one
         //     try {
         //       unlinkSync(payloadPathOld);
         //     } catch (err) {
@@ -650,14 +650,14 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
 app.get(/^\/.*\/?$/, (req, res) => {
   try {
     const reqPath = req.path.endsWith("/") ? req.path : req.path + "/";
-    // 1. Inicialización correcta del Map
+    // 1. Correct Map initialization
     if (!isDynamic.has(reqPath)) {
-      // Inicializamos con un objeto mutable.
-      // Por defecto asumimos que NO es dinámico (false) hasta que se demuestre lo contrario.
+      // Initialize with a mutable object.
+      // By default we assume it is NOT dynamic (false) until proven otherwise.
       isDynamic.set(reqPath, { value: false });
     }
 
-    // Obtenemos la referencia al objeto mutable
+    // Get reference to the mutable object
     const dynamicState = isDynamic.get(reqPath);
     // console.log("dynamicState.value", dynamicState.value);
     if (
@@ -668,11 +668,11 @@ app.get(/^\/.*\/?$/, (req, res) => {
       revalidating(reqPath, dynamicState);
       let htmlPathOld;
       if (regenerating.has(reqPath)) {
-        // Todavía se está regenerando, servir el HTML viejo si existe
+        // Still regenerating, serve old HTML if exists
         htmlPathOld = path.join("dist2", reqPath, "index._old.html");
       }
       const htmlPath = path.join("dist2", reqPath, "index.html");
-      // Decidimos qué archivo leer
+      // Decide which file to read
       const fileToRead = htmlPathOld || htmlPath;
 
       if (existsSync(fileToRead) && !dynamicState.value) {
@@ -691,23 +691,23 @@ app.get(/^\/.*\/?$/, (req, res) => {
           if (!res.headersSent) res.status(500).send("Server Error");
         });
 
-        // 1. IMPORTANTE: Usamos { end: false } para que el pipe no cierre la respuesta
+        // 1. IMPORTANT: We use { end: false } so pipe doesn't close the response
         rStream.pipe(res, { end: false });
 
-        // 2. Cuando el archivo termina de enviarse...
+        // 2. When the file finishes sending...
         rStream.on("end", () => {
-          // 3. Escribimos nuestro contenido adicional
+          // 3. Write our additional content
           if (htmlPathOld) {
             res.write("<script>window.__DINOU_USE_OLD_RSC__=true;</script>");
           }
           res.write("<script>window.__DINOU_USE_STATIC__=true;</script>");
 
-          // 4. Cerramos manualmente la respuesta (ahora sí)
+          // 4. Manually close the response (now we do)
           res.end();
 
-          // // 5. Lógica de limpieza opcional (async para no bloquear)
+          // // 5. Optional cleanup logic (async to avoid blocking)
           // if (htmlPathOld && !regenerating.has(reqPath)) {
-          //   // Es mejor usar fs.promises para no bloquear el bucle de eventos
+          //   // It is better to use fs.promises to avoid blocking the event loop
           //   require("fs")
           //     .promises.unlink(htmlPathOld)
           //     .catch((err) => {
@@ -716,13 +716,13 @@ app.get(/^\/.*\/?$/, (req, res) => {
           // }
         });
 
-        return; // El stream ya está fluyendo
+        return; // The stream is already flowing
       }
     }
 
     const contextForChild = {
       req: {
-        // Solo serializa lo necesario para getContext().req
+        // Only serialize what is necessary for getContext().req
         query: { ...req.query },
         cookies: { ...req.cookies },
         headers: {
@@ -734,7 +734,7 @@ app.get(/^\/.*\/?$/, (req, res) => {
         path: req.path,
         method: req.method,
       },
-      // No incluyas res aquí
+      // Do not include res here
     };
     processLimiter
       .run(async () => {
@@ -752,36 +752,36 @@ app.get(/^\/.*\/?$/, (req, res) => {
         res.setHeader("Content-Type", "text/html");
         appHtmlStream.pipe(res);
 
-        // 👇 AQUÍ VA EL GATILLO ISG 👇
-        // Usamos 'finish' para asegurarnos de que el usuario ya recibió todo (Status 200).
-        // Es "Fire and Forget": No usamos 'await', corre en background.
+        // 👇 ISG TRIGGER GOES HERE 👇
+        // We use 'finish' to ensure the user received everything (Status 200).
+        // It's "Fire and Forget": We don't use 'await', runs in background.
         res.on("finish", () => {
           if (
             !isDevelopment &&
-            res.statusCode === 200 && // Solo si fue éxito
-            req.method === "GET" // Solo peticiones GET
-            /*Object.keys({ ...req.query }).length === 0*/ // Sin query params (evitar duplicados infinitos)
+            res.statusCode === 200 && // Only if success
+            req.method === "GET" // Only GET requests
+            /*Object.keys({ ...req.query }).length === 0*/ // No query params (avoid infinite duplicates)
           ) {
             generatingISG(reqPath, dynamicState);
           }
         });
-        // 👆 FIN DEL GATILLO ISG 👆
+        // 👆 END OF ISG TRIGGER 👆
 
-        // 💡 TRUCO: Queremos liberar el slot de concurrencia SOLO cuando
-        // el stream haya terminado de enviarse o haya error.
+        // 💡 TRICK: We want to release the concurrency slot ONLY when
+        // the stream has finished sending or there is an error.
         await new Promise((resolve) => {
           appHtmlStream.on("end", resolve);
           appHtmlStream.on("error", (error) => {
             console.error("Stream error:", error);
-            // resolve(); // ⚠️ OJO: Si resuelves aquí y luego intentas enviar status 500, podría fallar si headers ya se enviaron
+            // resolve(); // ⚠️ WATCH OUT: If you resolve here and then try to send status 500, it might fail if headers sent
             if (!res.headersSent) res.status(500).send("Internal Server Error");
-            resolve(); // Mejor resolver al final
+            resolve(); // Better resolve at the end
           });
-          res.on("close", resolve); // Si el usuario cierra la pestaña
+          res.on("close", resolve); // If user closes the tab
         });
       })
       .catch((err) => {
-        console.error("Error en SSR limitado:", err);
+        console.error("Error in limited SSR:", err);
         if (!res.headersSent) res.status(500).send("Server Busy or Error");
       });
   } catch (error) {
@@ -790,47 +790,47 @@ app.get(/^\/.*\/?$/, (req, res) => {
   }
 });
 
-// Helper function para verificar origen
+// Helper function to verify origin
 function isOriginAllowed(req) {
-  // 1. En entornos server-to-server o tools, a veces no hay Origin.
-  // Si decides que es obligatorio, devuelve false aquí.
-  // Pero navegadores modernos SIEMPRE envían Origin en POST.
+  // 1. In server-to-server or tools environments, sometimes there is no Origin.
+  // If you decide it is mandatory, return false here.
+  // But modern browsers ALWAYS send Origin on POST.
   const origin = req.headers.origin;
 
-  // Si no hay origin (ej: llamada curl o server-side fetch sin headers),
-  // tú decides si ser estricto o permisivo.
-  if (!origin) return false; // Cambia a true si quieres permitir sin origin.
+  // If no origin (e.g. curl call or server-side fetch without headers),
+  // you decide whether to be strict or permissive.
+  if (!origin) return false; // Change to true if you want to allow without origin.
 
   try {
-    // Parseamos para ignorar protocolo (http/https) y puerto si difieren sutilmente
+    // Parse to ignore protocol (http/https) and port if they differ subtly
     const originHost = new URL(origin).host;
     const serverHost = req.headers.host;
 
-    // Comparamos el host (dominio:puerto)
+    // Compare host (domain:port)
     return originHost === serverHost;
   } catch (e) {
-    return false; // Si la URL del origin es inválida, rechazar.
+    return false; // If origin URL is invalid, reject.
   }
 }
 
 app.post("/____server_function____", async (req, res) => {
   try {
-    // 1. Verificar Origin (Prevenir llamadas desde otros dominios)
+    // 1. Check Origin (Prevent calls from other domains)
     const origin = req.headers.origin;
     const host = req.headers.host;
 
-    // Nota: En local a veces origin es undefined o null, permitirlo en dev si es necesario
+    // Note: Locally sometimes origin is undefined or null, allow in dev if necessary
     if (!isDevelopment && origin && !origin.includes(host)) {
       return res.status(403).json({ error: "Invalid Origin" });
     }
 
-    // 2. Verificar Header Personalizado (Defensa CSRF robusta)
-    // Asegúrate de que tu cliente (server-function-proxy.js) envíe este header
+    // 2. Check Custom Header (Robust CSRF defense)
+    // Make sure your client (server-function-proxy.js) sends this header
     if (req.headers["x-server-function-call"] !== "1") {
       return res.status(403).json({ error: "Missing security header" });
     }
 
-    // 2. Check del Origin (NUEVO)
+    // 2. Origin Check (NEW)
     if (!isDevelopment && !isOriginAllowed(req)) {
       console.error(
         `[Security] Blocked request from origin: ${req.headers.origin}`
@@ -839,19 +839,19 @@ app.post("/____server_function____", async (req, res) => {
     }
     const { id, args } = req.body;
 
-    // Validación básica de inputs: id debe ser string, args un array
+    // Basic input validation: id must be string, args an array
     if (typeof id !== "string" || !Array.isArray(args)) {
       return res.status(400).json({ error: "Invalid request body" });
     }
 
     const [fileUrl, exportName] = id.split("#");
 
-    // Validar fileUrl: debe empezar con 'file://' y no contener caracteres sospechosos
+    // Validate fileUrl: must start with 'file://' and not contain suspicious chars
     if (!fileUrl.startsWith("file://")) {
       return res.status(400).json({ error: "Invalid file URL format" });
     }
 
-    // Extraer relativePath y normalizarlo (elimina 'file://' y posibles '/')
+    // Extract relativePath and normalize (remove 'file://' and potential '/')
     let relativePath = fileUrl.replace(/^file:\/\/\/?/, "").trim();
     if (relativePath.startsWith("/") || relativePath.includes("..")) {
       return res
@@ -859,13 +859,13 @@ app.post("/____server_function____", async (req, res) => {
         .json({ error: "Invalid path: no absolute or traversal allowed" });
     }
     // console.log("relPath", relativePath);
-    // Restringir a carpeta 'src/': prepend 'src/' si no está, y resolver absolutePath
+    // Restrict to 'src/' folder: prepend 'src/' if missing, and resolve absolutePath
     if (!relativePath.startsWith("src/") && !relativePath.startsWith("src\\")) {
       relativePath = path.join("src", relativePath);
     }
     const absolutePath = path.resolve(process.cwd(), relativePath);
 
-    // Verificar que absolutePath esté estrictamente dentro de 'src/'
+    // Verify that absolutePath is strictly inside 'src/'
     const srcDir = path.resolve(process.cwd(), "src");
     if (!absolutePath.startsWith(srcDir + path.sep)) {
       return res
@@ -873,33 +873,33 @@ app.post("/____server_function____", async (req, res) => {
         .json({ error: "Access denied: file outside src directory" });
     }
     // console.log("absPath", absolutePath);
-    // Verificar que el archivo exista
+    // Verify that the file exists
     if (!existsSync(absolutePath)) {
       return res.status(404).json({ error: "File not found" });
     }
 
     let allowedExports;
     if (serverFunctionsManifest) {
-      // Prod: usar manifest (relativePath ya está normalizado)
+      // Prod: use manifest (relativePath is already normalized)
       allowedExports = serverFunctionsManifest[relativePath];
     } else {
-      // Dev: usar cache o verificar archivo
+      // Dev: use cache or verify file
       // allowedExports = devCache.get(absolutePath);
       // if (!allowedExports) {
-      const fileContent = readFileSync(absolutePath, "utf8"); // Solo lee una vez
+      const fileContent = readFileSync(absolutePath, "utf8"); // Reads only once
       if (!useServerRegex.test(fileContent)) {
         return res
           .status(403)
           .json({ error: "Not a valid server function file" });
       }
-      // Parsear exports (necesitas implementar parseExports en server si no lo tienes)
-      const exports = parseExports(fileContent); // Asume que mueves parseExports a un util compartido
+      // Parse exports (you need to implement parseExports on server if not present)
+      const exports = parseExports(fileContent); // Assume you move parseExports to a shared util
       allowedExports = new Set(exports);
       // devCache.set(absolutePath, allowedExports);
       // }
     }
 
-    // Validar exportName contra allowedExports
+    // Validate exportName against allowedExports
     if (
       !exportName ||
       (exportName !== "default" && !allowedExports.has(exportName))
@@ -907,10 +907,10 @@ app.post("/____server_function____", async (req, res) => {
       return res.status(400).json({ error: "Invalid export name" });
     }
 
-    // Proceder con la importación (usando tu importModule)
+    // Proceed with import (using your importModule)
     const mod = await importModule(absolutePath);
 
-    // Validar exportName: solo permitir 'default' u otros si defines una whitelist
+    // Validate exportName: only allow 'default' or others if you define a whitelist
     if (!exportName || (exportName !== "default" && !mod[exportName])) {
       return res.status(400).json({ error: "Invalid export name" });
     }
@@ -929,30 +929,30 @@ app.post("/____server_function____", async (req, res) => {
           return await fn(...args);
         });
       } catch (err) {
-        // 💡 INTERCEPTAMOS LA REDIRECCIÓN
+        // 💡 WE INTERCEPT THE REDIRECT
         if (err && err.$$type === "dinou-internal-redirect") {
-          // 1. Saneamos la URL siempre
+          // 1. Always sanitize the URL
           const safeUrl = JSON.stringify(err.url);
           const script = `<script>window.location.href = ${safeUrl};</script>`;
 
           if (!res.headersSent) {
-            // ESCENARIO A: Limpio (Content-Type html)
+            // SCENARIO A: Clean (Content-Type html)
             res.setHeader("Content-Type", "text/html");
-            return res.send(script); // res.send hace end() y return detiene la función
+            return res.send(script); // res.send calls end() and return stops the function
           } else {
-            // ESCENARIO B: Sucio/Stream activo (Content-Type ya fijado por clearCookie)
-            // Escribimos el script en el stream existente
+            // SCENARIO B: Dirty/Active Stream (Content-Type already set by clearCookie)
+            // Write the script to the existing stream
             res.write(script);
 
-            // ⚠️ IMPORTANTE:
-            // 1. Cerramos la respuesta, ya que redireccionamos y no habrá RSC payload.
+            // ⚠️ IMPORTANT:
+            // 1. We close the response, since we redirected and there will be no RSC payload.
             res.end();
 
-            // 2. DETENEMOS la ejecución para que no siga hacia res.json() abajo.
+            // 2. WE STOP execution so it doesn't continue to res.json() below.
             return;
           }
         }
-        throw err; // Si es otro error, lo lanzamos al catch externo
+        throw err; // If it's another error, throw it to the outer catch
       }
 
       if (!res.headersSent) res.setHeader("Content-Type", "text/x-component");
@@ -962,7 +962,7 @@ app.post("/____server_function____", async (req, res) => {
           ? `${outputFolder}/react-client-manifest.json`
           : `react_client_manifest/react-client-manifest.json`
       );
-      // Verificar que el manifest exista para evitar errores
+      // Verify that the manifest exists to avoid errors
       if (!existsSync(manifestPath)) {
         return res.status(500).json({ error: "Manifest not found" });
       }
@@ -974,7 +974,7 @@ app.post("/____server_function____", async (req, res) => {
     });
   } catch (err) {
     console.error(`Server function error [${req.body?.id}]:`, err);
-    // En producción, no envíes err.message completo para evitar leaks
+    // In production, do not send full err.message to avoid leaks
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -983,14 +983,14 @@ const port = process.env.PORT || 3000;
 
 const http = require("http");
 
-// Envolvemos todo el arranque en una IIFE asíncrona para usar await limpiamente
+// Wrap the entire startup in an async IIFE to use await cleanly
 (async () => {
   try {
     // ============================================================
-    // FASE 1: GENERACIÓN ESTÁTICA (Build Time)
+    // PHASE 1: STATIC GENERATION (Build Time)
     // ============================================================
-    // Hacemos esto ANTES de crear el servidor. Así, si generateStatic
-    // hace limpiezas agresivas de memoria, no mata al servidor HTTP.
+    // We do this BEFORE creating the server. This way, if generateStatic
+    // performs aggressive memory cleanups, it doesn't kill the HTTP server.
     if (!isDevelopment) {
       console.log("🏗️  [Startup] Starting static generation (SSG/ISR)...");
       try {
@@ -998,8 +998,8 @@ const http = require("http");
         console.log("✅ [Startup] Static generation finished successfully.");
       } catch (buildError) {
         console.error("❌ [Startup] Static generation failed:", buildError);
-        // Dependiendo de tu política, podrías salir (process.exit(1)) o continuar
-        // Si decides continuar, el servidor arrancará pero quizás falten archivos.
+        // Depending on your policy, you could exit (process.exit(1)) or continue
+        // If you decide to continue, the server will start but files might be missing.
         process.exit(1);
       }
     } else {
@@ -1009,17 +1009,17 @@ const http = require("http");
     }
 
     // ============================================================
-    // FASE 2: CREACIÓN DEL SERVIDOR
+    // PHASE 2: SERVER CREATION
     // ============================================================
     console.log("👉 [Startup] Initializing HTTP Server...");
 
-    // Pasamos 'app' a createServer. Esto desacopla Express de la red.
+    // We pass 'app' to createServer. This decouples Express from the network.
     const server = http.createServer(app);
 
     // ============================================================
-    // FASE 3: MANEJO DE ERRORES (Anti-Zombies)
+    // PHASE 3: ERROR HANDLING (Anti-Zombies)
     // ============================================================
-    // Esto captura errores como EADDRINUSE antes de que crasheen el proceso silenciosamente
+    // This captures errors like EADDRINUSE before they silently crash the process
     server.on("error", (error) => {
       if (error.code === "EADDRINUSE") {
         console.error(`\n❌ FATAL ERROR: Port ${port} is already in use!`);
@@ -1032,11 +1032,11 @@ const http = require("http");
       } else {
         console.error("❌ [Server Error]:", error);
       }
-      process.exit(1); // Salimos explícitamente con código de error
+      process.exit(1); // Explicitly exit with error code
     });
 
     // ============================================================
-    // FASE 4: ARRANQUE (Listen)
+    // PHASE 4: STARTUP (Listen)
     // ============================================================
     server.listen(port, () => {
       isReady = true;

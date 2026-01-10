@@ -13,57 +13,55 @@ function safeDecode(val) {
   try {
     return !!val ? decodeURIComponent(val) : val;
   } catch (e) {
-    return val; // Si falla la decodificación, devolvemos el original
+    return val; // If decoding fails, return the original
   }
 }
 
 /**
- * Crea un espía que detecta acceso a propiedades y marca la página como dinámica.
- * @param {Object} target - El objeto real (cookies, headers, query...)
- * @param {string} label - Nombre para el log (ej: "Headers", "Cookies")
- * @param {Function} onBailout - Callback para ejecutar cuando se detecta acceso
+ * Creates a spy that detects access to properties and marks the page as dynamic.
+ * @param {Object} target - The real object (cookies, headers, query...)
+ * @param {string} label - Name for the log (e.g., "Headers", "Cookies")
+ * @param {Function} onBailout - Callback to execute when access is detected
  */
 function createBailoutProxy(target, label, onBailout) {
-  // Si no hay target, usamos objeto vacío para evitar crashes,
-  // pero lo ideal es pasar siempre lo que tengas.
+  // If there is no target, use an empty object to avoid crashes,
+  // but ideally pass whatever you have.
   const safeTarget = target || {};
 
   return new Proxy(safeTarget, {
     get(t, prop, receiver) {
-      // Ignorar símbolos internos de Node/Console
+      // Ignore internal Node/Console symbols
       if (
         typeof prop === "symbol" ||
         prop === "inspect" ||
         prop === "valueOf" ||
-        prop === "toString" // A veces útil ignorar
+        prop === "toString" // Sometimes useful to ignore
       ) {
         return Reflect.get(t, prop, receiver);
       }
 
-      // 🚨 ALARMA: Acceso detectado
+      // 🚨 ALARM: Access detected
       console.log(
-        `[StaticBailout] Acceso a ${label} detectado: "${String(prop)}".`
+        `[StaticBailout] Access to ${label} detected: "${String(prop)}".`
       );
 
-      // Ejecutamos la lógica de marcar como dinámico
+      // Execute logic to mark as dynamic
       onBailout();
 
-      // IMPORTANTE: Devolvemos el valor real del objeto original
+      // IMPORTANT: Return the real value of the original object
       return Reflect.get(t, prop, receiver);
     },
 
     ownKeys(t) {
-      console.log(`[StaticBailout] Iteración de ${label} detectada.`);
+      console.log(`[StaticBailout] Iteration of ${label} detected.`);
       onBailout();
       return Reflect.ownKeys(t);
     },
 
-    // Opcional: Detectar si intentan preguntar "prop in headers"
+    // Optional: Detect if they try to ask "prop in headers"
     has(t, prop) {
       console.log(
-        `[StaticBailout] Chequeo de existencia (IN) en ${label}: "${String(
-          prop
-        )}".`
+        `[StaticBailout] Existence check (IN) in ${label}: "${String(prop)}".`
       );
       onBailout();
       return Reflect.has(t, prop);
@@ -151,7 +149,7 @@ async function buildStaticPages() {
               if (getStaticPaths) {
                 const paths = getStaticPaths();
                 for (const pathItem of paths) {
-                  // 1. Preparación de Estructura y Extracción
+                  // 1. Preparation of Structure and Extraction
                   const currentStructure = [...dynamicStructure, paramName];
                   const isObject =
                     typeof pathItem === "object" &&
@@ -162,38 +160,38 @@ async function buildStaticPages() {
 
                   if (isObject) {
                     rawSegments = currentStructure.map((key) => {
-                      // A. Manejo de Puentes Estáticos
+                      // A. Handling of Static Bridges
                       const isKeyObject =
                         typeof key === "object" && key !== null;
                       if (isKeyObject) {
                         return key.STATIC_PARAM_NAME;
                       }
 
-                      // B. Extracción de valor
+                      // B. Value Extraction
                       const val = pathItem[key];
 
-                      // IMPORTANTE: Para el Gap Check necesitamos mantener el 'undefined' o 'null'
-                      // explícitamente en el array, no convertirlo a [] todavía.
-                      // Si es [] vacío, lo dejamos como tal para que .flat() lo elimine (no cuenta como gap).
+                      // IMPORTANT: For the Gap Check we need to keep 'undefined' or 'null'
+                      // explicitly in the array, do not convert it to [] yet.
+                      // If it is [] empty, we leave it as is so that .flat() removes it (does not count as gap).
                       return val;
                     });
                   } else {
-                    // Si no es objeto, es el valor directo del parámetro actual
+                    // If not object, it is the direct value of the current parameter
                     rawSegments = [pathItem];
                   }
 
-                  // Aplanamos. Nota: undefined se mantiene en el array. [] desaparece.
+                  // Flatten. Note: undefined is kept in the array. [] disappears.
                   const flatSegments = rawSegments.flat();
 
-                  // 🛡️ 2. GAP CHECK (Detección de huecos prohibidos)
-                  // Prohibido: [undefined, "algo"]
-                  // Permitido: ["algo", undefined] o [undefined, undefined]
+                  // 🛡️ 2. GAP CHECK (Detection of prohibited gaps)
+                  // Prohibited: [undefined, "something"]
+                  // Permitted: ["something", undefined] or [undefined, undefined]
                   const hasGap = flatSegments.some((seg, index) => {
                     const isUndefined =
                       seg === undefined || seg === null || seg === "";
                     if (!isUndefined) return false;
 
-                    // Si este es undefined, miramos si queda algo definido a la derecha
+                    // If this is undefined, we check if there is something defined to the right
                     const remaining = flatSegments.slice(index + 1);
                     return remaining.some(
                       (s) => s !== undefined && s !== null && s !== ""
@@ -201,21 +199,21 @@ async function buildStaticPages() {
                   });
 
                   if (hasGap) {
-                    continue; // Ruta inválida (hueco intermedio)
+                    continue; // Invalid route (intermediate gap)
                   }
 
                   // 🛡️ 3. URL CLEANING
-                  // Quitamos undefineds para la URL física
+                  // Remove undefineds for the physical URL
                   const validSegmentsToAdd = flatSegments.filter(
                     (s) => s !== undefined && s !== null && s !== ""
                   );
 
                   // 🛡️ 4. PARAMS PREPARATION & NORMALIZATION
                   const paramsToAdd = isObject
-                    ? { ...pathItem } // Clonamos para no mutar
+                    ? { ...pathItem } // Clone to avoid mutation
                     : { [paramName]: pathItem };
 
-                  // Normalización específica para Catch-all: undefined -> []
+                  // Specific normalization for Catch-all: undefined -> []
                   const currentVal = paramsToAdd[paramName];
                   if (
                     currentVal === undefined ||
@@ -240,7 +238,7 @@ async function buildStaticPages() {
               console.error(`Error loading ${pagePath}:`, err);
             }
           } else {
-            // ⚠️ IMPORTANTE: Actualizar el historial en la recursión
+            // ⚠️ IMPORTANT: Update the history in the recursion
             pages.push(
               ...(await collectPages(
                 dynamicPath,
@@ -309,9 +307,9 @@ async function buildStaticPages() {
                       }
                       const val = pathItem[key];
 
-                      // 🛡️ FIX 1: Validación relajada.
-                      // Solo lanzamos error si falta el parámetro ACTUAL (que es catch-all obligatorio).
-                      // Si faltan claves padres (key !== paramName), permitimos undefined (asumimos opcionales).
+                      // 🛡️ FIX 1: Relaxed validation.
+                      // We only throw error if the CURRENT parameter (which is mandatory catch-all) is missing.
+                      // If parent keys are missing (key !== paramName), we allow undefined (assume optional).
                       if (
                         (val === undefined || val === null || val === "") &&
                         i < arr.length - 1
@@ -319,7 +317,7 @@ async function buildStaticPages() {
                         notValidRoute = true;
                       }
                       // throw new Error(
-                      //   `[Dinou] El parámetro catch-all obligatorio '${paramName}' es undefined en ${dynamicPath}.`
+                      //   `[Dinou] The mandatory catch-all parameter '${paramName}' is undefined in ${dynamicPath}.`
                       // );
                       return val;
                     });
@@ -328,8 +326,8 @@ async function buildStaticPages() {
                     segmentsToAdd = [pathItem];
                   }
 
-                  // 🛡️ FIX 2: Filtrado de segmentos.
-                  // Aplanamos (.flat) para manejar el array del catch-all y filtramos undefineds de los padres.
+                  // 🛡️ FIX 2: Segment filtering.
+                  // Flatten (.flat) to handle the catch-all array and filter undefineds from parents.
                   const validSegmentsToAdd = segmentsToAdd.flat();
                   // .filter((s) => s !== undefined && s !== null && s !== "");
 
@@ -340,7 +338,7 @@ async function buildStaticPages() {
                   pages.push(
                     ...(await collectPages(
                       dynamicPath,
-                      [...segments, ...validSegmentsToAdd], // Usamos la versión filtrada
+                      [...segments, ...validSegmentsToAdd], // Use the filtered version
                       { ...params, ...paramsToAdd }
                     ))
                   );
@@ -350,7 +348,7 @@ async function buildStaticPages() {
               console.error(`Error loading ${pagePath}:`, err);
             }
           } else {
-            // ⚠️ IMPORTANTE: Actualizar el historial
+            // ⚠️ IMPORTANT: Update the history
             pages.push(
               ...(await collectPages(
                 dynamicPath,
@@ -403,41 +401,41 @@ async function buildStaticPages() {
               if (getStaticPaths) {
                 const paths = getStaticPaths();
                 for (const pathItem of paths) {
-                  // 1. Preparación de Estructura y Extracción
+                  // 1. Preparation of Structure and Extraction
                   const currentStructure = [...dynamicStructure, paramName];
                   const isObject =
-                    typeof pathItem === "object" && pathItem !== null; // Single param no debería ser array, pero por seguridad.
+                    typeof pathItem === "object" && pathItem !== null; // Single param should not be array, but for safety.
 
                   let rawSegments;
 
                   if (isObject) {
                     rawSegments = currentStructure.map((key) => {
-                      // A. Manejo de Puentes Estáticos
+                      // A. Handling of Static Bridges
                       const isKeyObject =
                         typeof key === "object" && key !== null;
                       if (isKeyObject) {
                         return key.STATIC_PARAM_NAME;
                       }
 
-                      // B. Extracción de valor
-                      // Devolvemos el valor tal cual (undefined se queda como undefined para el check)
+                      // B. Value Extraction
+                      // Return the value as is (undefined stays as undefined for the check)
                       return pathItem[key];
                     });
                   } else {
                     rawSegments = [pathItem];
                   }
 
-                  // Aplanamos (por si acaso viene algún array anidado raro, aunque en single no debería)
+                  // Flatten (in case there is some weird nested array, although in single it shouldn't)
                   const flatSegments = rawSegments.flat();
 
-                  // 🛡️ 2. GAP CHECK (Detección de huecos prohibidos)
-                  // Permite que /inventory/[[a]]/[[b]] genere /inventory si a y b son undefined
+                  // 🛡️ 2. GAP CHECK (Detection of prohibited gaps)
+                  // Allows /inventory/[[a]]/[[b]] to generate /inventory if a and b are undefined
                   const hasGap = flatSegments.some((seg, index) => {
                     const isUndefined =
                       seg === undefined || seg === null || seg === "";
                     if (!isUndefined) return false;
 
-                    // Miramos a la derecha
+                    // Check to the right
                     const remaining = flatSegments.slice(index + 1);
                     return remaining.some(
                       (s) => s !== undefined && s !== null && s !== ""
@@ -445,7 +443,7 @@ async function buildStaticPages() {
                   });
 
                   if (hasGap) {
-                    continue; // Ruta inválida
+                    continue; // Invalid route
                   }
 
                   // 🛡️ 3. URL CLEANING
@@ -454,8 +452,8 @@ async function buildStaticPages() {
                   );
 
                   // 🛡️ 4. PARAMS PREPARATION
-                  // Aquí NO normalizamos a [], porque es un single parameter.
-                  // undefined se queda como undefined.
+                  // Here we DO NOT normalize to [], because it is a single parameter.
+                  // undefined stays as undefined.
                   const paramsToAdd = isObject
                     ? pathItem
                     : { [paramName]: pathItem };
@@ -473,7 +471,7 @@ async function buildStaticPages() {
               console.error(`Error loading ${pagePath}:`, err);
             }
           } else {
-            // ⚠️ IMPORTANTE: Actualizar el historial
+            // ⚠️ IMPORTANT: Update the history
             pages.push(
               ...(await collectPages(
                 dynamicPath,
@@ -539,15 +537,15 @@ async function buildStaticPages() {
                       }
                       const val = pathItem[key];
 
-                      // 🛡️ CAMBIO: Solo lanzamos error si falta el parámetro ACTUAL (que es obligatorio).
-                      // Si falta un parámetro padre (key !== paramName), asumimos que podría ser opcional.
+                      // 🛡️ CHANGE: We only throw error if the CURRENT parameter (which is mandatory) is missing.
+                      // If a parent parameter is missing (key !== paramName), we assume it could be optional.
                       if (
                         (val === undefined || val === null || val === "") &&
                         i < arr.length - 1
                       ) {
                         notValidRoute = true;
                         // throw new Error(
-                        //   `[Dinou] El parámetro obligatorio '${paramName}' es undefined en ${dynamicPath}.`
+                        //   `[Dinou] The mandatory parameter '${paramName}' is undefined in ${dynamicPath}.`
                         // );
                       }
                       return val;
@@ -557,7 +555,7 @@ async function buildStaticPages() {
                     segmentsToAdd = [pathItem];
                   }
 
-                  // 🛡️ CAMBIO: Filtramos undefineds también aquí, porque un padre pudo ser opcional
+                  // 🛡️ CHANGE: We filter undefineds here too, because a parent could be optional
                   const validSegmentsToAdd = segmentsToAdd.flat();
                   // .filter((s) => s !== undefined && s !== null && s !== "");
 
@@ -568,7 +566,7 @@ async function buildStaticPages() {
                   pages.push(
                     ...(await collectPages(
                       dynamicPath,
-                      [...segments, ...validSegmentsToAdd], // Usamos la versión filtrada
+                      [...segments, ...validSegmentsToAdd], // Use the filtered version
                       { ...params, ...paramsToAdd }
                     ))
                   );
@@ -641,15 +639,15 @@ async function buildStaticPages() {
                         }
                         const val = pathItem[key];
 
-                        // 🛡️ CAMBIO: Solo lanzamos error si falta el parámetro ACTUAL (que es obligatorio).
-                        // Si falta un parámetro padre (key !== paramName), asumimos que podría ser opcional.
+                        // 🛡️ CHANGE: We only throw error if the CURRENT parameter (which is mandatory) is missing.
+                        // If a parent parameter is missing (key !== paramName), we assume it could be optional.
                         if (
                           (val === undefined || val === null || val === "") &&
                           i < arr.length - 1
                         ) {
                           notValidRoute = true;
                           // throw new Error(
-                          //   `[Dinou] El parámetro obligatorio '${paramName}' es undefined en ${dynamicPath}.`
+                          //   `[Dinou] The mandatory parameter '${paramName}' is undefined in ${dynamicPath}.`
                           // );
                         }
                         return val;
@@ -659,7 +657,7 @@ async function buildStaticPages() {
                       segmentsToAdd = [pathItem];
                     }
 
-                    // 🛡️ CAMBIO: Filtramos undefineds también aquí, porque un padre pudo ser opcional
+                    // 🛡️ CHANGE: We filter undefineds here too, because a parent could be optional
                     const validSegmentsToAdd = segmentsToAdd.flat();
                     // .filter((s) => s !== undefined && s !== null && s !== "");
 
@@ -670,7 +668,7 @@ async function buildStaticPages() {
                     pages.push(
                       ...(await collectPages(
                         dynamicPath,
-                        [...segments, ...validSegmentsToAdd, entry.name], // Usamos la versión filtrada
+                        [...segments, ...validSegmentsToAdd, entry.name], // Use the filtered version
                         { ...params, ...paramsToAdd }
                       ))
                     );
@@ -848,19 +846,19 @@ async function buildStaticPages() {
       const segmentsJoin = segments.join("/");
       const reqPath = segments.length ? "/" + segmentsJoin + "/" : "/";
       // ====================================================================
-      // 1. MOCK RES: Cumpliendo la interfaz ResponseProxy
+      // 1. MOCK RES: Fulfilling ResponseProxy interface
       // ====================================================================
-      // Aunque el contrato dice que devuelve void, internamente guardamos
-      // el estado por si quieres loguear errores (ej. un redirect en build time).
+      // Although contract says it returns void, internally we save
+      // the state in case you want to log errors (ex: a redirect in build time).
       const mockRes = {
         _statusCode: 200,
         _headers: {},
         _redirectUrl: null,
-        _cookies: [], // Opcional: para debug
+        _cookies: [], // Optional: for debug
 
-        // 👇 AÑADIR ESTE MÉTODO
+        // 👇 ADD THIS METHOD
         cookie(name, value, options) {
-          // En SSG no hacemos nada real, pero guardamos registro si quieres debuguear
+          // In SSG we do nothing real, but keep a record if you want to debug
           // console.log(`[SSG] Cookie set ignored: ${name}=${value}`);
           this._cookies.push({ name, value, options, isClear: false });
         },
@@ -895,7 +893,7 @@ async function buildStaticPages() {
           this._statusCode = status;
           this._redirectUrl = url;
 
-          // Logueamos advertencia porque un redirect en SSG suele ser problemático
+          // Log warning because a redirect in SSG is usually problematic
           console.warn(
             `⚠️ [SSG] Redirect detected in ${reqPath} -> ${url} (${status})`
           );
@@ -907,23 +905,23 @@ async function buildStaticPages() {
         isStatic = false;
       };
 
-      // 1. Espía de Cookies
+      // 1. Cookies Spy
       const cookiesProxy = createBailoutProxy({}, "Cookies", markAsDynamic);
 
-      // 2. Espía de Headers
-      // Nota: req.headers suele venir de los argumentos o mocks
+      // 2. Headers Spy
+      // Note: req.headers usually comes from arguments or mocks
       const headersProxy = createBailoutProxy({}, "Headers", markAsDynamic);
 
-      // 3. (Opcional) Espía de Query/SearchParams
-      // Si el usuario lee ?id=5, tampoco debería ser estático (normalmente)
+      // 3. (Optional) Query/SearchParams Spy
+      // If user reads ?id=5, it shouldn't be static either (usually)
       const queryProxy = createBailoutProxy({}, "Query", markAsDynamic);
       // {
       //           "user-agent": "Dinou-SSG-Builder",
       //           host: "localhost",
-      //           // Añade aquí cualquier header default que necesites
+      //           // Add any default header you need here
       //         }
       // ====================================================================
-      // 2. MOCK REQ: Cumpliendo RequestContextStore['req']
+      // 2. MOCK REQ: Fulfilling RequestContextStore['req']
       // ====================================================================
       const mockReq = {
         query: queryProxy,
@@ -933,7 +931,7 @@ async function buildStaticPages() {
         method: "GET",
       };
 
-      // 3. CONTEXTO COMPLETO
+      // 3. FULL CONTEXT
       const mockContext = {
         req: mockReq,
         res: mockRes,
@@ -944,8 +942,8 @@ async function buildStaticPages() {
       });
 
       if (!isStatic) {
-        // ❌ NO guardar archivo.
-        // Se comportará como SSR puro en runtime.
+        // ❌ DO NOT save file.
+        // Will behave as pure SSR at runtime.
         console.log(
           `Skipping static generation for ${segments.join(
             "/"
@@ -1127,19 +1125,19 @@ async function buildStaticPage(reqPath, isDynamic = null) {
     }
 
     // ====================================================================
-    // 1. MOCK RES: Cumpliendo la interfaz ResponseProxy
+    // 1. MOCK RES: Fulfilling the ResponseProxy interface
     // ====================================================================
-    // Aunque el contrato dice que devuelve void, internamente guardamos
-    // el estado por si quieres loguear errores (ej. un redirect en build time).
+    // Although the contract says it returns void, internally we save
+    // the state in case you want to log errors (e.g., a redirect at build time).
     const mockRes = {
       _statusCode: 200,
       _headers: {},
       _redirectUrl: null,
-      _cookies: [], // Opcional: para debug
+      _cookies: [], // Optional: for debug
 
-      // 👇 AÑADIR ESTE MÉTODO
+      // 👇 ADD THIS METHOD
       cookie(name, value, options) {
-        // En SSG no hacemos nada real, pero guardamos registro si quieres debuguear
+        // In SSG we don't do anything real, but we save a record if you want to debug
         // console.log(`[SSG] Cookie set ignored: ${name}=${value}`);
         this._cookies.push({ name, value, options, isClear: false });
       },
@@ -1174,7 +1172,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
         this._statusCode = status;
         this._redirectUrl = url;
 
-        // Logueamos advertencia porque un redirect en SSG suele ser problemático
+        // We log a warning because a redirect in SSG is usually problematic
         console.warn(
           `⚠️ [SSG] Redirect detected in ${reqPath} -> ${url} (${status})`
         );
@@ -1186,23 +1184,23 @@ async function buildStaticPage(reqPath, isDynamic = null) {
       isStatic = false;
     };
 
-    // 1. Espía de Cookies
+    // 1. Spy on Cookies
     const cookiesProxy = createBailoutProxy({}, "Cookies", markAsDynamic);
 
-    // 2. Espía de Headers
-    // Nota: req.headers suele venir de los argumentos o mocks
+    // 2. Spy on Headers
+    // Note: req.headers usually come from the arguments or mocks
     const headersProxy = createBailoutProxy({}, "Headers", markAsDynamic);
 
-    // 3. (Opcional) Espía de Query/SearchParams
-    // Si el usuario lee ?id=5, tampoco debería ser estático (normalmente)
+    // 3. (Optional) Spy on Query/SearchParams
+    // If the user reads ?id=5, it shouldn't be static either (normally)
     const queryProxy = createBailoutProxy({}, "Query", markAsDynamic);
     //  {
     //         "user-agent": "Dinou-SSG-Builder",
     //         host: "localhost",
-    //         // Añade aquí cualquier header default que necesites
+    //         // Add here any default header you need
     //       }
     // ====================================================================
-    // 2. MOCK REQ: Cumpliendo RequestContextStore['req']
+    // 2. MOCK REQ: Fulfilling RequestContextStore['req']
     // ====================================================================
     const mockReq = {
       query: queryProxy,
@@ -1212,7 +1210,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
       method: "GET",
     };
 
-    // 3. CONTEXTO COMPLETO
+    // 3. COMPLETE CONTEXT
     const mockContext = {
       req: mockReq,
       res: mockRes,
@@ -1223,8 +1221,8 @@ async function buildStaticPage(reqPath, isDynamic = null) {
     });
 
     if (!isStatic) {
-      // ❌ NO guardar archivo.
-      // Se comportará como SSR puro en runtime.
+      // ❌ DO NOT save file.
+      // It will behave as pure SSR at runtime.
       console.log(
         `Skipping static generation for ${segments.join(
           "/"
@@ -1308,7 +1306,7 @@ function serializeReactElement(element) {
 
     return {
       type,
-      name: componentName, // 👈 GUARDAMOS EL NOMBRE (ej: "ClientRedirect")
+      name: componentName,
       isPackage,
       modulePath: isPackage
         ? modulePath

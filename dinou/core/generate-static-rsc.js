@@ -11,15 +11,15 @@ const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 async function generateStaticRSC(reqPath) {
   const finalReqPath = reqPath.endsWith("/") ? reqPath : reqPath + "/";
 
-  // 1. RUTAS: Final y Temporal
+  // 1. PATHS: Final and Temporary
   const payloadPath = path.join(OUT_DIR, finalReqPath, "rsc.rsc");
-  const tempPayloadPath = payloadPath + ".tmp"; // 👈 Escribimos aquí
+  const tempPayloadPath = payloadPath + ".tmp"; // 👈 We write here
 
-  // 👇 2. MOCK RES (Versión Completa y Robusta)
+  // 👇 2. MOCK RES (Complete and Robust Version)
   const mockRes = {
     _statusCode: 200,
     _headers: {},
-    _redirectUrl: null, // ✅ Recuperamos esta propiedad
+    _redirectUrl: null, // ✅ We recover this property
     _cookies: [],
 
     cookie(name, value, options) {
@@ -38,12 +38,12 @@ async function generateStaticRSC(reqPath) {
       this._statusCode = code;
     },
 
-    // ✅ TU LÓGICA ORIGINAL (La correcta)
+    // ✅ YOUR ORIGINAL LOGIC (The correct one)
     redirect(arg1, arg2) {
       let status = 302;
       let url = "";
 
-      // Manejo de sobrecarga: redirect(url) vs redirect(status, url)
+      // Overload handling: redirect(url) vs redirect(status, url)
       if (typeof arg1 === "number") {
         status = arg1;
         url = arg2;
@@ -89,7 +89,7 @@ async function generateStaticRSC(reqPath) {
 
     fs.mkdirSync(path.dirname(payloadPath), { recursive: true });
 
-    // 2. ESCRIBIR EN TEMPORAL
+    // 2. WRITE TO TEMPORARY
     const fileStream = fs.createWriteStream(tempPayloadPath);
     const passThrough = new PassThrough();
 
@@ -106,7 +106,7 @@ async function generateStaticRSC(reqPath) {
       });
     });
 
-    // 3. RETORNAR RESULTADO (NO renombramos aquí)
+    // 3. RETURN RESULT (We DO NOT rename here)
     const success = mockRes._statusCode !== 500;
 
     return {
@@ -119,7 +119,7 @@ async function generateStaticRSC(reqPath) {
     };
   } catch (error) {
     console.error("❌ Error generating RSC payload:", error);
-    // Limpieza de emergencia
+    // Emergency cleanup
     if (fs.existsSync(tempPayloadPath)) fs.unlinkSync(tempPayloadPath);
     return { success: false, tempPath: tempPayloadPath };
   }

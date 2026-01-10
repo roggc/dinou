@@ -2,16 +2,14 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "./navigation.js"; // Ajusta ruta si es necesario
+import { useRouter } from "./navigation.js";
 
 export function ClientRedirect({ to }) {
   const router = useRouter();
 
   useEffect(() => {
-    // Usamos replace para no ensuciar el historial (back button debe saltar esto)
     router.replace(to);
   }, [to, router]);
 
-  // No renderizamos nada visualmente
   return null;
 }

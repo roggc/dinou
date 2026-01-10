@@ -6,11 +6,11 @@ class ConcurrencyManager {
   }
 
   /**
-   * Ejecuta una tarea asíncrona respetando el límite de concurrencia.
-   * @param {Function} task - Función que devuelve una promesa (ej: tu lógica de render/fork)
+   * Executes an asynchronous task respecting the concurrency limit.
+   * @param {Function} task - Function that returns a promise (e.g., your render/fork logic)
    */
   async run(task) {
-    // Si ya estamos a tope, esperamos en la cola
+    // If we are already at maximum, wait in the queue
     if (this.activeCount >= this.maxConcurrent) {
       await new Promise((resolve) => this.queue.push(resolve));
     }
@@ -22,7 +22,7 @@ class ConcurrencyManager {
     } finally {
       this.activeCount--;
 
-      // Si hay alguien esperando, le damos paso
+      // If there is someone waiting, let them proceed
       if (this.queue.length > 0) {
         const nextResolve = this.queue.shift();
         nextResolve();
@@ -30,14 +30,14 @@ class ConcurrencyManager {
     }
   }
 
-  // Opcional: Para métricas
+  // Optional: For metrics
   getStatus() {
     return { active: this.activeCount, queued: this.queue.length };
   }
 }
 
-// Instancia global (ajústalo según la RAM de tu servidor)
-// Una regla general conservadora: CPUs * 2 o un número fijo como 10-20.
+// Global instance (adjust according to your server's RAM)
+// A conservative general rule: CPUs * 2 or a fixed number like 10-20.
 const os = require("os");
 const MAX_PROCESSES =
   process.env.MAX_CONCURRENT_RENDERS || Math.max(1, os.cpus().length * 2);

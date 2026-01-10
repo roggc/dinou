@@ -1,29 +1,29 @@
 import { ClientRedirect } from "./client-redirect.jsx";
 
 /**
- * Función universal de redirección.
- * Úsala con 'return': return redirect('/login');
+ * Universal redirection function.
+ * Use it with 'return': return redirect('/login');
  */
 export function redirect(destination) {
-  // 1. Intentamos obtener el contexto del servidor
+  // 1. We try to get the server context
   if (typeof window === "undefined") {
-    // getContext() debe ser accesible aquí
+    // getContext() must be accessible here
     const dynamicRequire = require;
     const { getContext } = dynamicRequire(
       /* webpackIgnore: true */ "./request-context.js"
     );
     const ctx = getContext();
 
-    // 2. Si estamos en el servidor y AÚN NO se han enviado cabeceras...
-    // Podemos hacer un redirect HTTP real (Status 307).
-    // Esto es mejor para SEO y rapidez en Hard Navigation.
+    // 2. If we are on the server and headers have NOT been sent yet...
+    // We can do a real HTTP redirect (Status 307).
+    // This is better for SEO and speed in Hard Navigation.
     if (ctx && ctx.res) {
       ctx.res.redirect(destination);
       return <ClientRedirect to={destination} />;
     }
   }
 
-  // 3. FALLBACK: Si estamos en Cliente, O si el Servidor ya empezó el stream (headers sent)
-  // Devolvemos el componente que forzará la redirección en el navegador.
+  // 3. FALLBACK: If we are on the Client, OR if the Server has already started the stream (headers sent)
+  // We return the component that will force the redirection in the browser.
   return <ClientRedirect to={destination} />;
 }

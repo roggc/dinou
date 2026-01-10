@@ -115,29 +115,29 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false) {
             await asyncRenderJSXToClientJSX(slotElement);
             updatedSlotElement = slotElement;
           } catch (e) {
-            // 1. RECUPERAR LA RUTA REAL
-            // Usamos el "hack" (metadata) que inyectamos en getSlots.
-            // Esto nos da la ruta al archivo: .../src/(grupo)/@sidebar/page.tsx
+            // 1. RECOVER THE REAL PATH
+            // We use the "hack" (metadata) that we inject in getSlots.
+            // This gives us the path to the file: .../src/(group)/@sidebar/page.tsx
             const slotFilePath = slotElement.props?.__modulePath;
 
             if (slotFilePath) {
-              // 2. OBTENER LA CARPETA DEL SLOT
-              // Quitamos el nombre del archivo para quedarnos con el directorio:
-              // .../src/(grupo)/@sidebar
+              // 2. GET THE SLOT FOLDER
+              // Remove the file name to stay with the directory:
+              // .../src/(group)/@sidebar
               const realSlotFolder = path.dirname(slotFilePath);
 
-              // 3. BUSCAR EL ERROR.TSX EN ESA CARPETA
-              // Usamos tu helper, pero ahora le pasamos la carpeta CORRECTA como 'currentPath'.
+              // 3. SEARCH FOR ERROR.TSX IN THAT FOLDER
+              // We use your helper, but now we pass the CORRECT folder as 'currentPath'.
               const [slotErrorPath, slotErrorParams] =
                 getFilePathAndDynamicParams(
                   reqSegments,
-                  query, // query (irrelevante para buscar el archivo)
-                  realSlotFolder, // <--- LA CLAVE: Buscamos dentro de la carpeta real del slot
-                  "error", // Buscamos 'error' (error.tsx, error.js, etc.)
+                  query, // query (irrelevant for searching the file)
+                  realSlotFolder, // <--- THE KEY: We search inside the real folder of the slot
+                  "error", // We search for 'error' (error.tsx, error.js, etc.)
                   true, // withExtension
                   true, // finalDestination
                   undefined, // lastFound
-                  reqSegments.length // TRUCO: Forzamos index al final para que busque archivo directo
+                  reqSegments.length // TRICK: We force index at the end so that it searches for direct file
                 );
 
               if (slotErrorPath) {
@@ -151,22 +151,22 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false) {
                 };
 
                 updatedSlotElement = React.createElement(SlotError, {
-                  params: slotErrorParams, // Params resueltos (si hubiera)
+                  params: slotErrorParams, // Resolved params (if any)
                   // searchParams: query,
                   key: slotName,
-                  error: serializedError, // Pasamos el error capturado
+                  error: serializedError, // We pass the captured error
                 });
               } else {
-                // Opcional: Si no hay error.tsx, podrías loguear o devolver null
+                // Optional: If there is no error.tsx, you could log or return null
                 console.warn(
-                  `[Dinou] Slot @${slotName} falló y no tiene error.tsx`
+                  `[Dinou] Slot @${slotName} failed and does not have error.tsx`
                 );
                 updatedSlotElement = null;
               }
             } else {
-              // Si por alguna razón no tenemos __modulePath (ej: componente estático puro sin wrapper)
+              // If for some reason we do not have __modulePath (e.g., pure static component without wrapper)
               console.error(
-                `[Dinou] No se pudo localizar el path del slot @${slotName}`
+                `[Dinou] Could not locate the path of the slot @${slotName}`
               );
               updatedSlotElement = null;
             }

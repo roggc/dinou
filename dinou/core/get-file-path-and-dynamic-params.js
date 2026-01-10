@@ -6,34 +6,28 @@ function safeDecode(val) {
   try {
     return !!val ? decodeURIComponent(val) : val;
   } catch (e) {
-    return val; // Si falla la decodificación, devolvemos el original
+    return val;
   }
 }
 
 function getSlots(currentPath, reqSegments, query) {
   let slots = {};
 
-  // Leemos todo el directorio actual
   const entries = readdirSync(currentPath, { withFileTypes: true });
 
   for (const entry of entries) {
-    // Solo nos interesan directorios
     if (!entry.isDirectory()) continue;
 
-    // ---------------------------------------------------------
-    // CASO 1: Encontramos un Slot directo (@sidebar)
-    // ---------------------------------------------------------
     if (entry.name.startsWith("@")) {
-      // Usamos tu lógica actual para resolver la página dentro del slot
       const [slotPath, slotParams] = getFilePathAndDynamicParams(
         reqSegments,
         query,
-        path.join(currentPath, entry.name), // Path físico: .../layout/@sidebar
+        path.join(currentPath, entry.name),
         "page",
         true,
         true,
         undefined,
-        reqSegments.length // Mantenemos tu lógica de ir directo al final
+        reqSegments.length
       );
 
       if (slotPath) {
@@ -41,30 +35,18 @@ function getSlots(currentPath, reqSegments, query) {
         const Slot = slotModule.default ?? slotModule;
         const slotName = entry.name.slice(1);
 
-        // Guardamos el slot encontrado
         slots[slotName] = React.createElement(Slot, {
           params: slotParams,
           // searchParams: query,
           key: slotName,
-          // Añadimos esto para tus hacks de Server Components si los necesitas
           __modulePath: slotPath ?? null,
         });
       }
-    }
-
-    // ---------------------------------------------------------
-    // CASO 2: Encontramos un Route Group ((marketing))
-    // ---------------------------------------------------------
-    // Aquí está la magia: Si es un grupo, entramos recursivamente
-    else if (entry.name.startsWith("(") && entry.name.endsWith(")")) {
+    } else if (entry.name.startsWith("(") && entry.name.endsWith(")")) {
       const groupPath = path.join(currentPath, entry.name);
 
-      // 🔄 RECURSIÓN: Buscamos slots dentro del grupo
       const nestedSlots = getSlots(groupPath, reqSegments, query);
 
-      // Fusionamos los slots encontrados dentro del grupo con los actuales.
-      // Nota: Si hay colisión (mismo slot fuera y dentro), gana el último procesado.
-      // Normalmente object.assign sobreescribe, dando prioridad a lo "último" encontrado.
       slots = { ...slots, ...nestedSlots };
     }
   }

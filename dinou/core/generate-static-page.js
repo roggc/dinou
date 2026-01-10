@@ -81,8 +81,6 @@ async function generateStaticPage(reqPath) {
       fileStream.on("error", reject);
     });
 
-    // 🛡️ NO RENOMBRAMOS NI ACTUALIZAMOS MANIFIESTO AQUÍ
-    // Solo devolvemos el reporte al orquestador
     const status = capturedStatus.value || 200;
     const success = status !== 500;
 
@@ -95,7 +93,6 @@ async function generateStaticPage(reqPath) {
       status: status,
     };
   } catch (error) {
-    // En caso de excepción, intentamos limpiar pero delegamos error
     await fs.unlink(tempHtmlPath).catch(() => {});
     return { success: false, tempPath: tempHtmlPath };
   }

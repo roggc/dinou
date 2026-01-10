@@ -15,25 +15,23 @@ export function Link({
   const handlePrefetch = () => {
     if (!prefetch || !href || fresh) return;
     const finalPath = resolveUrl(href, window.location.pathname);
-    // Llamamos a la función global que expondremos en client.jsx
     if (window.__DINOU_PREFETCH__) {
       window.__DINOU_PREFETCH__(finalPath);
     }
   };
 
   const handleClick = (e) => {
-    // Teclas especiales (abrir en pestaña nueva, etc)
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
 
     e.preventDefault();
-    push(href, { fresh }); // navigate ya usará la lógica de resolución interna
+    push(href, { fresh });
   };
 
   return (
     <a
       href={href}
       onClick={handleClick}
-      onMouseEnter={handlePrefetch} // ¡Magia!
+      onMouseEnter={handlePrefetch}
       {...props}
     >
       {children}

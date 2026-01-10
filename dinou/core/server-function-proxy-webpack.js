@@ -17,7 +17,7 @@ function createServerFunctionProxy(id) {
 
       const contentType = res.headers.get("content-type") || "";
 
-      // Caso 1: HTML puro (Redirect simple)
+      // Case 1: Pure HTML (Simple Redirect)
       if (contentType.includes("text/html")) {
         const html = await res.text();
         const range = document.createRange();
@@ -26,7 +26,7 @@ function createServerFunctionProxy(id) {
         return new Promise(() => {});
       }
 
-      // Caso 2: RSC o Stream Híbrido (Bufferizado)
+      // Case 2: RSC or Hybrid Stream (Buffered)
       if (contentType.includes("text/x-component")) {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -35,7 +35,7 @@ function createServerFunctionProxy(id) {
 
         const readableStream = new ReadableStream({
           async start(controller) {
-            let buffer = ""; // 📦 ESTADO PERSISTENTE
+            let buffer = ""; // 📦 PERSISTENT STATE
             let isRedirecting = false;
 
             try {
@@ -43,74 +43,74 @@ function createServerFunctionProxy(id) {
                 const { done, value } = await reader.read();
 
                 if (done) {
-                  // Si queda algo en el buffer al terminar, lo mandamos (siempre que no sea un script roto)
+                  // If something remains in the buffer upon finishing, we send it (as long as it's not a broken script)
                   if (buffer.length > 0) {
-                    // CHECK CORRECTO: Buscamos el inicio del tag, tenga o no el cierre >
+                    // CHECK: We search for the tag start, whether it has the closing > or not
                     if (buffer.includes("<script")) {
                       console.warn(
                         "[Dinou] Stream ended with incomplete script. Discarding tail."
                       );
-                      // No hacemos enqueue.
+                      // We do not enqueue.
                     } else {
-                      // Es contenido seguro (ej: "a < b" o un json cortado que React manejará)
+                      // It is safe content (e.g., "a < b" or a cut JSON that React will handle)
                       controller.enqueue(encoder.encode(buffer));
                     }
                   }
                   break;
                 }
 
-                // 1. ACUMULAR
+                // 1. ACCUMULATE
                 buffer += decoder.decode(value, { stream: true });
 
-                // 2. PROCESAR SCRIPTS COMPLETOS
-                // Buscamos pares completos de <script>...</script>
+                // 2. PROCESS COMPLETE SCRIPTS
+                // We search for complete pairs of <script>...</script>
                 let match;
 
-                // Ejecutamos todos los scripts completos que encontremos
+                // We execute all complete scripts we find
                 while ((match = scriptRegex.exec(buffer)) !== null) {
                   const fullMatch = match[0];
                   const scriptContent = match[1];
 
-                  // Detectar redirect
+                  // Detect redirect
                   if (scriptContent.includes("window.location.href")) {
                     isRedirecting = true;
                   }
 
-                  // Inyectar al DOM
+                  // Inject to DOM
                   const range = document.createRange();
-                  const fragment = range.createContextualFragment(fullMatch); // fullMatch incluye tags para contexto correcto
+                  const fragment = range.createContextualFragment(fullMatch); // fullMatch includes tags for correct context
                   document.body.appendChild(fragment);
                 }
 
-                // 3. LIMPIAR SCRIPTS PROCESADOS DEL BUFFER
-                // Una vez ejecutados, los borramos para que no vayan a React
+                // 3. CLEAN PROCESSED SCRIPTS FROM BUFFER
+                // Once executed, we remove them so they don't go to React
                 buffer = buffer.replace(scriptRegex, "");
 
-                // 4. CALCULAR QUÉ ES SEGURO ENVIAR (La lógica anti-corte)
-                // Necesitamos saber si el buffer termina con algo que PARECE el inicio de un script
-                // Patrones peligrosos al final: <, <s, <sc, <scr, <scri, <scrip, <script
+                // 4. CALCULATE WHAT IS SAFE TO SEND (Anti-cut logic)
+                // We need to know if the buffer ends with something that LOOKS like the start of a script
+                // Dangerous patterns at the end: <, <s, <sc, <scr, <scri, <scrip, <script
 
-                let cutoffIndex = buffer.length; // Por defecto enviamos todo
+                let cutoffIndex = buffer.length; // Default send everything
 
-                // A) Si hay un <script> abierto pero no cerrado en el buffer
+                // A) If there is an open but not closed <script> in the buffer
                 const openScriptIndex = buffer.indexOf("<script>");
                 if (openScriptIndex !== -1) {
-                  // Guardamos todo desde el <script> en adelante
+                  // We keep everything from the <script> onwards
                   cutoffIndex = openScriptIndex;
                 } else {
-                  // B) Si no hay script abierto, miramos si el final parece un tag cortado
-                  // Regex: Busca '<' seguido opcionalmente de s, c, r, i, p, t AL FINAL de la cadena ($)
+                  // B) If no open script, check if the end looks like a cut tag
+                  // Regex: Looks for '<' optionally followed by s, c, r, i, p, t AT THE END of the string ($)
                   const partialTagMatch = buffer.match(/<s?c?r?i?p?t?$/);
 
                   if (partialTagMatch) {
-                    // Guardamos desde donde empieza la sospecha
+                    // We save from where the suspicion starts
                     cutoffIndex = partialTagMatch.index;
                   }
                 }
 
-                // 5. ENVIAR LO SEGURO
+                // 5. SEND SAFE CONTENT
                 const safeChunk = buffer.slice(0, cutoffIndex);
-                // Lo que sobra se queda en el buffer para la siguiente vuelta (chunk)
+                // What remains stays in the buffer for the next loop (chunk)
                 buffer = buffer.slice(cutoffIndex);
 
                 if (safeChunk) {
@@ -120,7 +120,7 @@ function createServerFunctionProxy(id) {
             } catch (err) {
               controller.error(err);
             } finally {
-              // Si NO es redirect, cerramos. Si es redirect, dejamos colgando (tu truco maestro).
+              // If it is NOT a redirect, we close. If it is a redirect, we leave hanging (your master trick).
               if (!isRedirecting) {
                 controller.close();
               }

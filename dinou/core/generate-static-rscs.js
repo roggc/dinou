@@ -4,7 +4,7 @@ const { PassThrough } = require("stream");
 const getSSGJSXOrJSX = require("./get-ssg-jsx-or-jsx.js");
 const { renderToPipeableStream } = require("react-server-dom-webpack/server");
 
-// 👇 Tu almacenamiento de contexto
+// 👇 Your context storage
 const { requestStorage } = require("./request-context.js");
 
 const OUT_DIR = path.resolve("dist2");
@@ -27,26 +27,26 @@ async function generateStaticRSCs(routes) {
     const payloadPath = path.join(OUT_DIR, reqPath, "rsc.rsc");
 
     // ====================================================================
-    // 1. MOCK RES: Cumpliendo la interfaz ResponseProxy
+    // 1. MOCK RES: Fulfilling the ResponseProxy interface
     // ====================================================================
-    // Aunque el contrato dice que devuelve void, internamente guardamos
-    // el estado por si quieres loguear errores (ej. un redirect en build time).
+    // Although the contract says it returns void, internally we save
+    // the state in case you want to log errors (e.g., a redirect at build time).
     const mockRes = {
       _statusCode: 200,
       _headers: {},
       _redirectUrl: null,
-      _cookies: [], // Opcional: para debug
+      _cookies: [], // Optional: for debug
 
-      // 👇 AÑADIR ESTE MÉTODO
+      // 👇 ADD THIS METHOD
       cookie(name, value, options) {
-        // En SSG no hacemos nada real, pero guardamos registro si quieres debuguear
+        // In SSG we don't do anything real, but we save a record if you want to debug
         // console.log(`[SSG] Cookie set ignored: ${name}=${value}`);
         this._cookies.push({ name, value, options });
       },
 
       // clearCookie(name: string, options?: ...): void;
       clearCookie(name, options) {
-        // En SSG no hacemos nada, pero cumplimos el contrato evitando crash
+        // In SSG we don't do anything, but we fulfill the contract avoiding crash
       },
 
       // setHeader(name: string, value: string | ReadonlyArray<string>): void;
@@ -75,7 +75,7 @@ async function generateStaticRSCs(routes) {
         this._statusCode = status;
         this._redirectUrl = url;
 
-        // Logueamos advertencia porque un redirect en SSG suele ser problemático
+        // We log a warning because a redirect in SSG is usually problematic
         console.warn(
           `⚠️ [SSG] Redirect detected in ${reqPath} -> ${url} (${status})`
         );
@@ -83,7 +83,7 @@ async function generateStaticRSCs(routes) {
     };
 
     // ====================================================================
-    // 2. MOCK REQ: Cumpliendo RequestContextStore['req']
+    // 2. MOCK REQ: Fulfilling RequestContextStore['req']
     // ====================================================================
     const mockReq = {
       query: {},
@@ -91,13 +91,13 @@ async function generateStaticRSCs(routes) {
       headers: {
         "user-agent": "Dinou-SSG-Builder",
         host: "localhost",
-        // Añade aquí cualquier header default que necesites
+        // Add here any default header you need
       },
       path: reqPath,
       method: "GET",
     };
 
-    // 3. CONTEXTO COMPLETO
+    // 3. COMPLETE CONTEXT
     const mockContext = {
       req: mockReq,
       res: mockRes,
@@ -108,7 +108,7 @@ async function generateStaticRSCs(routes) {
       const fileStream = fs.createWriteStream(payloadPath);
       const passThrough = new PassThrough();
 
-      // 1. Todo el ciclo de vida del stream debe estar dentro del storage
+      // 1. The entire lifecycle of the stream must be inside the storage
       await requestStorage.run(mockContext, async () => {
         const jsx = await getSSGJSXOrJSX(reqPath, {});
         const { pipe } = renderToPipeableStream(jsx, manifest);
@@ -116,17 +116,17 @@ async function generateStaticRSCs(routes) {
         pipe(passThrough);
         passThrough.pipe(fileStream);
 
-        // 2. IMPORTANTE: Esperamos a que el archivo se escriba TOTALMENTE
-        // antes de salir del bloque 'run'.
+        // 2. IMPORTANT: We wait for the file to be written COMPLETELY
+        // before exiting the 'run' block.
         await new Promise((resolve, reject) => {
           fileStream.on("finish", resolve);
           fileStream.on("error", reject);
-          // Opcional: manejar errores del passThrough también
+          // Optional: handle errors from passThrough as well
           passThrough.on("error", reject);
         });
       });
 
-      // Validación post-generación
+      // Post-generation validation
       if (mockRes._statusCode !== 200) {
         console.log(
           `⚠️ Generated RSC for ${reqPath} but logic set status to ${mockRes._statusCode}`

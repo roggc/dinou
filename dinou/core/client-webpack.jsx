@@ -12,7 +12,7 @@ import { RouterContext } from "./navigation.js";
 import { resolveUrl } from "./navigation-utils.js";
 
 // ====================================================================
-// 1. ESTADO GLOBAL (Fuera del componente)
+// 1. GLOBAL STATE (Outside the component)
 // ====================================================================
 const cache = new Map();
 const scrollCache = new Map();
@@ -20,10 +20,10 @@ const scrollCache = new Map();
 const getCurrentRoute = () => window.location.pathname + window.location.search;
 
 // ====================================================================
-// 2. HELPERS PUROS
+// 2. PURE HELPERS
 // ====================================================================
 
-// Helper para detectar si solo cambiamos el hash en la misma página
+// Helper to detect if we only change the hash on the same page
 const isHashChangeOnly = (finalPath) => {
   const targetUrl = new URL(finalPath, window.location.origin);
   const normalize = (p) =>
@@ -39,12 +39,12 @@ const isHashChangeOnly = (finalPath) => {
 };
 
 const getRSCPayload = (url) => {
-  // 1. Check Idempotencia (Evita el loop infinito de React)
+  // 1. Check Idempotence (Avoids the infinite loop of React)
   if (cache.has(url)) {
     return cache.get(url);
   }
 
-  // 2. Lógica de Flags Globales (Solo primera vez)
+  // 2. Global Flags Logic (Only first time)
   let payloadUrl;
   if (window.__DINOU_USE_OLD_RSC__ || window.__DINOU_USE_STATIC__) {
     payloadUrl = window.__DINOU_USE_OLD_RSC__
@@ -55,21 +55,21 @@ const getRSCPayload = (url) => {
       ? "/____rsc_payload_static____" + url
       : "/____rsc_payload____" + url;
 
-    // Limpiamos flags inmediatamente
+    // Clean flags immediately
     window.__DINOU_USE_OLD_RSC__ = false;
     window.__DINOU_USE_STATIC__ = false;
   } else {
     payloadUrl = "/____rsc_payload____" + url;
   }
 
-  // 3. Fetch y Guardado en Caché
+  // 3. Fetch and Cache Storage
   const promise = createFromFetch(fetch(payloadUrl));
-  cache.set(url, promise); // <--- CLAVE PARA EVITAR LOOP
+  cache.set(url, promise); // <--- KEY TO AVOID LOOP
   return promise;
 };
 
 // ====================================================================
-// 3. COMPONENTE ROUTER
+// 3. ROUTER COMPONENT
 // ====================================================================
 
 function Router() {
@@ -78,23 +78,23 @@ function Router() {
   const [isPending, startTransition] = useTransition();
   const [version, setVersion] = useState(0);
 
-  // 🔌 EFECTO 1: Exponer Prefetch Global
+  // 🔌 EFFECT 1: Expose Global Prefetch
   useEffect(() => {
     window.__DINOU_PREFETCH__ = (url) => {
-      // 🛡️ PROTECCIÓN PREFETCH: Si es un hash local, no hacemos nada
+      // 🛡️ PREFETCH PROTECTION: If it's a local hash, do nothing
       if (isHashChangeOnly(url)) return;
       getRSCPayload(url);
     };
 
-    // Hidratación
+    // Hydration
     document.body.setAttribute("data-hydrated", "true");
-  }, []); // Solo al montar
+  }, []); // Only on mount
 
-  // 🧭 FUNCIÓN NAVIGATE (Core Logic)
+  // 🧭 NAVIGATE FUNCTION (Core Logic)
   const navigate = (href, options = {}) => {
     const finalPath = resolveUrl(href, window.location.pathname);
 
-    // 🛡️ PROTECCIÓN NAVIGATE: Detección de Hash
+    // 🛡️ NAVIGATE PROTECTION: Hash Detection
     if (isHashChangeOnly(finalPath)) {
       if (options.replace) {
         window.history.replaceState(null, "", finalPath);
@@ -102,14 +102,14 @@ function Router() {
         window.history.pushState(null, "", finalPath);
       }
 
-      // Scroll manual
+      // Manual scroll
       const hash = new URL(finalPath, window.location.origin).hash;
       const id = hash.replace("#", "");
       const element = document.getElementById(id);
       if (element) {
         element.scrollIntoView({ behavior: "auto" });
       }
-      return; // STOP CRÍTICO
+      return; // CRITICAL STOP
     }
 
     if (options.fresh) {
@@ -117,7 +117,7 @@ function Router() {
       cache.delete(finalPath);
     }
 
-    // Navegación RSC Normal
+    // Normal RSC Navigation
     scrollCache.set(
       window.location.pathname + window.location.search,
       window.scrollY
@@ -141,24 +141,24 @@ function Router() {
     const currentPath = window.location.pathname + window.location.search;
     // console.log(`[Router] Soft Refreshing: ${currentPath}`);
 
-    // 1. Borrar caché para asegurar datos frescos
+    // 1. Delete cache to ensure fresh data
     cache.delete(currentPath);
 
-    // 2. Iniciar transición (para mostrar isPending si quieres)
+    // 2. Start transition (to show isPending if you want)
     startTransition(() => {
-      // 3. Incrementamos versión para forzar re-ejecución de useMemo
+      // 3. Increment version to force re-execution of useMemo
       setVersion((v) => v + 1);
     });
   };
 
-  // 🔌 EFECTO 2: Listeners Globales (Click y PopState)
+  // 🔌 EFFECT 2: Global Listeners (Click and PopState)
   useEffect(() => {
     if ("scrollRestoration" in window.history) {
       window.history.scrollRestoration = "manual";
     }
 
     const onNavigate = (e) => {
-      // 🛡️ FIX: Si el evento ya fue procesado (preventDefault llamado por Link), lo ignoramos.
+      // 🛡️ FIX: If the event was already processed (preventDefault called by Link), we ignore it.
       if (e.defaultPrevented) return;
       const anchor = e.target.closest("a");
       if (
@@ -176,12 +176,12 @@ function Router() {
       if (!href || href.startsWith("mailto:") || href.startsWith("tel:"))
         return;
 
-      // Usamos el helper unificado
+      // We use the unified helper
       const finalPath = resolveUrl(href, window.location.pathname);
 
-      // Usamos el mismo helper de detección de hash para consistencia
+      // We use the same hash detection helper for consistency
       if (isHashChangeOnly(finalPath)) {
-        return; // El navegador lo maneja nativamente o el navigate lo manejaría
+        return; // The browser handles it natively or navigate would handle it
       }
 
       e.preventDefault();
@@ -190,7 +190,7 @@ function Router() {
 
     const onPopState = () => {
       const target = getCurrentRoute();
-      // Opcional: cache.delete(target); // Descomenta si quieres refresh al volver atrás
+      // Optional: cache.delete(target); // Uncomment if you want refresh on going back
       startTransition(() => {
         setIsPopState(true);
         setRoute(target);
@@ -206,7 +206,7 @@ function Router() {
     };
   }, []);
 
-  // 🔌 EFECTO 3: Gestión de Scroll (Restauración)
+  // 🔌 EFFECT 3: Scroll Management (Restoration)
   useLayoutEffect(() => {
     requestAnimationFrame(() => {
       if (window.location.hash) return;
@@ -223,7 +223,7 @@ function Router() {
     });
   }, [route, isPopState]);
 
-  // 🔌 EFECTO 4: Gestión de Scroll (Hash en página nueva)
+  // 🔌 EFFECT 4: Scroll Management (Hash on new page)
   useEffect(() => {
     const hash = window.location.hash;
     if (!hash) return;
@@ -237,7 +237,7 @@ function Router() {
     });
   }, [route]);
 
-  // Lógica RSC
+  // RSC Logic
   const content = getRSCPayload(route);
 
   const contextValue = useMemo(

@@ -1,7 +1,6 @@
 // generate-static-pages.js
 const path = require("path");
 const { mkdirSync, createWriteStream } = require("fs");
-const { writeFile } = require("fs").promises;
 const renderAppToHtml = require("./render-app-to-html.js");
 const getSSGMetadata = require("./get-ssg-metadata.js");
 const { updateStatus } = require("./status-manifest.js");
@@ -10,47 +9,47 @@ const OUT_DIR = path.resolve("dist2");
 
 async function generateStaticPages(routes) {
   for (const route of routes) {
-    // Normalización de la ruta
+    // Normalization of the route
     const reqPath = route.endsWith("/") ? route : route + "/";
     const htmlPath = path.join(OUT_DIR, reqPath, "index.html");
 
-    // Preparar Query params (vacío por defecto en SSG, salvo que tu router lo soporte)
+    // Prepare Query params (empty by default in SSG, unless your router supports it)
     const query = {};
     const paramsString = JSON.stringify(query);
     const capturedStatus = {};
     // ---------------------------------------------------------
-    // 1. CREAR MOCK REQUEST (Solución a tu segunda pregunta)
+    // 1. CREATE MOCK REQUEST (Solution to your second question)
     // ---------------------------------------------------------
     const contextForChild = {
       req: {
         query,
-        cookies: {}, // No hay cookies en build time
+        cookies: {}, // No cookies at build time
         headers: {
           "user-agent": "Dinou-SSG-Builder",
-          host: "localhost", // Valor seguro por defecto
+          host: "localhost", // Safe default value
           "x-forwarded-proto": "http",
         },
-        path: reqPath, // 💡 Vital para lógica de menús activos, etc.
+        path: reqPath, // 💡 Vital for active menu logic, etc.
         method: "GET",
       },
-      // No pasamos 'res' aquí, el child lo ignora, nosotros pasamos el mockRes como argumento
+      // We do not pass 'res' here, the child ignores it, we pass the mockRes as an argument
     };
 
     try {
       mkdirSync(path.dirname(htmlPath), { recursive: true });
       const fileStream = createWriteStream(htmlPath);
-      let htmlStream = null; // Declaramos fuera para usar en el closure
+      let htmlStream = null; // Declare outside to use in the closure
 
       // ---------------------------------------------------------
-      // 2. CREAR MOCK RESPONSE (Con Fix para Webpack)
+      // 2. CREATE MOCK RESPONSE (With Fix for Webpack)
       // ---------------------------------------------------------
       const mockRes = {
-        headersSent: true, // Forzamos modo "streaming/script injection"
-        _cookies: [], // Opcional: para debug
+        headersSent: true, // Force "streaming/script injection" mode
+        _cookies: [], // Optional: for debug
 
-        // 👇 AÑADIR ESTE MÉTODO
+        // 👇 ADD THIS METHOD
         cookie(name, value, options) {
-          // En SSG no hacemos nada real, pero guardamos registro si quieres debuguear
+          // In SSG we don't do anything real, but we save a record if you want to debug
           // console.log(`[SSG] Cookie set ignored: ${name}=${value}`);
           this._cookies.push({ name, value, options });
         },
@@ -60,19 +59,19 @@ async function generateStaticPages(routes) {
         },
 
         end: (chunk) => {
-          // Si nos mandan un último chunk (ej: </script>)
+          // If they send us a last chunk (e.g., </script>)
           if (chunk && !fileStream.writableEnded) fileStream.write(chunk);
 
-          // 🔥 FIX WEBPACK "WRITE AFTER END":
-          // Desconectamos el stream del hijo inmediatamente.
-          // Si Webpack manda basura después, no llegará al fileStream.
+          // 🔥 WEBPACK "WRITE AFTER END" FIX:
+          // Disconnect the child's stream immediately.
+          // If Webpack sends garbage afterwards, it won't reach the fileStream.
           if (htmlStream) {
             htmlStream.unpipe(fileStream);
-            // Opcional: Pausar o destruir el stream del hijo para liberar memoria
+            // Optional: Pause or destroy the child's stream to free memory
             // htmlStream.destroy();
           }
 
-          // Cerramos el archivo oficialmente
+          // Officially close the file
           if (!fileStream.writableEnded) fileStream.end();
         },
 
@@ -86,25 +85,25 @@ async function generateStaticPages(routes) {
         redirect: () => {},
       };
 
-      // 3. Ejecutar Render
+      // 3. Execute Render
       htmlStream = renderAppToHtml(
         reqPath,
         paramsString,
-        contextForChild, // ✅ Pasamos el MockReq
+        contextForChild, // ✅ Pass the MockReq
         mockRes,
         capturedStatus
       );
 
       const sideEffectScripts = getSSGMetadata(reqPath);
       await new Promise((resolve, reject) => {
-        // 🟢 INYECCIÓN DE SCRIPTS
+        // 🟢 SCRIPT INJECTION
         if (sideEffectScripts) {
           fileStream.write(sideEffectScripts);
         }
-        // Conectamos standard output al archivo
-        htmlStream.pipe(fileStream, { end: false }); // end: false nos da control manual en el mockRes
+        // Connect standard output to the file
+        htmlStream.pipe(fileStream, { end: false }); // end: false gives us manual control in the mockRes
 
-        // Manejo de eventos
+        // Event handling
         htmlStream.on("end", () => {
           if (!fileStream.writableEnded) fileStream.end();
           updateStatus(reqPath, capturedStatus.value);
@@ -112,7 +111,7 @@ async function generateStaticPages(routes) {
         });
 
         htmlStream.on("error", (err) => {
-          // Si el error es "write after end" y ya cerramos, lo ignoramos (es ruido)
+          // If the error is "write after end" and we already closed, ignore it (it's noise)
           if (err.code === "ERR_STREAM_WRITE_AFTER_END") {
             resolve();
           } else {
@@ -125,7 +124,7 @@ async function generateStaticPages(routes) {
 
       console.log("✅ Generated HTML:", reqPath);
     } catch (error) {
-      // Filtro extra de seguridad por si el error sube hasta aquí
+      // Extra safety filter in case the error bubbles up here
       if (error.code === "ERR_STREAM_WRITE_AFTER_END") {
         console.log("⚠️ Ignored write-after-end race condition for:", reqPath);
       } else {

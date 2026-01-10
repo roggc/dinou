@@ -9,13 +9,13 @@ module.exports = function ({ types: t }) {
         const sourceValue = pathNode.node.source.value;
         const currentFile = state.file.opts.filename;
 
-        // Intentamos obtener la ruta absoluta
+        // We try to get the absolute path
         const resolvedPath = getAbsPathWithExt(sourceValue, {
           parentURL: pathToFileURL(currentFile).href,
         });
 
-        // Si resolvedPath es null, significa que es una librería de node_modules
-        // (porque tu helper devuelve null si no empieza por . o alias)
+        // If resolvedPath is null, it means it is a node_modules library
+        // (because your helper returns null if it doesn't start with . or alias)
         const pathOrPackage = resolvedPath || sourceValue;
         const isPackage = !resolvedPath;
 

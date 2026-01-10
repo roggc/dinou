@@ -2,7 +2,7 @@
 "use client";
 import React from "react";
 
-// Mocks defensivos
+// Defensive mocks
 const createContext =
   React.createContext ||
   ((defaultValue) => ({
@@ -11,7 +11,7 @@ const createContext =
   }));
 const useContext = React.useContext || (() => null);
 
-// 🔄 CAMBIO: Valor por defecto ahora es un objeto compatible
+// 🔄 CHANGE: Now default value is a compatible object
 export const RouterContext = createContext({
   url: "",
   navigate: (url) => {
@@ -20,7 +20,7 @@ export const RouterContext = createContext({
   isPending: false, // Default value
 });
 
-// Función de limpieza (Mantenemos la lógica de trailing slash)
+// Cleanup function (We keep the trailing slash logic)
 function normalizePath(path) {
   if (!path) return "";
   if (path === "/") return "/";
@@ -30,17 +30,17 @@ function normalizePath(path) {
   return path;
 }
 
-// ⏳ NUEVO HOOK: useNavigationLoading
+// ⏳ NEW HOOK: useNavigationLoading
 export function useNavigationLoading() {
-  // 1. En el servidor siempre es false
+  // 1. On the server it is always false
   if (typeof window === "undefined") {
     return false;
   }
 
-  // 2. En el cliente, leemos del contexto
+  // 2. On the client, we read from the context
   const context = useContext(RouterContext);
 
-  // Si el contexto es antiguo (string) o nulo, asumimos false
+  // If the context is old (string) or null, we assume false
   if (!context || typeof context === "string") {
     return false;
   }
@@ -54,9 +54,9 @@ export function useNavigationLoading() {
 export function useRouter() {
   const context = useContext(RouterContext);
 
-  // Guardias para SSR (opcional, pero buena práctica)
+  // Guards for SSR (optional, but good practice)
   if (!context) {
-    // En el servidor devolvemos funciones vacías para no romper el renderizado
+    // On the server we return empty functions to not break the rendering
     return {
       push: () => {},
       replace: () => {},
@@ -92,11 +92,11 @@ export function useRouter() {
 }
 
 export function usePathname() {
-  // 🟢 1. LÓGICA DE SERVIDOR (SSR)
+  // 🟢 1. SERVER LOGIC (SSR)
   if (typeof window === "undefined") {
     try {
       const dynamicRequire = require;
-      // 🛡️ webpackIgnore para evitar bundling de cosas de servidor
+      // 🛡️ webpackIgnore to avoid bundling server things
       const { getContext } = dynamicRequire(
         /* webpackIgnore: true */ "./request-context.js"
       );
@@ -107,11 +107,11 @@ export function usePathname() {
     } catch (e) {}
   }
 
-  // 🔵 2. LÓGICA DE CLIENTE
+  // 🔵 2. CLIENT LOGIC
   const context = useContext(RouterContext);
 
-  // ⚠️ CAMBIO CRÍTICO: Ahora extraemos .url del objeto
-  // Soportamos ambos casos por si acaso (string antiguo o objeto nuevo)
+  // ⚠️ CRITICAL CHANGE: Now we extract .url from the object
+  // We support both cases just in case (old string or new object)
   const fullRoute = typeof context === "string" ? context : context.url;
 
   if (typeof fullRoute !== "string") {
@@ -123,7 +123,7 @@ export function usePathname() {
 }
 
 export function useSearchParams() {
-  // 🟢 1. LÓGICA DE SERVIDOR
+  // 🟢 1. SERVER LOGIC
   if (typeof window === "undefined") {
     try {
       const dynamicRequire = require;
@@ -142,10 +142,10 @@ export function useSearchParams() {
     } catch (e) {}
   }
 
-  // 🔵 2. LÓGICA DE CLIENTE
+  // 🔵 2. CLIENT LOGIC
   const context = useContext(RouterContext);
 
-  // ⚠️ CAMBIO CRÍTICO: Extraemos .url
+  // ⚠️ CRITICAL CHANGE: We extract .url
   const fullRoute = typeof context === "string" ? context : context.url;
 
   if (typeof fullRoute !== "string") return new URLSearchParams();

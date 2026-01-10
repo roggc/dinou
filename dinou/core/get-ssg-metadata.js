@@ -6,7 +6,6 @@ function processMetadata(metadata) {
   const { effects } = metadata;
   let scriptContent = "";
 
-  // 1. Procesar Cookies
   if (effects.cookies && effects.cookies.length > 0) {
     effects.cookies.forEach((ck) => {
       const name = JSON.stringify(ck.name);
@@ -14,23 +13,19 @@ function processMetadata(metadata) {
       const path = JSON.stringify(ck.options?.path || "/");
 
       if (ck.isClear) {
-        // Opción clearCookie
         scriptContent += `document.cookie = ${name} + "=; Max-Age=0; path=" + ${path} + ";";`;
       } else {
-        // Opción setCookie
         scriptContent += `document.cookie = ${name} + "=" + ${value} + "; path=" + ${path} + ";";`;
       }
     });
   }
 
-  // 2. Procesar Redirección
   if (effects.redirect) {
     scriptContent += `window.location.href = "${effects.redirect}";`;
   }
 
   if (!scriptContent) return "";
 
-  // Envolvemos en un IIFE para evitar contaminar el scope global
   return `<script>(function(){ ${scriptContent} })();</script>`;
 }
 

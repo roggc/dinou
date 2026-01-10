@@ -1,27 +1,19 @@
-// dinou/core/jsxStore.js
-
-// Almacén en memoria
-// Key: reqPath (string)
-// Value: {
-//    jsx: Object (El JSX serializado),
-//    revalidate: number,
-//    generatedAt: number
-// }
+// In-memory store
 const store = new Map();
 
 /**
- * Guarda el resultado de la generación estática.
- * @param {string} reqPath - La ruta (ej: "/about/")
+ * Saves the result of the static generation.
+ * @param {string} reqPath - The route (e.g., "/about/")
  * @param {object} json - { jsx, revalidate, generatedAt }
  */
 function setJSXJSON(reqPath, json) {
-  // Guardamos directamente el objeto en memoria.
-  // Al ser referencia, es instantáneo.
+  // We save the object directly in memory.
+  // As a reference, it is instantaneous.
   store.set(reqPath, json);
 }
 
 /**
- * Obtiene los datos para servir el RSC o comprobar revalidación.
+ * Gets the data to serve the RSC or check revalidation.
  * @param {string} reqPath
  * @returns {object|undefined}
  */
@@ -30,27 +22,27 @@ function getJSXJSON(reqPath) {
 }
 
 /**
- * Verifica si tenemos datos para esa ruta
+ * Verifies if we have data for that route
  */
 function hasJSXJSON(reqPath) {
   return store.has(reqPath);
 }
 
 /**
- * (Opcional) Borra datos si una página deja de existir
+ * (Optional) Deletes data if a page no longer exists
  */
 function deleteJSXJSON(reqPath) {
   store.delete(reqPath);
 }
 
 /**
- * 🆕 Obtiene todas las rutas estáticas disponibles.
- * Reemplaza a la antigua función que leía el disco recursivamente.
+ * 🆕 Gets all available static routes.
+ * Replaces the old function that read the disk recursively.
  *
- * @returns {string[]} Array de rutas (ej: ["/", "/about/", "/blog/post-1/"])
+ * @returns {string[]} Array of routes (e.g., ["/", "/about/", "/blog/post-1/"])
  */
 function getStaticPaths() {
-  // Array.from convierte el iterador de llaves en un Array real
+  // Array.from converts the iterator of keys into a real Array
   return Array.from(store.keys());
 }
 

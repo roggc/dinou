@@ -1,10 +1,10 @@
 const path = require("path");
-const { fork } = require("child_process"); // ⬅️ CAMBIO 1: Usamos fork
+const { fork } = require("child_process"); // ⬅️ CHANGE 1: We use fork
 const url = require("url");
 const { getJSXJSON, hasJSXJSON } = require("./jsx-json");
 
 function toFileUrl(p) {
-  // Convierte a file://, cross-platform
+  // Converts to file://, cross-platform
   return url.pathToFileURL(p).href;
 }
 
@@ -14,14 +14,14 @@ const registerLoaderPath = toFileUrl(
 const renderHtmlPath = path.resolve(__dirname, "render-html.js");
 
 // ----------------------------------------------------
-// 💡 ESTRATEGIA DE LISTA BLANCA (WHITELIST)
+// 💡 WHITELIST STRATEGY
 // ----------------------------------------------------
 
-// 1. Definimos los flags ESENCIALES de Node.js que el hijo debe tener.
-//    (Dejamos la lista vacía para no heredar flags problemáticos)
+// 1. Define ESSENTIAL Node.js flags that the child must have.
+//    (We leave the list empty to avoid inheriting problematic flags)
 const ESSENTIAL_NODE_ARGS = [];
 
-// 2. Añadimos el --import del loader, que es la única necesidad confirmada.
+// 2. Add the loader --import, which is the only confirmed necessity.
 const loaderArg = `--import=${registerLoaderPath}`;
 const childExecArgv = ESSENTIAL_NODE_ARGS.concat(loaderArg);
 
@@ -37,7 +37,7 @@ function renderAppToHtml(
 ) {
   const jsxJson = getJSXJSON(reqPath);
   const hasJsxJson = hasJSXJSON(reqPath);
-  // Replicamos el array de argumentos posicionales que se pasaban al script
+  // We replicate the array of positional arguments passed to the script
   // [renderHtmlPath, reqPath, paramsString, cookiesString]
   const scriptArgs = [
     reqPath,
@@ -49,21 +49,21 @@ function renderAppToHtml(
   ];
 
   const child = fork(
-    renderHtmlPath, // ⬅️ CAMBIO 2: El script (path) es el primer argumento de fork (sin necesidad de "node")
-    scriptArgs, // Argumentos posicionales para el script (process.argv)
+    renderHtmlPath, // ⬅️ CHANGE 2: The script (path) is the first argument of fork (no need for "node")
+    scriptArgs, // Positional arguments for the script (process.argv)
     {
       env: {
         NODE_ENV: process.env.NODE_ENV,
         DINOU_BUILD_TOOL: process.env.DINOU_BUILD_TOOL,
-      }, // Puedes pasar otras variables de entorno si es necesario
-      // ⬅️ CAMBIO 3: Aplicamos la Lista Blanca a execArgv, reseteando las opciones heredadas
+      }, // You can pass other environment variables if necessary
+      // ⬅️ CHANGE 3: Apply Whitelist to execArgv, resetting inherited options
       execArgv: childExecArgv,
-      // ⬅️ CAMBIO 4: stdio necesita 'ipc' para que fork funcione y para el canal de comunicación futuro
+      // ⬅️ CHANGE 4: stdio needs 'ipc' for fork to work and for the future communication channel
       stdio: ["ignore", "pipe", "pipe", "ipc"], // stdin, stdout, stderr, ipc
     }
   );
 
-  // 💡 Implementación de on('message') (Canal IPC)
+  // 💡 on('message') Implementation (IPC Channel)
   // ----------------------------------------------------
   child.on("message", (message) => {
     if (message && message.type === "DINOU_CONTEXT_COMMAND") {
@@ -72,16 +72,16 @@ function renderAppToHtml(
       //   `[Dinou] Received context command from child: ${command}`,
       //   args
       // );
-      // Lista de comandos soportados para chequeo rápido
+      // List of supported commands for quick check
       if (
         command === "setHeader" ||
         command === "clearCookie" ||
-        command === "cookie" || // ⬅️ AÑADIDO
+        command === "cookie" || // ⬅️ ADDED
         command === "status" ||
         command === "redirect"
       ) {
         // ============================================================
-        // ESCENARIO 1: EL STREAMING YA EMPEZÓ (Headers enviados)
+        // SCENARIO 1: STREAMING ALREADY STARTED (Headers sent)
         // ============================================================
         if (res.headersSent) {
           // --- REDIRECT (JS Injection) ---
@@ -105,7 +105,7 @@ function renderAppToHtml(
             return;
           }
 
-          // --- CLEAR COOKIE (JS Injection - Solo Non-HttpOnly) ---
+          // --- CLEAR COOKIE (JS Injection - Only Non-HttpOnly) ---
           if (command === "clearCookie") {
             const [name, options] = args;
             const path = options && options.path ? options.path : "/";
@@ -120,26 +120,26 @@ function renderAppToHtml(
             return;
           }
 
-          // --- 🍪 SET COOKIE (Nuevo - JS Injection) ---
+          // --- 🍪 SET COOKIE (New - JS Injection) ---
           if (command === "cookie") {
             const [name, value, options] = args;
 
-            // ⚠️ ADVERTENCIA CRÍTICA:
-            // Si la cookie es HttpOnly, JS no puede escribirla.
+            // ⚠️ CRITICAL WARNING:
+            // If the cookie is HttpOnly, JS cannot write it.
             if (options && options.httpOnly) {
               console.error(
                 `[Dinou Error] Cannot set HttpOnly cookie '${name}' because streaming has already started. ` +
                   `Headers are sent, and document.cookie cannot write HttpOnly cookies.`
               );
-              return; // No hacemos nada porque fallaría silenciosamente en el navegador
+              return; // We do nothing because it would fail silently in the browser
             }
 
             console.log(
               `[Dinou] Streaming active. Setting cookie '${name}' via JS.`
             );
 
-            // Construimos el string de la cookie manualmente para JS
-            // Formato: name=value; path=/; max-age=...
+            // We build the cookie string manually for JS
+            // Format: name=value; path=/; max-age=...
             let cookieStr = `${name}=${encodeURIComponent(value)}`;
 
             if (options) {
@@ -172,26 +172,26 @@ function renderAppToHtml(
       }
 
       // ============================================================
-      // ESCENARIO 2: HEADERS AÚN NO ENVIADOS (Uso normal de Express)
+      // SCENARIO 2: HEADERS NOT YET SENT (Normal Express usage)
       // ============================================================
       if (typeof res[command] === "function") {
-        // Manejo especial de redirect seguro
+        // Special safe redirect handling
         if (command === "redirect") {
-          // 1. Normalizar argumentos (Status y URL)
-          let status = 302; // Default de Express
+          // 1. Normalize arguments (Status and URL)
+          let status = 302; // Express Default
           let rawUrl = "";
 
           if (args.length === 2) {
-            // Firma: redirect(status, url)
+            // Signature: redirect(status, url)
             status = args[0];
             rawUrl = args[1];
           } else {
-            // Firma: redirect(url)
+            // Signature: redirect(url)
             rawUrl = args[0];
           }
 
-          // 2. Lógica de Seguridad (Safe Redirect)
-          // Permitimos solo rutas relativas que empiezan por '/' pero no por '//'
+          // 2. Security Logic (Safe Redirect)
+          // We allow only relative routes starting with '/' but not '//'
           let finalUrl = "/";
 
           if (
@@ -204,15 +204,15 @@ function renderAppToHtml(
             console.warn(
               `[Dinou Security] Blocked unsafe redirect to: ${rawUrl}`
             );
-            // finalUrl se queda en "/"
+            // finalUrl remains "/"
           }
 
-          // 3. Ejecutar redirect seguro usando siempre (status, url)
+          // 3. Execute safe redirect always using (status, url)
           res.redirect.apply(res, [status, finalUrl]);
           return;
         }
 
-        // Ejecución estándar (cookie, clearCookie, status, setHeader)
+        // Standard execution (cookie, clearCookie, status, setHeader)
         res[command].apply(res, args);
       } else {
         console.error(`[Dinou] Unknown context command: ${command}`);
@@ -221,17 +221,17 @@ function renderAppToHtml(
   });
   // ----------------------------------------------------
 
-  // Capturamos errores del child
+  // Capture child errors
   child.on("error", (err) => {
     console.error("Failed to start child process:", err);
   });
 
-  // Escuchamos stderr, replicando el comportamiento de la función original
+  // Listen to stderr, replicating the behavior of the original function
   child.stderr.on("data", (chunk) => {
     console.error(chunk.toString());
   });
 
-  // ⬅️ Retorno idéntico al original, devolviendo solo el stream de HTML
+  // ⬅️ Return identical to original, returning only the HTML stream
   return child.stdout;
 }
 

@@ -33,8 +33,8 @@ const { getErrorJSX } = require("./get-error-jsx");
 const { renderJSXToClientJSX } = require("./render-jsx-to-client-jsx");
 const isDevelopment = process.env.NODE_ENV !== "production";
 const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
-const { requestStorage } = require("./request-context.js"); // Asumimos que está aquí
-const { createResponseProxy } = require("./context-proxy.js"); // ⬅️ Nuevo
+const { requestStorage } = require("./request-context.js");
+const { createResponseProxy } = require("./context-proxy.js");
 
 function formatErrorHtml(error) {
   const message = error.message || "Unknown error";
@@ -135,10 +135,7 @@ async function renderToStream(
   jsxJson
 ) {
   const context = {
-    // Datos serializados de req (query, headers, cookies, etc.)
     req: serializedBox.req,
-
-    // Usamos el Proxy en lugar del objeto res real
     res: createResponseProxy(),
   };
   await requestStorage.run(context, async () => {
@@ -239,10 +236,7 @@ async function renderToStream(
           : {}),
       });
     } catch (error) {
-      // 👇 AÑADIR ESTO: Avisar al padre explícitamente del error 500 antes de morir
       if (context && context.res && typeof context.res.status === "function") {
-        // Si el padre está escuchando, esto le dice "Oye, fue un 500"
-        // aunque luego el exit(1) probablemente tenga prioridad.
         if (!context.res.headersSent) context.res.status(500);
       }
       process.stdout.write(formatErrorHtml(error));

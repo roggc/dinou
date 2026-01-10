@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { fileURLToPath, pathToFileURL } = require("url");
 
-// Lee tsconfig/jsconfig y construye un map de alias -> targetBase
+// Reads tsconfig/jsconfig and builds a map of alias -> targetBase
 function loadTsconfigAliases() {
   const cwd = process.cwd();
   const tsconfigPath = path.resolve(cwd, "tsconfig.json");
@@ -33,17 +33,17 @@ function loadTsconfigAliases() {
     const targets = paths[key];
     if (!targets || !targets.length) continue;
 
-    // Normaliza: el primer target es el que usaremos
+    // Normalize: the first target is the one we will use
     let target = Array.isArray(targets) ? targets[0] : targets;
 
-    // Soportar patterns con /* al final: "@/*" -> "src/*"
+    // Support patterns with /* at the end: "@/*" -> "src/*"
     const keyIsWildcard = key.endsWith("/*");
     const targetIsWildcard = target.endsWith("/*");
 
     const alias = keyIsWildcard ? key.slice(0, -1) : key; // "@/"
-    const targetBase = targetIsWildcard ? target.slice(0, -1) : target; // "src" o "../lib"
+    const targetBase = targetIsWildcard ? target.slice(0, -1) : target; // "src" or "../lib"
 
-    // resolvemos el targetBase relativo a baseUrl si no es absoluto
+    // we resolve the targetBase relative to baseUrl if it is not absolute
     const resolvedTargetBase = path.resolve(absoluteBase, targetBase);
 
     map.set(alias, {
@@ -58,7 +58,7 @@ function loadTsconfigAliases() {
 
 const aliasMap = loadTsconfigAliases();
 
-// Añadir extensiones si no existen
+// Add extensions if they do not exist
 function tryExtensions(filePath) {
   if (fs.existsSync(filePath) && fs.statSync(filePath).isFile())
     return filePath;
@@ -67,7 +67,7 @@ function tryExtensions(filePath) {
     const f = filePath + ext;
     if (fs.existsSync(f) && fs.statSync(f).isFile()) return f;
   }
-  // Si es carpeta, probar index.*
+  // If it is a folder, try index.*
   if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
     for (const ext of exts) {
       const f = path.join(filePath, "index" + ext);

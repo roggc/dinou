@@ -1,5 +1,5 @@
 const path = require("path");
-const fs = require("fs").promises; // Usamos promesas
+const fs = require("fs").promises;
 const { existsSync, copyFileSync } = require("fs");
 const generateStaticPage = require("./generate-static-page");
 const { buildStaticPage } = require("./build-static-pages");
@@ -23,7 +23,6 @@ function revalidating(reqPath, isDynamicFromServer) {
     Date.now() > generatedAt + revalidate;
 
   if (isExpired && !regenerating.has(reqPath)) {
-    // 1. BACKUP (Mantenemos tu lógica de backup para servir algo mientras regeneramos)
     try {
       if (existsSync(path.join(dist2Folder, reqPath, "index.html")))
         copyFileSync(
@@ -35,9 +34,7 @@ function revalidating(reqPath, isDynamicFromServer) {
           path.join(dist2Folder, reqPath, "rsc.rsc"),
           path.join(dist2Folder, reqPath, "rsc._old.rsc")
         );
-    } catch (e) {
-      /* Ignorar errores de copia */
-    }
+    } catch (e) {}
 
     regenerating.add(reqPath);
 
@@ -45,7 +42,6 @@ function revalidating(reqPath, isDynamicFromServer) {
       try {
         console.log(`[ISR] Starting regeneration for ${reqPath}...`);
         const isDynamic = {};
-        // A. Construir datos
         await buildStaticPage(reqPath, isDynamic);
         if (isDynamic.value) {
           isDynamicFromServer.value = true;
@@ -53,44 +49,27 @@ function revalidating(reqPath, isDynamicFromServer) {
             `[ISR] Bailout detected for ${reqPath}. Switching to Dynamic.`
           );
 
-          return; // 👋 Salimos sin hacer nada, la página es dinámica
+          return;
         }
-        // B. Generar HTML y RSC en PARALELO (Archivos .tmp) 🚀
+
         const [pageResult, rscResult] = await Promise.all([
           generateStaticPage(reqPath),
           generateStaticRSC(reqPath),
         ]);
 
-        // =========================================================
-        // 🔒 COMMIT TRANSACCIONAL (Todo o Nada)
-        // =========================================================
-
-        // Verificamos si AMBOS tuvieron éxito (Status != 500)
         if (pageResult.success && rscResult.success) {
           await safeRename(pageResult.tempPath, pageResult.finalPath);
-
-          // 2. Renombrar RSC (.tmp -> .rsc)
-          // AQUÍ es donde solía fallar el EPERM
           await safeRename(rscResult.tempPath, rscResult.finalPath);
-          // // 1. Renombrar HTML (.tmp -> .html)
-          // await fs.rename(pageResult.tempPath, pageResult.finalPath);
-
-          // // 2. Renombrar RSC (.tmp -> .rsc)
-          // await fs.rename(rscResult.tempPath, rscResult.finalPath);
-
-          // 3. Actualizar Manifiesto (Usamos el status del HTML que es el principal)
           updateStatus(reqPath, pageResult.status);
           isDynamicFromServer.value = false;
           console.log(
             `✅ [ISR] Successfully committed ${reqPath} (Status: ${pageResult.status})`
           );
         } else {
-          // 🛑 ABORTAR: Al menos uno falló (probablemente 500)
           console.warn(
             `⚠️ [ISR] Partial failure for ${reqPath}. Aborting commit.`
           );
 
-          // Borrar temporales (limpieza)
           await fs.unlink(pageResult.tempPath).catch(() => {});
           await fs.unlink(rscResult.tempPath).catch(() => {});
         }
