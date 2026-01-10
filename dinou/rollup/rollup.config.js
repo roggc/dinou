@@ -29,26 +29,26 @@ const isEjected = fs.existsSync(localDinouPath);
 
 console.log(
   isEjected
-    ? "🚀 [Dinou] Modo Eyectado detectado (Usando código local)"
-    : "📦 [Dinou] Modo Librería detectado (Usando node_modules)"
+    ? "🚀 [Dinou] Ejected Mode detected (Using local code)"
+    : "📦 [Dinou] Library Mode detected (Using node_modules)"
 );
 
 // ----------------------------------------------------------------------
-// 🛠️ MICRO-PLUGIN DE ALIAS (Cero Dependencias)
+// 🛠️ ALIAS MICRO-PLUGIN (Zero Dependencies)
 // ----------------------------------------------------------------------
 function localDinouAlias() {
   return {
     name: "local-dinou-alias",
     resolveId(source) {
-      // Si importan "dinou", devolvemos la ruta absoluta local
+      // If "dinou" is imported, return local absolute path
       if (source === "dinou") {
         return localDinouPath;
       }
-      // // Si importan "dinou/navigation", devolvemos la ruta absoluta local
+      // // If "dinou/navigation" is imported, return local absolute path
       // if (source === "dinou/navigation") {
       //   return localNavigationPath;
       // }
-      return null; // Si no es dinou, dejamos que otros plugins resuelvan
+      return null; // If not dinou, let other plugins resolve
     },
   };
 }
@@ -94,14 +94,14 @@ module.exports = async function () {
       format: "esm",
       entryFileNames: isDevelopment ? "[name].js" : "[name]-[hash].js",
       chunkFileNames: isDevelopment ? "[name].js" : "[name]-[hash].js",
-      // 🛑 LA SOLUCIÓN MAGICA 👇
-      // Por defecto es 'true' en algunos casos.
-      // Al ponerlo en 'false', obligas a Rollup a usar el nombre original
-      // de la variable exportada en lugar de 'C', 'a', 'b', etc.
+      // 🛑 THE MAGIC SOLUTION 👇
+      // Defaults to 'true' in some cases.
+      // By setting it to 'false', you force Rollup to use the original exported
+      // variable name instead of 'C', 'a', 'b', etc.
       minifyInternalExports: false,
     },
-    // 🛑 AÑADE ESTA LÍNEA MÁGICA
-    // Le dice a Rollup: "Mantén las firmas (nombres de exportación) de los entry points intactas"
+    // 🛑 ADD THIS MAGIC LINE
+    // Tells Rollup: "Keep entry point signatures (export names) intact"
     preserveEntrySignatures: "exports-only",
     external: [
       "/refresh.js",
@@ -188,13 +188,13 @@ module.exports = async function () {
       exclude: ["public/**", "react_client_manifest/**"],
     },
     onwarn(warning, warn) {
-      // Ignorar warning de eval si viene de nuestro archivo request-context
+      // Ignore eval warning if it comes from our request-context file
       if (warning.code === "EVAL") {
-        // Opcional: Si quieres ser muy específico y solo permitirlo en ese archivo:
+        // Optional: If you want to be very specific and only allow it in that file:
         if (warning.loc && warning.loc.file.includes("request-context.js")) {
           return;
         }
-        // Si quieres matarlo siempre que aparezca (más seguro para evitar ruido):
+        // If you want to kill it whenever it appears (safer to avoid noise):
         // return;
       }
       if (
