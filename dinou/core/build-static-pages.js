@@ -147,7 +147,7 @@ async function buildStaticPages() {
             );
             try {
               if (getStaticPaths) {
-                const paths = getStaticPaths();
+                const paths = await getStaticPaths();
                 for (const pathItem of paths) {
                   // 1. Preparation of Structure and Extraction
                   const currentStructure = [...dynamicStructure, paramName];
@@ -289,7 +289,7 @@ async function buildStaticPages() {
             );
             try {
               if (getStaticPaths) {
-                const paths = getStaticPaths();
+                const paths = await getStaticPaths();
                 for (const pathItem of paths) {
                   const currentStructure = [...dynamicStructure, paramName];
                   const isObject =
@@ -399,7 +399,7 @@ async function buildStaticPages() {
             );
             try {
               if (getStaticPaths) {
-                const paths = getStaticPaths();
+                const paths = await getStaticPaths();
                 for (const pathItem of paths) {
                   // 1. Preparation of Structure and Extraction
                   const currentStructure = [...dynamicStructure, paramName];
@@ -520,7 +520,7 @@ async function buildStaticPages() {
             );
             try {
               if (getStaticPaths) {
-                const paths = getStaticPaths();
+                const paths = await getStaticPaths();
                 for (const pathItem of paths) {
                   const currentStructure = [...dynamicStructure, paramName];
                   const isObject =
@@ -621,7 +621,7 @@ async function buildStaticPages() {
             if (isLocalPage && !dynamic?.()) {
               try {
                 if (getStaticPaths) {
-                  const paths = getStaticPaths();
+                  const paths = await getStaticPaths();
                   for (const pathItem of paths) {
                     const currentStructure = dynamicStructure;
                     const isObject =
