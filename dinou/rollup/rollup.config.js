@@ -1,4 +1,5 @@
 const path = require("path");
+const fs = require("fs");
 const postcss = require("rollup-plugin-postcss");
 const babel = require("@rollup/plugin-babel").default;
 const resolve = require("@rollup/plugin-node-resolve").default;
@@ -19,6 +20,39 @@ const manifestGeneratorPlugin = require("./rollup-plugins/manifest-generator-plu
 const isDevelopment = process.env.NODE_ENV !== "production";
 const outputDirectory = isDevelopment ? "public" : "dist3";
 
+const localDinouPath = path.resolve(process.cwd(), "dinou/index.js");
+// const localNavigationPath = path.resolve(
+//   process.cwd(),
+//   "dinou/core/navigation.js"
+// );
+const isEjected = fs.existsSync(localDinouPath);
+
+console.log(
+  isEjected
+    ? "🚀 [Dinou] Ejected Mode detected (Using local code)"
+    : "📦 [Dinou] Library Mode detected (Using node_modules)"
+);
+
+// ----------------------------------------------------------------------
+// 🛠️ ALIAS MICRO-PLUGIN (Zero Dependencies)
+// ----------------------------------------------------------------------
+function localDinouAlias() {
+  return {
+    name: "local-dinou-alias",
+    resolveId(source) {
+      // If "dinou" is imported, return local absolute path
+      if (source === "dinou") {
+        return localDinouPath;
+      }
+      // // If "dinou/navigation" is imported, return local absolute path
+      // if (source === "dinou/navigation") {
+      //   return localNavigationPath;
+      // }
+      return null; // If not dinou, let other plugins resolve
+    },
+  };
+}
+
 module.exports = async function () {
   const del = (await import("rollup-plugin-delete")).default;
   return {
@@ -38,6 +72,10 @@ module.exports = async function () {
             __dirname,
             "../core/server-function-proxy.js"
           ),
+          dinouClientRedirect: path.resolve(
+            __dirname,
+            "../core/client-redirect.jsx"
+          ),
         }
       : {
           main: path.resolve(__dirname, "../core/client.jsx"),
@@ -46,19 +84,33 @@ module.exports = async function () {
             __dirname,
             "../core/server-function-proxy.js"
           ),
+          dinouClientRedirect: path.resolve(
+            __dirname,
+            "../core/client-redirect.jsx"
+          ),
         },
     output: {
       dir: outputDirectory,
       format: "esm",
       entryFileNames: isDevelopment ? "[name].js" : "[name]-[hash].js",
       chunkFileNames: isDevelopment ? "[name].js" : "[name]-[hash].js",
+      // 🛑 THE MAGIC SOLUTION 👇
+      // Defaults to 'true' in some cases.
+      // By setting it to 'false', you force Rollup to use the original exported
+      // variable name instead of 'C', 'a', 'b', etc.
+      minifyInternalExports: false,
     },
+    // 🛑 ADD THIS MAGIC LINE
+    // Tells Rollup: "Keep entry point signatures (export names) intact"
+    preserveEntrySignatures: "exports-only",
     external: [
       "/refresh.js",
       "/__hmr_client__.js",
       "/__SERVER_FUNCTION_PROXY__",
+      // "dinou",
     ],
     plugins: [
+      isEjected && localDinouAlias(),
       del({
         targets: [
           `${outputDirectory}/*`,
@@ -82,7 +134,7 @@ module.exports = async function () {
         preferBuiltins: false,
       }),
       commonjs({
-        include: /node_modules/,
+        include: isEjected ? [/node_modules/, /dinou/] : /node_modules/,
         transformMixedEsModules: true,
       }),
       dinouAssetPlugin({
@@ -136,6 +188,15 @@ module.exports = async function () {
       exclude: ["public/**", "react_client_manifest/**"],
     },
     onwarn(warning, warn) {
+      // Ignore eval warning if it comes from our request-context file
+      if (warning.code === "EVAL") {
+        // Optional: If you want to be very specific and only allow it in that file:
+        if (warning.loc && warning.loc.file.includes("request-context.js")) {
+          return;
+        }
+        // If you want to kill it whenever it appears (safer to avoid noise):
+        // return;
+      }
       if (
         warning.message.includes(
           'Module level directives cause errors when bundled, "use client"'

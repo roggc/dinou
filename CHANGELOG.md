@@ -5,15 +5,82 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.0.0]
+
+### 🚀 Major Release
+
+This release marks a significant milestone for Dinou.
+
+**Key Highlights:**
+
+- **Public Typed API:** Import everything directly from `dinou`.
+- **Hybrid Rendering Engine:** Automatic static/dynamic switching (Bailout).
+- **SPA Experience:** Soft navigation, prefetching, and client-side caching.
+- **Security Hardening:** Context isolation in Server Functions.
+
+---
+
+### 💥 Breaking Changes
+
+- **Server Functions Context:** The `{ req, res }` object is **no longer injected** as the last argument to Server Functions.
+  - **Migration:** Use the new `getContext()` hook inside your function body to access request/response objects.
+- **Page Props:** Pages and Layouts no longer receive `searchParams` or `query` as props.
+  - **Migration:** Use the `useSearchParams()` hook for client-side or server-side access.
+
+### ✨ Features
+
+#### 📦 Core & API
+
+- **`dinou` Export:** Introduced the main package export containing all hooks, types, and utilities.
+- **`getContext()`:** New synchronous utility function to safely access `req` (cookies, headers, query) and `res` (cookie setting, redirects) within Server Components and Server Functions.
+- **Universal `redirect()`:** Intelligent redirect helper that performs an HTTP 307 on the server (hard navigation) and a router replacement on the client (soft navigation).
+
+#### ⚡ Rendering & Performance
+
+- **ISG (Incremental Static Generation):** New pages can now be generated on-demand after build time.
+- **Automatic Bailout:** The engine now automatically opts out of static generation if dynamic APIs (cookies, headers, searchParams) are accessed during render.
+- **Async `getStaticPaths`:** `getStaticPaths` in page functions can now be asynchronous, allowing for database-driven static paths.
+- **ISR Fixes:** Complete overhaul of the Incremental Static Regeneration system for reliability.
+
+#### 🧭 Routing & Navigation
+
+- **Soft Navigation (SPA):** Full client-side router implementation. Navigating between pages no longer triggers a full browser refresh.
+- **`<Link>` Component:** New component with built-in:
+  - **Prefetching:** Loads data on hover.
+  - **Freshness Control:** `fresh` prop to bypass cache.
+  - **Scroll Management:** Intelligent scroll restoration.
+- **Nested Dynamic Routes:** Support for complex nested dynamic patterns (e.g., `/shop/[category]/[product]`).
+- **New Hooks:**
+  - `useRouter()`: Programmatic navigation (`push`, `replace`, `back`, `forward`, `refresh`).
+  - `usePathname()`: Reactive current path access.
+  - `useSearchParams()`: Reactive query string access.
+  - `useNavigationLoading()`: Global navigation state for loading indicators.
+- **`ClientRedirect`:** Component for immediate client-side redirection on mount.
+
+### 🛡️ Security
+
+- **Context Isolation:** Removed implicit context passing to prevent accidental leakage of sensitive request data in Server Functions.
+- **Typed Headers & Cookies:** `getContext().req.headers` and `cookies` are now fully typed and read-only by default to enforce security best practices.
+
+### 🐛 Fixed
+
+- **Static Generation:** Fixed `collectPages` (buildStaticPages) to correctly identify and generate nested dynamic routes.
+- **Dynamic Parameters:** Fixed `getFilePathAndDynamicParams` logic to correctly resolve complex nested slugs and catch-all routes.
+- **RSC Stream:** Corrected handling of `BigInt` and `Map` types during the RSC stream transfer.
+
+### 🧪 Testing
+
+- **E2E Suite:** Introduced a comprehensive End-to-End test suite using **Playwright** to ensure framework stability across routing, rendering, and hydration scenarios.
+
 ## [3.0.6]
 
-## Security
+### Security
 
 - Fix: Use fixes from React versions 19.2.3 and improve security of server function endpoint.
 
 ## [3.0.5]
 
-## Security
+### Security
 
 - Fix: set minimum version for react-server-dom-webpack to 19.2.1.
 

@@ -2,7 +2,7 @@ const path = require("path");
 const { existsSync, rmSync } = require("fs");
 const generateStaticRSCs = require("./generate-static-rscs");
 const generateStaticPages = require("./generate-static-pages");
-const getStaticPaths = require("./get-static-paths");
+const { getStaticPaths } = require("./jsx-json");
 const { buildStaticPages } = require("./build-static-pages");
 
 async function generateStatic() {
@@ -14,7 +14,7 @@ async function generateStatic() {
   }
 
   await buildStaticPages();
-  const routes = await getStaticPaths();
+  const routes = getStaticPaths();
   console.log("Static paths:", routes);
   await generateStaticPages(routes);
   await generateStaticRSCs(routes);

@@ -28,6 +28,15 @@ function getConfigFileIfExists() {
 
 const configFile = getConfigFileIfExists();
 
+const localDinouPath = path.resolve(process.cwd(), "dinou/index.js");
+const isEjected = fs.existsSync(localDinouPath);
+
+console.log(
+  isEjected
+    ? "🚀 [Dinou] Ejected Mode detected (Webpack: Using local code)"
+    : "📦 [Dinou] Library Mode detected (Webpack: Using node_modules)"
+);
+
 module.exports = async () => {
   const [cssEntries] = await getCSSEntries();
   return {
@@ -43,6 +52,11 @@ module.exports = async () => {
         __dirname,
         "../core/server-function-proxy-webpack.js"
       ),
+      dinouClientRedirect: path.resolve(
+        __dirname,
+        "../core/client-redirect.jsx"
+      ),
+      dinouLink: path.resolve(__dirname, "../core/link.jsx"),
       ...[...cssEntries].reduce(
         (acc, cssEntry) => ({
           ...acc,
@@ -84,7 +98,9 @@ module.exports = async () => {
           include: [
             path.resolve(process.cwd(), "src"),
             path.resolve(__dirname, "../core"),
-          ],
+            path.resolve(process.cwd(), "node_modules/dinou"),
+            isEjected && path.resolve(process.cwd(), "dinou"),
+          ].filter(Boolean),
           use: {
             loader: "babel-loader",
             options: {
@@ -202,6 +218,10 @@ module.exports = async () => {
     resolve: {
       extensions: [".js", ".jsx", ".ts", ".tsx"],
       modules: ["src", "node_modules"],
+      // 🎯 ADD THIS:
+      alias: {
+        ...(isEjected ? { dinou: localDinouPath } : {}),
+      },
       plugins: configFile
         ? [
             new TsconfigPathsPlugin({
@@ -212,18 +232,37 @@ module.exports = async () => {
         : [],
     },
     // externals: {
-    //   // __SERVER_FUNCTION_PROXY__: "__SERVER_FUNCTION_PROXY__",
-    //   // "/__SERVER_FUNCTION_PROXY__": "/__SERVER_FUNCTION_PROXY__",
-    //   // serverFunctionProxy: "/serverFunctionProxy.js",
+    //   dinou: "dinou",
     // },
     optimization: {
+      // 2. RUNTIME CHUNK: Vital for sharing module state between entry points
+      runtimeChunk: "single",
+
       splitChunks: {
+        chunks: "all", // Applies to async and sync chunks
         cacheGroups: {
+          // Specific group for React and critical libraries
+          reactVendor: {
+            test: /[\\/]node_modules[\\/](react|react-dom|react-server-dom-webpack|scheduler)[\\/]/,
+            name: "vendor-react",
+            priority: 40, // High priority to ensure they are grouped here
+            chunks: "all",
+            enforce: true,
+          },
+          // Your styles (what you already had)
           styles: {
             name: "styles",
             type: "css/mini-extract",
             chunks: "all",
             enforce: true,
+          },
+          // Rest of node_modules
+          defaultVendors: {
+            test: /[\\/]node_modules[\\/]/,
+            name: "vendors",
+            priority: 20,
+            chunks: "all",
+            reuseExistingChunk: true,
           },
         },
       },
@@ -231,7 +270,7 @@ module.exports = async () => {
     watchOptions: {
       ignored: ["public/", "dist3/"],
     },
-    stats: "normal", // o 'verbose' en dev
+    stats: "normal", // or 'verbose' in dev
     infrastructureLogging: {
       level: "info",
     },

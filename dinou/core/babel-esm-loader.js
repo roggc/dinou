@@ -29,7 +29,7 @@ exports.resolve = async function resolve(specifier, context, defaultResolve) {
 exports.load = async function load(url, context, defaultLoad) {
   // --- 🟢 Handle non-JS assets (png, jpg, etc.)
   const assetExts = extensionsWithDot;
-  const ext = path.extname(url.split("?")[0]); // remove query params if any
+  const ext = path.extname(url.split("?")[0]); // remove search params if any
 
   if (assetExts.includes(ext)) {
     // Return a tiny stub that mimics what asset-require-hook would do

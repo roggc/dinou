@@ -42,20 +42,11 @@ function renderJSXToClientJSX(jsx, key = null) {
     throw new Error(`Unsupported symbol: ${String(jsx)}`);
   } else if (typeof jsx === "object") {
     if (jsx.$$typeof === Symbol.for("react.transitional.element")) {
-      if (jsx.type === Symbol.for("react.fragment")) {
-        return {
-          ...jsx,
-          props: renderJSXToClientJSX(jsx.props),
-          key: key ?? jsx.key,
-        };
-      } else if (jsx.type === Symbol.for("react.suspense")) {
-        return {
-          ...jsx,
-          props: renderJSXToClientJSX(jsx.props),
-          key: key ?? jsx.key,
-        };
-      } else if (typeof jsx.type === "string") {
-        // HTML elements (e.g., <div>, <h1>)
+      if (
+        jsx.type === Symbol.for("react.fragment") ||
+        jsx.type === Symbol.for("react.suspense") ||
+        typeof jsx.type === "string"
+      ) {
         return {
           ...jsx,
           props: renderJSXToClientJSX(jsx.props),
@@ -129,24 +120,11 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
     throw new Error(`Unsupported symbol: ${String(jsx)}`);
   } else if (typeof jsx === "object") {
     if (jsx.$$typeof === Symbol.for("react.transitional.element")) {
-      if (jsx.type === Symbol.for("react.fragment")) {
-        return {
-          ...jsx,
-          props: {
-            ...(await asyncRenderJSXToClientJSX(jsx.props, key ?? jsx.key)),
-            key: key ?? jsx.key,
-          },
-        };
-      } else if (jsx.type === Symbol.for("react.suspense")) {
-        return {
-          ...jsx,
-          props: {
-            ...(await asyncRenderJSXToClientJSX(jsx.props, key ?? jsx.key)),
-            key: key ?? jsx.key,
-          },
-        };
-      } else if (typeof jsx.type === "string") {
-        // HTML elements (e.g., <div>, <h1>)
+      if (
+        jsx.type === Symbol.for("react.fragment") ||
+        jsx.type === Symbol.for("react.suspense") ||
+        typeof jsx.type === "string"
+      ) {
         return {
           ...jsx,
           props: {

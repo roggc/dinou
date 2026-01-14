@@ -24,10 +24,10 @@ const extensions = [
 
 const globPattern = `**/*.{${extensions.join(",")}}`;
 
-// 🔹 regex útil para plugins tipo Rollup/PostCSS
+// 🔹 regex useful for Rollup/PostCSS type plugins
 const regex = new RegExp(`\\.(${extensions.join("|")})$`, "i");
 
-// 🔹 versión con punto para comparaciones directas
+// 🔹 version with dot for direct comparisons
 const extensionsWithDot = extensions.map((ext) => `.${ext}`);
 
 module.exports = { extensions, extensionsWithDot, regex, globPattern };

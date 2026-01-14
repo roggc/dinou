@@ -5,21 +5,39 @@ const {
   getFilePathAndDynamicParams,
 } = require("./get-file-path-and-dynamic-params");
 const importModule = require("./import-module");
+const { asyncRenderJSXToClientJSX } = require("./render-jsx-to-client-jsx");
 
-async function getJSX(reqPath, query, cookies) {
+async function getJSX(
+  reqPath,
+  query,
+  isNotFound = null,
+  isDevelopment = false
+) {
   const srcFolder = path.resolve(process.cwd(), "src");
   const reqSegments = reqPath.split("/").filter(Boolean);
-  const folderPath = path.join(srcFolder, ...reqSegments);
+  const hasRouterSyntax = reqSegments.some((seg) => {
+    const isGroup = seg.startsWith("(") && seg.endsWith(")");
+
+    const isDynamic = seg.startsWith("[") && seg.endsWith("]");
+    const isSlot = seg.startsWith("@");
+
+    return isGroup || isDynamic || isSlot;
+  });
+
   let pagePath;
-  if (existsSync(folderPath)) {
-    for (const ext of [".tsx", ".ts", ".jsx", ".js"]) {
-      const candidatePath = path.join(folderPath, `page${ext}`);
-      if (existsSync(candidatePath)) {
-        pagePath = candidatePath;
+  if (!hasRouterSyntax) {
+    const folderPath = path.join(srcFolder, ...reqSegments);
+    if (existsSync(folderPath)) {
+      for (const ext of [".tsx", ".ts", ".jsx", ".js"]) {
+        const candidatePath = path.join(folderPath, `page${ext}`);
+        if (existsSync(candidatePath)) {
+          pagePath = candidatePath;
+          break;
+        }
       }
     }
   }
-  let dynamicParams;
+  let dynamicParams = {};
 
   if (!pagePath) {
     const [filePath, dParams] = getFilePathAndDynamicParams(
@@ -35,6 +53,7 @@ async function getJSX(reqPath, query, cookies) {
   let pageFunctionsProps;
 
   if (!pagePath) {
+    if (isNotFound) isNotFound.value = true;
     const [notFoundPath, dParams] = getFilePathAndDynamicParams(
       reqSegments,
       query,
@@ -54,7 +73,7 @@ async function getJSX(reqPath, query, cookies) {
       const Page = pageModule.default ?? pageModule;
       jsx = React.createElement(Page, {
         params: dParams ?? {},
-        query,
+        // searchParams: query,
       });
 
       const notFoundDir = path.dirname(notFoundPath);
@@ -67,12 +86,13 @@ async function getJSX(reqPath, query, cookies) {
       }
     }
   } else {
+    if (isNotFound) isNotFound.value = false;
     const pageModule = await importModule(pagePath);
     const Page = pageModule.default ?? pageModule;
 
     let props = {
       params: dynamicParams,
-      query,
+      // searchParams: query,
     };
 
     const pageFolder = path.dirname(pagePath);
@@ -89,7 +109,7 @@ async function getJSX(reqPath, query, cookies) {
     if (pageFunctionsPath) {
       const pageFunctionsModule = await importModule(pageFunctionsPath);
       const getProps = pageFunctionsModule.getProps;
-      pageFunctionsProps = await getProps?.(dynamicParams, query, cookies);
+      pageFunctionsProps = await getProps?.(dynamicParams);
       props = { ...props, ...(pageFunctionsProps?.page ?? {}) };
     }
 
@@ -134,7 +154,63 @@ async function getJSX(reqPath, query, cookies) {
         false
       )[0];
       const Layout = layoutModule.default ?? layoutModule;
-      let props = { params: dParams, query, ...slots };
+      const updatedSlots = {};
+      for (const [slotName, slotElement] of Object.entries(slots)) {
+        let updatedSlotElement;
+        try {
+          await asyncRenderJSXToClientJSX(slotElement);
+          updatedSlotElement = slotElement;
+        } catch (e) {
+          const slotFilePath = slotElement.props?.__modulePath;
+
+          if (slotFilePath) {
+            const realSlotFolder = path.dirname(slotFilePath);
+
+            const [slotErrorPath, slotErrorParams] =
+              getFilePathAndDynamicParams(
+                reqSegments,
+                query,
+                realSlotFolder,
+                "error",
+                true, // withExtension
+                true, // finalDestination
+                undefined, // lastFound
+                reqSegments.length
+              );
+
+            if (slotErrorPath) {
+              const slotErrorModule = require(slotErrorPath);
+              const SlotError = slotErrorModule.default ?? slotErrorModule;
+
+              const serializedError = {
+                message: e.message || "Unknown Error",
+                name: e.name,
+                stack: isDevelopment ? e.stack : undefined,
+              };
+
+              updatedSlotElement = React.createElement(SlotError, {
+                params: slotErrorParams,
+                // searchParams: query,
+                key: slotName,
+                error: serializedError,
+              });
+            } else {
+              console.warn(
+                `[Dinou] Slot @${slotName} failed and does not have error.tsx`
+              );
+              updatedSlotElement = null;
+            }
+          } else {
+            console.error(
+              `[Dinou] Could not locate the path of the slot @${slotName}`
+            );
+            updatedSlotElement = null;
+          }
+        } finally {
+          updatedSlots[slotName] = updatedSlotElement;
+        }
+      }
+      let props = { params: dParams, /*searchParams: query,*/ ...updatedSlots };
       if (index === layouts.length - 1 || resetLayoutPath) {
         props = { ...props, ...(pageFunctionsProps?.layout ?? {}) };
       }

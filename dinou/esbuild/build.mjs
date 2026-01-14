@@ -4,6 +4,7 @@ import getConfigEsbuildProd from "./helpers-esbuild/get-config-esbuild-prod.mjs"
 import getEsbuildEntries from "./helpers-esbuild/get-esbuild-entries.mjs";
 import { fileURLToPath } from "url";
 import path from "node:path";
+import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-module.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,6 +13,11 @@ const outdir = "dist3";
 await fs.rm(outdir, { recursive: true, force: true });
 await fs.rm("react_client_manifest", { recursive: true, force: true });
 await fs.rm("server_functions_manifest", { recursive: true, force: true });
+
+const absPathToClientRedirect = path.resolve(
+  __dirname,
+  "../core/client-redirect.jsx"
+);
 
 const frameworkEntryPoints = {
   main: path.resolve(__dirname, "../core/client.jsx"),
@@ -25,6 +31,7 @@ const frameworkEntryPoints = {
     __dirname,
     "react-refresh/react-refresh-entry.js"
   ),
+  dinouClientRedirect: absPathToClientRedirect,
 };
 
 try {
@@ -32,6 +39,13 @@ try {
 
   const [esbuildEntries, detectedCSSEntries, detectedAssetEntries] =
     await getEsbuildEntries({ manifest });
+
+  updateManifestForModule(
+    absPathToClientRedirect,
+    await fs.readFile(absPathToClientRedirect, "utf8"),
+    true,
+    manifest
+  );
 
   const componentEntryPoints = [...esbuildEntries].reduce(
     (acc, dCE) => ({ ...acc, [dCE.outfileName]: dCE.absPath }),

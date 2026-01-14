@@ -1,969 +1,1068 @@
-# **Dinou**: **A React 19 Framework**
+# **Dinou**
 
-[**Dinou**](https://dinou.dev) is a **React 19 framework**. "dinou" means 19 in Catalan. You can create a Dinou [app](https://github.com/roggc/dinou-app) by running the command **`npx create-dinou@latest my-app`**.
+### **Full-Stack React 19 Framework**
 
-Or you can create one by yourself with the following steps:
+---
 
-- Create an npm project (`npm init -y`)
+Support for React Server Components (RSC), Server-Side Rendering (SSR), Static Generation (SSG), Incremental Static Generation (ISG), and Incremental Static Regeneration (ISR).
 
-- Install dependencies (`npm i react react-dom dinou`)
+## Key Features
 
-- Create scripts in `package.json` for convenience:
-
-  - "dev": "dinou dev"
-
-  - "build": "dinou build"
-
-  - "start": "dinou start"
-
-  - "eject": "dinou eject"
-
-- Create an `src` folder with a `page.jsx` (or `.tsx`)
-
-  ```typescript
-  "use client";
-
-  export default function Page() {
-    return <>hi world!</>;
-  }
-  ```
-
-- Run `npm run dev` (or `npx dinou dev`) to see the page in action in your browser.
-
-- If you run `npm run eject` (or `npx dinou eject`), Dinou will be ejected and copied to your root project folder, so you can customize it.
-
-Dinou main features are:
-
-- File-based routing system.
-
-- SSR (Server Side Rendering)
-
-- SSG (Static Site Generation)
-
-- ISR (Incremental Static Regeneration)
-
-- Pure React 19: Server Functions, `Suspense`, Server Components, ...
-
-- TypeScript or JavaScript
-
-- Full control and customization through the command `npm run eject` (`npx dinou eject`)
-
-- Support for the use of `.css`, `.module.css`, and `Tailwind.css`
-
-- Support for the use of images in your components (`.png`, `.jpeg`, `.jpg`, `.gif`, `.svg`, `.webp`)
-
-- Support for the use of an import alias in `tsconfig.json` or `jsconfig.json` file.
-
-- Error handling with `error.tsx` pages, differentiating behaviour in production and in development.
+- **React Server Components:** Built on the React 19 core, leveraging Suspense and Streaming for optimal performance without client-side waterfalls.
+- **Server Functions:** Type-safe RPC actions. Execute server-side logic directly from your components without creating manual API endpoints.
+- **Automatic Static Bailout:** Static by default (SSG). Automatically switches to Dynamic Rendering (SSR) when request-specific data (cookies, headers, search params) is detected.
+- **Full-Featured Router:** Client-side soft navigation including `push`, `replace`, `back`, `forward`, and `refresh` (soft reload).
+- **Generation Strategies:** Comprehensive support for Incremental Static Regeneration (ISR) and Incremental Static Generation (ISG).
+- **Bundler Agnostic:** The only framework that lets you choose your build engine. Switch between Webpack, Rollup, or Esbuild via configuration.
+- **Smart Navigation:** `<Link>` component with automatic prefetching and opt-in `fresh` data fetching for volatile states.
+- **File-System Routing:** Intuitive routing based on `page.{jsx,tsx}` files located within the `src` directory structure.
 
 ## Table of contents
 
-- [Routing system, layouts, pages, not found pages, ...](#routing-system-layouts-pages-not-found-pages-)
-
-- [page_functions.ts (or `.tsx`, `.js`, `.jsx`)](#page_functionsts-or-tsx-js-jsx)
-
-- [Fetching data with `Suspense`](#fetching-data-with-suspense)
-
-- [Fetching data in the server without `Suspense` (revisited)](#fetching-data-in-the-server-without-suspense-revisited)
-
-- [`page_functions.ts` (revisited)](#page_functionsts-revisited)
-
-- [Server Components](#server-components)
-
-- [Client Components](#client-components)
-
-- [Server Functions](#server-functions)
-
-- [Dynamic Parameters (`params` prop)](#dynamic-parameters-params-prop)
-
-- [Query Parameters (`query` prop)](#query-parameters-query-prop)
-
-- [Navigation between pages (routes)](#navigation-between-pages-routes)
-
-- [Routing System revisited (in depth)](#routing-system-revisited-in-depth)
-
-  - [Base Directory](#base-directory)
-
-  - [Route Types](#route-types)
-
-    - [Static Routes](#static-routes)
-
-    - [Dynamic Routes](#dynamic-routes)
-
-    - [Optional Dynamic Routes](#optional-dynamic-routes)
-
-    - [Catch-All Routes](#catch-all-routes)
-
-    - [Optional Catch-All Routes](#optional-catch-all-routes)
-
-    - [Route Groups](#route-groups)
-
-    - [Parallel Routes (Slots)](#parallel-routes-slots)
-
-  - [Layouts](#layouts)
-
-  - [Not Found Handling](#not-found-handling)
-
-  - [Error Handling](#error-handling)
-
-- [`favicons` folder](#favicons-folder)
-
-- [`.env` file](#env-file)
-
-- [Styles (Tailwind.css, .module.css, and .css)](#styles-tailwindcss-modulecss-and-css)
-
-- [Assets or media files (image, video, and sound)](#assets-or-media-files-image-video-and-sound)
-
-- [Import alias (e.g. `"@/..."`)](#import-alias-eg-)
-
-- [How to run a Dinou app](#how-to-run-a-dinou-app)
-
-- [Eject Dinou](#eject-dinou)
-
+- [Getting Started](#getting-started)
+  - [Quick Start (CLI)](#quick-start-cli)
+  - [Manual Setup](#manual-setup)
+- [Routing](#routing)
+  - [Basic & Dynamic Routes](#basic--dynamic-routes)
+  - [Important: Optional Segments Rules](#important-optional-segments-rules)
+  - [Advanced Routing](#advanced-routing)
+  - [Navigation](#navigation)
+- [Layouts & Hierarchical Rendering](#layouts--hierarchical-rendering)
+  - [Layouts (`layout.jsx`)](#layouts-layoutjsx)
+  - [Error Handling (`error.jsx`)](#error-handling-errorjsx)
+  - [Not Found (`not_found.jsx`)](#not-found-not_foundjsx)
+  - [Advanced Layout Control (Flags)](#advanced-layout-control-flags)
+- [Data Fetching & Rendering](#data-fetching--rendering)
+  - [Server Components (Async Data)](#server-components-async-data)
+  - [Hybrid Rendering Engine](#hybrid-rendering-engine)
+  - [Incremental Static Regeneration (ISR)](#incremental-static-regeneration-isr)
+  - [Client Components](#client-components)
+- [Server Functions (`"use server"`) & Smart Suspense](#server-functions-use-server--smart-suspense)
+  - [Usage in Client Components (Reactive)](#usage-in-client-components-reactive)
+  - [Usage in Server Components (Streaming)](#usage-in-server-components-streaming)
+- [Advanced Patterns: The "Dinou Pattern"](#advanced-patterns-the-dinou-pattern)
+  - [The Concept](#the-concept)
+  - [Implementation](#implementation)
+- [Page Configuration (`page_functions.ts`)](#page-configuration-page_functionsts)
+  - [1. `getProps` (Static/Layout Data Injection)](#1-getprops-staticlayout-data-injection)
+  - [2. `getStaticPaths` (Static Generation)](#2-getstaticpaths-static-generation)
+  - [3. `revalidate` (ISR)](#3-revalidate-isr)
+  - [4. `dynamic` (Force SSR)](#4-dynamic-force-ssr)
+- [📚 API Reference](#-api-reference)
+  - [1. Components (`dinou`)](#1-components-dinou)
+  - [2. Hooks & Utilities (`dinou`)](#2-hooks--utilities-dinou)
+  - [3. Server-Only Utilities (`dinou`)](#3-server-only-utilities-dinou)
+  - [4. Page Configuration (`page_functions.ts`)](#4-page-configuration-page_functionsts)
+  - [5. File Conventions Cheatsheet](#5-file-conventions-cheatsheet)
+- [🎨 Favicons](#-favicons)
+- [🔐 Environment Variables (`.env`)](#-environment-variables-env)
+- [💅 Styles (Tailwind, CSS Modules, & Global CSS)](#-styles-tailwind-css-modules--global-css)
+  - [1. Link the Stylesheet](#1-link-the-stylesheet)
+  - [2. Full Example (Layout + Global CSS + Modules)](#2-full-example-layout--global-css--modules)
+- [🖼️ Assets & Media](#️-assets--media)
+- [🔗 Import Aliases (`@/`)](#-import-aliases-)
+- [⚡ Bundlers & Running the App](#-bundlers--running-the-app)
+  - [Development](#development)
+  - [Production Build](#production-build)
+  - [Start Production Server](#start-production-server)
+- [⏏️ Eject Dinou](#️-eject-dinou)
 - [🚀 Deployment](#-deployment)
-
 - [📦 Changelog](#-changelog)
+- [📄 License](#-license)
 
-- [License](#license)
+## Getting Started
 
-## Routing system, layouts, pages, not found pages, ...
+### Quick Start (CLI)
 
-- Routes are defined by defining a `page.tsx` file (or `.jsx`) in a folder.
+The fastest way to scaffold a new application is using the CLI generator:
 
-- Route "/" corresponds to the `src` folder.
+```bash
+npx create-dinou@latest my-app
+cd my-app
+npm run dev
+```
 
-- You can define layouts and nested layouts by defining a `layout.tsx` (or `.jsx`) file in a folder. A layout file found in a folder wraps a layout file found in a more nested folder, and finally composition of all layouts found in a route hierarchy wraps the `page` component or `not_found` component.
+### Manual Setup
 
-- You can define not found pages by defining `not_found.tsx` (or `.jsx`) file in a folder. If more than a `not_found.tsx` file is found in a route hierarchy, the more nested one will be used.
+Alternatively, you can set up a project manually:
 
-- If you don't want a `page` to be applied layouts define a `no_layout` file (without extension) in the same folder. A `no_layout` file, if present, also applies to the `not_found` file if present in the same folder. There exists also a `no_layout_not_found` file if you don't want a `not_found` file to be applied layouts but you do in `page` component.
+1. **Install dependencies:**
 
-- `reset_layout` file (without extension) if present in the same folder as a `layout.tsx` file, will ignore previous layouts in the layout hierarchy.
+   ```bash
+   npm install react react-dom dinou
+   ```
 
-- If found any `error.tsx` (or `.jsx`) page in the route hierarchy, the more nested one will be rendered in case of error in the page. Layouts are also applied to error pages if no `no_layout` or `no_layout_error` files (without extension) exists in the folder where `error.tsx` is defined.
+2. **Create the structure:**
+   Create a `src` directory in the root of your project and add an entry `page.jsx` file:
 
-## page_functions.ts (or `.tsx`, `.js`, `.jsx`)
+   ```jsx
+   // src/page.jsx
+   export default function Page() {
+     return <h1>Hello, Dinou!</h1>;
+   }
+   ```
 
-`page_functions.ts` is a file for defining four diferent possible functions. These are:
+3. **Start the server:**
 
-- `getProps`: a function to fetch data in the server and pass this data as props to the page component and the root layout (if exists).
+   ```bash
+   npx dinou dev
+   ```
 
-  ```typescript
-  // src/dynamic/[name]/page_functions.ts
-  export async function getProps(
-    params: { name: string },
-    query: Record<string, string>,
-    cookies: Record<string, string>
-  ) {
-    const data = await new Promise<string>((r) =>
-      setTimeout(() => r(`Hello ${params.name}`), 2000)
-    );
+## Routing
 
-    return { page: { data }, layout: { title: data } };
-  }
-  ```
+Dinou uses a file-system based router. Files named `page.{jsx,tsx,js,ts}` inside the `src` directory automatically become routes.
 
-- `getStaticPaths`: function to get the values of a dynamic param in the route for which SSG will be applied. Fetching data in the server with `getProps` or within the body of a Server Component increases the FCP (First Contentful Paint), that is, when the user sees something on the screen, when rendering dynamically, that is, on the fly. So this technique must only be used if acompanied by SSG (Static Site Generation). This means that at build time the data is fetched so when a user requests a page statically generated at build time he/she hasn't to wait for the data to be fetched on the server. This is good for SEO, when data is necessary for SEO.
+### Basic & Dynamic Routes
 
-  ```typescript
-  // src/dynamic/[name]/page_functions.ts
-  export async function getProps(
-    params: { name: string },
-    query: Record<string, string>,
-    cookies: Record<string, string>
-  ) {
-    const data = await new Promise<string>((r) =>
-      setTimeout(() => r(`Hello ${params.name}`), 2000)
-    );
+| Pattern                | File Path                       | URL Example   | Params (`params`)           |
+| :--------------------- | :------------------------------ | :------------ | :-------------------------- |
+| **Static**             | `src/page.jsx`                  | `/`           | `{}`                        |
+| **Dynamic**            | `src/blog/[slug]/page.jsx`      | `/blog/hello` | `{ slug: "hello" }`         |
+| **Optional Dynamic**   | `src/blog/[[slug]]/page.jsx`    | `/blog`       | `{ slug: undefined }`       |
+| **Catch-all**          | `src/blog/[...slug]/page.jsx`   | `/blog/a/b/c` | `{ slug: ["a", "b", "c"] }` |
+| **Optional Catch-all** | `src/blog/[[...slug]]/page.jsx` | `/blog`       | `{ slug: [] }`              |
 
-    return { page: { data }, layout: { title: data } };
-  }
+> **Note:** To access query parameters (e.g. `?q=hello`), use the `useSearchParams()` hook. They are NOT passed as props.
 
-  export function getStaticPaths() {
-    return ["albert", "johan", "roger", "alex"];
-  }
-  ```
+### Important: Optional Segments Rules
 
-- `dynamic`: this function is for when we want the page to be rendered dynamically, bypassing a possible statically generated file. It must return `true` to render a page dynamically. Otherwise the rendering system will use the statically generated file if exists.
+Dinou supports deep nesting of optional segments (`[[...]]` or `[[slug]]`), but it enforces a strict **No-Gap Rule**.
 
-  ```typescript
-  export function dynamic() {
-    return true;
-  }
-  ```
+> **The Rule:** You cannot skip an intermediate optional segment. You can only omit parameters if they are at the **end of the URL**.
 
-- `revalidate`: this function is for when we want to revalidate data fetched in SSG.
+#### ✅ Allowed: "Trailing Omission"
 
-  ```typescript
-  export function revalidate() {
-    return 60000; // ms
-  }
-  ```
+You can leave optional segments undefined, but only if they are the last ones in the structure.
 
-## Fetching data with `Suspense`
+- **Structure:** `src/inventory/[[warehouse]]/[[aisle]]/page.tsx`
 
-- We have already seen that data can be fetched on the server with the `getProps` function or within the body of a Server Component, but this needs to be accompanied of a mechanism of SSG of the page/s to not increase the FCP.
+| URL                  | Result (`params`)                            | Status                          |
+| :------------------- | :------------------------------------------- | :------------------------------ |
+| `/inventory/main/a1` | `{ warehouse: "main", aisle: "a1" }`         | ✅ **Full**                     |
+| `/inventory/main`    | `{ warehouse: "main", aisle: undefined }`    | ✅ **Valid** (Last one omitted) |
+| `/inventory`         | `{ warehouse: undefined, aisle: undefined }` | ✅ **Valid** (All omitted)      |
 
-- There is an alternative that do not increase FCP even when rendering dynamically and that is to use `Suspense` for data fetching, either in the server (in a Server Component) and in the client (in a Client Component).
+#### ❌ Forbidden: "Intercalated Undefined" (Gaps)
 
-  ```typescript
-  // src/posts/post.tsx
-  "use client";
+It is **not possible** to define a later segment while skipping an earlier one.
 
-  export type PostType = {
-    title: string;
-    content: string;
-  };
+- **Structure:** `src/inventory/[[warehouse]]/[[aisle]]/page.tsx`
 
-  export default function Post({ post }: { post: PostType }) {
-    return (
-      <>
-        <h1>{post.title}</h1>
-        <div>{post.content}</div>
-      </>
-    );
-  }
-  ```
-
-  ```typescript
-  // src/posts/get-post.tsx
-  "use server";
-
-  import Post from "./post";
-  import type { PostType } from "./post";
-
-  export async function getPost() {
-    const post = await new Promise<PostType>((r) =>
-      setTimeout(
-        () => r({ title: "Post Title", content: "Post content" }),
-        1000
-      )
-    );
-
-    return <Post post={post} />;
-  }
-  ```
-
-  ```typescript
-  // src/posts/page.tsx
-  "use client";
-
-  import Suspense from "react-enhanced-suspense";
-  import { getPost } from "./get-post";
-
-  export default function Page() {
-    return (
-      <>
-        <Suspense fallback={<div>Loading...</div>} resourceId="get-post">
-          {() => getPost()}
-        </Suspense>
-      </>
-    );
-  }
-  ```
-
-- In Client Components, the `resourceId` prop together with passing a function to the `children` prop of `Suspense` from `react-enhanced-suspense` makes the promise returned by the Server Function stable between re-renders, and it is only reinvoked the Server Function whenever the `resourceId` changes.
-
-- The same can be done with `page.tsx` being a Server Component. In that case we would not use the `resourceId` prop and we will call directly the Server Function:
-
-  ```typescript
-  // src/posts/page.tsx
-  import Suspense from "react-enhanced-suspense";
-  import { getPost } from "./get-post";
-
-  export default async function Page({ data }: { data: string }) {
-    return (
-      <>
-        <Suspense fallback={<div>Loading...</div>}>{getPost()}</Suspense>
-      </>
-    );
-  }
-  ```
-
-- `Suspense` from [react-enhanced-suspense](https://www.npmjs.com/package/react-enhanced-suspense) is React's `Suspense` when no extra prop is used.
-
-## Fetching data in the server without `Suspense` (revisited)
-
-This option is useful for SSG (Static Site Generated) pages. **When used with dynamic rendering (no SSG) it increases the FCP (First Contentful Paint), that is, when the user sees something rendered on the page**.
-
-The recommended way to use it is with `page.tsx` being a Client Component and defining a **`page_functions.ts`** with **`getProps`** function defined and exported. The other option is to use a Server Component for `page.tsx` instead of a Client Component and do the fetch in the body of the Server Component (`async` function) or, what is equivalent, use the `getProps` function defined and exported in `page_functions.ts` too.
-
-Pages in **static routes** (e.g. `/some/route`) are statically generated (SSG) if no `dynamic` function returning `true` is defined and exported in a `page_functions.ts`. Therefore, statically generated pages for static routes will be served if no query params are present in the request. **If there are query params pages will be served dynamically**.
-
-Pages in **dynamic routes** (e.g. `/[id]`, or `/[[id]]`, `[...id]`, `[[...id]]`) are statically generated (SSG) if no `dynamic` function returning `true` is defined and exported in a `page_functions.ts`, for those values of the dynamic param returned by function `getStaticPaths` defined and exported in `page_functions.ts`. Again, if **query params** are used in the request of the page, then it will be **rendered dynamically**, affecting the FCP (increasing it). Or those requests using dynamic params not returned by `getStaticPaths` will also be rendered dynamically.
-
-- Example with **optional catch-all dynamic route**:
-
-  ```typescript
-  // src/catch-all-optional/[[..names]]/page.tsx
-  "use client";
-
-  export default function Page({
-    params: { names },
-    data,
-  }: {
-    params: { names: string[] };
-    data: string;
-  }) {
-    return (
-      <>
-        {names}
-        {data}
-      </>
-    );
-  }
-  ```
-
-  ```typescript
-  // src/catch-all-optional/[[..names]]/page_functions.ts
-  export async function getProps(
-    params: { names: string[] },
-    query: Record<string, string>,
-    cookies: Record<string, string>
-  ) {
-    const data = await new Promise<string>((r) =>
-      setTimeout(() => r(`Hello ${params.names.join(",")}`), 2000)
-    );
-
-    return { page: { data }, layout: { title: data } };
-  }
-
-  export function getStaticPaths() {
-    return [["albert"], ["johan"], ["roger"], ["alex"], ["albert", "johan"]];
-  }
-  ```
-
-  In this case statically generated routes will be `/catch-all-optional`, `/catch-all-optional/albert`, `/catch-all-optional/johan`, `/catch-all-optional/roger`, `/catch-all-optional/alex`, and `/catch-all-optional/albert/johan`. Any other route starting by `/catch-all-optional/*` will be rendered dynamically, increasing the FCP by 2 secs (2000 ms) in this particular case.
-
-  The same example works with `page.tsx` being a Server Component.
-
-- Example with **catch-all dynamic route**:
-
-  ```typescript
-  // src/catch-all/[...names]/page.tsx
-  "use client";
-
-  export default function Page({
-    params: { names },
-    data,
-  }: {
-    params: { names: string[] };
-    data: string;
-  }) {
-    return (
-      <>
-        {names}
-        {data}
-      </>
-    );
-  }
-  ```
-
-  ```typescript
-  // src/catch-all/[...names]/page_functions.ts
-  export async function getProps(
-    params: { names: string[] },
-    query: Record<string, string>,
-    cookies: Record<string, string>
-  ) {
-    const data = await new Promise<string>((r) =>
-      setTimeout(() => r(`Hello ${params.names.join(",")}`), 2000)
-    );
-
-    return { page: { data }, layout: { title: data } };
-  }
-
-  export function getStaticPaths() {
-    return [["albert"], ["johan"], ["roger"], ["alex"], ["albert", "johan"]];
-  }
-  ```
-
-  In this case statically generated routes will be `/catch-all/albert`, `/catch-all/johan`, `/catch-all/roger`, `/catch-all/alex`, and `/catch-all/albert/johan`. `/catch-all` will render `not_found.tsx` page (the more nested one existing in the route hierarchy) if no `page.tsx` is defined in this route. Any other route starting by `/catch-all/*` will be rendered dynamically, increasing the FCP by 2 secs (2000 ms) in this particular case.
-
-  The same example works with `page.tsx` being a Server Component.
-
-- Example with **optional dynamic route**:
-
-  ```typescript
-  // src/optional/[[name]]/page.tsx
-  "use client";
-
-  export default function Page({
-    params: { name },
-    data,
-  }: {
-    params: { name: string };
-    data: string;
-  }) {
-    return (
-      <>
-        {name}
-        {data}
-      </>
-    );
-  }
-  ```
-
-  ```typescript
-  // src/optional/[[name]]/page_functions.ts
-  export async function getProps(
-    params: { name: string },
-    query: Record<string, string>,
-    cookies: Record<string, string>
-  ) {
-    const data = await new Promise<string>((r) =>
-      setTimeout(() => r(`Hello ${params.name ?? ""}`), 2000)
-    );
-
-    return { page: { data }, layout: { title: data } };
-  }
-
-  export function getStaticPaths() {
-    return ["albert", "johan", "roger", "alex"];
-  }
-  ```
-
-  In this case statically generated routes will be `/optional`, `/optional/albert`, `/optional/johan`, `/optional/roger`, and `/optional/alex`. Any other route as `/optional/other-name` will be rendered dynamically, increasing the FCP by 2 secs (2000 ms) in this particular case.
-
-  The same example works with `page.tsx` being a Server Component.
-
-- Example with **dynamic route**:
-
-  ```typescript
-  // src/dynamic/[name]/page.tsx
-  "use client";
-
-  export default function Page({
-    params: { name },
-    data,
-  }: {
-    params: { name: string };
-    data: string;
-  }) {
-    return (
-      <>
-        {name}
-        {data}
-      </>
-    );
-  }
-  ```
-
-  ```typescript
-  // src/dynamic/[name]/page_functions.ts
-  export async function getProps(
-    params: { name: string },
-    query: Record<string, string>,
-    cookies: Record<string, string>
-  ) {
-    const data = await new Promise<string>((r) =>
-      setTimeout(() => r(`Hello ${params.name}`), 2000)
-    );
-
-    return { page: { data }, layout: { title: data } };
-  }
-
-  export function getStaticPaths() {
-    return ["albert", "johan", "roger", "alex"];
-  }
-  ```
-
-  In this case statically generated routes will be `/dynamic/albert`, `/dynamic/johan`, `/dynamic/roger`, and `/dynamic/alex`. `/dynamic` will render `not_found.tsx` page (the more nested one existing in the route hierarchy) if no `page.tsx` is defined in this route. Any other route as `/dynamic/other-name` will be rendered dynamically, increasing the FCP by 2 secs (2000 ms) in this particular case.
-
-  The same example works with `page.tsx` being a Server Component.
-
-- Example with **static route**:
-
-  ```typescript
-  // src/static/page.tsx
-  "use client";
-
-  export default function Page({ data }: { data: string }) {
-    return <>{data}</>;
-  }
-  ```
-
-  ```typescript
-  // src/static/page_functions.ts
-  export async function getProps(
-    params: Record<string, string>,
-    query: Record<string, string>,
-    cookies: Record<string, string>
-  ) {
-    const data = await new Promise<string>((r) =>
-      setTimeout(() => r(`data`), 2000)
-    );
-
-    return { page: { data }, layout: { title: data } };
-  }
-  ```
-
-  In this case the static generated route will be `/static`. If query params are passed to the route (e.g. `/static?some-param`) the route will be rendered dynamically, increasing the FCP by 2 secs (2000 ms) in this particular case.
-
-  The same example works with `page.tsx` being a Server Component.
-
-## `page_functions.ts` (revisited)
-
-The framework supports a `page_functions.ts` (or `.tsx`, `.jsx`, `.js`) file in any route directory to define route-specific logic, such as static path generation, dynamic rendering control, revalidation of fetched data in SSG, and custom page and root layout props.
-
-- Supported Functions:
-
-  - **`getStaticPaths`**: Defines static paths for dynamic routes during SSG.
-
-  - **`getProps`**: This is where you can fetch your data. Fetches or computes additional props for a page or root layout.
-
-  - **`dynamic`**: Controls whether a route is dynamically rendered (bypassing SSG).
-
-  - **`revalidate`**: Specifies a time in ms for when we want to revalidate data fetched during SSG.
-
-- Example:
-
-  ```typescript
-  // src/blog/[id]/page_functions.tsx
-  export function getStaticPaths() {
-    // Return an array of possible 'id' values for SSG
-    return ["1", "2", "3"];
-  }
-
-  export async function getProps(
-    params: { id: string },
-    query: Record<string, string>,
-    cookies: Record<string, string>
-  ) {
-    // Fetch data based on the 'id' parameter
-    const post = await fetch(`https://api.example.com/posts/${params.id}`).then(
-      (res) => res.json()
-    );
-    return { page: { post }, layout: { title: post.title } };
-  }
-
-  export function dynamic() {
-    // Force dynamic rendering (skip SSG) if needed
-    return false; // Set to true to bypass SSG
-  }
-
-  export function revalidate() {
-    return 60000;
-  }
-  ```
-
-- How It Works:
-
-  - `getStaticPaths`: Used for dynamic routes (`[id]`), optional dynamic routes (`[[id]]`), catch-all routes (`[...slug]`), or optional catch-all routes (`[[...slug]]`). The returned paths are pre-rendered during SSG.
-
-  - `getProps`: The returned props are merged with `params` and `query` and passed to the `page.tsx` component. The same for the root layout (if exists).
-
-  - `dynamic`: If `dynamic() { return true; }`, the route is rendered dynamically at request time, bypassing SSG.
-
-  - `revalidate`: The returned time by this function marks when a statically generated page will be regenerated in the background (ISR or Incremental Static Regeneration).
-
-- Usage in a page:
-
-  ```typescript
-  // src/blog/[id]/page.tsx
-  "use client";
-
-  export default function Page({
-    params,
-    post,
-  }: {
-    params: { id: string };
-    post: { title: string; content: string };
-  }) {
-    return (
-      <div>
-        <h1>{post.title}</h1>
-        <p>{post.content}</p>
-      </div>
-    );
-  }
-  ```
-
-- Usage in root layout (the first layout in the route hierarchy):
-
-  ```typescript
-  "use client";
-
-  import type { ReactNode } from "react";
-
-  export default function Layout({
-    children,
-    sidebar,
-    title,
-  }: {
-    children: ReactNode;
-    sidebar: ReactNode;
-    title: string;
-  }) {
-    return (
-      <html lang="en">
-        <head>
-          <title>{title ?? "react 19 app"}</title>
-        </head>
-        <body>
-          {sidebar}
-          {children}
-        </body>
-      </html>
-    );
-  }
-  ```
-
-## Server Components
-
-- Server Components in this implementation are distinguished by the fact they are `async` functions. So when defining them, **make them `async` always**, whether or not they use `await` in their definition or function body. This is necessary for the framework to know they are Server Components and execute them.
-
-## Client Components
-
-- Client Components need to have the directive `"use client";` at the top of the file if they are not imported in other Client Components. That's the case of pages for example, that they are not imported directly in another Client Component. So when defining pages as Client Components **remember to use the directive `"use client";`**. The same applies for layouts, not found pages and error pages. In general, to avoid surprises, is a good practice to put the directive `"use client";` in all Client Components.
-
-## Server Functions
-
-- Server Functions are functions executed in the server. To define a Server Function use the directive `"use server";` at the top of the file where you define the Server Function. **Server Functions** can be invoked from either a Server Component or a Client Component and **can return Client Components**.
-
-- You can access the `req` and `res` objects from express in the Server Function by adding an extra parameter in the definition, the last one:
-
-```typescript
-"use server";
-
-export async function doSomething(myParam, { req, res }) {
-  // ...
+| Goal                                    | Result                                                                                 |
+| :-------------------------------------- | :------------------------------------------------------------------------------------- |
+| **Skip `warehouse` but define `aisle`** | ❌ **Forbidden**: You cannot provide an `aisle` without providing a `warehouse` first. |
+
+#### Catch-all Constraints
+
+Due to their "greedy" nature (consuming the rest of the URL), Catch-all segments (`[...]` and `[[...]]`) must always be the **terminal (last) segment** of a route definition. You cannot place other static or dynamic folders inside a Catch-all folder.
+
+---
+
+### Advanced Routing
+
+#### Route Groups `(folder)`
+
+Folders wrapped in parentheses are omitted from the URL path. This is useful for organizational purposes.
+
+- `src/(auth)/login/page.jsx` → **`/login`**
+- `src/(marketing)/about/page.jsx` → **`/about`**
+- `src/(marketing)/(nested)/about/page.jsx` → **`/about`**
+
+**Why use them?**
+Route Groups allow you to keep your project structure logical without affecting the public URL structure. For example, grouping all authentication-related routes together.
+
+#### Parallel Routes `@slot`
+
+You can define slots (e.g., `@sidebar`, `@header`) to render multiple pages in the same layout simultaneously.
+
+- `src/dashboard/@sidebar/page.jsx`
+- `src/dashboard/(group-a)/@bottom/page.jsx`
+- `src/dashboard/layout.jsx` → Receives `sidebar` and `bottom` as props.
+
+> **Note:** Slots must be located in the same logical folder as the layout they serve.
+
+**Why use them?**
+Parallel routes allow independent UI sections and **Error Containment**:
+
+1. **Server Component with `error.jsx`:** If the slot fails, only that specific slot renders the error UI.
+2. **Server Component without `error.jsx`:** If the slot fails, it renders `null` safely.
+3. **Client Component:** Without an explicit React Error Boundary, an unhandled error here will crash the entire page.
+
+### Navigation
+
+#### Using `<Link>` (Recommended)
+
+The `<Link>` component provides optimized client-side transitions with automatic prefetching.
+
+```jsx
+"use client";
+import { Link } from "dinou";
+
+export default function Menu() {
+  return (
+    <nav>
+      {/* Prefetches data automatically on hover/viewport */}
+      <Link href="/about">About Us</Link>
+
+      {/* Opt-in for fresh data (bypasses cache) */}
+      <Link href="/dashboard" fresh>
+        Dashboard
+      </Link>
+    </nav>
+  );
 }
 ```
 
-- In the previous example, the Server Function should be called only with `myParam` as argument. The last argument with references to `req` and `res` from `express` is added by Dinou.
+> **Note:** Standard HTML `<a>` tags also trigger client-side soft navigation via global event delegation in Dinou, but they lack the smart features (prefetching, `fresh` prop) provided by the `<Link>` component.
 
-## Dynamic Parameters (`params` prop)
+#### Programmatic Navigation
 
-- Components (`page.tsx`, `layout.tsx`, and `not_found.tsx`) receive a `params` prop that contains **dynamic parameters** (from the route, e.g., `{ id: "123" }` for `/blog/[id]`).
+Use the `useRouter` hook inside Client Components (`"use client"`).
 
-- Examples:
+```jsx
+"use client";
+import { useRouter } from "dinou";
 
-  - For `/blog/[id]/page.tsx`, accessing `/blog/123` passes `{ params: { id: "123" } }`.
+export default function Controls() {
+  const router = useRouter();
 
-  - For `/wiki/[...slug]/page.tsx`, accessing `/wiki/a/b` passes `{ params: { slug: ["a", "b"] } }`.
+  return (
+    <div>
+      <button onClick={() => router.push("/home")}>Push</button>
+      <button onClick={() => router.replace("/home")}>Replace</button>
+      <button onClick={() => router.back()}>Go Back</button>
+      <button onClick={() => router.forward()}>Go Forward</button>
 
-  - For `/blog/[[category]]/page.tsx`, accessing `/blog` passes `{ params: { category: undefined } }`, and `/blog/tech` passes `{ params: { category: "tech" } }`.
+      {/* Soft Reload: Refetches server data without a browser refresh */}
+      <button onClick={() => router.refresh()}>Refresh Data</button>
+    </div>
+  );
+}
+```
 
-  - For `/wiki/[[...slug]]/page.tsx`, accessing `/wiki` passes `{ params: { slug: [] } }`, and `/wiki/a/b` passes `{ params: { slug: ["a", "b"] } }`.
+## Layouts & Hierarchical Rendering
 
-## Query Parameters (`query` prop)
+Dinou uses a nested routing system. Layouts, Error pages, and Not Found pages cascade down the directory hierarchy.
 
-- Components (`page.tsx`, `layout.tsx`, and `not_found.tsx`) receive a `query` prop that contains **query parameters** from the URL (e.g., `{query: { category: "tech" }}` for `?category=tech`).
+### Layouts (`layout.jsx`)
 
-- Examples:
+Layouts wrap pages and child layouts. They persist across navigation, preserving state and preventing unnecessary re-renders.
 
-  - For `/blog/[id]/page.tsx`, accessing `/blog/123?category=tech` passes `{ query: { category: "tech" }, params: {id: 123} }`. <!--In SSG, it passes `{ query: {} }`.>
+A layout component receives a `children` prop, `params` (route parameters), and any parallel slot (e.g., `sidebar`) defined in the same folder scope.
 
-  - For `/search/page.tsx`, accessing `/search?term=react&page=2` passes `{ query: { term: "react", page: "2" }, params: {} }`. <!--In SSG, it passes `{ query: {} }`.>
+> **Note:** `searchParams` are NOT passed to layouts.
 
-  - For `/blog/[[category]]/page.tsx`, accessing `/blog/tech?sort=asc` passes `{ params: { category: "tech" }, query: { sort: "asc" } }`. <!--In SSG, it passes `{ params: { category: "tech" }, query: {} }`.>
-
-  - For `/wiki/[...slug]/page.tsx`, accessing `/wiki/a/b?lang=en` passes `{ params: { slug: ["a", "b"] }, query: { lang: "en" } }`.<!-- In SSG, it passes `{ params: { slug: ["a", "b"] }, query: {} }`.>
-
-  - For `/search/page.tsx`, accessing `/search` passes `{ query: {}, params: {} }`.
-
-- **Example Usage**:
-
-  ```typescript
-  // src/blog/[id]/page.tsx
-  "use client";
-
-  export default function Page({
-    params,
-    query,
-  }: {
-    params: { id: string };
-    query: { category: string | undefined; sort: string | undefined };
-  }) {
-    return (
-      <div>
-        <h1>Blog ID: {params.id}</h1>
-        <h2>Category: {query.category ?? "none"}</h2>
-        <p>Sort Order: {query.sort ?? "default"}</p>
-      </div>
-    );
-  }
-  ```
-
-## Navigation between pages (routes)
-
-- To navigate programmatically between pages you do:
-
-  ```typescript
-  // src/route/page.tsx
-  "use client";
-
-  export default function Page() {
-    const handleNavigate = () => {
-      window.location.assign("/route-2?foo=bar");
-    };
-
-    return (
-      <div>
-        <button onClick={handleNavigate}>Go to /route-2</button>
-      </div>
-    );
-  }
-  ```
-
-- Use anchor tags to allow the user navigate between pages:
-
-  ```typescript
-  // src/page.tsx
-  export default async function Page() {
-    return (
-      <>
-        <a href="/route-1?foo=bar">go to route-1</a>
-      </>
-    );
-  }
-  ```
-
-## Routing System revisited (in depth)
-
-The routing system is file-based and supports static routes, dynamic routes, optional dynamic routes, catch-all routes, optional catch-all routes, route groups, and parallel routes (slots).
-
-### Base Directory
-
-- All routes are resolved relative to the `src/` directory.
-
-- A route is defined by a `page.tsx` (or `.jsx`) file in a directory.
-
-- Layouts are defined by `layout.tsx` (or `.jsx`) files, which wrap the content of pages or nested layouts.
-
-- Not found pages are defined by `not_found.tsx` (or `.jsx`) files.
-
-- Slots are defined by folders starting with `@` (e.g., `@sidebar`), containing a `page.tsx` file.
-
-### Route Types
-
-- #### Static Routes
-
-  - Defined by a directory structure with a `page.tsx` file.
-
-  - Examples:
-
-    - `src/page.tsx` → "/"
-
-    - `src/about/page.tsx` → "/about" (or "/about/")
-
-    - `src/blog/post/page.tsx` → "/blog/post" (or "/blog/post/")
-
-  - The `page.tsx` file in each directory defines the content for that route.
-
-- #### Dynamic Routes
-
-  - Defined by directories named with square brackets, e.g., `[param]`.
-
-  - The parameter value is extracted from the URL and passed to the page component as `params[param]`.
-
-  - Example:
-
-    - `src/blog/[id]/page.tsx` → "/blog/:id"
-
-    - Accessing `/blog/123` passes `{params: { id: "123" }}` to the `page.tsx` component.
-
-  - Requires a `page.tsx` file in the dynamic directory.
-
-- #### Optional Dynamic Routes
-
-  - Defined by directories named `[[param]]`.
-
-  - Matches a single segment or no segment at all.
-
-  - Example:
-
-    - `src/blog/[[category]]/page.tsx` → "/blog" or "/blog/:category"
-
-    - Accessing `/blog` passes `{params: { category: undefined }}`.
-
-    - Accessing `/blog/tech` passes `{params: { category: "tech" }}`.
-
-- #### Catch-All Routes
-
-  - Defined by directories named `[...param]`.
-
-  - Captures all remaining URL segments as an array in `params[param]`.
-
-  - Example:
-
-    - `src/wiki/[...slug]/page.tsx` → "/wiki/\*"
-
-    - Accessing `/wiki/a/b/c` passes `{params: { slug: ["a", "b", "c"] }}`.
-
-  - Useful for handling arbitrary nested paths.
-
-- #### Optional Catch-All Routes
-
-  - Defined by directories named `[[...param]]`.
-
-  - Similar to catch-all routes but also matches the parent route (i.e., when no segments are provided).
-
-  - Example:
-
-    - `src/wiki/[[...slug]]/page.tsx` → "/wiki" or "/wiki/\*"
-
-    - Accessing `/wiki` passes `{params: { slug: [] }}`.
-
-    - Accessing `/wiki/a/b` passes `{params: { slug: ["a", "b"] }}`.
-
-  - Provides flexibility for routes that may or may not have additional segments.
-
-- #### Route Groups
-
-  - Defined by directories named with parentheses, e.g., `(group)`.
-
-  - Used to organize routes without affecting the URL structure.
-
-  - Example:
-
-    - `src/(auth)/login/page.tsx` → "/login"
-
-    - `src/(auth)/signup/page.tsx` → "/signup"
-
-    - The `(auth)` directory is ignored in the URL, so both routes are at the root level.
-
-  - Useful for grouping related routes (e.g., authentication-related pages) without adding a URL prefix.
-
-- #### Parallel Routes (Slots)
-
-  - Defined by directories starting with `@`, e.g., `@sidebar`.
-
-  - Slots are injected into **layouts** as props, allowing parallel content rendering.
-
-  - Example:
-
-    - `src/@sidebar/page.tsx`
-
-    - `src/page.tsx`
-
-    - `src/layout.tsx`
-
-    - The `@sidebar/page.tsx` content is passed to the `layout.tsx` as `props.sidebar`.
-
-    - In `layout.tsx`, you can render the slot like: `{props.sidebar}`.
-
-  - Example in code:
-
-    ```typescript
-    "use client";
-
-    import type { ReactNode } from "react";
-
-    export default function Layout({
-      children,
-      sidebar,
-    }: {
-      children: ReactNode;
-      sidebar: ReactNode;
-    }) {
-      return (
-        <html lang="en">
-          <head>
-            <title>Dinou app</title>
-          </head>
-          <body>
-            {sidebar}
-            {children}
-          </body>
-        </html>
-      );
-    }
-    ```
-
-  - Slots can be used to render sidebars, headers, or other parallel content.
-
-### Layouts
-
-- Layouts are defined by `layout.tsx` files in the route hierarchy.
-
-- They wrap the content of pages or nested layouts, receiving children (the page or nested layout) and any slots as props.
-
-- Example:
-
-  - `src/layout.tsx`
-
-  - `src/page.tsx`
-
-  - The `layout.tsx` wraps the `page.tsx` content for the "/" route.
-
-- Nested layouts are supported:
-
-  - `src/layout.tsx`
-
-  - `src/blog/layout.tsx`
-
-  - `src/blog/post/page.tsx`
-
-  - For "/blog/post", the `src/layout.tsx` wraps the `src/blog/layout.tsx`, which wraps the `page.tsx` content.
-
-- If a **`no_layout`** file exists in a directory (**without extension**), the layout hierarchy is skipped, and only the page content is rendered.
-
-- If a **`reset_layout`** file (**without extension**) exists in a directory where a `layout.tsx` file is defined, previous layouts in the hierarchy will be ignored.
-
-### Not Found Handling
-
-- If no `page.tsx` is found for a route, the system looks for a `not_found.tsx` file in the route hierarchy.
-
-- Example:
-
-  - `src/not_found.tsx`
-
-  - If "/invalid/route" is accessed and no matching `page.tsx` is found, the `not_found.tsx` component is rendered.
-
-- If no `not_found.tsx` exists, a default "Page not found" message is returned.
-
-- Layouts are applied to `not_found.tsx` pages too, unless a `no_layout` or **`no_layout_not_found`** files (**without extension**) are found in the directory in which the `not_found.tsx` page is defined, in which case layouts will not be applied to `not_found.tsx` page.
-
-### Error Handling
-
-- In case of error in a page, the more nested `error.tsx` (or `.jsx`) page will rendered if exists. **If it does not exist, then in production the error will be written in the console, and in development a default error page will be rendered informing about the error message and the error stack**.
-
-- Layouts are applied to `error.tsx` pages, if no `no_layout` or `no_layout_error` files (without extension) exists in the folder where `error.tsx` is defined.
-
-- `error.tsx` pages are **dynamically rendered**, so avoid using server components (async functions) and fetching data in their body definition because this will delay the rendering of the page. Use `Suspense` instead if you need to fetch data.
-
-- There not exists a `error_functions.ts` functionality, so there is no `getProps` for error pages. Again, if you need to fetch data use `Suspense`.
-
-- The error page receives `params`, `query`, and `error`. `error` is an object with properties `message` and `stack` which are strings.
-
-- Example:
-
-  ```typescript
-  "use client";
-
-  export default function Page({
-    error: { message, stack },
-  }: {
-    error: Error;
-  }) {
-    return (
-      <main className="flex-1 flex flex-col items-center justify-center p-4">
-        <div className="max-w-md w-full text-center space-y-6">
-          <h1 className="text-3xl font-bold text-red-600">Error</h1>
-          <p className="text-lg text-gray-700">
-            An unexpected error has occurred. Please try again later.
-          </p>
-          <a
-            href="/"
-            className="inline-block px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-          >
-            Go to Home
-          </a>
-        </div>
-        <div className="mt-6 text-sm text-gray-500">
-          <pre className="whitespace-pre-wrap break-words">{message}</pre>
-          <pre className="whitespace-pre-wrap break-words">{stack}</pre>
-        </div>
+```jsx
+// src/dashboard/layout.jsx
+export default async function Layout({ children, params, sidebar }) {
+  return (
+    <div className="dashboard-grid">
+      <aside>{sidebar}</aside>
+      <main>
+        <h1>Dashboard for {params.teamId}</h1>
+        {children}
       </main>
-    );
-  }
-  ```
+    </div>
+  );
+}
+```
 
-## `favicons` folder
+Layouts are **nested** by default. A page at `src/dashboard/settings/page.jsx` will be wrapped by:
 
-If you want to show a favicon, generate one with an online tool (e.g. [favicon.io](https://favicon.io/)), unzip the downloaded folder with the favicons, paste it in the root of the project and rename it to `favicons`. Then update your `layout` or `page` to include this in the `head` tag:
+1. `src/layout.jsx` (Root Layout)
+2. `src/dashboard/layout.jsx` (Dashboard Layout)
+3. `src/dashboard/settings/page.jsx` (The Page)
+
+**Fetching data in Layouts:**
+The Root Layout that applies to a specific page can receive additional props by defining a `getProps` function in a `page_functions.ts` file located alongside the page:
+
+```typescript
+// src/foo/bar/page_functions.ts
+export async function getProps({ params }) {
+  // fetch data using route params
+  const data = await fetchData(params.id);
+  // 'layout' props are injected into the Root Layout for this page
+  return { page: { data }, layout: { title: data.name } };
+}
+```
+
+### Error Handling (`error.jsx`)
+
+Create an `error.jsx` file to define an error page for a route segment. If a page throws an error (Server or Client not controlled by an Error Boundary), Dinou looks for the closest `error.jsx` in the directory hierarchy (bubbling up).
+
+`error.jsx` receives `error` (object) and `params` as props.
+
+```jsx
+// Error pages can be Client Components or Server Components
+"use client";
+
+export default function Page({ error, params }) {
+  return (
+    <div>
+      <h2>Something went wrong in {params.slug}!</h2>
+      <p>{`${error.name}: ${error.message}`}</p>
+      {/* error.stack is only defined in development, not in production */}
+      {error.stack && (
+        <pre style={{ background: "#eee", padding: "1rem" }}>{error.stack}</pre>
+      )}
+    </div>
+  );
+}
+```
+
+### Not Found (`not_found.jsx`)
+
+Create a `not_found.jsx` file to customize the 404 UI. Like errors, Dinou renders the closest `not_found.jsx` found traversing up from the requested URL.
+
+`not_found.jsx` receives `params` as a prop. To access search parameters, use `useSearchParams()`.
+
+### Advanced Layout Control (Flags)
+
+Sometimes you need to break out of the standard nested hierarchy (e.g., a Landing Page that shouldn't share the App Layout). Dinou uses **"Flag Files"** (empty files with no extension) to control this behavior.
+
+Place these files in the same directory as your component to activate the behavior.
+
+| Flag File             | Applies To                               | Description                                                                                                                                       |
+| :-------------------- | :--------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `reset_layout`        | `layout.jsx`                             | **Resets the layout tree.** This layout becomes the new Root, ignoring all parent layouts. Perfect for separating Marketing pages from App pages. |
+| `no_layout`           | `page.jsx`, `error.jsx`, `not_found.jsx` | Prevents the component from being wrapped by _any_ layout in the hierarchy.                                                                       |
+| `no_layout_error`     | `error.jsx`                              | Specifically prevents layouts only for the Error page.                                                                                            |
+| `no_layout_not_found` | `not_found.jsx`                          | Specifically prevents layouts only for the Not Found page.                                                                                        |
+
+#### Example: Isolate a Landing Page
+
+If you have a marketing page at `src/marketing/page.jsx` and you don't want it to inherit the Root Layout:
+
+1. Create `src/marketing/layout.jsx` (Your marketing layout).
+2. Create an empty file named `reset_layout` inside `src/marketing/`.
+3. **Result:** `src/marketing/page.jsx` will only use the marketing layout, ignoring the global root layout.
+
+## Data Fetching & Rendering
+
+Dinou leverages React 19 Server Components to allow direct data access on the server without sending that logic to the client.
+
+### Server Components (Async Data)
+
+You can define a React Server Component by using an `async` function.
+
+```jsx
+// src/blog/page.jsx
+import db from "@/lib/db";
+
+export default async function Page() {
+  const posts = await db.query("SELECT * FROM posts");
+
+  return (
+    <ul>
+      {posts.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Hybrid Rendering Engine
+
+Dinou employs a **Zero-Config Hybrid Model**. You do not need to configure pages as "Static" or "Dynamic" manually. The framework decides at runtime:
+
+1. **Static (SSG):** Pages are pre-rendered at start time by default.
+2. **Dynamic (SSR):** If a page utilizes request-specific APIs (Cookies, Headers, Search Params), it automatically opts out of static generation and renders on demand.
+
+```jsx
+import { getContext } from "dinou";
+
+export default async function Profile() {
+  const ctx = getContext();
+  if (!ctx) return null;
+
+  // accessing cookies automatically switches this page to Dynamic Rendering (SSR)
+  const token = ctx.req.cookies.session_token;
+
+  const user = await fetchUser(token);
+  return <h1>Hello, {user.name}</h1>;
+}
+```
+
+### Incremental Static Regeneration (ISR)
+
+You can enable ISR to update static pages in the background without rebuilding the entire site. Export a `revalidate` function from your `page_functions.ts`.
+
+```typescript
+// src/blog/page_functions.ts
+
+// This page will regenerate at most once every 60 seconds
+export function revalidate() {
+  return 60000; // time in milliseconds
+}
+```
+
+### Client Components
+
+To add interactivity (useState, useEffect, event listeners), place the `"use client"` directive at the top of your file.
+
+```jsx
+"use client";
+
+import { useState } from "react";
+
+export default function Counter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount((c) => c + 1)}>{count}</button>;
+}
+```
+
+## Server Functions (`"use server"`) & Smart Suspense
+
+Dinou supports **Server Functions**, allowing you to call server-side logic directly from your Client Components like a Remote Procedure Call (RPC). A unique feature of Dinou is that Server Functions can return **rendered Components** (both Server or Client Components), not just JSON data.
+
+1. Define a function with `"use server"` at the top of the file.
+2. Import and call it from any component.
+
+```jsx
+// src/server-functions/get-post.jsx
+"use server";
+import db from "./db";
+import Post from "@/components/post.jsx";
+
+export async function getPost(postId) {
+  const data = await db.query("SELECT * FROM posts WHERE id = ?", [postId]);
+
+  return <Post post={data} />;
+}
+```
+
+### Usage in Client Components (Reactive)
+
+When used in a Client Component, you can use `react-enhanced-suspense` to automatically re-fetch the Server Function when a key changes.
+
+```jsx
+// src/[id]/page.jsx
+"use client";
+import { getPost } from "@/server-functions/get-post";
+import Suspense from "react-enhanced-suspense";
+
+export default function Page({ params: { id } }) {
+  return (
+    <Suspense fallback="Loading post..." resourceId={`get-post-${id}`}>
+      {() => getPost(id)}
+    </Suspense>
+  );
+}
+```
+
+**How `react-enhanced-suspense` works:**
+
+- **Standard Mode:** If only `children` (as React Nodes) and `fallback` are passed, it behaves exactly like React's native `<Suspense>`.
+- **Enhanced Mode:** If you provide a `resourceId` prop and `children` is a **function**, the promise returned by that function is automatically re-evaluated whenever `resourceId` changes. This is perfect for handling data dependencies without `useEffect`.
+
+### Usage in Server Components (Streaming)
+
+In Server Components, you can simply wrap the async call to stream the result to the client as soon as it is ready.
+
+```jsx
+// src/[id]/page.jsx
+import { getPost } from "@/server-functions/get-post";
+import Suspense from "react-enhanced-suspense";
+
+export default async function Page({ params: { id } }) {
+  return (
+    <div>
+      {/* Behaves like native Suspense (Streaming) */}
+      <Suspense fallback="Loading post...">{getPost(id)}</Suspense>
+    </div>
+  );
+}
+```
+
+## Advanced Patterns: The "Dinou Pattern"
+
+Dinou introduces a powerful pattern for handling mutations and list updates without full page reloads. By combining **Server Functions**, **Global State** (e.g., `jotai-wrapper`), and **`react-enhanced-suspense`**, you can achieve granular reactivity.
+
+### The Concept
+
+In Dinou, **Server Functions can return Client Components**. We leverage this to return a "Headless State Updater" component after a mutation. This component renders nothing but updates a global `resourceId` atom (key), triggering a re-fetch of specific data.
+
+### Implementation
+
+#### 1. The Global Store
+
+Define an atom to hold the `resourceId` key.
+
+```javascript
+// src/atoms.js
+import { atom } from "jotai";
+import getAPIFromAtoms from "jotai-wrapper";
+
+export const { useAtom, useSetAtom, useAtomValue, getAtom, selectAtom } =
+  getAPIFromAtoms({
+    tasksListKey: atom(0),
+    isAddTask: atom(false),
+    // rest of atoms...
+  });
+```
+
+#### 2. The Headless Updater (Client Component)
+
+A tiny component whose only job is to update the atoms when it mounts.
+
+```jsx
+"use client";
+import { useEffect } from "react";
+import { useSetAtom } from "@/atoms";
+
+export default function AddTaskUpdater() {
+  const setTasksListKey = useSetAtom("tasksListKey");
+  const setIsAddTask = useSetAtom("isAddTask");
+
+  useEffect(() => {
+    // Update the key to force a re-fetch
+    setTasksListKey((k) => k + 1);
+    setIsAddTask(false);
+  }, [setTasksListKey, setIsAddTask]);
+
+  return null; // It renders nothing visually
+}
+```
+
+#### 3. The Server Function (Mutation)
+
+Performs the database operation and **returns the Client Component**.
+
+```jsx
+"use server";
+import AddTaskUpdater from "../components/add-task-updater";
+import { tasks } from "./db";
+
+export async function addTask(text) {
+  // Perform DB mutation
+  tasks.push(text);
+
+  // 🪄 Magic: Return the updater to run logic on the client
+  return <AddTaskUpdater />;
+}
+```
+
+#### 4. The Page (Consuming the Pattern)
+
+Use `react-enhanced-suspense` with the `resourceId` prop. When the `resourceId` (in this case `tasksListKey`) changes, the Server Function (`tasksList`) is re-evaluated.
+
+```jsx
+"use client";
+import Suspense from "react-enhanced-suspense";
+import { useAtomValue, useAtom } from "@/atoms";
+import { addTask } from "./server-functions/add-task";
+import { tasksList } from "./server-functions/tasks-list";
+import { useState } from "react";
+
+export default function Page() {
+  const tasksListKey = useAtomValue("tasksListKey");
+  const [isAddTask, setIsAddTask] = useAtom("isAddTask");
+  const [text, setText] = useState("");
+
+  return (
+    <div>
+      {/* The Mutation Form */}
+      <input type="text" onChange={(e) => setText(e.target.value)} />
+      <button onClick={() => setIsAddTask(true)}>Add Task</button>
+
+      {/* Conditionally render the mutation suspense */}
+      {isAddTask && (
+        <Suspense fallback="Adding task..." resourceId="add-task">
+          {() => addTask(text)}
+        </Suspense>
+      )}
+
+      {/* The Reactive List */}
+      {/* Changing resourceId forces Suspense to re-fetch tasksList */}
+      <Suspense
+        fallback={<div>Loading tasks...</div>}
+        resourceId={`tasks-list-${tasksListKey}`}
+      >
+        {() => tasksList()}
+      </Suspense>
+    </div>
+  );
+}
+```
+
+#### 5. The Data Fetching Components
+
+The Server Function responsible for fetching data:
+
+```jsx
+// src/server-functions/tasks-list.jsx
+"use server";
+import { tasks } from "./db";
+import TasksListDisplay from "../components/tasks-list-display";
+
+export async function tasksList() {
+  return <TasksListDisplay tasks={tasks} />;
+}
+```
+
+The Client Component responsible for rendering the list:
+
+```jsx
+// src/components/tasks-list-display.jsx
+"use client";
+
+export default function TasksListDisplay({ tasks }) {
+  return (
+    <div>
+      {tasks.map((t, index) => (
+        <div key={index}>{t}</div>
+      ))}
+    </div>
+  );
+}
+```
+
+## Page Configuration (`page_functions.ts`)
+
+For advanced control over rendering behavior, data fetching, and static generation, you can create a `page_functions.ts` (or `.js`) file next to your `page.jsx`.
+
+### 1. `getProps` (Static/Layout Data Injection)
+
+Use this function to fetch data based on the **route parameters** and inject it into your Page and Layout.
+
+> **Design Note:** `getProps` only receives `params`. To use request-specific data like `searchParams` or `cookies`, fetch data directly inside your Server Components using `Suspense` or Hooks to avoid blocking the initial HTML render.
+
+- **Arguments:** `{ params }` (The dynamic route parameters).
+- **Returns:** An object with `page` and `layout` keys containing the props.
+
+```typescript
+// src/blog/[slug]/page_functions.ts
+
+export async function getProps({ params }) {
+  // 1. Fetch data based on the URL path (e.g., /blog/my-post)
+  const post = await db.getPost(params.slug);
+
+  // 2. Return data.
+  // 'page' props go to page.jsx
+  // 'layout' props go to layout.jsx (useful for setting document titles dynamically)
+  return {
+    page: { post },
+    layout: { title: post.title },
+  };
+}
+```
+
+### 2. `getStaticPaths` (Static Generation)
+
+Defines which dynamic paths should be pre-rendered at server start (SSG).
+
+- **ISG (Incremental Static Generation):** Paths not returned here will be generated on-demand when requested for the first time.
+
+**Return Format:**
+
+Dinou is flexible with the return format depending on the complexity of your route:
+
+| Route Type                  | Best Format            | Example Return                    |
+| :-------------------------- | :--------------------- | :-------------------------------- |
+| **Simple** (`[id]`)         | `Array<string>`        | `["1", "2"]`                      |
+| **Catch-all** (`[...slug]`) | `Array<Array<string>>` | `[["a", "b"], ["c"]]`             |
+| **Nested / Complex**        | `Array<Object>`        | `[{ id: "1", category: "tech" }]` |
+
+#### Simple Dynamic Routes
+
+```typescript
+// src/blog/[id]/page_functions.ts
+export function getStaticPaths() {
+  return ["1", "2", "hello"];
+  // Generates: /blog/1, /blog/2, /blog/hello
+}
+```
+
+#### Catch-all Routes
+
+```typescript
+// src/docs/[...slug]/page_functions.ts
+export function getStaticPaths() {
+  return [
+    ["intro"], // /docs/intro
+    ["api", "v1", "auth"], // /docs/api/v1/auth
+  ];
+}
+```
+
+#### Automatic Route Propagation (Recursion)
+
+One of Dinou's most powerful features is that **static parameters propagate downwards**. If you define values for a segment, Dinou will automatically generate all static sub-pages nested within that segment.
+
+**Example Structure:**
+
+- `src/blog/[slug]/page.tsx` (+ `page_functions.ts`)
+- `src/blog/[slug]/details/page.tsx` (Nested static page)
+
+If `getStaticPaths` in `blog/[slug]` returns `["post-a", "post-b"]`, Dinou generates **4 pages**:
+
+1.  `/blog/post-a`
+2.  `/blog/post-a/details`
+3.  `/blog/post-b`
+4.  `/blog/post-b/details`
+
+#### Nested Pages & The "Chain of Responsibility"
+
+When nesting routes, **dependency flows downwards**. If an intermediate segment (whether static or dynamic) contains a `page.tsx`, it becomes a required step in the generation chain.
+
+If a parent page fails to define its own paths (e.g., returns an empty array), **the generator stops there**. It will never reach the child pages, regardless of whether the children have valid `getStaticPaths` defined.
+
+**Scenario:**
+
+- `src/case3/[slug]/page.tsx` (Parent Page)
+- `src/case3/[slug]/[id]/page.tsx` (Child Page)
+
+In this structure, `[id]` depends physically on `[slug]` existing first.
+
+**❌ Broken Chain:**
+If `src/case3/[slug]/page_functions.ts` returns `[]` (no paths):
+
+1. Dinou tries to build `/case3/[slug]`.
+2. No paths are returned. No folders are created.
+3. **Result:** The build process never attempts to generate `[id]`, because the parent directory `/case3/foo/` was never created.
+
+**✅ Functional Chain:**
+The parent must resolve its own level for the children to run.
+
+```typescript
+// src/case3/[slug]/page_functions.ts
+export function getStaticPaths() {
+  // 1. Defines the parent folders
+  return ["foo", "bar"];
+}
+```
+
+```typescript
+// src/case3/[slug]/[id]/page_functions.ts
+export function getStaticPaths() {
+  // 2. Now runs inside /case3/foo/ and /case3/bar/
+  return ["100", "200"];
+}
+```
+
+> **Rule of Thumb:** Every `page.tsx` in the hierarchy is responsible for "opening the door" to its children.
+
+#### Nested & Complex Routes (Pass-through Segments)
+
+When you have multiple dynamic segments in a path **without intermediate pages**, you must return an **Object** to map values to all parameter names involved.
+
+```typescript
+// Structure: src/shop/[category]/[...specs]/[[brand]]/page_functions.ts
+// (Assuming [category] and [...specs] do NOT have their own page.tsx)
+
+export function getStaticPaths() {
+  return [
+    {
+      category: "electronics",
+      specs: ["m3", "16gb"],
+      brand: "apple",
+    },
+    {
+      category: "clothing",
+      specs: ["cotton", "white"],
+      brand: undefined, // Valid: optional and at the end of the route
+    },
+  ];
+}
+```
+
+> **Reminder:** According to the **No-Gap Rule**, you can use `undefined` for an intermediate optional segment **only if all subsequent segments are also `undefined`**. You cannot leave a "gap" (an undefined segment followed by a defined one).
+
+#### Normalization Guarantee
+
+Dinou ensures that `params` are consistent between SSG and SSR:
+
+- **Catch-all** segments will always be an `Array` (e.g., `undefined` becomes `[]`, `"val"` becomes `["val"]`).
+- **Optional Single** segments remain `undefined` if omitted.
+
+### 3. `revalidate` (ISR)
+
+Enables Incremental Static Regeneration. Defines the cache lifetime of a static page in milliseconds.
+
+- **Returns:** `number` (milliseconds).
+- If it returns `0` (or is not defined), the page remains static indefinitely (unless rebuilt).
+
+```typescript
+// src/dashboard/page_functions.ts
+export function revalidate() {
+  return 60000; // Regenerate at most once every 60 seconds
+}
+```
+
+### 4. `dynamic` (Force SSR)
+
+Forces a page to be rendered dynamically (Server-Side Rendering) on every request, bypassing static generation.
+
+- **Returns:** `boolean`.
+
+```typescript
+// src/profile/page_functions.ts
+export function dynamic() {
+  return true; // Always render on demand (SSR)
+}
+```
+
+## 📚 API Reference
+
+### 1. Components (`dinou`)
+
+#### `<Link>`
+
+The primary way to navigate between pages. Enables client-side navigation (SPA transition) without full page reloads.
+
+- **Props:**
+  - `href` (string): The target path. Supports both **absolute** and **relative** paths.
+  - `prefetch` (boolean): If `true`, preloads the code and data for the destination route when the user hovers over the link. Defaults to `true`.
+  - `fresh` (boolean): If `true`, bypasses the client-side router cache and forces a fetch of the latest data from the server. Defaults to `false`.
+  - `...props`: Standard HTML anchor attributes (`className`, `id`, `target`, etc.).
+
+**Path Resolution:**
+Dinou resolves paths similar to a file system:
+
+| Type                   | Syntax            | Example      | Description                                                          |
+| :--------------------- | :---------------- | :----------- | :------------------------------------------------------------------- |
+| **Absolute**           | Starts with `/`   | `/about`     | Navigates from the root of the app.                                  |
+| **Relative (Child)**   | No slash or `./`  | `team`       | Appends to the current path (e.g., `/about` → `/about/team`).        |
+| **Relative (Sibling)** | Starts with `../` | `../contact` | Go up one level, then down (e.g., `/about/team` → `/about/contact`). |
+
+```jsx
+import { Link } from "dinou";
+
+// Absolute path
+<Link href="/dashboard">Home</Link>
+
+// Relative path (Go deeper)
+<Link href="./settings">Settings</Link>
+
+// Relative path (Go up/Sibling)
+<Link href="../profile">Profile</Link>
+
+// With options
+<Link href="/volatile-data" fresh={true} prefetch={false}>
+  Live Status
+</Link>
+```
+
+#### `<ClientRedirect>`
+
+A utility component that triggers an immediate client-side navigation when rendered.
+
+- **Props:** `to` (string) - The destination URL.
+- **Usage:** While you can use this directly, it is recommended to use the `redirect()` helper function instead for better server-side handling.
+
+```jsx
+import { ClientRedirect } from "dinou";
+// Forces navigation to home
+return <ClientRedirect to="/" />;
+```
+
+---
+
+### 2. Hooks & Utilities (`dinou`)
+
+Functions available in **both** Server and Client environments.
+
+#### `redirect(destination)`
+
+Stops execution and redirects the user.
+
+- **Server:** Sets HTTP 307 header (if headers not sent).
+- **Client:** Renders `<ClientRedirect />`.
+- **Usage:** Use with `return` to halt rendering.
+
+```javascript
+import { redirect } from "dinou";
+if (!user) return redirect("/login");
+```
+
+#### `useSearchParams()`
+
+Returns a standard [`URLSearchParams`](https://developer.mozilla.org/en-US/docs/Web/API/URLSearchParams) object to read the query string.
+
+```javascript
+import { useSearchParams } from "dinou";
+
+export default function SearchPage() {
+  const searchParams = useSearchParams();
+  const query = searchParams.get("q");
+  return <div>Result: {query}</div>;
+}
+```
+
+**Behavior & Static Generation (Bailout):**
+
+| Component Type       | Behavior during Build                              | Result                                                                                                                        |
+| :------------------- | :------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------- |
+| **Server Component** | Accessing this hook triggers a **Static Bailout**. | The page opts out of SSG and switches to **Dynamic Rendering** (SSR) on demand.                                               |
+| **Client Component** | Does **NOT** trigger a bailout.                    | The page remains **Static (SSG)**. The initial HTML renders with empty params, and the browser updates values upon hydration. |
+
+> **⚠️ Client Component Warning:**
+> If used in a Client Component on a static page, be aware of **Hydration Mismatches**. The server renders with empty params (since they don't exist at build time), but the browser renders with the real URL.
+> **Recommendation:** If the initial UI depends heavily on params, pass them as props from a Server Component to force Dynamic Rendering.
+
+**Common Methods:**
+
+- `.get(name)`: Returns the first value.
+- `.getAll(name)`: Returns all values (useful for `?id=1&id=2`).
+- `.has(name)`: Checks existence.
+- `.toString()`: Returns the query string.
+
+#### `usePathname()`
+
+Returns the current URL pathname as a `string` (e.g., `/blog/post-1`).
+
+#### `useRouter()` (Client Only)
+
+Provides programmatic navigation methods.
+
+- **Methods:** `.push(href)`, `.replace(href)`, `.back()`, `.forward()`, `.refresh()`.
+- **Note:** Only works inside Client Components (`"use client"`).
+
+#### `useNavigationLoading()` (Client Only)
+
+Returns a `boolean` indicating if a client-side navigation is in progress.
+
+---
+
+### 3. Server-Only Utilities (`dinou`)
+
+#### `getContext()`
+
+Retrieves the request/response context. **Server Components Only**.
+
+- **Returns:** `{ req, res }`.
+- **req:** `headers`, `cookies`, `query`, `path`, `method`.
+- **res:** `status()`, `setHeader()`, `redirect()`, `cookie()`, `clearCookie()`.
+
+#### ⚠️ Security Warning: `getContext` in Client Components
+
+While `getContext()` technically works during the Server-Side Rendering (SSR) phase of Client Components, **using it directly inside a Client Component is strongly discouraged**.
+
+```javascript
+"use client";
+import { getContext } from "dinou";
+
+// ❌ DANGEROUS PATTERN
+export default function UserProfile() {
+  const ctx = getContext(); // Runs on server during SSR
+  return <div>{ctx.req.headers["authorization"]}</div>;
+  // ⚠️ The sensitive header is now baked into the public HTML source code!
+}
+```
+
+**Risks:**
+
+1.  **Data Leak:** Any data read from `getContext` during SSR is serialized into the initial HTML. If you mistakenly render sensitive data (like tokens or internal headers), it will be visible in the page source (`View Source`), even if React hydration fails later.
+2.  **Hydration Mismatch:** The browser execution will fail because `getContext` is not available in the browser, causing the UI to break or flicker.
+
+**✅ Correct Pattern:**
+Fetch sensitive data in a **Server Component** and pass only the necessary, safe fields as props.
+
+```javascript
+// src/profile/page.tsx (Server Component)
+import { getContext } from "dinou";
+import ClientProfile from "./client-profile";
+
+export default function Page() {
+  const ctx = getContext();
+  // Extract ONLY what is safe for the client
+  const safeUser = { name: ctx.req.cookies.username };
+
+  return <ClientProfile user={safeUser} />;
+}
+```
+
+---
+
+### 4. Page Configuration (`page_functions.ts`)
+
+Export these functions from `page_functions.{ts,js}` to configure the associated `page.tsx`.
+
+#### `getStaticPaths()`
+
+Defines paths for Static Site Generation (SSG).
+
+- **Returns:** `Array<string | string[] | Object>`.
+
+```typescript
+export function getStaticPaths() {
+  return [{ slug: "foo", id: "bar" }];
+}
+```
+
+#### `getProps({ params })`
+
+**Async** function to fetch data on the server and pass it as props to the Page component and to the Root Layout (if exists).
+
+- **Receives:** Object with resolved `params`.
+- **Returns:** Object with the props.
+
+```typescript
+export async function getProps({ params }) {
+  const data = await db.getItem(params.id);
+  return { page: { item: data }, layout: { title: data.title } }; // Available as props in page.tsx and Root Layout of this particular page.
+}
+```
+
+#### `revalidate()`
+
+Sets the Incremental Static Regeneration (ISR) time in **milliseconds**.
+
+- **Returns:** Number (ms). `0` means no revalidate (always the same static page).
+
+```typescript
+export function revalidate() {
+  return 60000;
+} // Regenerate static page every 1 minute
+```
+
+#### `dynamic()`
+
+Whether to bypass static generation or not (e.g. use dynamic rendering).
+
+- **Returns:** `true`, `false`.
+
+```typescript
+export function dynamic() {
+  return true;
+}
+```
+
+---
+
+### 5. File Conventions Cheatsheet
+
+Dinou recognizes specific filenames to build the routing hierarchy.
+
+#### Route Components
+
+| Filename                    | Environment      | Description                                    |
+| :-------------------------- | :--------------- | :--------------------------------------------- |
+| `page.{jsx,tsx,js,ts}`      | Server or Client | The unique UI for a route.                     |
+| `layout.{jsx,tsx,js,ts}`    | Server or Client | Wraps the page and children segments.          |
+| `error.{jsx,tsx,js,ts}`     | Server or Client | UI for 500 errors within the segment.          |
+| `not_found.{jsx,tsx,js,ts}` | Server or Client | UI for 404 not found pages within the segment. |
+
+#### Layout Control Flags (Empty Files)
+
+Create these empty files to alter how layouts apply to a specific route directory.
+
+| Filename              | Effect                                                                                               |
+| :-------------------- | :--------------------------------------------------------------------------------------------------- |
+| `no_layout`           | The `page.tsx` in this folder will **NOT** be applied any layout.                                    |
+| `reset_layout`        | Resets the layout hierarchy. The first layout found from within this folder becomes the Root Layout. |
+| `no_layout_error`     | The `error.tsx` in this folder will render without any layout.                                       |
+| `no_layout_not_found` | The `not-found.tsx` in this folder will render without any layout.                                   |
+
+## 🎨 Favicons
+
+To add a favicon to your application:
+
+1. Generate your assets using a tool like [favicon.io](https://favicon.io/).
+2. Unzip the downloaded folder.
+3. Rename the folder to `favicons` and place it in the **root** of your project.
+4. Update your root `layout.tsx` (or `page.tsx`) to include the references in the `<head>` tag:
 
 ```typescript
 "use client";
@@ -974,7 +1073,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <head>
-        <title>Dinou app</title>
+        <title>Dinou App</title>
         <link rel="icon" type="image/png" href="/favicon.ico" />
         <link
           rel="apple-touch-icon"
@@ -993,7 +1092,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           sizes="16x16"
           href="/favicon-16x16.png"
         />
-        <link rel="manifest" href="/site.webmanifest"></link>
+        <link rel="manifest" href="/site.webmanifest" />
       </head>
       <body>{children}</body>
     </html>
@@ -1001,170 +1100,139 @@ export default function Layout({ children }: { children: ReactNode }) {
 }
 ```
 
-Then you will have your favicon in your web app.
+## 🔐 Environment Variables (`.env`)
 
-## `.env` file
+Dinou automatically loads environment variables for server-side code (Server Components, Server Functions, and `getProps`).
 
-Dinou is ready to manage env vars in the code that runs on the Server side (Server Functions, Server Components, and `getProps` function). Create an `.env` file in your project (and add it to your `.gitignore` file to not expose sensitive data to the public) and define there your env variables:
+1. Create a `.env` file in the root of your project.
+2. Add `.env` to your `.gitignore` to prevent exposing sensitive keys.
 
 ```bash
 # .env
-# define here your env vars
-MY_VAR=my_value
+API_SECRET=my_secret_value
+DB_HOST=localhost
 ```
 
-## Styles (Tailwind.css, .module.css, and .css)
+## 💅 Styles (Tailwind, CSS Modules, & Global CSS)
 
-Dinou is ready to use Tailwind.css, `.module.css`, and `.css` styles. All styles will be generated in a file in `public` folder named `styles.css`. So you must include this in your `page.tsx` or `layout.tsx` file, in the `head` tag:
+Dinou supports **Tailwind CSS**, **CSS Modules** (`.module.css`), and standard **Global CSS** (`.css`) out of the box.
+
+Dinou bundles all your styles into a single file served at `/styles.css`. You **must** manually link this file in your root layout or page.
+
+### 1. Link the Stylesheet
+
+Add the link tag to the `<head>` of your root component:
 
 ```typescript
-<link href="/styles.css" rel="stylesheet"></link>
+<link href="/styles.css" rel="stylesheet" />
 ```
 
-- Example with Client Components (is the same for Server Components):
+### 2. Full Example (Layout + Global CSS + Modules)
 
-  ```typescript
-  // src/layout.tsx
-  "use client";
+**`src/layout.tsx`** (Client Component example):
 
-  import type { ReactNode } from "react";
-  import "./globals.css";
+```typescript
+"use client";
 
-  export default function Layout({ children }: { children: ReactNode }) {
-    return (
-      <html lang="en">
-        <head>
-          <title>Dinou app</title>
-          <link rel="icon" type="image/png" href="/favicon.ico" />
-          <link
-            rel="apple-touch-icon"
-            sizes="180x180"
-            href="/apple-touch-icon.png"
-          />
-          <link
-            rel="icon"
-            type="image/png"
-            sizes="32x32"
-            href="/favicon-32x32.png"
-          />
-          <link
-            rel="icon"
-            type="image/png"
-            sizes="16x16"
-            href="/favicon-16x16.png"
-          />
-          <link rel="manifest" href="/site.webmanifest"></link>
-          <link href="/styles.css" rel="stylesheet"></link>
-        </head>
-        <body>{children}</body>
-      </html>
-    );
-  }
-  ```
+import type { ReactNode } from "react";
+import "./globals.css"; // Import global styles here
 
-  ```css
-  /* src/globals.css */
-  @import "tailwindcss";
+export default function Layout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en">
+      <head>
+        <title>Dinou App</title>
+        {/* Favicons omitted for brevity */}
+        <link href="/styles.css" rel="stylesheet" />
+      </head>
+      <body>{children}</body>
+    </html>
+  );
+}
+```
 
-  .test1 {
-    background-color: purple;
-  }
-  ```
+**`src/globals.css`** (Tailwind setup):
 
-  ```typescript
-  // src/page.tsx
-  "use client";
+```css
+@import "tailwindcss";
 
-  import styles from "./page.module.css";
+.custom-bg {
+  background-color: purple;
+}
+```
 
-  export default function Page() {
-    return (
-      <div className={`text-red-500 test1 ${styles.test2}`}>hi world!</div>
-    );
-  }
-  ```
+**`src/page.tsx`** (Using CSS Modules):
 
-  ```css
-  /* src/page.module.css */
-  .test2 {
-    text-decoration: underline;
-  }
-  ```
+```typescript
+"use client";
 
-  ```typescript
-  // src/css.d.ts
-  declare module "*.module.css" {
-    const classes: { [key: string]: string };
-    export default classes;
-  }
-  ```
+import styles from "./page.module.css";
 
-- The above will produce the text `hi world!` in red, underlined, and with a purple background color.
+export default function Page() {
+  return (
+    <div className={`text-red-500 custom-bg ${styles.underlined}`}>
+      Hello World!
+    </div>
+  );
+}
+```
 
-## Assets or media files (image, video, and sound)
+**`src/page.module.css`**:
 
-Dinou supports the use of assets in your components. Supported file extensions are: `.png`, `.jpeg`, `.jpg`, `.gif`, `.svg`, `.webp`, `.avif`, `.ico`, `.mp4`, `.webm`, `.ogg`, `.mov`, `.avi`, `.mkv`, `.mp3`, `.wav`, `.flac`, `.m4a`, `.aac`, `.mjpeg`, and `.mjpg`.
+```css
+.underlined {
+  text-decoration: underline;
+}
+```
 
-To use an asset in your component just import it as a default import:
+**`src/css.d.ts`** (TypeScript support for modules):
+
+```typescript
+declare module "*.module.css" {
+  const classes: { [key: string]: string };
+  export default classes;
+}
+```
+
+## 🖼️ Assets & Media
+
+You can import media files directly into your components. Dinou supports a wide range of extensions:
+
+- **Images:** `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.avif`, `.ico`, `.mjpeg`, `.mjpg`
+- **Audio/Video:** `.mp4`, `.webm`, `.ogg`, `.mov`, `.avi`, `.mkv`, `.mp3`, `.wav`, `.flac`, `.m4a`, `.aac`
+
+**Usage:**
 
 ```typescript
 // src/component.tsx
 "use client";
-
-import image from "./image.png"; // import the image from where it is located (inside src folder)
+import logo from "./logo.png";
 
 export default function Component() {
-  return <img src={image} alt="image" />;
+  return <img src={logo} alt="Logo" />;
 }
 ```
 
-Works the same for Server Components.
-
-For typescript, you should create a declaration file like this:
+**TypeScript Configuration:**
+To avoid type errors, create a declaration file (e.g., `src/assets.d.ts`):
 
 ```typescript
-// src/assets.d.ts
-declare module "*.jpeg" {
-  const value: string;
-  export default value;
-}
-
-declare module "*.jpg" {
-  const value: string;
-  export default value;
-}
-
 declare module "*.png" {
   const value: string;
   export default value;
 }
-
-// and continue with the rest of supported file extensions
+// Repeat for other extensions used (jpg, svg, mp4, etc.)
 ```
 
-If you miss a certain file extension you can eject and customize Dinou to meet your requirements. Just eject and add the extension in this place: `dinou/core/asset-extensions.js`. Just look for the place were all the extensions are mentioned and add yours in this file.
+> **Customization:** If you need to support additional extensions, you can [eject](#-eject-dinou) Dinou and modify `dinou/core/asset-extensions.js`.
 
-## Import alias (e.g. `"@/..."`)
+## 🔗 Import Aliases (`@/`)
 
-Dinou is ready to support import alias, as `import some from "@/..."`. If you want to use them just define the options in `tsconfig.json`:
+Dinou supports import aliases (e.g., `import Button from "@/components/Button"`). Configure paths in your `tsconfig.json`.
 
-```json
-// tsconfig.json for a js project
-{
-  "compilerOptions": {
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"]
-    },
-    "allowJs": true,
-    "noEmit": true
-  },
-  "include": ["src"]
-}
-```
+**`tsconfig.json` (TypeScript):**
 
 ```json
-// tsconfig.json for a ts project
 {
   "compilerOptions": {
     "baseUrl": ".",
@@ -1180,48 +1248,81 @@ Dinou is ready to support import alias, as `import some from "@/..."`. If you wa
 }
 ```
 
-## How to run a Dinou app
+## ⚡ Bundlers & Running the App
 
-Run `npm run dev` (or `npx dinou dev`) to start the Dinou app in development mode. Wait for the logs of the bundler (`waiting for changes...`) and the server (`Listening on port 3000`) to load the page on your browser. In development, the bundler will emit its files in `public` folder.
+Dinou is flexible and integrates with three major bundlers: **esbuild** (default), **Rollup**, and **Webpack**.
 
-Run `npm run build` (or `npx dinou build`) to build the app and `npm start` (or `npx dinou start`) to run it. In production, the bundler will emit its files in `dist3` folder.
+### Development
 
-## Eject Dinou
+Starts the development server with hot reloading. Files are emitted to the `public` folder.
 
-- You can eject Dinou with the command `npm run eject` (or `npx dinou eject`). This will copy the files defining Dinou in the root folder of the project (grouped in a `dinou` folder). You will have full control and customization capabilities.
+| Command               | Bundler     | Description                |
+| :-------------------- | :---------- | :------------------------- |
+| `npm run dev`         | **esbuild** | Default. Fastest startup.  |
+| `npm run dev:esbuild` | **esbuild** | Explicit esbuild command.  |
+| `npm run dev:rollup`  | **Rollup**  | Uses Rollup for bundling.  |
+| `npm run dev:webpack` | **Webpack** | Uses Webpack for bundling. |
+
+### Production Build
+
+Compiles the application for production. Files are emitted to the `dist3` folder.
+
+| Command                 | Bundler                |
+| :---------------------- | :--------------------- |
+| `npm run build`         | **esbuild** (Default)  |
+| `npm run build:esbuild` | **esbuild** (Explicit) |
+| `npm run build:rollup`  | **Rollup**             |
+| `npm run build:webpack` | **Webpack**            |
+
+### Start Production Server
+
+Runs the built application from the `dist3` folder.
+
+| Command                 | Description                         |
+| :---------------------- | :---------------------------------- |
+| `npm start`             | Same as `npm run start:esbuild`.    |
+| `npm run start:esbuild` | Use it after building with esbuild. |
+| `npm run start:rollup`  | Use it after building with Rollup.  |
+| `npm run start:webpack` | Use it after building with Webpack. |
+
+## ⏏️ Eject Dinou
+
+If you need full control over the configuration or internal logic, you can "eject" the framework.
+
+```bash
+npm run eject
+# or
+npx dinou eject
+```
+
+This will copy the entire Dinou core into a `dinou/` folder in your project root, allowing you to modify build scripts, server logic, and configuration files directly.
 
 ## 🚀 Deployment
 
-Projects built with **Dinou** can be deployed to any platform that supports Node.js with custom flags.
+Dinou apps can be deployed to any platform supporting Node.js, provided you can pass custom flags.
 
 ### ✅ Recommended: DigitalOcean App Platform
 
-Dinou works seamlessly on [DigitalOcean App Platform](https://www.digitalocean.com/products/app-platform). You can deploy your project easily without needing any special configuration.
+Dinou works seamlessly on DigitalOcean. It allows full control over the runtime command, essential for the required `--conditions react-server` flag.
 
-**Why it works well:**
+### ❌ Not Supported: Netlify
 
-- Full control over the Node.js runtime
+Netlify is currently incompatible because it does not support passing custom Node.js flags (`--conditions react-server`) during runtime.
 
-- Supports the required `--conditions react-server` flag
+### 🛠 Other Platforms (Render, Fly.io, Railway, etc.)
 
-- Simple integration via GitHub/GitLab or manual repo
+Ensure your platform allows customization of the start command. Your start command should look like:
 
-### ❌ Not supported: Netlify
+```bash
+node --conditions react-server dist3/index.js
+```
 
-At the moment, **Netlify is not compatible with Dinou, because it does not allow passing the `--conditions react-server` flag when starting a Node.js app**. This flag is essential for the app to work.
-
-If Netlify adds support for custom runtime flags in the future, Dinou compatibility might become possible.
-
-### 🛠 Other Platforms
-
-If you're deploying on other Node.js-compatible platforms (like Render, Fly.io, Railway, etc.), ensure that:
-
-- You can pass custom flags (`--conditions react-server`) to Node.js
+_(Or use `npm start` if your package.json scripts are configured correctly)._
 
 ## 📦 Changelog
 
 For a detailed list of changes, enhancements, and bug fixes across versions, see the [CHANGELOG.md](./CHANGELOG.md).
 
-## License
+## 📄 License
 
-Dinou is licensed under the [MIT License](https://github.com/roggc/dinou/blob/master/LICENSE.md).
+Dinou is licensed under the [MIT License](./LICENSE.md).

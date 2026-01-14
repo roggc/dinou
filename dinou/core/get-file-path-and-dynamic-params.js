@@ -2,33 +2,55 @@ const path = require("path");
 const { existsSync, readdirSync } = require("fs");
 const React = require("react");
 
+function safeDecode(val) {
+  try {
+    return !!val ? decodeURIComponent(val) : val;
+  } catch (e) {
+    return val;
+  }
+}
+
 function getSlots(currentPath, reqSegments, query) {
-  const slots = {};
-  const slotFolders = readdirSync(currentPath, {
-    withFileTypes: true,
-  }).filter((entry) => entry.isDirectory() && entry.name.startsWith("@"));
-  for (const slot of slotFolders) {
-    const [slotPath, slotParams] = getFilePathAndDynamicParams(
-      reqSegments,
-      query,
-      path.join(currentPath, slot.name),
-      "page",
-      true,
-      true,
-      undefined,
-      reqSegments.length
-    );
-    if (slotPath) {
-      const slotModule = require(slotPath);
-      const Slot = slotModule.default ?? slotModule;
-      const slotName = slot.name.slice(1);
-      slots[slotName] = React.createElement(Slot, {
-        params: slotParams,
+  let slots = {};
+
+  const entries = readdirSync(currentPath, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    if (entry.name.startsWith("@")) {
+      const [slotPath, slotParams] = getFilePathAndDynamicParams(
+        reqSegments,
         query,
-        key: slotName,
-      });
+        path.join(currentPath, entry.name),
+        "page",
+        true,
+        true,
+        undefined,
+        reqSegments.length
+      );
+
+      if (slotPath) {
+        const slotModule = require(slotPath);
+        const Slot = slotModule.default ?? slotModule;
+        const slotName = entry.name.slice(1);
+
+        slots[slotName] = React.createElement(Slot, {
+          params: slotParams,
+          // searchParams: query,
+          key: slotName,
+          __modulePath: slotPath ?? null,
+        });
+      }
+    } else if (entry.name.startsWith("(") && entry.name.endsWith(")")) {
+      const groupPath = path.join(currentPath, entry.name);
+
+      const nestedSlots = getSlots(groupPath, reqSegments, query);
+
+      slots = { ...slots, ...nestedSlots };
     }
   }
+
   return slots;
 }
 
@@ -95,7 +117,9 @@ function getFilePathAndDynamicParams(
           if (entry.name.startsWith("[[...") && entry.name.endsWith("]]")) {
             const paramName = entry.name.slice(5, -2);
             const paramValue =
-              index < reqSegments.length ? reqSegments.slice(index) : [];
+              index < reqSegments.length
+                ? reqSegments.slice(index).map(safeDecode)
+                : [];
             const newParams = {
               ...dParams,
               [paramName]: paramValue,
@@ -136,7 +160,9 @@ function getFilePathAndDynamicParams(
           } else if (entry.name.startsWith("[[") && entry.name.endsWith("]]")) {
             const paramName = entry.name.slice(2, -2);
             const paramValue =
-              index < reqSegments.length ? reqSegments[index] : undefined;
+              index < reqSegments.length
+                ? safeDecode(reqSegments[index])
+                : undefined;
             const newParams = {
               ...dParams,
               [paramName]: paramValue,
@@ -170,10 +196,50 @@ function getFilePathAndDynamicParams(
                 return [candidatePath, newParams];
               }
             }
+            const newIsFound = { value: false };
+            const result = getFilePathAndDynamicParams(
+              reqSegments,
+              query,
+              dynamicPath,
+              fileName,
+              withExtension,
+              finalDestination,
+              lastFound,
+              index + 1,
+              dParams,
+              accumulative,
+              accumulate,
+              newIsFound
+            );
+            if (newIsFound.value) {
+              isFound.value = true;
+              return result;
+            }
             if (accumulative) return accumulate;
             return finalDestination
               ? []
               : [foundInCurrentPath ?? lastFound, newParams];
+          } else if (entry.name.startsWith("(") && entry.name.endsWith(")")) {
+            const groupPath = path.join(currentPath, entry.name);
+            const newIsFound = { value: false };
+            const result = getFilePathAndDynamicParams(
+              reqSegments,
+              query,
+              groupPath,
+              fileName,
+              withExtension,
+              finalDestination,
+              lastFound,
+              index,
+              dParams,
+              accumulative,
+              accumulate,
+              newIsFound
+            );
+            if (newIsFound.value) {
+              isFound.value = true;
+              return result;
+            }
           }
         }
       }
@@ -182,7 +248,13 @@ function getFilePathAndDynamicParams(
     }
   }
   const staticPath = path.join(currentPath, reqSegments[index]);
-  if (existsSync(staticPath)) {
+  const isRouterSyntaxInSegment =
+    reqSegments[index] &&
+    ((reqSegments[index].startsWith("(") && reqSegments[index].endsWith(")")) ||
+      (reqSegments[index].startsWith("[") &&
+        reqSegments[index].endsWith("]")) ||
+      reqSegments[index].startsWith("@"));
+  if (existsSync(staticPath) && !isRouterSyntaxInSegment) {
     return getFilePathAndDynamicParams(
       reqSegments,
       query,
@@ -204,7 +276,9 @@ function getFilePathAndDynamicParams(
         if (entry.name.startsWith("[[...") && entry.name.endsWith("]]")) {
           const paramName = entry.name.slice(5, -2);
           const paramValue =
-            index < reqSegments.length ? reqSegments.slice(index) : [];
+            index < reqSegments.length
+              ? reqSegments.slice(index).map(safeDecode)
+              : [];
           const newParams = {
             ...dParams,
             [paramName]: paramValue,
@@ -241,7 +315,7 @@ function getFilePathAndDynamicParams(
             : [foundInCurrentPath ?? lastFound, newParams];
         } else if (entry.name.startsWith("[...") && entry.name.endsWith("]")) {
           const paramName = entry.name.slice(4, -1);
-          const paramValue = reqSegments.slice(index);
+          const paramValue = reqSegments.slice(index).map(safeDecode);
           const newParams = {
             ...dParams,
             [paramName]: paramValue,
@@ -279,7 +353,9 @@ function getFilePathAndDynamicParams(
         } else if (entry.name.startsWith("[[") && entry.name.endsWith("]]")) {
           const paramName = entry.name.slice(2, -2);
           const paramValue =
-            index < reqSegments.length ? reqSegments[index] : undefined;
+            index < reqSegments.length
+              ? safeDecode(reqSegments[index])
+              : undefined;
           const newParams = {
             ...dParams,
             [paramName]: paramValue,
@@ -301,7 +377,7 @@ function getFilePathAndDynamicParams(
           );
         } else if (entry.name.startsWith("[") && entry.name.endsWith("]")) {
           const paramName = entry.name.slice(1, -1);
-          const paramValue = reqSegments[index];
+          const paramValue = safeDecode(reqSegments[index]);
           const newParams = {
             ...dParams,
             [paramName]: paramValue,
