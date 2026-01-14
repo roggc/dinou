@@ -1,6 +1,6 @@
 # **Dinou**
 
-### **A Full-Stack React 19 Framework**
+### **Full-Stack React 19 Framework**
 
 ---
 

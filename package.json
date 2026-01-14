@@ -1,7 +1,7 @@
 {
   "name": "dinou",
   "version": "4.0.0",
-  "description": "Dinou is a modern React 19 framework with React Server Components, Server Functions, and streaming SSR.",
+  "description": "Modern Full-Stack React 19 framework with React Server Components, Server Functions, and Streaming SSR.",
   "main": "index.js",
   "bin": {
     "dinou": "./cli.js"
