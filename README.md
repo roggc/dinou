@@ -8,13 +8,14 @@ Support for React Server Components (RSC), Server-Side Rendering (SSR), Static G
 
 ## Key Features
 
-- **Native React Server Components:** Built on the React 19 core, leveraging Suspense and Streaming for optimal performance.
-- **Hybrid Rendering Engine:** Static by default (SSG). Automatically switches to Dynamic Rendering (SSR) when request-specific data (cookies, headers, search params) is detected.
+- **React Server Components:** Built on the React 19 core, leveraging Suspense and Streaming for optimal performance without client-side waterfalls.
+- **Server Functions:** Type-safe RPC actions. Execute server-side logic directly from your components without creating manual API endpoints.
+- **Automatic Static Bailout:** Static by default (SSG). Automatically switches to Dynamic Rendering (SSR) when request-specific data (cookies, headers, search params) is detected.
 - **Full-Featured Router:** Client-side soft navigation including `push`, `replace`, `back`, `forward`, and `refresh` (soft reload).
 - **Generation Strategies:** Comprehensive support for Incremental Static Regeneration (ISR) and Incremental Static Generation (ISG).
-- **Data Fetching & State:** Optimized patterns using `react-enhanced-suspense` (with `resourceId`) and `jotai-wrapper` for seamless server-client state synchronization and mutations.
+- **Bundler Agnostic:** The only framework that lets you choose your build engine. Switch between Webpack, Rollup, or Esbuild via configuration.
 - **Smart Navigation:** `<Link>` component with automatic prefetching and opt-in `fresh` data fetching for volatile states.
-- **File-System Routing:** Automatic routing based on `page.{jsx,tsx,js,ts}` files located within the `src` directory structure.
+- **File-System Routing:** Intuitive routing based on `page.{jsx,tsx}` files located within the `src` directory structure.
 
 ## Table of contents
 
