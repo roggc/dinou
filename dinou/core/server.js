@@ -960,7 +960,6 @@ const http = require("http");
 // ============================================================
 (async () => {
   try {
-    // 1. CREAR SERVIDOR
     console.log("👉 [Startup] Initializing HTTP Server...");
     const server = http.createServer(app);
 
@@ -974,8 +973,6 @@ const http = require("http");
       process.exit(1);
     });
 
-    // 3. LISTEN (ARRANCAR INMEDIATAMENTE)
-    // Esto hace feliz a DigitalOcean y los Health Checks
     await new Promise((resolve) => {
       server.listen(port, () => {
         console.log(
@@ -988,16 +985,8 @@ const http = require("http");
       });
     });
 
-    // 4. GENERACIÓN ESTÁTICA EN SEGUNDO PLANO (NON-BLOCKING)
-    // El servidor ya está escuchando. Ahora generamos los estáticos.
-    // Si entra una petición ahora, se servirá dinámicamente.
     if (!isDevelopment) {
       console.log("🏗️  [Background] Starting static generation (SSG)...");
-
-      // No hacemos await aquí si no queremos bloquear el Event Loop completamente,
-      // aunque en Node el rendering suele ser síncrono/CPU heavy,
-      // así que el servidor podría ir un poco lento durante la generación.
-      // Pero para un health check simple (ping) debería bastar.
 
       generateStatic()
         .then(() => {
@@ -1010,8 +999,6 @@ const http = require("http");
             err
           );
           isReady = true;
-          // Opcional: process.exit(1) si consideras que sin estáticos la app no debe vivir.
-          // Yo recomiendo NO salir, para que la web siga funcionando dinámicamente.
         });
     } else {
       console.log("⚙️  [Startup] Running in Development Mode");
