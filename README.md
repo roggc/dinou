@@ -1,5 +1,7 @@
 # **Dinou**
 
+[![Documentation](https://img.shields.io/badge/docs-dinou.dev-blue?style=flat-square)](https://dinou.dev)
+
 ### **Full-Stack React 19 Framework**
 
 ---
@@ -1314,7 +1316,7 @@ Netlify is currently incompatible because it does not support passing custom Nod
 Ensure your platform allows customization of the start command. Your start command should look like:
 
 ```bash
-node --conditions react-server dist3/index.js
+node --conditions react-server ...
 ```
 
 _(Or use `npm start` if your package.json scripts are configured correctly)._
