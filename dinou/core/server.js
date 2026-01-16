@@ -436,42 +436,14 @@ function getContextForServerFunctionEndpoint(req, res) {
 
 app.use(express.static(path.resolve(process.cwd(), outputFolder)));
 
-// app.use((req, res, next) => {
-//   // Make sure NOT to return 200 if what is requested is a .js that doesn't exist
-//   if (
-//     req.path.endsWith(".js") ||
-//     req.path.endsWith(".css") ||
-//     req.path.endsWith(".png") ||
-//     req.path.endsWith(".jpg") ||
-//     req.path.endsWith(".svg") ||
-//     req.path.endsWith(".webp") ||
-//     req.path.endsWith(".ico") ||
-//     req.path.endsWith(".json")
-//   ) {
-//     return res.status(404).send("Not found");
-//   }
-//   next();
-//   // ... Dinou rendering ...
-// });
-
 let isReady = isDevelopment; // In dev we are always ready (or almost)
 
-// 1. "Blocking" Middleware (Put BEFORE your Dinou routes, but AFTER express.static)
-// Ideal order:
-// app.use(express.static(...));
-// app.use(404AssetsMiddlewareWeMadeBefore);
-
-app.use((req, res, next) => {
-  // If we are in PROD and generateStatic hasn't finished yet...
-  if (!isReady) {
-    // Optional: Allow health-checks or assets if you want
-    // if (req.path.endsWith('.js')) return next();
-
-    // Return 503 (Service Unavailable)
-    // Playwright understands that 503 means "Keep waiting"
-    return res.status(503).send("Server warming up (generating static)...");
-  }
-  next();
+app.get("/__DINOU_STATUS_PLAYWRIGHT__", (req, res) => {
+  res.json({
+    status: "ok",
+    isReady,
+    mode: isDevelopment ? "development" : "production",
+  });
 });
 
 app.get("/.well-known/appspecific/com.chrome.devtools.json", (req, res) => {
@@ -759,8 +731,8 @@ app.get(/^\/.*\/?$/, (req, res) => {
           if (
             !isDevelopment &&
             res.statusCode === 200 && // Only if success
-            req.method === "GET" // Only GET requests
-            /*Object.keys({ ...req.query }).length === 0*/ // No query params (avoid infinite duplicates)
+            req.method === "GET" && // Only GET requests
+            isReady
           ) {
             generatingISG(reqPath, dynamicState);
           }
@@ -983,70 +955,54 @@ const port = process.env.PORT || 3000;
 
 const http = require("http");
 
-// Wrap the entire startup in an async IIFE to use await cleanly
+// ============================================================
+// STARTUP SEQUENCE
+// ============================================================
 (async () => {
   try {
-    // ============================================================
-    // PHASE 1: STATIC GENERATION (Build Time)
-    // ============================================================
-    // We do this BEFORE creating the server. This way, if generateStatic
-    // performs aggressive memory cleanups, it doesn't kill the HTTP server.
-    if (!isDevelopment) {
-      console.log("🏗️  [Startup] Starting static generation (SSG/ISR)...");
-      try {
-        await generateStatic();
-        console.log("✅ [Startup] Static generation finished successfully.");
-      } catch (buildError) {
-        console.error("❌ [Startup] Static generation failed:", buildError);
-        // Depending on your policy, you could exit (process.exit(1)) or continue
-        // If you decide to continue, the server will start but files might be missing.
-        process.exit(1);
-      }
-    } else {
-      console.log(
-        "⚙️  [Startup] Running in Development Mode (Dynamic Rendering)"
-      );
-    }
-
-    // ============================================================
-    // PHASE 2: SERVER CREATION
-    // ============================================================
     console.log("👉 [Startup] Initializing HTTP Server...");
-
-    // We pass 'app' to createServer. This decouples Express from the network.
     const server = http.createServer(app);
 
-    // ============================================================
-    // PHASE 3: ERROR HANDLING (Anti-Zombies)
-    // ============================================================
-    // This captures errors like EADDRINUSE before they silently crash the process
+    // 2. ERROR HANDLING (Anti-Zombies)
     server.on("error", (error) => {
       if (error.code === "EADDRINUSE") {
         console.error(`\n❌ FATAL ERROR: Port ${port} is already in use!`);
-        console.error(
-          `   Cause: A previous instance, a zombie test runner, or another app is holding the port.`
-        );
-        console.error(
-          `   Action: Run 'netstat -ano | findstr :${port}' (Win) or 'lsof -i :${port}' to find the PID and kill it.\n`
-        );
       } else {
         console.error("❌ [Server Error]:", error);
       }
-      process.exit(1); // Explicitly exit with error code
+      process.exit(1);
     });
 
-    // ============================================================
-    // PHASE 4: STARTUP (Listen)
-    // ============================================================
-    server.listen(port, () => {
-      isReady = true;
-      console.log(
-        `\n🚀 Dinou Server is ready and listening on http://localhost:${port}`
-      );
-      console.log(
-        `   Environment: ${isDevelopment ? "Development" : "Production"}\n`
-      );
+    await new Promise((resolve) => {
+      server.listen(port, () => {
+        console.log(
+          `\n🚀 Dinou Server is ready and listening on http://localhost:${port}`
+        );
+        console.log(
+          `   Environment: ${isDevelopment ? "Development" : "Production"}`
+        );
+        resolve();
+      });
     });
+
+    if (!isDevelopment) {
+      console.log("🏗️  [Background] Starting static generation (SSG)...");
+
+      generateStatic()
+        .then(() => {
+          console.log("✅ [Background] Static generation finished.");
+          isReady = true;
+        })
+        .catch((err) => {
+          console.error(
+            "❌ [Background] Static generation failed (App continues in Dynamic Mode):",
+            err
+          );
+          isReady = true;
+        });
+    } else {
+      console.log("⚙️  [Startup] Running in Development Mode");
+    }
   } catch (error) {
     console.error("💥 [Fatal Startup Error]:", error);
     process.exit(1);
