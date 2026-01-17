@@ -28,33 +28,38 @@ function getConfigFileIfExists() {
 
 const configFile = getConfigFileIfExists();
 
-const localDinouPath = path.resolve(process.cwd(), "dinou/index.js");
+const localDinouPath = path.resolve(process.cwd(), "dinou");
 const isEjected = fs.existsSync(localDinouPath);
 
 console.log(
   isEjected
     ? "🚀 [Dinou] Ejected Mode detected (Webpack: Using local code)"
-    : "📦 [Dinou] Library Mode detected (Webpack: Using node_modules)"
+    : "📦 [Dinou] Library Mode detected (Webpack: Using node_modules)",
 );
 
 module.exports = async () => {
   const [cssEntries] = await getCSSEntries();
   return {
+    performance: {
+      hints: isDevelopment ? false : "warning",
+      maxEntrypointSize: 512000,
+      maxAssetSize: 512000,
+    },
     mode: isDevelopment ? "development" : "production",
     entry: {
       main: [path.resolve(__dirname, "../core/client-webpack.jsx")].filter(
-        Boolean
+        Boolean,
       ),
       error: [
         path.resolve(__dirname, "../core/client-error-webpack.jsx"),
       ].filter(Boolean),
       serverFunctionProxy: path.resolve(
         __dirname,
-        "../core/server-function-proxy-webpack.js"
+        "../core/server-function-proxy-webpack.js",
       ),
       dinouClientRedirect: path.resolve(
         __dirname,
-        "../core/client-redirect.jsx"
+        "../core/client-redirect.jsx",
       ),
       dinouLink: path.resolve(__dirname, "../core/link.jsx"),
       ...[...cssEntries].reduce(
@@ -62,7 +67,7 @@ module.exports = async () => {
           ...acc,
           [cssEntry.outfileName]: cssEntry.absPath,
         }),
-        {}
+        {},
       ),
     },
     experiments: {
@@ -95,12 +100,12 @@ module.exports = async () => {
 
         {
           test: /\.(js|jsx|ts|tsx)$/,
-          include: [
-            path.resolve(process.cwd(), "src"),
-            path.resolve(__dirname, "../core"),
-            path.resolve(process.cwd(), "node_modules/dinou"),
-            isEjected && path.resolve(process.cwd(), "dinou"),
-          ].filter(Boolean),
+          // include: [
+          //   path.resolve(process.cwd(), "src"),
+          //   path.resolve(__dirname, "../core"),
+          //   path.resolve(process.cwd(), "node_modules/dinou"),
+          //   isEjected && path.resolve(process.cwd(), "dinou"),
+          // ].filter(Boolean),
           use: {
             loader: "babel-loader",
             options: {
@@ -127,7 +132,7 @@ module.exports = async () => {
             {
               loader: path.resolve(
                 __dirname,
-                "./loaders/server-functions-loader.js"
+                "./loaders/server-functions-loader.js",
               ),
             },
           ],
@@ -182,7 +187,7 @@ module.exports = async () => {
 
               const base = path.basename(
                 resourcePath,
-                path.extname(resourcePath)
+                path.extname(resourcePath),
               );
               const scoped = createScopedName(base, resourcePath);
 
@@ -218,6 +223,10 @@ module.exports = async () => {
     resolve: {
       extensions: [".js", ".jsx", ".ts", ".tsx"],
       modules: ["src", "node_modules"],
+      extensionAlias: {
+        ".js": [".js", ".ts", ".tsx"],
+        ".jsx": [".jsx", ".tsx"],
+      },
       // 🎯 ADD THIS:
       alias: {
         ...(isEjected ? { dinou: localDinouPath } : {}),
