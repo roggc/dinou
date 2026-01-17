@@ -40,6 +40,11 @@ console.log(
 module.exports = async () => {
   const [cssEntries] = await getCSSEntries();
   return {
+    performance: {
+      hints: isDevelopment ? false : "warning",
+      maxEntrypointSize: 512000,
+      maxAssetSize: 512000,
+    },
     mode: isDevelopment ? "development" : "production",
     entry: {
       main: [path.resolve(__dirname, "../core/client-webpack.jsx")].filter(
