@@ -1,14 +1,20 @@
 const fs = require("fs");
 const path = require("path");
+const { execSync } = require("child_process");
 
 const dinouPath = path.resolve(__dirname, "dinou");
 const projectRoot = process.cwd();
 
+console.log("🚀 Starting Dinou ejecting process...");
+
 fs.cpSync(dinouPath, path.join(projectRoot, "dinou"), {
   recursive: true,
 });
+console.log("✅ Files copyed to ./dinou");
 
-const pkg = require(path.join(projectRoot, "package.json"));
+const pkgPath = path.join(projectRoot, "package.json");
+const pkg = require(pkgPath);
+
 pkg.scripts["dev:express"] =
   "node --conditions react-server --import ./dinou/core/register-loader.mjs ./dinou/core/server.js";
 pkg.scripts["dev_rollup"] = "rollup -c ./dinou/rollup/rollup.config.js -w";
@@ -39,9 +45,50 @@ pkg.scripts["start:webpack"] =
   "cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack node --conditions react-server --import ./dinou/core/register-loader.mjs ./dinou/core/server.js";
 pkg.scripts.start = "npm run start:esbuild";
 delete pkg.scripts.eject;
-fs.writeFileSync(
-  path.join(projectRoot, "package.json"),
-  JSON.stringify(pkg, null, 2)
-);
 
-console.log("Eject completed. Now you can customize the files in /dinou.");
+if (!pkg.dependencies) {
+  pkg.dependencies = {};
+}
+
+pkg.dependencies["dinou"] = "file:./dinou";
+
+fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+
+function detectPackageManager() {
+  const userAgent = process.env.npm_config_user_agent;
+
+  if (userAgent) {
+    if (userAgent.startsWith("yarn")) return "yarn";
+    if (userAgent.startsWith("pnpm")) return "pnpm";
+    if (userAgent.startsWith("bun")) return "bun";
+    if (userAgent.startsWith("npm")) return "npm";
+  }
+
+  if (fs.existsSync(path.join(projectRoot, "yarn.lock"))) return "yarn";
+  if (fs.existsSync(path.join(projectRoot, "pnpm-lock.yaml"))) return "pnpm";
+  if (fs.existsSync(path.join(projectRoot, "bun.lockb"))) return "bun";
+  if (fs.existsSync(path.join(projectRoot, "package-lock.json"))) return "npm";
+
+  return "npm";
+}
+
+const pm = detectPackageManager();
+console.log(`🕵️  Package manager detected: ${pm}`);
+
+// const installCommand = pm === "yarn" ? "yarn" : `${pm} install`;
+const installCommand = `${pm} install`;
+
+console.log(`📦 Executing '${installCommand}' to link dependencies...`);
+
+try {
+  execSync(installCommand, { stdio: "inherit", cwd: projectRoot });
+  console.log("✅ Dependencies updated successfully");
+} catch (error) {
+  console.error(
+    `❌ Error on executing ${installCommand}. Please, install dependencies manually`,
+  );
+}
+
+console.log(
+  "🎉 Eject completed successfully! Dinou is now running from local source.",
+);

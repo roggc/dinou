@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.0.2]
+
+### Fixed
+
+- Export dinou as ESM too.
+
 ## [4.0.1]
 
 ### Fixed

@@ -20,7 +20,7 @@ const manifestGeneratorPlugin = require("./rollup-plugins/manifest-generator-plu
 const isDevelopment = process.env.NODE_ENV !== "production";
 const outputDirectory = isDevelopment ? "public" : "dist3";
 
-const localDinouPath = path.resolve(process.cwd(), "dinou/index.js");
+const localDinouPath = path.resolve(process.cwd(), "dinou");
 // const localNavigationPath = path.resolve(
 //   process.cwd(),
 //   "dinou/core/navigation.js"
@@ -30,7 +30,7 @@ const isEjected = fs.existsSync(localDinouPath);
 console.log(
   isEjected
     ? "🚀 [Dinou] Ejected Mode detected (Using local code)"
-    : "📦 [Dinou] Library Mode detected (Using node_modules)"
+    : "📦 [Dinou] Library Mode detected (Using node_modules)",
 );
 
 // ----------------------------------------------------------------------
@@ -60,21 +60,21 @@ module.exports = async function () {
       ? {
           runtime: path.resolve(
             __dirname,
-            "react-refresh/react-refresh-runtime.js"
+            "react-refresh/react-refresh-runtime.js",
           ),
           refresh: path.resolve(
             __dirname,
-            "react-refresh/react-refresh-entry.js"
+            "react-refresh/react-refresh-entry.js",
           ),
           main: path.resolve(__dirname, "../core/client.jsx"),
           error: path.resolve(__dirname, "../core/client-error.jsx"),
           serverFunctionProxy: path.resolve(
             __dirname,
-            "../core/server-function-proxy.js"
+            "../core/server-function-proxy.js",
           ),
           dinouClientRedirect: path.resolve(
             __dirname,
-            "../core/client-redirect.jsx"
+            "../core/client-redirect.jsx",
           ),
         }
       : {
@@ -82,11 +82,11 @@ module.exports = async function () {
           error: path.resolve(__dirname, "../core/client-error.jsx"),
           serverFunctionProxy: path.resolve(
             __dirname,
-            "../core/server-function-proxy.js"
+            "../core/server-function-proxy.js",
           ),
           dinouClientRedirect: path.resolve(
             __dirname,
-            "../core/client-redirect.jsx"
+            "../core/client-redirect.jsx",
           ),
         },
     output: {
@@ -110,7 +110,7 @@ module.exports = async function () {
       // "dinou",
     ],
     plugins: [
-      isEjected && localDinouAlias(),
+      // isEjected && localDinouAlias(),
       del({
         targets: [
           `${outputDirectory}/*`,
@@ -124,7 +124,7 @@ module.exports = async function () {
       replace({
         preventAssignment: true,
         "process.env.NODE_ENV": JSON.stringify(
-          isDevelopment ? "development" : "production"
+          isDevelopment ? "development" : "production",
         ),
       }),
       json(),
@@ -176,7 +176,7 @@ module.exports = async function () {
       reactClientManifest({
         manifestPath: path.join(
           "react_client_manifest",
-          "react-client-manifest.json"
+          "react-client-manifest.json",
         ),
       }),
       isDevelopment && reactRefreshWrapModules(),
@@ -199,10 +199,10 @@ module.exports = async function () {
       }
       if (
         warning.message.includes(
-          'Module level directives cause errors when bundled, "use client"'
+          'Module level directives cause errors when bundled, "use client"',
         ) ||
         warning.message.includes(
-          'Module level directives cause errors when bundled, "use server"'
+          'Module level directives cause errors when bundled, "use server"',
         )
       ) {
         return;

@@ -119,10 +119,10 @@ function formatErrorHtmlProduction(error) {
 
 function writeErrorOutput(error, isProd) {
   process.stdout.write(
-    isProd ? formatErrorHtmlProduction(error) : formatErrorHtml(error)
+    isProd ? formatErrorHtmlProduction(error) : formatErrorHtml(error),
   );
   process.stderr.write(
-    JSON.stringify({ error: error.message, stack: error.stack })
+    JSON.stringify({ error: error.message, stack: error.stack }),
   );
 }
 
@@ -132,7 +132,7 @@ async function renderToStream(
   serializedBox,
   isDynamic,
   hasJsxJson,
-  jsxJson
+  jsxJson,
 ) {
   const context = {
     req: serializedBox.req,
@@ -146,12 +146,12 @@ async function renderToStream(
         isDynamic ||
         !hasJsxJson
           ? renderJSXToClientJSX(
-              await getJSX(reqPath, query, isNotFound, isDevelopment)
+              await getJSX(reqPath, query, isNotFound, isDevelopment),
             )
-          : (await getSSGJSX(jsxJson)) ??
+          : ((await getSSGJSX(jsxJson)) ??
             renderJSXToClientJSX(
-              await getJSX(reqPath, query, isNotFound, isDevelopment)
-            );
+              await getJSX(reqPath, query, isNotFound, isDevelopment),
+            ));
       if (isNotFound.value) {
         context.res.status(404);
       }
@@ -171,7 +171,7 @@ async function renderToStream(
                 reqPath,
                 query,
                 error,
-                isDevelopment
+                isDevelopment,
               );
 
               if (!context.res.headersSent) context.res.status(500);
@@ -200,11 +200,11 @@ async function renderToStream(
                     ].filter(Boolean)
                   : [getAssetFromManifest("error.js")],
                 bootstrapScriptContent: `window.__DINOU_ERROR_MESSAGE__=${JSON.stringify(
-                  error.message || "Unknown error"
+                  error.message || "Unknown error",
                 )};window.__DINOU_ERROR_NAME__=${JSON.stringify(error.name)};${
                   isDevelopment
                     ? `window.__DINOU_ERROR_STACK__=${JSON.stringify(
-                        error.stack || "No stack trace available"
+                        error.stack || "No stack trace available",
                       )};`
                     : ""
                 }${
@@ -244,19 +244,19 @@ async function renderToStream(
         JSON.stringify({
           error: error.message,
           stack: error.stack,
-        })
+        }),
       );
       process.exit(1);
     }
   });
 }
 
-const reqPath = process.argv[2];
-const query = JSON.parse(process.argv[3]);
+const reqPath = process.argv[2] || "/";
+const query = JSON.parse(process.argv[3] || "{}");
 const serializedBox = JSON.parse(process.argv[4] || "{}");
 const isDynamic = process.argv[5] === "true";
 const hasJsxJson = process.argv[6] === "true";
-const jsxJson = JSON.parse(process.argv[7]);
+const jsxJson = JSON.parse(process.argv[7] || "{}");
 
 process.on("uncaughtException", (error) => {
   process.stdout.write(formatErrorHtml(error));
@@ -264,7 +264,7 @@ process.on("uncaughtException", (error) => {
     JSON.stringify({
       error: error.message,
       stack: error.stack,
-    })
+    }),
   );
   process.exit(1);
 });
@@ -276,7 +276,7 @@ process.on("unhandledRejection", (reason) => {
     JSON.stringify({
       error: error.message,
       stack: error.stack,
-    })
+    }),
   );
   process.exit(1);
 });
@@ -287,7 +287,7 @@ renderToStream(
   serializedBox,
   isDynamic,
   hasJsxJson,
-  jsxJson
+  jsxJson,
 ).catch((err) => {
   console.error("❌ Fatal error starting render stream:", err);
   process.exit(1);

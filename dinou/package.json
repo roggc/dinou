@@ -1,41 +1,17 @@
 {
   "name": "dinou",
   "version": "4.0.1",
-  "description": "Modern Full-Stack React 19 framework with React Server Components, Server Functions, and Streaming SSR.",
   "main": "index.js",
-  "bin": {
-    "dinou": "./cli.js"
-  },
+  "private": true,
   "exports": {
     ".": {
-      "import": "./dinou/index.mjs",
-      "require": "./dinou/index.js"
+      "import": "./index.mjs",
+      "require": "./index.js"
     }
   },
-  "types": "./dinou/index.d.ts",
+  "types": "./index.d.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [
-    "react",
-    "react-19",
-    "react-server-components",
-    "rsc",
-    "react-server-functions",
-    "framework",
-    "react-framework",
-    "esbuild",
-    "rollup",
-    "webpack",
-    "ssr",
-    "streaming",
-    "dinou"
-  ],
-  "author": "Roger Gomez Castells (@roggc)",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/roggc/dinou.git"
   },
   "dependencies": {
     "@babel/core": "^7.27.4",
