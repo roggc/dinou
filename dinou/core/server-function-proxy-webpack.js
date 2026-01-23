@@ -4,13 +4,29 @@ import { createFromFetch } from "react-server-dom-webpack/client";
 function createServerFunctionProxy(id) {
   return new Proxy(() => {}, {
     apply: async (_target, _thisArg, args) => {
+      let body;
+      const headers = {
+        "x-server-function-call": "1",
+      };
+
+      if (args[0] instanceof FormData) {
+        const formData = args[0];
+
+        formData.append("__dinou_func_id", id);
+
+        if (args.length > 1) {
+          formData.append("__dinou_args", JSON.stringify(args.slice(1)));
+        }
+
+        body = formData;
+      } else {
+        headers["Content-Type"] = "application/json";
+        body = JSON.stringify({ id, args });
+      }
       const res = await fetch("/____server_function____", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-server-function-call": "1",
-        },
-        body: JSON.stringify({ id, args }),
+        headers,
+        body,
       });
 
       if (!res.ok) throw new Error("Server function failed");
@@ -48,7 +64,7 @@ function createServerFunctionProxy(id) {
                     // CHECK: We search for the tag start, whether it has the closing > or not
                     if (buffer.includes("<script")) {
                       console.warn(
-                        "[Dinou] Stream ended with incomplete script. Discarding tail."
+                        "[Dinou] Stream ended with incomplete script. Discarding tail.",
                       );
                       // We do not enqueue.
                     } else {
@@ -86,7 +102,7 @@ function createServerFunctionProxy(id) {
                 // Once executed, we remove them so they don't go to React
                 buffer = buffer.replace(scriptRegex, "");
 
-                // 4. CALCULATE WHAT IS SAFE TO SEND (Anti-cut logic)
+                // 4. CALCULATE WHAT IS SAFE TO SEND (The anti-cut logic)
                 // We need to know if the buffer ends with something that LOOKS like the start of a script
                 // Dangerous patterns at the end: <, <s, <sc, <scr, <scri, <scrip, <script
 

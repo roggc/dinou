@@ -72,6 +72,7 @@
     "generic-names": "^4.0.0",
     "loader-utils": "^3.3.1",
     "mini-css-extract-plugin": "^2.9.4",
+    "multer": "^2.0.2",
     "postcss": "^8.5.5",
     "postcss-import": "^16.1.1",
     "postcss-loader": "^8.2.0",
