@@ -1,6 +1,6 @@
 {
   "name": "dinou",
-  "version": "4.0.3",
+  "version": "4.0.4",
   "description": "Modern Full-Stack React 19 framework with React Server Components, Server Functions, and Streaming SSR.",
   "main": "index.js",
   "bin": {
