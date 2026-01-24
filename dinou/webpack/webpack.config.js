@@ -90,45 +90,35 @@ module.exports = async () => {
       // chunkFilename: "[name]-[contenthash].js",
     },
     module: {
-      noParse: [/dist3/, /public/],
+      noParse: [/[\\/]dist3[\\/]/, /[\\/]public[\\/]/],
       rules: [
-        // {
-        //   test: /\.(js|jsx|ts|tsx)$/,
-        //   include: path.resolve(process.cwd(), "dist3"),
-        //   use: "null-loader",
-        // },
-
         {
-          test: /\.(js|jsx|ts|tsx)$/,
+          test: /\.[jt]sx?$/,
           // include: [
           //   path.resolve(process.cwd(), "src"),
-          //   path.resolve(__dirname, "../core"),
-          //   path.resolve(process.cwd(), "node_modules/dinou"),
           //   isEjected && path.resolve(process.cwd(), "dinou"),
+          //   path.resolve(__dirname, "../core"),
           // ].filter(Boolean),
-          use: {
-            loader: "babel-loader",
-            options: {
-              presets: [
-                ["@babel/preset-react", { runtime: "automatic" }],
-                "@babel/preset-typescript",
-              ],
-              plugins: [
-                "@babel/plugin-syntax-import-meta",
-                // isDevelopment && require.resolve("react-refresh/babel"),
-              ].filter(Boolean),
-            },
-          },
           exclude: [
             /node_modules\/(?!dinou)/,
             path.resolve(process.cwd(), "dist3"),
             path.resolve(process.cwd(), "public"),
           ],
-        },
-        {
-          test: /\.[jt]sx?$/,
-          include: path.resolve(process.cwd(), "src"),
           use: [
+            {
+              loader: "babel-loader",
+              options: {
+                presets: [
+                  ["@babel/preset-react", { runtime: "automatic" }],
+                  "@babel/preset-typescript",
+                ],
+                plugins: [
+                  "babel-plugin-react-compiler",
+                  "@babel/plugin-syntax-import-meta",
+                  // isDevelopment && require.resolve("react-refresh/babel"),
+                ].filter(Boolean),
+              },
+            },
             {
               loader: path.resolve(
                 __dirname,
@@ -215,7 +205,9 @@ module.exports = async () => {
       }),
       manifestGeneratorPlugin,
       // Ignore any imports that reference the output folders
-      new webpack.IgnorePlugin({ resourceRegExp: /(dist3|public)/ }),
+      new webpack.IgnorePlugin({
+        resourceRegExp: /[\\/](dist3|public)([\\/]|$)/,
+      }),
       new ServerFunctionsPlugin({
         manifest: manifestGeneratorPlugin.manifestData,
       }),
@@ -268,7 +260,8 @@ module.exports = async () => {
           // Rest of node_modules
           defaultVendors: {
             test: /[\\/]node_modules[\\/]/,
-            name: "vendors",
+            // name: "vendors",
+            name: false,
             priority: 20,
             chunks: "all",
             reuseExistingChunk: true,

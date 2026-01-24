@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Use Server Functions as Actions in Forms.
+- Webpack config ignore pattern.
+
+### Added
+
+- React Compiler to Webpack (dev, prod), Rollup (dev, prod), and esbuild (prod).
 
 ## [4.0.3]
 

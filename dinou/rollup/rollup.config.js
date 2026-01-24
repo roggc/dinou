@@ -148,6 +148,7 @@ module.exports = async function () {
           "@babel/preset-typescript",
         ],
         plugins: [
+          "babel-plugin-react-compiler",
           isDevelopment && require.resolve("react-refresh/babel"),
           "@babel/plugin-syntax-import-meta",
         ].filter(Boolean),
