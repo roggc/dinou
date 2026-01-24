@@ -484,26 +484,21 @@ Server Functions can also be used as **Server Actions** by passing them to the `
 
 1.  **Automatic FormData:** The function receives a `FormData` object containing the input values.
 2.  **Progressive Enhancement:** Forms work even before JavaScript loads.
-3.  **Redirects:** Use `redirect` to navigate after a successful mutation.
+3.  **Redirects:** Use `getContext` to redirect after a successful mutation.
 
 ```javascript
 // src/actions/create-post.js
 "use server";
 import { getContext } from "dinou";
-import db from "@/db";
+import { addPost } from "@/db/posts.js";
 
 export async function createPost(formData) {
   const context = getContext();
   const title = formData.get("title");
   const content = formData.get("content");
 
-  // Perform database mutation
-  await db.query("INSERT INTO posts (title, content) VALUES (?, ?)", [
-    title,
-    content,
-  ]);
+  await addPost({ title, content });
 
-  // Navigate back to the list after creation
   context?.res?.redirect("/posts");
 }
 ```
