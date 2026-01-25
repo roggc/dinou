@@ -51,6 +51,9 @@ Support for React Server Components (RSC), Server-Side Rendering (SSR), Static G
   - [2. `getStaticPaths` (Static Generation)](#2-getstaticpaths-static-generation)
   - [3. `revalidate` (ISR)](#3-revalidate-isr)
   - [4. `dynamic` (Force SSR)](#4-dynamic-force-ssr)
+- [⚡ React Compiler & Automatic Optimizations](#-react-compiler--automatic-optimizations)
+  - [Integration Strategy](#integration-strategy)
+  - [Code Example](#code-example)
 - [📚 API Reference](#-api-reference)
   - [1. Components (`dinou`)](#1-components-dinou)
   - [2. Hooks & Utilities (`dinou`)](#2-hooks--utilities-dinou)
@@ -860,6 +863,55 @@ Forces a page to be rendered dynamically (Server-Side Rendering) on every reques
 // src/profile/page_functions.ts
 export function dynamic() {
   return true; // Always render on demand (SSR)
+}
+```
+
+## ⚡ React Compiler & Automatic Optimizations
+
+Dinou integrates the **React Compiler** (React 19+) out of the box. It analyzes your code and automatically applies fine-grained memoization to values and functions.
+
+This means you can stop manually writing `useMemo`, `useCallback`, and `React.memo`. Just write clean, idiomatic JavaScript, and Dinou ensures maximum performance at build time.
+
+### Integration Strategy
+
+Dinou uses a sophisticated hybrid strategy to balance **Developer Experience (DX)** with **Production Performance**:
+
+| Bundler     |     Development     | Production | Status                                                                                                                           |
+| :---------- | :-----------------: | :--------: | :------------------------------------------------------------------------------------------------------------------------------- |
+| **Webpack** |     ✅ Enabled      | ✅ Enabled | Full optimization.                                                                                                               |
+| **Rollup**  |     ✅ Enabled      | ✅ Enabled | Full optimization.                                                                                                               |
+| **Esbuild** | ⚡ **Native Speed** | ✅ Enabled | **Hybrid Mode:** Dev prioritizes instant HMR (Hot Module Replacement), while Prod injects the compiler for maximum optimization. |
+
+### Code Example
+
+**The Old Way (Manual Optimization):**
+
+```jsx
+function ExpensiveComponent({ data }) {
+  // Manual dependency management required
+  const processed = useMemo(() => heavyMath(data), [data]);
+
+  const handleClick = useCallback(() => {
+    console.log(processed);
+  }, [processed]);
+
+  return <Child onAction={handleClick} />;
+}
+```
+
+**The Dinou Way:**
+
+```jsx
+function ExpensiveComponent({ data }) {
+  // ✨ Automatically memoized by Dinou
+  const processed = heavyMath(data);
+
+  // ✨ Automatically stable reference
+  const handleClick = () => {
+    console.log(processed);
+  };
+
+  return <Child onAction={handleClick} />;
 }
 ```
 
