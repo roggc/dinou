@@ -4,15 +4,10 @@ const parseExports = require("../../core/parse-exports.js");
 const { useServerRegex } = require("../../constants.js");
 
 module.exports = function (source) {
-  // Detect "use server"
-  const lines = source.split("\n");
   let hasUseServer = false;
 
-  for (const line of lines) {
-    if (useServerRegex.test(line.trim())) {
-      hasUseServer = true;
-      break;
-    }
+  if (useServerRegex.test(source)) {
+    hasUseServer = true;
   }
 
   if (!hasUseServer) return source;
@@ -45,7 +40,7 @@ const loadProxy = new Function('return import("/"+"__SERVER_FUNCTION_PROXY__")')
 export default (...args) =>
   loadProxy().then(mod =>
     (mod.default ?? mod ?? window.__SERVER_FUNCTION_PROXY_LIB__).createServerFunctionProxy(${JSON.stringify(
-      key
+      key,
     )})(...args)
   );
 `;
@@ -53,7 +48,7 @@ export default (...args) =>
       proxyCode += `
 export const ${exp} = (...args) =>
   loadProxy().then(mod => (mod.default ?? mod ?? window.__SERVER_FUNCTION_PROXY_LIB__).createServerFunctionProxy(${JSON.stringify(
-    key
+    key,
   )})(...args)
   );
 `;
@@ -68,7 +63,7 @@ export const ${exp} = (...args) =>
 
   this.emitFile(
     `server-functions/${normalizedPath}.json`,
-    JSON.stringify(manifestEntry, null, 2)
+    JSON.stringify(manifestEntry, null, 2),
   );
 
   return proxyCode;

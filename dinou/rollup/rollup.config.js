@@ -148,6 +148,7 @@ module.exports = async function () {
           "@babel/preset-typescript",
         ],
         plugins: [
+          "babel-plugin-react-compiler",
           isDevelopment && require.resolve("react-refresh/babel"),
           "@babel/plugin-syntax-import-meta",
         ].filter(Boolean),
@@ -185,7 +186,11 @@ module.exports = async function () {
       serverFunctionsPlugin(),
     ].filter(Boolean),
     watch: {
-      exclude: ["public/**", "react_client_manifest/**"],
+      exclude: [
+        "public/**",
+        "react_client_manifest/**",
+        "server_functions_manifest/**",
+      ],
     },
     onwarn(warning, warn) {
       // Ignore eval warning if it comes from our request-context file

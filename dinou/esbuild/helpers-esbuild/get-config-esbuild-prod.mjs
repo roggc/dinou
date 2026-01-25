@@ -6,6 +6,7 @@ import assetsPlugin from "../plugins-esbuild/assets-plugin.mjs";
 import copyStaticFiles from "esbuild-copy-static-files";
 import manifestGeneratorPlugin from "../plugins-esbuild/manifest-generator-plugin.mjs";
 import writePlugin from "../plugins-esbuild/write-plugin.mjs";
+import babelReactCompilerPlugin from "../plugins-esbuild/babel-react-compiler-plugin.mjs";
 import { existsSync } from "node:fs";
 
 const manifestData = {};
@@ -16,6 +17,7 @@ export default function getConfigEsbuildProd({
   manifest = {},
 }) {
   let plugins = [
+    babelReactCompilerPlugin(),
     TsconfigPathsPlugin({}),
     cssProcessorPlugin({ outdir }),
     reactClientManifestPlugin({

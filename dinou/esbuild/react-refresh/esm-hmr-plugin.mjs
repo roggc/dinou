@@ -1,8 +1,9 @@
 // plugins-esbuild/esm-hmr-plugin.mjs
 import fs from "node:fs/promises";
 import path from "node:path";
-import * as babelCore from "@babel/core";
-import { babelConfig } from "./babel-config.js";
+// import * as babelCore from "@babel/core";
+// import { babelConfig } from "./babel-config.js";
+import { transformSync } from "@swc/core";
 import { createServer } from "node:http";
 import { EsmHmrEngine } from "./esm-hmr/server.js";
 import { fileURLToPath } from "node:url";
@@ -49,41 +50,6 @@ export default function esmHmrPlugin({
         }
       });
 
-      // build.onLoad({ filter: /.*/ }, async (args) => {
-      //   const abs = path.resolve(args.path);
-
-      //   const outfileName = Object.entries(entryPoints).find(
-      //     ([, value]) => norm(value) === norm(abs)
-      //   )?.[0];
-
-      //   if (!outfileName) {
-      //     return null;
-      //   }
-
-      //   for (let i = 0; i < entryAbsPaths.length; i++) {
-      //     if (abs === entryAbsPaths[i] && entrySources[i]) {
-      //       let injectCode = `import { createHotContext } from "/__hmr_client__.js";\n`;
-      //       injectCode += `window.__hotContext = createHotContext;\n`;
-
-      //       return {
-      //         contents: injectCode + entrySources[i],
-      //         loader: "jsx",
-      //       };
-      //     }
-      //   }
-
-      //   const source = await fs.readFile(args.path, "utf8");
-      //   const transformed = babelCore.transformSync(source, {
-      //     ...babelConfig,
-      //     filename: abs,
-      //   }).code;
-
-      //   return {
-      //     contents: transformed,
-      //     loader: args.path.endsWith(".tsx") ? "tsx" : "jsx",
-      //   };
-      // });
-
       build.onLoad({ filter: /.*/ }, async (args) => {
         const abs = path.resolve(args.path);
 
@@ -92,7 +58,7 @@ export default function esmHmrPlugin({
         // 1. Comprobamos si es un ROOT Entry (client.jsx o error.tsx)
         // Estos son los que tienes guardados en 'entryAbsPaths'
         const rootIndex = entryAbsPaths.findIndex(
-          (entryPath) => norm(entryPath) === absNorm
+          (entryPath) => norm(entryPath) === absNorm,
         );
 
         // CASO A: Es Main o Error (Roots)
@@ -115,7 +81,7 @@ export default function esmHmrPlugin({
         // 2. Comprobamos si es cualquier OTRO Entry Point de la configuración de esbuild
         // (Aquí están tus páginas, layouts, componentes...)
         const isAnEntryPoint = Object.values(entryPoints).some(
-          (val) => norm(path.resolve(val)) === absNorm
+          (val) => norm(path.resolve(val)) === absNorm,
         );
 
         // CASO B: Es una página o componente de usuario
@@ -123,18 +89,46 @@ export default function esmHmrPlugin({
           // AQUÍ SÍ aplicamos Babel para tener React Fast Refresh
           const source = await fs.readFile(args.path, "utf8");
 
+          // try {
+          //   const transformed = babelCore.transformSync(source, {
+          //     ...babelConfig,
+          //     filename: abs,
+          //   }).code;
+
+          //   return {
+          //     contents: transformed,
+          //     loader: args.path.endsWith(".tsx") ? "tsx" : "jsx",
+          //   };
+          // } catch (e) {
+          //   // Si babel falla, fallback al original
+          //   return null;
+          // }
           try {
-            const transformed = babelCore.transformSync(source, {
-              ...babelConfig,
+            const { code } = transformSync(source, {
               filename: abs,
-            }).code;
+              jsc: {
+                parser: {
+                  syntax: "typescript",
+                  tsx: true,
+                  dynamicImport: true,
+                },
+                target: "es2022",
+                transform: {
+                  react: {
+                    refresh: true,
+                    development: true,
+                    runtime: "automatic",
+                  },
+                },
+              },
+            });
 
             return {
-              contents: transformed,
-              loader: args.path.endsWith(".tsx") ? "tsx" : "jsx",
+              contents: code,
+              loader: "js",
             };
           } catch (e) {
-            // Si babel falla, fallback al original
+            console.error("SWC Error:", e);
             return null;
           }
         }
@@ -147,7 +141,7 @@ export default function esmHmrPlugin({
         if (!result || !result.outputFiles) return;
         const clientPath = path.resolve(
           path.dirname(fileURLToPath(import.meta.url)),
-          "./esm-hmr/client.mjs"
+          "./esm-hmr/client.mjs",
         );
         const clientCode = await fs.readFile(clientPath, "utf8");
         const assetPath = path.join(outdir, "__hmr_client__.js");
@@ -174,7 +168,7 @@ export default function esmHmrPlugin({
           const relPath = normalizeRel(bF);
           const outputFile = result.outputFiles.find(
             (f) =>
-              normalizeRel(path.relative(process.cwd(), f.path)) === relPath
+              normalizeRel(path.relative(process.cwd(), f.path)) === relPath,
           );
           if (!outputFile) continue;
           const baseName = path.basename(bF, ".js");
@@ -194,7 +188,7 @@ export default function esmHmrPlugin({
           const source = new TextDecoder().decode(outputFile.contents);
 
           const imports = Array.from(
-            source.matchAll(/import\s+["'](.+?)["']/g)
+            source.matchAll(/import\s+["'](.+?)["']/g),
           ).map((m) => m[1]);
 
           hmrEngine.value.setEntry(urlId, imports, true);

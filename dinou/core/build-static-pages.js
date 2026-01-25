@@ -42,7 +42,7 @@ function createBailoutProxy(target, label, onBailout) {
 
       // 🚨 ALARM: Access detected
       console.log(
-        `[StaticBailout] Access to ${label} detected: "${String(prop)}".`
+        `[StaticBailout] Access to ${label} detected: "${String(prop)}".`,
       );
 
       // Execute logic to mark as dynamic
@@ -61,7 +61,7 @@ function createBailoutProxy(target, label, onBailout) {
     // Optional: Detect if they try to ask "prop in headers"
     has(t, prop) {
       console.log(
-        `[StaticBailout] Existence check (IN) in ${label}: "${String(prop)}".`
+        `[StaticBailout] Existence check (IN) in ${label}: "${String(prop)}".`,
       );
       onBailout();
       return Reflect.has(t, prop);
@@ -87,7 +87,7 @@ async function buildStaticPages() {
     segments = [],
     params = {},
     dynamicStructure = [],
-    doNotPushAtEnd = false
+    doNotPushAtEnd = false,
   ) {
     const entries = readdirSync(currentPath, { withFileTypes: true });
     const pages = [];
@@ -101,8 +101,8 @@ async function buildStaticPages() {
               segments,
               params,
               dynamicStructure,
-              doNotPushAtEnd
-            ))
+              doNotPushAtEnd,
+            )),
           );
         } else if (
           entry.name.startsWith("[[...") &&
@@ -118,7 +118,7 @@ async function buildStaticPages() {
             true,
             true,
             undefined,
-            segments.length
+            segments.length,
           );
           const [pageFunctionsPath] = getFilePathAndDynamicParams(
             segments,
@@ -128,7 +128,7 @@ async function buildStaticPages() {
             true,
             true,
             undefined,
-            segments.length
+            segments.length,
           );
 
           let dynamic, getStaticPaths;
@@ -143,7 +143,7 @@ async function buildStaticPages() {
             console.log(
               `Found optional catch-all route: ${
                 segments.join("/") ?? ""
-              }/[[...${paramName}]]`
+              }/[[...${paramName}]]`,
             );
             try {
               if (getStaticPaths) {
@@ -194,7 +194,7 @@ async function buildStaticPages() {
                     // If this is undefined, we check if there is something defined to the right
                     const remaining = flatSegments.slice(index + 1);
                     return remaining.some(
-                      (s) => s !== undefined && s !== null && s !== ""
+                      (s) => s !== undefined && s !== null && s !== "",
                     );
                   });
 
@@ -205,7 +205,7 @@ async function buildStaticPages() {
                   // 🛡️ 3. URL CLEANING
                   // Remove undefineds for the physical URL
                   const validSegmentsToAdd = flatSegments.filter(
-                    (s) => s !== undefined && s !== null && s !== ""
+                    (s) => s !== undefined && s !== null && s !== "",
                   );
 
                   // 🛡️ 4. PARAMS PREPARATION & NORMALIZATION
@@ -229,8 +229,8 @@ async function buildStaticPages() {
                     ...(await collectPages(
                       dynamicPath,
                       [...segments, ...validSegmentsToAdd],
-                      { ...params, ...paramsToAdd }
-                    ))
+                      { ...params, ...paramsToAdd },
+                    )),
                   );
                 }
               }
@@ -245,8 +245,8 @@ async function buildStaticPages() {
                 segments,
                 params,
                 [...dynamicStructure, paramName],
-                true
-              ))
+                true,
+              )),
             );
           }
         } else if (entry.name.startsWith("[...") && entry.name.endsWith("]")) {
@@ -260,7 +260,7 @@ async function buildStaticPages() {
             true,
             true,
             undefined,
-            segments.length
+            segments.length,
           );
           const [pageFunctionsPath] = getFilePathAndDynamicParams(
             segments,
@@ -270,7 +270,7 @@ async function buildStaticPages() {
             true,
             true,
             undefined,
-            segments.length
+            segments.length,
           );
 
           let dynamic, getStaticPaths;
@@ -285,7 +285,7 @@ async function buildStaticPages() {
             console.log(
               `Found catch-all route: ${
                 segments.join("/") ?? ""
-              }/[...${paramName}]`
+              }/[...${paramName}]`,
             );
             try {
               if (getStaticPaths) {
@@ -339,8 +339,8 @@ async function buildStaticPages() {
                     ...(await collectPages(
                       dynamicPath,
                       [...segments, ...validSegmentsToAdd], // Use the filtered version
-                      { ...params, ...paramsToAdd }
-                    ))
+                      { ...params, ...paramsToAdd },
+                    )),
                   );
                 }
               }
@@ -355,8 +355,8 @@ async function buildStaticPages() {
                 segments,
                 params,
                 [...dynamicStructure, paramName],
-                true
-              ))
+                true,
+              )),
             );
           }
         } else if (entry.name.startsWith("[[") && entry.name.endsWith("]]")) {
@@ -370,7 +370,7 @@ async function buildStaticPages() {
             true,
             true,
             undefined,
-            segments.length
+            segments.length,
           );
           const [pageFunctionsPath] = getFilePathAndDynamicParams(
             segments,
@@ -380,7 +380,7 @@ async function buildStaticPages() {
             true,
             true,
             undefined,
-            segments.length
+            segments.length,
           );
 
           let dynamic, getStaticPaths;
@@ -395,7 +395,7 @@ async function buildStaticPages() {
             console.log(
               `Found optional dynamic route: ${
                 segments.join("/") ?? ""
-              }/[[${paramName}]]`
+              }/[[${paramName}]]`,
             );
             try {
               if (getStaticPaths) {
@@ -438,7 +438,7 @@ async function buildStaticPages() {
                     // Check to the right
                     const remaining = flatSegments.slice(index + 1);
                     return remaining.some(
-                      (s) => s !== undefined && s !== null && s !== ""
+                      (s) => s !== undefined && s !== null && s !== "",
                     );
                   });
 
@@ -448,7 +448,7 @@ async function buildStaticPages() {
 
                   // 🛡️ 3. URL CLEANING
                   const validSegmentsToAdd = flatSegments.filter(
-                    (s) => s !== undefined && s !== null && s !== ""
+                    (s) => s !== undefined && s !== null && s !== "",
                   );
 
                   // 🛡️ 4. PARAMS PREPARATION
@@ -462,8 +462,8 @@ async function buildStaticPages() {
                     ...(await collectPages(
                       dynamicPath,
                       [...segments, ...validSegmentsToAdd],
-                      { ...params, ...paramsToAdd }
-                    ))
+                      { ...params, ...paramsToAdd },
+                    )),
                   );
                 }
               }
@@ -478,8 +478,8 @@ async function buildStaticPages() {
                 segments,
                 params,
                 [...dynamicStructure, paramName],
-                true
-              ))
+                true,
+              )),
             );
           }
         } else if (entry.name.startsWith("[") && entry.name.endsWith("]")) {
@@ -493,7 +493,7 @@ async function buildStaticPages() {
             true,
             true,
             undefined,
-            segments.length
+            segments.length,
           );
           const [pageFunctionsPath] = getFilePathAndDynamicParams(
             segments,
@@ -503,7 +503,7 @@ async function buildStaticPages() {
             true,
             true,
             undefined,
-            segments.length
+            segments.length,
           );
           let dynamic;
           let getStaticPaths;
@@ -516,7 +516,7 @@ async function buildStaticPages() {
             pagePath && path.dirname(pagePath) === dynamicPath;
           if (isLocalPage && !dynamic?.()) {
             console.log(
-              `Found dynamic route: ${segments.join("/") ?? ""}/[${paramName}]`
+              `Found dynamic route: ${segments.join("/") ?? ""}/[${paramName}]`,
             );
             try {
               if (getStaticPaths) {
@@ -567,8 +567,8 @@ async function buildStaticPages() {
                     ...(await collectPages(
                       dynamicPath,
                       [...segments, ...validSegmentsToAdd], // Use the filtered version
-                      { ...params, ...paramsToAdd }
-                    ))
+                      { ...params, ...paramsToAdd },
+                    )),
                   );
                 }
               }
@@ -582,8 +582,8 @@ async function buildStaticPages() {
                 segments,
                 params,
                 [...dynamicStructure, paramName],
-                true
-              ))
+                true,
+              )),
             );
           }
         } else if (!entry.name.startsWith("@")) {
@@ -597,7 +597,7 @@ async function buildStaticPages() {
               true,
               true,
               undefined,
-              segments.length
+              segments.length,
             );
             const [pageFunctionsPath] = getFilePathAndDynamicParams(
               segments,
@@ -607,7 +607,7 @@ async function buildStaticPages() {
               true,
               true,
               undefined,
-              segments.length
+              segments.length,
             );
             let dynamic;
             let getStaticPaths;
@@ -669,8 +669,8 @@ async function buildStaticPages() {
                       ...(await collectPages(
                         dynamicPath,
                         [...segments, ...validSegmentsToAdd, entry.name], // Use the filtered version
-                        { ...params, ...paramsToAdd }
-                      ))
+                        { ...params, ...paramsToAdd },
+                      )),
                     );
                   }
                 }
@@ -684,8 +684,8 @@ async function buildStaticPages() {
                   segments,
                   params,
                   [...dynamicStructure, { STATIC_PARAM_NAME: entry.name }],
-                  true
-                ))
+                  true,
+                )),
               );
             }
           } else {
@@ -695,8 +695,8 @@ async function buildStaticPages() {
                 [...segments, entry.name],
                 params,
                 dynamicStructure,
-                false
-              ))
+                false,
+              )),
             );
           }
         }
@@ -712,7 +712,7 @@ async function buildStaticPages() {
       true,
       undefined,
       segments.length,
-      params
+      params,
     );
     const [pageFunctionsPath] = getFilePathAndDynamicParams(
       segments,
@@ -722,7 +722,7 @@ async function buildStaticPages() {
       true,
       true,
       undefined,
-      segments.length
+      segments.length,
     );
     let dynamic;
     if (pageFunctionsPath) {
@@ -746,105 +746,7 @@ async function buildStaticPages() {
 
   for (const { path: folderPath, segments, params } of pages) {
     try {
-      const [pagePath] = getFilePathAndDynamicParams(
-        segments,
-        {},
-        folderPath,
-        "page",
-        true,
-        true,
-        undefined,
-        segments.length
-      );
-      const pageModule = await importModule(pagePath);
-      const Page = pageModule.default ?? pageModule;
-      // Set displayName for better serialization
-      // if (!Page.displayName) Page.displayName = "Page";
-
-      let props = { params /* searchParams: {}*/ };
-
-      const [pageFunctionsPath] = getFilePathAndDynamicParams(
-        segments,
-        {},
-        folderPath,
-        "page_functions",
-        true,
-        true,
-        undefined,
-        segments.length
-      );
-
-      let pageFunctionsProps;
-      let revalidate;
-
-      if (pageFunctionsPath) {
-        const pageFunctionsModule = await importModule(pageFunctionsPath);
-        const getProps = pageFunctionsModule.getProps;
-        revalidate = pageFunctionsModule.revalidate;
-        pageFunctionsProps = await getProps?.(params);
-        props = { ...props, ...(pageFunctionsProps?.page ?? {}) };
-      }
-
-      let jsx = React.createElement(Page, props);
-      jsx = { ...jsx, __modulePath: pagePath };
-
-      const noLayoutPath = path.join(folderPath, "no_layout");
-      if (!existsSync(noLayoutPath)) {
-        const layouts = getFilePathAndDynamicParams(
-          segments,
-          {},
-          srcFolder,
-          "layout",
-          true,
-          false,
-          undefined,
-          0,
-          {},
-          true
-        );
-
-        if (layouts && Array.isArray(layouts)) {
-          let index = 0;
-          for (const [layoutPath, dParams, slots] of layouts.reverse()) {
-            const layoutModule = await importModule(layoutPath);
-            const Layout = layoutModule.default ?? layoutModule;
-            // if (!Layout.displayName) Layout.displayName = "Layout";
-            const updatedSlots = {};
-            for (const [slotName, slotElement] of Object.entries(slots)) {
-              const alreadyFoundPath = slotElement.props?.__modulePath;
-
-              updatedSlots[slotName] = {
-                ...slotElement,
-                __modulePath: alreadyFoundPath ?? null,
-              };
-            }
-            let props = {
-              params: dParams,
-              /*searchParams: {},*/ ...updatedSlots,
-            };
-            if (index === layouts.length - 1) {
-              props = { ...props, ...(pageFunctionsProps?.layout ?? {}) };
-            }
-            jsx = React.createElement(Layout, props, jsx);
-            jsx = { ...jsx, __modulePath: layoutPath };
-            const layoutFolderPath = path.dirname(layoutPath);
-            if (
-              getFilePathAndDynamicParams(
-                [],
-                {},
-                layoutFolderPath,
-                "reset_layout",
-                false
-              )[0]
-            ) {
-              break;
-            }
-            index++;
-          }
-        }
-      }
-      const segmentsJoin = segments.join("/");
-      const reqPath = segments.length ? "/" + segmentsJoin + "/" : "/";
+      const reqPath = segments.length ? "/" + segments.join("/") + "/" : "/";
       // ====================================================================
       // 1. MOCK RES: Fulfilling ResponseProxy interface
       // ====================================================================
@@ -895,7 +797,7 @@ async function buildStaticPages() {
 
           // Log warning because a redirect in SSG is usually problematic
           console.warn(
-            `⚠️ [SSG] Redirect detected in ${reqPath} -> ${url} (${status})`
+            `⚠️ [SSG] Redirect detected in ${reqPath} -> ${url} (${status})`,
           );
         },
       };
@@ -937,7 +839,105 @@ async function buildStaticPages() {
         res: mockRes,
       };
 
-      jsx = await requestStorage.run(mockContext, async () => {
+      let revalidate;
+      const jsx = await requestStorage.run(mockContext, async () => {
+        const [pagePath] = getFilePathAndDynamicParams(
+          segments,
+          {},
+          folderPath,
+          "page",
+          true,
+          true,
+          undefined,
+          segments.length,
+        );
+        const pageModule = await importModule(pagePath);
+        const Page = pageModule.default ?? pageModule;
+        // Set displayName for better serialization
+        // if (!Page.displayName) Page.displayName = "Page";
+
+        let props = { params /* searchParams: {}*/ };
+
+        const [pageFunctionsPath] = getFilePathAndDynamicParams(
+          segments,
+          {},
+          folderPath,
+          "page_functions",
+          true,
+          true,
+          undefined,
+          segments.length,
+        );
+
+        let pageFunctionsProps;
+
+        if (pageFunctionsPath) {
+          const pageFunctionsModule = await importModule(pageFunctionsPath);
+          const getProps = pageFunctionsModule.getProps;
+          revalidate = pageFunctionsModule.revalidate;
+          pageFunctionsProps = await getProps?.(params);
+          props = { ...props, ...(pageFunctionsProps?.page ?? {}) };
+        }
+
+        let jsx = React.createElement(Page, props);
+        jsx = { ...jsx, __modulePath: pagePath };
+
+        const noLayoutPath = path.join(folderPath, "no_layout");
+        if (!existsSync(noLayoutPath)) {
+          const layouts = getFilePathAndDynamicParams(
+            segments,
+            {},
+            srcFolder,
+            "layout",
+            true,
+            false,
+            undefined,
+            0,
+            {},
+            true,
+          );
+
+          if (layouts && Array.isArray(layouts)) {
+            let index = 0;
+            for (const [layoutPath, dParams, slots] of layouts.reverse()) {
+              const layoutModule = await importModule(layoutPath);
+              const Layout = layoutModule.default ?? layoutModule;
+              // if (!Layout.displayName) Layout.displayName = "Layout";
+              const updatedSlots = {};
+              for (const [slotName, slotElement] of Object.entries(slots)) {
+                const alreadyFoundPath = slotElement.props?.__modulePath;
+
+                updatedSlots[slotName] = {
+                  ...slotElement,
+                  __modulePath: alreadyFoundPath ?? null,
+                };
+              }
+              let props = {
+                params: dParams,
+                /*searchParams: {},*/ ...updatedSlots,
+              };
+              if (index === layouts.length - 1) {
+                props = { ...props, ...(pageFunctionsProps?.layout ?? {}) };
+              }
+              jsx = React.createElement(Layout, props, jsx);
+              jsx = { ...jsx, __modulePath: layoutPath };
+              const layoutFolderPath = path.dirname(layoutPath);
+              if (
+                getFilePathAndDynamicParams(
+                  [],
+                  {},
+                  layoutFolderPath,
+                  "reset_layout",
+                  false,
+                )[0]
+              ) {
+                break;
+              }
+              index++;
+            }
+          }
+        }
+
         return await asyncRenderJSXToClientJSX(jsx);
       });
 
@@ -946,8 +946,8 @@ async function buildStaticPages() {
         // Will behave as pure SSR at runtime.
         console.log(
           `Skipping static generation for ${segments.join(
-            "/"
-          )} due to dynamic usage.`
+            "/",
+          )} due to dynamic usage.`,
         );
         continue;
       }
@@ -1004,7 +1004,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
         (entry) =>
           entry.isDirectory() &&
           ((entry.name.startsWith("[") && entry.name.endsWith("]")) ||
-            (entry.name.startsWith("[[") && entry.name.endsWith("]]")))
+            (entry.name.startsWith("[[") && entry.name.endsWith("]]"))),
       );
 
       if (dynamicEntry) {
@@ -1022,108 +1022,6 @@ async function buildStaticPage(reqPath, isDynamic = null) {
         throw new Error(`No matching route found for ${reqPath}`);
       }
     }
-
-    const [pagePath, dParams] = getFilePathAndDynamicParams(
-      segments,
-      {},
-      folderPath,
-      "page",
-      true,
-      true,
-      undefined,
-      segments.length,
-      dynamicParams
-    );
-    if (!pagePath) throw new Error(`No page found for ${reqPath}`);
-
-    const pageModule = await importModule(pagePath);
-    const Page = pageModule.default ?? pageModule;
-
-    let props = { params: dParams /*searchParams: {}*/ };
-    const [pageFunctionsPath] = getFilePathAndDynamicParams(
-      segments,
-      {},
-      folderPath,
-      "page_functions",
-      true,
-      true,
-      undefined,
-      segments.length
-    );
-
-    let pageFunctionsProps;
-    let revalidate;
-    if (pageFunctionsPath) {
-      const pageFunctionsModule = await importModule(pageFunctionsPath);
-      const getProps = pageFunctionsModule.getProps;
-      if (isDynamic && (isDynamic.value = pageFunctionsModule.dynamic?.()))
-        return;
-      revalidate = pageFunctionsModule.revalidate;
-      pageFunctionsProps = await getProps?.(dParams);
-      props = { ...props, ...(pageFunctionsProps?.page ?? {}) };
-    }
-
-    let jsx = React.createElement(Page, props);
-    jsx = { ...jsx, __modulePath: pagePath };
-
-    const noLayoutPath = path.join(folderPath, "no_layout");
-    if (!existsSync(noLayoutPath)) {
-      const layouts = getFilePathAndDynamicParams(
-        segments,
-        {},
-        srcFolder,
-        "layout",
-        true,
-        false,
-        undefined,
-        0,
-        {},
-        true
-      );
-      if (layouts && Array.isArray(layouts)) {
-        let index = 0;
-        for (const [layoutPath, dParams, slots] of layouts.reverse()) {
-          const layoutModule = await importModule(layoutPath);
-          const Layout = layoutModule.default ?? layoutModule;
-          const updatedSlots = {};
-          for (const [slotName, slotElement] of Object.entries(slots)) {
-            const alreadyFoundPath = slotElement.props?.__modulePath;
-
-            updatedSlots[slotName] = {
-              ...slotElement,
-              __modulePath: alreadyFoundPath ?? null,
-            };
-          }
-          let layoutProps = {
-            params: dParams,
-            // searchParams: {},
-            ...updatedSlots,
-          };
-          if (index === layouts.length - 1) {
-            layoutProps = {
-              ...layoutProps,
-              ...(pageFunctionsProps?.layout ?? {}),
-            };
-          }
-          jsx = React.createElement(Layout, layoutProps, jsx);
-          jsx = { ...jsx, __modulePath: layoutPath };
-          const layoutFolderPath = path.dirname(layoutPath);
-          if (
-            getFilePathAndDynamicParams(
-              [],
-              {},
-              layoutFolderPath,
-              "reset_layout",
-              false
-            )[0]
-          ) {
-            break;
-          }
-          index++;
-        }
-      }
-    }
-
     // ====================================================================
     // 1. MOCK RES: Fulfilling the ResponseProxy interface
     // ====================================================================
@@ -1174,7 +1072,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
 
         // We log a warning because a redirect in SSG is usually problematic
         console.warn(
-          `⚠️ [SSG] Redirect detected in ${reqPath} -> ${url} (${status})`
+          `⚠️ [SSG] Redirect detected in ${reqPath} -> ${url} (${status})`,
         );
       },
     };
@@ -1216,7 +1114,108 @@ async function buildStaticPage(reqPath, isDynamic = null) {
       res: mockRes,
     };
 
-    jsx = await requestStorage.run(mockContext, async () => {
+    let revalidate;
+    const jsx = await requestStorage.run(mockContext, async () => {
+      const [pagePath, dParams] = getFilePathAndDynamicParams(
+        segments,
+        {},
+        folderPath,
+        "page",
+        true,
+        true,
+        undefined,
+        segments.length,
+        dynamicParams,
+      );
+      if (!pagePath) throw new Error(`No page found for ${reqPath}`);
+
+      const pageModule = await importModule(pagePath);
+      const Page = pageModule.default ?? pageModule;
+
+      let props = { params: dParams /*searchParams: {}*/ };
+      const [pageFunctionsPath] = getFilePathAndDynamicParams(
+        segments,
+        {},
+        folderPath,
+        "page_functions",
+        true,
+        true,
+        undefined,
+        segments.length,
+      );
+
+      let pageFunctionsProps;
+      if (pageFunctionsPath) {
+        const pageFunctionsModule = await importModule(pageFunctionsPath);
+        const getProps = pageFunctionsModule.getProps;
+        if (isDynamic && (isDynamic.value = pageFunctionsModule.dynamic?.()))
+          return;
+        revalidate = pageFunctionsModule.revalidate;
+        pageFunctionsProps = await getProps?.(dParams);
+        props = { ...props, ...(pageFunctionsProps?.page ?? {}) };
+      }
+
+      let jsx = React.createElement(Page, props);
+      jsx = { ...jsx, __modulePath: pagePath };
+
+      const noLayoutPath = path.join(folderPath, "no_layout");
+      if (!existsSync(noLayoutPath)) {
+        const layouts = getFilePathAndDynamicParams(
+          segments,
+          {},
+          srcFolder,
+          "layout",
+          true,
+          false,
+          undefined,
+          0,
+          {},
+          true,
+        );
+        if (layouts && Array.isArray(layouts)) {
+          let index = 0;
+          for (const [layoutPath, dParams, slots] of layouts.reverse()) {
+            const layoutModule = await importModule(layoutPath);
+            const Layout = layoutModule.default ?? layoutModule;
+            const updatedSlots = {};
+            for (const [slotName, slotElement] of Object.entries(slots)) {
+              const alreadyFoundPath = slotElement.props?.__modulePath;
+
+              updatedSlots[slotName] = {
+                ...slotElement,
+                __modulePath: alreadyFoundPath ?? null,
+              };
+            }
+            let layoutProps = {
+              params: dParams,
+              // searchParams: {},
+              ...updatedSlots,
+            };
+            if (index === layouts.length - 1) {
+              layoutProps = {
+                ...layoutProps,
+                ...(pageFunctionsProps?.layout ?? {}),
+              };
+            }
+            jsx = React.createElement(Layout, layoutProps, jsx);
+            jsx = { ...jsx, __modulePath: layoutPath };
+            const layoutFolderPath = path.dirname(layoutPath);
+            if (
+              getFilePathAndDynamicParams(
+                [],
+                {},
+                layoutFolderPath,
+                "reset_layout",
+                false,
+              )[0]
+            ) {
+              break;
+            }
+            index++;
+          }
+        }
+      }
+
       return await asyncRenderJSXToClientJSX(jsx);
     });
 
@@ -1225,8 +1224,8 @@ async function buildStaticPage(reqPath, isDynamic = null) {
       // It will behave as pure SSR at runtime.
       console.log(
         `Skipping static generation for ${segments.join(
-          "/"
-        )} due to dynamic usage.`
+          "/",
+        )} due to dynamic usage.`,
       );
       if (isDynamic) {
         isDynamic.value = true;
@@ -1311,15 +1310,15 @@ function serializeReactElement(element) {
       modulePath: isPackage
         ? modulePath
         : modulePath
-        ? path.relative(process.cwd(), modulePath).split(path.sep).join("/")
-        : null,
+          ? path.relative(process.cwd(), modulePath).split(path.sep).join("/")
+          : null,
       props: {
         ...filterProps(element.props),
         children: Array.isArray(element.props.children)
           ? element.props.children.map((child) => serializeReactElement(child))
           : element.props.children
-          ? serializeReactElement(element.props.children)
-          : undefined,
+            ? serializeReactElement(element.props.children)
+            : undefined,
       },
     };
   }

@@ -1,6 +1,6 @@
 {
   "name": "dinou",
-  "version": "4.0.3",
+  "version": "4.0.4",
   "description": "Modern Full-Stack React 19 framework with React Server Components, Server Functions, and Streaming SSR.",
   "main": "index.js",
   "bin": {
@@ -54,9 +54,11 @@
     "@rollup/plugin-json": "^6.1.0",
     "@rollup/plugin-node-resolve": "^16.0.1",
     "@rollup/plugin-replace": "^6.0.2",
+    "@swc/core": "^1.15.10",
     "@tailwindcss/postcss": "^4.1.10",
     "autoprefixer": "^10.4.21",
     "babel-loader": "^10.0.0",
+    "babel-plugin-react-compiler": "^1.0.0",
     "chokidar": "^4.0.3",
     "commander": "^14.0.0",
     "concurrently": "^9.2.0",
@@ -72,6 +74,7 @@
     "generic-names": "^4.0.0",
     "loader-utils": "^3.3.1",
     "mini-css-extract-plugin": "^2.9.4",
+    "multer": "^2.0.2",
     "postcss": "^8.5.5",
     "postcss-import": "^16.1.1",
     "postcss-loader": "^8.2.0",

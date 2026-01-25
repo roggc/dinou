@@ -20,7 +20,7 @@ async function getCSSEntries({
   assetInclude = assetRegex,
   manifest = {},
 } = {}) {
-  // const detectedClientEntries = new Set();
+  const detectedClientEntries = new Set();
   const detectedCSSEntries = new Set();
   // const detectedAssetEntries = new Set();
   // const serverModules = new Set();
@@ -29,7 +29,7 @@ async function getCSSEntries({
     code,
     baseFilePath,
     visited = new Set(),
-    isTopLevelClientComponent = false
+    isTopLevelClientComponent = false,
   ) {
     if (visited.has(baseFilePath)) {
       return { imports: [], assets: [], csss: [] };
@@ -71,7 +71,7 @@ async function getCSSEntries({
       } catch (err) {
         console.warn(
           `[get-esbuild-entries] Could not read import: ${absImportPathWithExt}`,
-          err.message
+          err.message,
         );
         continue;
       }
@@ -115,7 +115,7 @@ async function getCSSEntries({
           importedCode,
           absImportPathWithExt,
           visited,
-          isTopLevelClientComponent
+          isTopLevelClientComponent,
         );
         nested.imports.forEach((p) => imports.add(p));
         nested.assets.forEach((p) => assets.add(p));
@@ -123,7 +123,7 @@ async function getCSSEntries({
       } catch (err) {
         console.warn(
           `[get-esbuild-entries] Could not process imports of: ${absImportPathWithExt}`,
-          err.message
+          err.message,
         );
       }
     }
@@ -188,10 +188,32 @@ async function getCSSEntries({
     const normalizedPath = normalizePath(absPath);
 
     if (isClientModule) {
+      const name = path.basename(absPath, path.extname(absPath));
+
+      detectedClientEntries.add({
+        absPath: normalizedPath,
+        name,
+      });
+      const { imports } = await getImportsAndAssetsAndCsss(
+        code,
+        absPath,
+        new Set(),
+        true,
+      );
+      const clientComponentRegex = /\.(js|jsx|ts|tsx)$/i;
+      imports.forEach((imp) => {
+        if (clientComponentRegex.test(imp) && !imp.includes("node_modules")) {
+          const name = path.basename(imp, path.extname(imp));
+          detectedClientEntries.add({
+            absPath: normalizePath(imp),
+            name,
+          });
+        }
+      });
     } else if (isPageOrLayout(absPath)) {
       if (!isAsyncDefaultExport(code)) {
         console.warn(
-          `[react-client-manifest] The file ${normalizedPath} is a page or layout without "use client" directive, but its default export is not an async function.`
+          `[react-client-manifest] The file ${normalizedPath} is a page or layout without "use client" directive, but its default export is not an async function.`,
         );
       }
       // serverModules.add({
@@ -206,7 +228,7 @@ async function getCSSEntries({
             ...csss.map((cssPath) => ({
               absPath: normalizePath(cssPath),
               name: path.basename(cssPath, path.extname(cssPath)),
-            }))
+            })),
           );
         }
 
@@ -225,6 +247,13 @@ async function getCSSEntries({
     }
   } // end for files
 
+  for (const dCE of detectedClientEntries) {
+    const hash = hashFilePath(dCE.absPath);
+    const outfileName = `${dCE.name}-${hash}`;
+    dCE.outfile = `${outfileName}.js`;
+    dCE.outfileName = outfileName;
+  }
+
   for (const dCSSE of detectedCSSEntries) {
     const hash = hashFilePath(dCSSE.absPath);
     const outfileName = `${dCSSE.name}-${hash}`;
@@ -240,7 +269,7 @@ async function getCSSEntries({
   // }
 
   // console.log("detectedCssEntries", detectedCSSEntries);
-  return [detectedCSSEntries];
+  return [detectedCSSEntries, detectedClientEntries];
 }
 
 module.exports = getCSSEntries;

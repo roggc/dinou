@@ -39,9 +39,10 @@ Support for React Server Components (RSC), Server-Side Rendering (SSR), Static G
   - [Hybrid Rendering Engine](#hybrid-rendering-engine)
   - [Incremental Static Regeneration (ISR)](#incremental-static-regeneration-isr)
   - [Client Components](#client-components)
-- [Server Functions (`"use server"`) & Smart Suspense](#server-functions-use-server--smart-suspense)
+- [Server Functions (`"use server"`) & Enhanced Suspense](#server-functions-use-server--enhanced-suspense)
   - [Usage in Client Components (Reactive)](#usage-in-client-components-reactive)
   - [Usage in Server Components (Streaming)](#usage-in-server-components-streaming)
+  - [Server Actions (Form Mutations)](#server-actions-form-mutations)
 - [Advanced Patterns: The "Dinou Pattern"](#advanced-patterns-the-dinou-pattern)
   - [The Concept](#the-concept)
   - [Implementation](#implementation)
@@ -50,6 +51,9 @@ Support for React Server Components (RSC), Server-Side Rendering (SSR), Static G
   - [2. `getStaticPaths` (Static Generation)](#2-getstaticpaths-static-generation)
   - [3. `revalidate` (ISR)](#3-revalidate-isr)
   - [4. `dynamic` (Force SSR)](#4-dynamic-force-ssr)
+- [⚡ React Compiler & Automatic Optimizations](#-react-compiler--automatic-optimizations)
+  - [Integration Strategy](#integration-strategy)
+  - [Code Example](#code-example)
 - [📚 API Reference](#-api-reference)
   - [1. Components (`dinou`)](#1-components-dinou)
   - [2. Hooks & Utilities (`dinou`)](#2-hooks--utilities-dinou)
@@ -414,7 +418,7 @@ export default function Counter() {
 }
 ```
 
-## Server Functions (`"use server"`) & Smart Suspense
+## Server Functions (`"use server"`) & Enhanced Suspense
 
 Dinou supports **Server Functions**, allowing you to call server-side logic directly from your Client Components like a Remote Procedure Call (RPC). A unique feature of Dinou is that Server Functions can return **rendered Components** (both Server or Client Components), not just JSON data.
 
@@ -473,6 +477,63 @@ export default async function Page({ params: { id } }) {
       {/* Behaves like native Suspense (Streaming) */}
       <Suspense fallback="Loading post...">{getPost(id)}</Suspense>
     </div>
+  );
+}
+```
+
+### Server Actions (Form Mutations)
+
+Server Functions can also be used as **Server Actions** by passing them to the `action` prop of a `<form>`. This allows you to handle form submissions and data mutations directly on the server without creating API endpoints manually.
+
+1.  **Automatic FormData:** The function receives a `FormData` object containing the input values.
+2.  **Progressive Enhancement:** Forms work even before JavaScript loads.
+3.  **Redirects:** Use `getContext` to redirect after a successful mutation.
+
+```javascript
+// src/actions/create-post.js
+"use server";
+import { getContext } from "dinou";
+import { addPost } from "@/db/posts.js";
+
+export async function createPost(formData) {
+  const context = getContext();
+  const title = formData.get("title");
+  const content = formData.get("content");
+
+  await addPost({ title, content });
+
+  context?.res?.redirect("/posts");
+}
+```
+
+#### Usage in Components
+
+You can import the function and use it directly in your JSX. You can also use the `useFormStatus` hook (from React 19) to show loading states while the action is executing.
+
+```jsx
+// src/new-post/page.jsx
+"use client";
+import { useFormStatus } from "react-dom";
+import { createPost } from "@/actions/create-post";
+
+function SubmitButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button type="submit" disabled={pending}>
+      {pending ? "Saving..." : "Create Post"}
+    </button>
+  );
+}
+
+export default function Page() {
+  return (
+    <form action={createPost}>
+      {/* The 'name' attribute is required for FormData extraction */}
+      <input name="title" placeholder="Title" required />
+      <textarea name="content" placeholder="Content" required />
+
+      <SubmitButton />
+    </form>
   );
 }
 ```
@@ -802,6 +863,55 @@ Forces a page to be rendered dynamically (Server-Side Rendering) on every reques
 // src/profile/page_functions.ts
 export function dynamic() {
   return true; // Always render on demand (SSR)
+}
+```
+
+## ⚡ React Compiler & Automatic Optimizations
+
+Dinou integrates the **React Compiler** (React 19+) out of the box. It analyzes your code and automatically applies fine-grained memoization to values and functions.
+
+This means you can stop manually writing `useMemo`, `useCallback`, and `React.memo`. Just write clean, idiomatic JavaScript, and Dinou ensures maximum performance at build time.
+
+### Integration Strategy
+
+Dinou uses a sophisticated hybrid strategy to balance **Developer Experience (DX)** with **Production Performance**:
+
+| Bundler     |     Development     | Production | Status                                                                                                                           |
+| :---------- | :-----------------: | :--------: | :------------------------------------------------------------------------------------------------------------------------------- |
+| **Webpack** |     ✅ Enabled      | ✅ Enabled | Full optimization.                                                                                                               |
+| **Rollup**  |     ✅ Enabled      | ✅ Enabled | Full optimization.                                                                                                               |
+| **Esbuild** | ⚡ **Native Speed** | ✅ Enabled | **Hybrid Mode:** Dev prioritizes instant HMR (Hot Module Replacement), while Prod injects the compiler for maximum optimization. |
+
+### Code Example
+
+**The Old Way (Manual Optimization):**
+
+```jsx
+function ExpensiveComponent({ data }) {
+  // Manual dependency management required
+  const processed = useMemo(() => heavyMath(data), [data]);
+
+  const handleClick = useCallback(() => {
+    console.log(processed);
+  }, [processed]);
+
+  return <Child onAction={handleClick} />;
+}
+```
+
+**The Dinou Way:**
+
+```jsx
+function ExpensiveComponent({ data }) {
+  // ✨ Automatically memoized by Dinou
+  const processed = heavyMath(data);
+
+  // ✨ Automatically stable reference
+  const handleClick = () => {
+    console.log(processed);
+  };
+
+  return <Child onAction={handleClick} />;
 }
 ```
 

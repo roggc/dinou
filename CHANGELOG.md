@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.0.4]
+
+### Fixed
+
+- Use Server Functions as Actions in Forms.
+- Webpack config ignore pattern.
+- buildStaticPages: pass context to getProps.
+- refresh: actually do refresh of the same page.
+
+### Added
+
+- React Compiler to Webpack (dev, prod), Rollup (dev, prod), and esbuild (prod).
+
 ## [4.0.3]
 
 ### Fixed

@@ -37,7 +37,24 @@ console.log(
     : "📦 [Dinou] Library Mode detected (Webpack: Using node_modules)",
 );
 
+const projectRoot = process.cwd();
+
+const outputDirs = [
+  path.resolve(projectRoot, "public"),
+  path.resolve(projectRoot, "dist3"),
+];
+
+function cleanDir(dir) {
+  if (fs.existsSync(dir)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 module.exports = async () => {
+  const outputDir = path.resolve(process.cwd(), outputDirectory);
+
+  // 🔥 CLEAN HARD
+  cleanDir(outputDir);
   const [cssEntries] = await getCSSEntries();
   return {
     performance: {
@@ -90,45 +107,31 @@ module.exports = async () => {
       // chunkFilename: "[name]-[contenthash].js",
     },
     module: {
-      noParse: [/dist3/, /public/],
+      // noParse: [/[\\/]dist3[\\/]/, /[\\/]public[\\/]/],
       rules: [
-        // {
-        //   test: /\.(js|jsx|ts|tsx)$/,
-        //   include: path.resolve(process.cwd(), "dist3"),
-        //   use: "null-loader",
-        // },
-
-        {
-          test: /\.(js|jsx|ts|tsx)$/,
-          // include: [
-          //   path.resolve(process.cwd(), "src"),
-          //   path.resolve(__dirname, "../core"),
-          //   path.resolve(process.cwd(), "node_modules/dinou"),
-          //   isEjected && path.resolve(process.cwd(), "dinou"),
-          // ].filter(Boolean),
-          use: {
-            loader: "babel-loader",
-            options: {
-              presets: [
-                ["@babel/preset-react", { runtime: "automatic" }],
-                "@babel/preset-typescript",
-              ],
-              plugins: [
-                "@babel/plugin-syntax-import-meta",
-                // isDevelopment && require.resolve("react-refresh/babel"),
-              ].filter(Boolean),
-            },
-          },
-          exclude: [
-            /node_modules\/(?!dinou)/,
-            path.resolve(process.cwd(), "dist3"),
-            path.resolve(process.cwd(), "public"),
-          ],
-        },
         {
           test: /\.[jt]sx?$/,
-          include: path.resolve(process.cwd(), "src"),
+          // include: [
+          //   path.resolve(process.cwd(), "src"),
+          //   isEjected && path.resolve(process.cwd(), "dinou"),
+          //   path.resolve(__dirname, "../core"),
+          // ].filter(Boolean),
+          exclude: [/node_modules\/(?!dinou)/, ...outputDirs],
           use: [
+            {
+              loader: "babel-loader",
+              options: {
+                presets: [
+                  ["@babel/preset-react", { runtime: "automatic" }],
+                  "@babel/preset-typescript",
+                ],
+                plugins: [
+                  "babel-plugin-react-compiler",
+                  "@babel/plugin-syntax-import-meta",
+                  // isDevelopment && require.resolve("react-refresh/babel"),
+                ].filter(Boolean),
+              },
+            },
             {
               loader: path.resolve(
                 __dirname,
@@ -214,8 +217,13 @@ module.exports = async () => {
         filename: "[name].css",
       }),
       manifestGeneratorPlugin,
-      // Ignore any imports that reference the output folders
-      new webpack.IgnorePlugin({ resourceRegExp: /(dist3|public)/ }),
+      new webpack.IgnorePlugin({
+        checkResource(resource, context) {
+          if (!context) return false;
+
+          return outputDirs.some((dir) => context.startsWith(dir));
+        },
+      }),
       new ServerFunctionsPlugin({
         manifest: manifestGeneratorPlugin.manifestData,
       }),
@@ -268,7 +276,8 @@ module.exports = async () => {
           // Rest of node_modules
           defaultVendors: {
             test: /[\\/]node_modules[\\/]/,
-            name: "vendors",
+            // name: "vendors",
+            name: false,
             priority: 20,
             chunks: "all",
             reuseExistingChunk: true,
@@ -277,7 +286,7 @@ module.exports = async () => {
       },
     },
     watchOptions: {
-      ignored: ["public/", "dist3/"],
+      ignored: outputDirs.map((dir) => `${dir}/**`),
     },
     stats: "normal", // or 'verbose' in dev
     infrastructureLogging: {

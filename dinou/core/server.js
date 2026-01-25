@@ -803,8 +803,25 @@ function isOriginAllowed(req) {
   }
 }
 
+const multer = require("multer");
+
+const upload = multer().any();
+
+const runMiddleware = (req, res, fn) => {
+  return new Promise((resolve, reject) => {
+    fn(req, res, (result) => {
+      if (result instanceof Error) return reject(result);
+      return resolve(result);
+    });
+  });
+};
+
 app.post("/____server_function____", async (req, res) => {
   try {
+    if (req.headers["content-type"]?.includes("multipart/form-data")) {
+      await runMiddleware(req, res, upload);
+    }
+
     // 1. Check Origin (Prevent calls from other domains)
     const origin = req.headers.origin;
     const host = req.headers.host;
@@ -827,7 +844,40 @@ app.post("/____server_function____", async (req, res) => {
       );
       return res.status(403).json({ error: "Origin not allowed" });
     }
-    const { id, args } = req.body;
+
+    let id, args;
+
+    if (req.headers["content-type"]?.includes("multipart/form-data")) {
+      id = req.body.__dinou_func_id;
+
+      const formData = new FormData();
+
+      for (const key in req.body) {
+        if (key === "__dinou_func_id" || key === "__dinou_args") continue;
+        formData.append(key, req.body[key]);
+      }
+
+      if (req.files && Array.isArray(req.files)) {
+        for (const file of req.files) {
+          const blob = new Blob([file.buffer], { type: file.mimetype });
+          formData.append(file.fieldname, blob, file.originalname);
+        }
+      }
+
+      args = [formData];
+
+      if (req.body.__dinou_args) {
+        try {
+          const extraArgs = JSON.parse(req.body.__dinou_args);
+          args.push(...extraArgs);
+        } catch (e) {
+          console.error("Error parsing extra args in multipart request");
+        }
+      }
+    } else {
+      id = req.body.id;
+      args = req.body.args;
+    }
 
     // Basic input validation: id must be string, args an array
     if (typeof id !== "string" || !Array.isArray(args)) {
