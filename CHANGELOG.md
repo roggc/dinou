@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Use Server Functions as Actions in Forms.
 - Webpack config ignore pattern.
+- buildStaticPages: pass context to getProps.
+- refresh: actually do refresh of the same page.
 
 ### Added
 

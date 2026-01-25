@@ -38,7 +38,8 @@ const isHashChangeOnly = (finalPath) => {
   );
 };
 
-const getRSCPayload = (url) => {
+const getRSCPayload = (rscKey) => {
+  const url = rscKey.split("::")[0];
   // 1. Check Idempotence (Avoids the infinite loop of React)
   if (cache.has(url)) {
     return cache.get(url);
@@ -52,8 +53,8 @@ const getRSCPayload = (url) => {
         ? "/____rsc_payload_old_static____" + url
         : "/____rsc_payload_old____" + url
       : window.__DINOU_USE_STATIC__
-      ? "/____rsc_payload_static____" + url
-      : "/____rsc_payload____" + url;
+        ? "/____rsc_payload_static____" + url
+        : "/____rsc_payload____" + url;
 
     // Clean flags immediately
     window.__DINOU_USE_OLD_RSC__ = false;
@@ -120,7 +121,7 @@ function Router() {
     // Normal RSC Navigation
     scrollCache.set(
       window.location.pathname + window.location.search,
-      window.scrollY
+      window.scrollY,
     );
     // cache.delete(finalPath);
     if (options.replace) {
@@ -238,7 +239,8 @@ function Router() {
   }, [route]);
 
   // RSC Logic
-  const content = getRSCPayload(route);
+  const rscKey = route + "::" + version;
+  const content = getRSCPayload(rscKey);
 
   const contextValue = useMemo(
     () => ({
@@ -249,7 +251,7 @@ function Router() {
       refresh,
       isPending,
     }),
-    [route, isPending]
+    [route, isPending],
   );
 
   return (

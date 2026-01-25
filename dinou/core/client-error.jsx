@@ -38,7 +38,8 @@ const isHashChangeOnly = (finalPath) => {
   );
 };
 
-const getRSCPayload = (url) => {
+const getRSCPayload = (rscKey) => {
+  const url = rscKey.split("::")[0];
   // Important: url must already be normalized here
   if (cache.has(url)) return cache.get(url);
 
@@ -55,7 +56,7 @@ const getRSCPayload = (url) => {
           name: window.__DINOU_ERROR_NAME__,
         },
       }),
-    })
+    }),
   );
   cache.set(url, content);
   return content;
@@ -113,7 +114,7 @@ function Router() {
     // Normal RSC Navigation
     scrollCache.set(
       window.location.pathname + window.location.search,
-      window.scrollY
+      window.scrollY,
     );
     // cache.delete(finalPath);
     if (options.replace) {
@@ -231,7 +232,8 @@ function Router() {
   }, [route]);
 
   // RSC Logic
-  const content = getRSCPayload(route);
+  const rscKey = route + "::" + version;
+  const content = getRSCPayload(rscKey);
 
   const contextValue = useMemo(
     () => ({
@@ -242,7 +244,7 @@ function Router() {
       refresh,
       isPending,
     }),
-    [route, isPending]
+    [route, isPending],
   );
 
   return (
