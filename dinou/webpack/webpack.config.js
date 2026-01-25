@@ -37,7 +37,24 @@ console.log(
     : "📦 [Dinou] Library Mode detected (Webpack: Using node_modules)",
 );
 
+const projectRoot = process.cwd();
+
+const outputDirs = [
+  path.resolve(projectRoot, "public"),
+  path.resolve(projectRoot, "dist3"),
+];
+
+function cleanDir(dir) {
+  if (fs.existsSync(dir)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 module.exports = async () => {
+  const outputDir = path.resolve(process.cwd(), outputDirectory);
+
+  // 🔥 CLEAN HARD
+  cleanDir(outputDir);
   const [cssEntries] = await getCSSEntries();
   return {
     performance: {
@@ -90,7 +107,7 @@ module.exports = async () => {
       // chunkFilename: "[name]-[contenthash].js",
     },
     module: {
-      noParse: [/[\\/]dist3[\\/]/, /[\\/]public[\\/]/],
+      // noParse: [/[\\/]dist3[\\/]/, /[\\/]public[\\/]/],
       rules: [
         {
           test: /\.[jt]sx?$/,
@@ -99,11 +116,7 @@ module.exports = async () => {
           //   isEjected && path.resolve(process.cwd(), "dinou"),
           //   path.resolve(__dirname, "../core"),
           // ].filter(Boolean),
-          exclude: [
-            /node_modules\/(?!dinou)/,
-            path.resolve(process.cwd(), "dist3"),
-            path.resolve(process.cwd(), "public"),
-          ],
+          exclude: [/node_modules\/(?!dinou)/, ...outputDirs],
           use: [
             {
               loader: "babel-loader",
@@ -204,9 +217,12 @@ module.exports = async () => {
         filename: "[name].css",
       }),
       manifestGeneratorPlugin,
-      // Ignore any imports that reference the output folders
       new webpack.IgnorePlugin({
-        resourceRegExp: /[\\/](dist3|public)([\\/]|$)/,
+        checkResource(resource, context) {
+          if (!context) return false;
+
+          return outputDirs.some((dir) => context.startsWith(dir));
+        },
       }),
       new ServerFunctionsPlugin({
         manifest: manifestGeneratorPlugin.manifestData,
@@ -270,7 +286,7 @@ module.exports = async () => {
       },
     },
     watchOptions: {
-      ignored: ["public/", "dist3/"],
+      ignored: outputDirs.map((dir) => `${dir}/**`),
     },
     stats: "normal", // or 'verbose' in dev
     infrastructureLogging: {

@@ -186,7 +186,11 @@ module.exports = async function () {
       serverFunctionsPlugin(),
     ].filter(Boolean),
     watch: {
-      exclude: ["public/**", "react_client_manifest/**"],
+      exclude: [
+        "public/**",
+        "react_client_manifest/**",
+        "server_functions_manifest/**",
+      ],
     },
     onwarn(warning, warn) {
       // Ignore eval warning if it comes from our request-context file
