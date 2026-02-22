@@ -902,7 +902,14 @@ async function buildStaticPages() {
             for (const [layoutPath, dParams, slots] of layouts.reverse()) {
               const layoutModule = await importModule(layoutPath);
               const Layout = layoutModule.default ?? layoutModule;
-              // if (!Layout.displayName) Layout.displayName = "Layout";
+              const layoutFolderPath = path.dirname(layoutPath);
+              const resetLayoutPath = getFilePathAndDynamicParams(
+                [],
+                {},
+                layoutFolderPath,
+                "reset_layout",
+                false,
+              )[0];
               const updatedSlots = {};
               for (const [slotName, slotElement] of Object.entries(slots)) {
                 const alreadyFoundPath = slotElement.props?.__modulePath;
@@ -916,21 +923,12 @@ async function buildStaticPages() {
                 params: dParams,
                 /*searchParams: {},*/ ...updatedSlots,
               };
-              if (index === layouts.length - 1) {
+              if (index === layouts.length - 1 || resetLayoutPath) {
                 props = { ...props, ...(pageFunctionsProps?.layout ?? {}) };
               }
               jsx = React.createElement(Layout, props, jsx);
               jsx = { ...jsx, __modulePath: layoutPath };
-              const layoutFolderPath = path.dirname(layoutPath);
-              if (
-                getFilePathAndDynamicParams(
-                  [],
-                  {},
-                  layoutFolderPath,
-                  "reset_layout",
-                  false,
-                )[0]
-              ) {
+              if (resetLayoutPath) {
                 break;
               }
               index++;
@@ -1177,6 +1175,14 @@ async function buildStaticPage(reqPath, isDynamic = null) {
           for (const [layoutPath, dParams, slots] of layouts.reverse()) {
             const layoutModule = await importModule(layoutPath);
             const Layout = layoutModule.default ?? layoutModule;
+            const layoutFolderPath = path.dirname(layoutPath);
+            const resetLayoutPath = getFilePathAndDynamicParams(
+              [],
+              {},
+              layoutFolderPath,
+              "reset_layout",
+              false,
+            )[0];
             const updatedSlots = {};
             for (const [slotName, slotElement] of Object.entries(slots)) {
               const alreadyFoundPath = slotElement.props?.__modulePath;
@@ -1191,7 +1197,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
               // searchParams: {},
               ...updatedSlots,
             };
-            if (index === layouts.length - 1) {
+            if (index === layouts.length - 1 || resetLayoutPath) {
               layoutProps = {
                 ...layoutProps,
                 ...(pageFunctionsProps?.layout ?? {}),
@@ -1199,16 +1205,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
             }
             jsx = React.createElement(Layout, layoutProps, jsx);
             jsx = { ...jsx, __modulePath: layoutPath };
-            const layoutFolderPath = path.dirname(layoutPath);
-            if (
-              getFilePathAndDynamicParams(
-                [],
-                {},
-                layoutFolderPath,
-                "reset_layout",
-                false,
-              )[0]
-            ) {
+            if (resetLayoutPath) {
               break;
             }
             index++;
