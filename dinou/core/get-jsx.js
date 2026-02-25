@@ -11,7 +11,7 @@ async function getJSX(
   reqPath,
   query,
   isNotFound = null,
-  isDevelopment = false
+  isDevelopment = false,
 ) {
   const srcFolder = path.resolve(process.cwd(), "src");
   const reqSegments = reqPath.split("/").filter(Boolean);
@@ -43,7 +43,7 @@ async function getJSX(
     const [filePath, dParams] = getFilePathAndDynamicParams(
       reqSegments,
       query,
-      srcFolder
+      srcFolder,
     );
     pagePath = filePath;
     dynamicParams = dParams ?? {};
@@ -60,26 +60,43 @@ async function getJSX(
       srcFolder,
       "not_found",
       true,
-      false
+      false,
     );
     if (!notFoundPath) {
       jsx = React.createElement(
         "div",
         null,
-        `Page not found: no "page" file found for "${reqPath}"`
+        `Page not found: no "page" file found for "${reqPath}"`,
       );
     } else {
       const pageModule = await importModule(notFoundPath);
       const Page = pageModule.default ?? pageModule;
-      jsx = React.createElement(Page, {
+      let props = {
         params: dParams ?? {},
-        // searchParams: query,
-      });
-
+      };
       const notFoundDir = path.dirname(notFoundPath);
+
+      const [pageFunctionsPath] = getFilePathAndDynamicParams(
+        reqSegments,
+        query,
+        notFoundDir,
+        "page_functions",
+        true,
+        true,
+        undefined,
+        reqSegments.length,
+      );
+      if (pageFunctionsPath) {
+        const pageFunctionsModule = await importModule(pageFunctionsPath);
+        const getProps = pageFunctionsModule.getProps;
+        pageFunctionsProps = await getProps?.(dParams ?? {});
+        props = { ...props, ...(pageFunctionsProps?.page ?? {}) };
+      }
+
+      jsx = React.createElement(Page, props);
       const noLayoutNotFoundPath = path.join(
         notFoundDir,
-        `no_layout_not_found`
+        `no_layout_not_found`,
       );
       if (existsSync(noLayoutNotFoundPath)) {
         return jsx;
@@ -104,7 +121,7 @@ async function getJSX(
       true,
       true,
       undefined,
-      reqSegments.length
+      reqSegments.length,
     );
     if (pageFunctionsPath) {
       const pageFunctionsModule = await importModule(pageFunctionsPath);
@@ -122,7 +139,7 @@ async function getJSX(
       query,
       srcFolder,
       "no_layout",
-      false
+      false,
     )[0]
   ) {
     return jsx;
@@ -138,7 +155,7 @@ async function getJSX(
     undefined,
     0,
     {},
-    true
+    true,
   );
 
   if (layouts && Array.isArray(layouts)) {
@@ -151,7 +168,7 @@ async function getJSX(
         {},
         layoutFolderPath,
         "reset_layout",
-        false
+        false,
       )[0];
       const Layout = layoutModule.default ?? layoutModule;
       const updatedSlots = {};
@@ -175,7 +192,7 @@ async function getJSX(
                 true, // withExtension
                 true, // finalDestination
                 undefined, // lastFound
-                reqSegments.length
+                reqSegments.length,
               );
 
             if (slotErrorPath) {
@@ -196,13 +213,13 @@ async function getJSX(
               });
             } else {
               console.warn(
-                `[Dinou] Slot @${slotName} failed and does not have error.tsx`
+                `[Dinou] Slot @${slotName} failed and does not have error.tsx`,
               );
               updatedSlotElement = null;
             }
           } else {
             console.error(
-              `[Dinou] Could not locate the path of the slot @${slotName}`
+              `[Dinou] Could not locate the path of the slot @${slotName}`,
             );
             updatedSlotElement = null;
           }
