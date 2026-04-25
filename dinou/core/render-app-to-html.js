@@ -9,7 +9,7 @@ function toFileUrl(p) {
 }
 
 const registerLoaderPath = toFileUrl(
-  path.join(__dirname, "register-loader.mjs")
+  path.join(__dirname, "register-loader.mjs"),
 );
 const renderHtmlPath = path.resolve(__dirname, "render-html.js");
 
@@ -33,7 +33,7 @@ function renderAppToHtml(
   contextForChild,
   res,
   capturedStatus = null,
-  isDynamic = false
+  isDynamic = false,
 ) {
   const jsxJson = getJSXJSON(reqPath);
   const hasJsxJson = hasJSXJSON(reqPath);
@@ -52,15 +52,15 @@ function renderAppToHtml(
     renderHtmlPath, // ⬅️ CHANGE 2: The script (path) is the first argument of fork (no need for "node")
     scriptArgs, // Positional arguments for the script (process.argv)
     {
-      env: {
-        NODE_ENV: process.env.NODE_ENV,
-        DINOU_BUILD_TOOL: process.env.DINOU_BUILD_TOOL,
-      }, // You can pass other environment variables if necessary
+      // env: {
+      //   NODE_ENV: process.env.NODE_ENV,
+      //   DINOU_BUILD_TOOL: process.env.DINOU_BUILD_TOOL,
+      // }, // You can pass other environment variables if necessary
       // ⬅️ CHANGE 3: Apply Whitelist to execArgv, resetting inherited options
       execArgv: childExecArgv,
       // ⬅️ CHANGE 4: stdio needs 'ipc' for fork to work and for the future communication channel
       stdio: ["ignore", "pipe", "pipe", "ipc"], // stdin, stdout, stderr, ipc
-    }
+    },
   );
 
   // 💡 on('message') Implementation (IPC Channel)
@@ -88,7 +88,7 @@ function renderAppToHtml(
           if (command === "redirect") {
             const url = args.length === 1 ? args[0] : args[1];
             console.log(
-              `[Dinou] Streaming active. Redirecting via JavaScript to: ${url}`
+              `[Dinou] Streaming active. Redirecting via JavaScript to: ${url}`,
             );
             const safeUrl = JSON.stringify(url);
             res.write(`<script>window.location.href = ${safeUrl};</script>`);
@@ -99,7 +99,7 @@ function renderAppToHtml(
           // --- STATUS (Warning) ---
           if (command === "status") {
             console.warn(
-              `[Dinou Warning] HTTP status '${args[0]}' ignored because streaming started.`
+              `[Dinou Warning] HTTP status '${args[0]}' ignored because streaming started.`,
             );
             if (capturedStatus) capturedStatus.value = args[0];
             return;
@@ -110,12 +110,12 @@ function renderAppToHtml(
             const [name, options] = args;
             const path = options && options.path ? options.path : "/";
             console.log(
-              `[Dinou] Streaming active. Clearing cookie '${name}' via JS.`
+              `[Dinou] Streaming active. Clearing cookie '${name}' via JS.`,
             );
             const safeName = JSON.stringify(name);
             const safePath = JSON.stringify(path);
             res.write(
-              `<script>document.cookie = ${safeName} + "=; Max-Age=0; path=" + ${safePath} + ";";</script>`
+              `<script>document.cookie = ${safeName} + "=; Max-Age=0; path=" + ${safePath} + ";";</script>`,
             );
             return;
           }
@@ -129,13 +129,13 @@ function renderAppToHtml(
             if (options && options.httpOnly) {
               console.error(
                 `[Dinou Error] Cannot set HttpOnly cookie '${name}' because streaming has already started. ` +
-                  `Headers are sent, and document.cookie cannot write HttpOnly cookies.`
+                  `Headers are sent, and document.cookie cannot write HttpOnly cookies.`,
               );
               return; // We do nothing because it would fail silently in the browser
             }
 
             console.log(
-              `[Dinou] Streaming active. Setting cookie '${name}' via JS.`
+              `[Dinou] Streaming active. Setting cookie '${name}' via JS.`,
             );
 
             // We build the cookie string manually for JS
@@ -148,7 +148,7 @@ function renderAppToHtml(
               if (options.maxAge) cookieStr += `; max-age=${options.maxAge}`;
               if (options.expires)
                 cookieStr += `; expires=${new Date(
-                  options.expires
+                  options.expires,
                 ).toUTCString()}`;
               if (options.secure) cookieStr += `; secure`;
               if (options.sameSite)
@@ -164,7 +164,7 @@ function renderAppToHtml(
           // --- SET HEADER (Warning) ---
           if (command === "setHeader") {
             console.warn(
-              `[Dinou Warning] Cannot set header '${args[0]}' because streaming started.`
+              `[Dinou Warning] Cannot set header '${args[0]}' because streaming started.`,
             );
             return;
           }
@@ -202,7 +202,7 @@ function renderAppToHtml(
             finalUrl = rawUrl;
           } else {
             console.warn(
-              `[Dinou Security] Blocked unsafe redirect to: ${rawUrl}`
+              `[Dinou Security] Blocked unsafe redirect to: ${rawUrl}`,
             );
             // finalUrl remains "/"
           }

@@ -33,7 +33,7 @@ export default async function getEsbuildEntries({
     code,
     baseFilePath,
     visited = new Set(),
-    isTopLevelClientComponent = false
+    isTopLevelClientComponent = false,
   ) {
     if (visited.has(baseFilePath)) {
       return { imports: [], assets: [], csss: [] };
@@ -75,7 +75,7 @@ export default async function getEsbuildEntries({
       } catch (err) {
         console.warn(
           `[get-esbuild-entries] Could not read import: ${absImportPathWithExt}`,
-          err.message
+          err.message,
         );
         continue;
       }
@@ -111,6 +111,12 @@ export default async function getEsbuildEntries({
         continue;
       }
 
+      // 🚨 LA SOLUCIÓN: Si es un JSON, lo añadimos pero NO lo parseamos con Babel
+      if (absImportPathWithExt.endsWith(".json")) {
+        imports.add(absImportPathWithExt);
+        continue; // Esto evita que pase a la recursividad de Babel
+      }
+
       imports.add(absImportPathWithExt);
 
       // Procesar imports recursivamente para módulos no-client
@@ -119,7 +125,7 @@ export default async function getEsbuildEntries({
           importedCode,
           absImportPathWithExt,
           visited,
-          isTopLevelClientComponent
+          isTopLevelClientComponent,
         );
         nested.imports.forEach((p) => imports.add(p));
         nested.assets.forEach((p) => assets.add(p));
@@ -127,7 +133,7 @@ export default async function getEsbuildEntries({
       } catch (err) {
         console.warn(
           `[get-esbuild-entries] Could not process imports of: ${absImportPathWithExt}`,
-          err.message
+          err.message,
         );
       }
     }
@@ -203,7 +209,7 @@ export default async function getEsbuildEntries({
         code,
         absPath,
         new Set(),
-        true
+        true,
       );
       const clientComponentRegex = /\.(js|jsx|ts|tsx)$/i;
       imports.forEach((imp) => {
@@ -218,14 +224,14 @@ export default async function getEsbuildEntries({
     } else if (isPageOrLayout(absPath)) {
       if (!isAsyncDefaultExport(code)) {
         console.warn(
-          `[react-client-manifest] The file ${normalizedPath} is a page or layout without "use client" directive, but its default export is not an async function.`
+          `[react-client-manifest] The file ${normalizedPath} is a page or layout without "use client" directive, but its default export is not an async function.`,
         );
       }
       serverModules.add(normalizedPath);
       try {
         const { imports, assets, csss } = await getImportsAndAssetsAndCsss(
           code,
-          absPath
+          absPath,
         );
 
         if (csss.length > 0) {
@@ -233,7 +239,7 @@ export default async function getEsbuildEntries({
             ...csss.map((cssPath) => ({
               absPath: normalizePath(cssPath),
               name: path.basename(cssPath, path.extname(cssPath)),
-            }))
+            })),
           );
         }
 
