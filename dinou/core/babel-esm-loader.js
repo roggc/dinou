@@ -6,10 +6,7 @@ const createScopedName = require("./createScopedName");
 const { extensionsWithDot } = require("./asset-extensions.js");
 const { getAbsPathWithExt } = require("./get-abs-path-with-ext.js");
 
-require("css-modules-require-hook")({
-  generateScopedName: createScopedName,
-  extensions: [".css"],
-});
+require("./css-require-hook.js")();
 
 exports.resolve = async function resolve(specifier, context, defaultResolve) {
   const absPathWithExt = getAbsPathWithExt(specifier, context);

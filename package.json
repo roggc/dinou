@@ -1,6 +1,6 @@
 {
   "name": "dinou",
-  "version": "4.0.7",
+  "version": "4.0.8",
   "description": "Full-Stack React 19 framework with React Server Components, Server Functions, and Streaming SSR.",
   "main": "index.js",
   "bin": {
@@ -61,12 +61,11 @@
     "babel-plugin-react-compiler": "^1.0.0",
     "chokidar": "^4.0.3",
     "commander": "^14.0.0",
-    "concurrently": "^9.2.0",
+    "concurrently": "^10.0.3",
     "cookie-parser": "^1.4.7",
-    "copy-webpack-plugin": "^13.0.1",
+    "copy-webpack-plugin": "^14.0.0",
     "cross-env": "^7.0.3",
     "css-loader": "^7.1.2",
-    "css-modules-require-hook": "^4.2.3",
     "dotenv": "^16.5.0",
     "esbuild": "^0.27.0",
     "esbuild-copy-static-files": "^0.1.0",
