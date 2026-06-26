@@ -23,9 +23,7 @@ babelRegister({
   extensions: [".js", ".jsx", ".ts", ".tsx"],
 });
 const createScopedName = require("./createScopedName");
-require("css-modules-require-hook")({
-  generateScopedName: createScopedName,
-});
+require("./css-require-hook.js")();
 addHook({
   extensions,
   name: function (localName, filepath) {

@@ -14,9 +14,7 @@ babelRegister({
 const addHook = require("./asset-require-hook.js");
 const { extensions } = require("./asset-extensions.js");
 const createScopedName = require("./createScopedName");
-require("css-modules-require-hook")({
-  generateScopedName: createScopedName,
-});
+require("./css-require-hook.js")();
 addHook({
   extensions,
   name: function (localName, filepath) {
