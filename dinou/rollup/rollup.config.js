@@ -21,10 +21,6 @@ const isDevelopment = process.env.NODE_ENV !== "production";
 const outputDirectory = isDevelopment ? "public" : "dist3";
 
 const localDinouPath = path.resolve(process.cwd(), "dinou");
-// const localNavigationPath = path.resolve(
-//   process.cwd(),
-//   "dinou/core/navigation.js"
-// );
 const isEjected = fs.existsSync(localDinouPath);
 
 console.log(
@@ -33,62 +29,42 @@ console.log(
     : "📦 [Dinou] Library Mode detected (Using node_modules)",
 );
 
-// ----------------------------------------------------------------------
-// 🛠️ ALIAS MICRO-PLUGIN (Zero Dependencies)
-// ----------------------------------------------------------------------
-function localDinouAlias() {
-  return {
-    name: "local-dinou-alias",
-    resolveId(source) {
-      // If "dinou" is imported, return local absolute path
-      if (source === "dinou") {
-        return localDinouPath;
-      }
-      // // If "dinou/navigation" is imported, return local absolute path
-      // if (source === "dinou/navigation") {
-      //   return localNavigationPath;
-      // }
-      return null; // If not dinou, let other plugins resolve
-    },
-  };
-}
-
 module.exports = async function () {
   const del = (await import("rollup-plugin-delete")).default;
   return {
     input: isDevelopment
       ? {
-          runtime: path.resolve(
-            __dirname,
-            "react-refresh/react-refresh-runtime.js",
-          ),
-          refresh: path.resolve(
-            __dirname,
-            "react-refresh/react-refresh-entry.js",
-          ),
-          main: path.resolve(__dirname, "../core/client.jsx"),
-          error: path.resolve(__dirname, "../core/client-error.jsx"),
-          serverFunctionProxy: path.resolve(
-            __dirname,
-            "../core/server-function-proxy.js",
-          ),
-          dinouClientRedirect: path.resolve(
-            __dirname,
-            "../core/client-redirect.jsx",
-          ),
-        }
+        runtime: path.resolve(
+          __dirname,
+          "react-refresh/react-refresh-runtime.js",
+        ),
+        refresh: path.resolve(
+          __dirname,
+          "react-refresh/react-refresh-entry.js",
+        ),
+        main: path.resolve(__dirname, "../core/client.jsx"),
+        error: path.resolve(__dirname, "../core/client-error.jsx"),
+        serverFunctionProxy: path.resolve(
+          __dirname,
+          "../core/server-function-proxy.js",
+        ),
+        dinouClientRedirect: path.resolve(
+          __dirname,
+          "../core/client-redirect.jsx",
+        ),
+      }
       : {
-          main: path.resolve(__dirname, "../core/client.jsx"),
-          error: path.resolve(__dirname, "../core/client-error.jsx"),
-          serverFunctionProxy: path.resolve(
-            __dirname,
-            "../core/server-function-proxy.js",
-          ),
-          dinouClientRedirect: path.resolve(
-            __dirname,
-            "../core/client-redirect.jsx",
-          ),
-        },
+        main: path.resolve(__dirname, "../core/client.jsx"),
+        error: path.resolve(__dirname, "../core/client-error.jsx"),
+        serverFunctionProxy: path.resolve(
+          __dirname,
+          "../core/server-function-proxy.js",
+        ),
+        dinouClientRedirect: path.resolve(
+          __dirname,
+          "../core/client-redirect.jsx",
+        ),
+      },
     output: {
       dir: outputDirectory,
       format: "esm",
@@ -107,10 +83,8 @@ module.exports = async function () {
       "/refresh.js",
       "/__hmr_client__.js",
       "/__SERVER_FUNCTION_PROXY__",
-      // "dinou",
     ],
     plugins: [
-      // isEjected && localDinouAlias(),
       del({
         targets: [
           `${outputDirectory}/*`,
@@ -199,8 +173,6 @@ module.exports = async function () {
         if (warning.loc && warning.loc.file.includes("request-context.js")) {
           return;
         }
-        // If you want to kill it whenever it appears (safer to avoid noise):
-        // return;
       }
       if (
         warning.message.includes(

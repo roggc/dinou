@@ -218,13 +218,11 @@ if (isDevelopment) {
       isInitial = true;
       currentManifest = {};
     });
-    // manifestWatcher.on("all", (event) => console.log("event", event));
     manifestWatcher.on("change", onManifestChange);
   }
   startManifestWatcher();
 }
 let serverFunctionsManifest = null;
-// const devCache = new Map(); // For dev: Map<absolutePath, Set<exports>>
 
 if (!isDevelopment) {
   // In prod/build: load generated manifest
@@ -326,14 +324,6 @@ function getContext(req, res) {
 
       // 4. REDIRECT (Your existing smart wrapper)
       redirect: (...args) => safeResCall("redirect", ...args),
-      // redirect: (...args) => {
-      //   if (res.headersSent) {
-      //     // Do nothing on res object.
-      //     // We trust that your Server Function will return <ClientRedirect />
-      //     return;
-      //   }
-      //   res.redirect.apply(res, args);
-      // },
     },
   };
   return context;
@@ -513,12 +503,7 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
     //   isStatic,
     //   reqPath
     // );
-    if (
-      (!isDevelopment &&
-        /*Object.keys({ ...req.query }).length === 0 &&*/
-        !dynamicState.value) ||
-      isStatic
-    ) {
+    if ((!isDevelopment && !dynamicState.value) || isStatic) {
       const payloadPath = path.resolve(
         "dist2",
         reqPath.replace(/^\//, ""),
@@ -536,16 +521,6 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
           console.error("Error reading RSC file:", err);
           res.status(500).end();
         });
-        // readStream.on("end", () => {
-        //   if (!regenerating.has(reqPath)) {
-        //     // Regeneration has finished, delete the old one
-        //     try {
-        //       unlinkSync(payloadPathOld);
-        //     } catch (err) {
-        //       console.error("Error deleting old RSC file:", err);
-        //     }
-        //   }
-        // });
         return readStream.pipe(res);
       }
     }
@@ -560,16 +535,16 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
       );
       const manifest = isDevelopment
         ? JSON.parse(
-            readFileSync(
-              path.resolve(
-                process.cwd(),
-                isWebpack
-                  ? `${outputFolder}/react-client-manifest.json`
-                  : `react_client_manifest/react-client-manifest.json`,
-              ),
-              "utf8",
+          readFileSync(
+            path.resolve(
+              process.cwd(),
+              isWebpack
+                ? `${outputFolder}/react-client-manifest.json`
+                : `react_client_manifest/react-client-manifest.json`,
             ),
-          )
+            "utf8",
+          ),
+        )
         : cachedClientManifest;
 
       const { pipe } = renderToPipeableStream(jsx, manifest);
@@ -610,16 +585,16 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
     );
     const manifest = isDevelopment
       ? JSON.parse(
-          readFileSync(
-            path.resolve(
-              process.cwd(),
-              isWebpack
-                ? `${outputFolder}/react-client-manifest.json`
-                : `react_client_manifest/react-client-manifest.json`,
-            ),
-            "utf8",
+        readFileSync(
+          path.resolve(
+            process.cwd(),
+            isWebpack
+              ? `${outputFolder}/react-client-manifest.json`
+              : `react_client_manifest/react-client-manifest.json`,
           ),
-        )
+          "utf8",
+        ),
+      )
       : cachedClientManifest;
     const { pipe } = renderToPipeableStream(jsx, manifest);
     pipe(res);
@@ -642,11 +617,7 @@ app.get(/^\/.*\/?$/, (req, res) => {
     // Get reference to the mutable object
     const dynamicState = isDynamic.get(reqPath);
     // console.log("dynamicState.value", dynamicState.value);
-    if (
-      !isDevelopment &&
-      /*Object.keys({ ...req.query }).length === 0 &&*/
-      !dynamicState.value
-    ) {
+    if (!isDevelopment && !dynamicState.value) {
       revalidating(reqPath, dynamicState);
       let htmlPathOld;
       if (regenerating.has(reqPath)) {
@@ -686,16 +657,6 @@ app.get(/^\/.*\/?$/, (req, res) => {
 
           // 4. Manually close the response (now we do)
           res.end();
-
-          // // 5. Optional cleanup logic (async to avoid blocking)
-          // if (htmlPathOld && !regenerating.has(reqPath)) {
-          //   // It is better to use fs.promises to avoid blocking the event loop
-          //   require("fs")
-          //     .promises.unlink(htmlPathOld)
-          //     .catch((err) => {
-          //       console.error("Error deleting old HTML file:", err);
-          //     });
-          // }
         });
 
         return; // The stream is already flowing
@@ -761,7 +722,6 @@ app.get(/^\/.*\/?$/, (req, res) => {
           appHtmlStream.on("end", resolve);
           appHtmlStream.on("error", (error) => {
             console.error("Stream error:", error);
-            // resolve(); // ⚠️ WATCH OUT: If you resolve here and then try to send status 500, it might fail if headers sent
             if (!res.headersSent) res.status(500).send("Internal Server Error");
             resolve(); // Better resolve at the end
           });
@@ -921,9 +881,6 @@ app.post("/____server_function____", async (req, res) => {
       // Prod: use manifest (relativePath is already normalized)
       allowedExports = serverFunctionsManifest[relativePath];
     } else {
-      // Dev: use cache or verify file
-      // allowedExports = devCache.get(absolutePath);
-      // if (!allowedExports) {
       const fileContent = readFileSync(absolutePath, "utf8"); // Reads only once
       if (!useServerRegex.test(fileContent)) {
         return res
@@ -933,8 +890,6 @@ app.post("/____server_function____", async (req, res) => {
       // Parse exports (you need to implement parseExports on server if not present)
       const exports = parseExports(fileContent); // Assume you move parseExports to a shared util
       allowedExports = new Set(exports);
-      // devCache.set(absolutePath, allowedExports);
-      // }
     }
 
     // Validate exportName against allowedExports

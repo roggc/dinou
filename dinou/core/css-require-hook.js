@@ -10,26 +10,26 @@ function registerCSSRequireHook() {
     const plugin = {
       postcssPlugin: "extract-classes",
       Rule(rule) {
-        // Ignorar clases dentro de animaciones (@keyframes)
+        // Ignore classes inside animations (@keyframes)
         if (rule.parent && rule.parent.name === "keyframes") {
           return;
         }
 
         const selector = rule.selector;
-        // Regex para capturar nombres de clases válidos
+        // Regex to capture valid class names
         const classRegex = /\.([_a-zA-Z0-9-]+)/g;
         let match;
 
         while ((match = classRegex.exec(selector)) !== null) {
           const className = match[1];
 
-          // Manejo de selectores :global y :local
+          // Handle :global and :local selectors
           const index = match.index;
           const before = selector.slice(0, index);
           const lastGlobal = before.lastIndexOf(":global");
           const lastLocal = before.lastIndexOf(":local");
 
-          // Si la clase está bajo el ámbito de un :global activo, no la hasheamos
+          // If the class is under an active :global scope, do not hash it
           if (lastGlobal > lastLocal) {
             const afterGlobal = before.slice(lastGlobal);
             if (afterGlobal.includes("(")) {
@@ -40,13 +40,13 @@ function registerCSSRequireHook() {
                 continue;
               }
             } else {
-              // Ejemplo: :global .my-class (sin paréntesis)
+              // Example: :global .my-class (without parentheses)
               jsonResult[className] = className;
               continue;
             }
           }
 
-          // Si es una clase local, generamos el hash determinista correspondiente
+          // If it is a local class, generate the corresponding deterministic hash
           if (!jsonResult[className]) {
             jsonResult[className] = createScopedName(className, filename);
           }
@@ -54,7 +54,7 @@ function registerCSSRequireHook() {
       }
     };
 
-    // Procesamos de forma estrictamente síncrona (PostCSS es síncrono si sus plugins lo son)
+    // Process strictly synchronously (PostCSS is synchronous if its plugins are)
     postcss([plugin]).process(cssContent, { from: filename }).css;
 
     module.exports = jsonResult;

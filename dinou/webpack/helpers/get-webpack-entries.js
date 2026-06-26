@@ -22,8 +22,6 @@ async function getCSSEntries({
 } = {}) {
   const detectedClientEntries = new Set();
   const detectedCSSEntries = new Set();
-  // const detectedAssetEntries = new Set();
-  // const serverModules = new Set();
 
   async function getImportsAndAssetsAndCsss(
     code,
@@ -64,7 +62,7 @@ async function getCSSEntries({
         continue;
       }
 
-      // Leer el archivo UNA sola vez
+      // Read the file ONLY once
       let importedCode;
       try {
         importedCode = readFileSync(absImportPathWithExt, "utf8");
@@ -77,12 +75,12 @@ async function getCSSEntries({
       }
 
       if (!isTopLevelClientComponent) {
-        // Verificar si es un client component
+        // Verify if it is a client component
         const isImportedFileClient = useClientRegex.test(importedCode.trim());
 
-        // Si es client component, NO procesar recursivamente
+        // If it is a client component, DO NOT process recursively
         if (isImportedFileClient) {
-          continue; // No procesar recursivamente client components
+          continue; // Do not recursively process client components
         }
       } else {
         const isImportedFileServer = useServerRegex.test(importedCode.trim());
@@ -92,7 +90,7 @@ async function getCSSEntries({
         }
       }
 
-      // Para módulos no-client, procesar normalmente
+      // For non-client modules, process normally
       if (
         absImportPathWithExt.endsWith(".css") ||
         absImportPathWithExt.endsWith(".scss") ||
@@ -109,7 +107,7 @@ async function getCSSEntries({
 
       imports.add(absImportPathWithExt);
 
-      // Procesar imports recursivamente para módulos no-client
+      // Process imports recursively for non-client modules
       try {
         const nested = await getImportsAndAssetsAndCsss(
           importedCode,
@@ -216,10 +214,6 @@ async function getCSSEntries({
           `[react-client-manifest] The file ${normalizedPath} is a page or layout without "use client" directive, but its default export is not an async function.`,
         );
       }
-      // serverModules.add({
-      //   absPath: normalizedPath,
-      //   name: path.basename(normalizedPath, path.extname(normalizedPath)),
-      // });
       try {
         const { csss } = await getImportsAndAssetsAndCsss(code, absPath);
 
@@ -231,16 +225,6 @@ async function getCSSEntries({
             })),
           );
         }
-
-        // const serverComponentRegex = /\.(js|jsx|ts|tsx)$/i;
-        // imports.forEach((imp) => {
-        //   if (serverComponentRegex.test(imp) && !imp.includes("node_modules")) {
-        //     serverModules.add({
-        //       absPath: normalizePath(imp),
-        //       name: path.basename(imp, path.extname(imp)),
-        //     });
-        //   }
-        // });
       } catch (err) {
         /* ignore */
       }
@@ -260,15 +244,7 @@ async function getCSSEntries({
     dCSSE.outfile = `${outfileName}.js`;
     dCSSE.outfileName = outfileName;
   }
-  // console.log("serverModules", serverModules);
-  // for (const sM of serverModules) {
-  //   const hash = hashFilePath(sM.absPath);
-  //   const outfileName = `${sM.name}-${hash}`;
-  //   sM.outfile = `${outfileName}.js`;
-  //   sM.outfileName = outfileName;
-  // }
 
-  // console.log("detectedCssEntries", detectedCSSEntries);
   return [detectedCSSEntries, detectedClientEntries];
 }
 

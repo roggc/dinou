@@ -1,8 +1,7 @@
-// public/server-function-proxy.js
 import { createFromFetch } from "react-server-dom-webpack/client";
 
 function createServerFunctionProxy(id) {
-  return new Proxy(() => {}, {
+  return new Proxy(() => { }, {
     apply: async (_target, _thisArg, args) => {
       let body;
       const headers = {
@@ -39,7 +38,7 @@ function createServerFunctionProxy(id) {
         const range = document.createRange();
         const documentFragment = range.createContextualFragment(html);
         document.body.appendChild(documentFragment);
-        return new Promise(() => {});
+        return new Promise(() => { });
       }
 
       // Case 2: RSC or Hybrid Stream (Buffered)

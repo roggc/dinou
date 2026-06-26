@@ -7,9 +7,8 @@ if (
 ) {
   RefreshRuntime.injectIntoGlobalHook(window);
 
-  // SETEA EL RUNTIME GLOBAL
   window.__reactRefreshRuntime = RefreshRuntime;
-  window.$RefreshReg$ = () => {};
+  window.$RefreshReg$ = () => { };
   window.$RefreshSig$ = () => (type) => type;
   window.__REACT_REFRESH_RUNTIME_INSTALLED__ = true;
 

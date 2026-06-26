@@ -16,31 +16,31 @@ export default async function write(result) {
       entryPointNormalized = entryPointNormalized.replace("dinou-asset:", "");
     }
     const inputKeys = Object.keys(info.inputs);
-    // Lógica para assets
+    // Logic for assets
     if (
       regex.test(entryPointNormalized) &&
       inputKeys.length === 1 &&
       inputKeys[0] === info.entryPoint
     ) {
-      // Saltar el .js inútil
+      // Skip the useless .js file
       const normalizedPath = normalizeRel(relPath);
       skipSet.add(normalizedPath);
-      // Saltar el .map correspondiente si existe
+      // Skip the corresponding .map file if it exists
       const mapRelPath = relPath.replace(/\.js$/, ".js.map");
       if (result.metafile.outputs[mapRelPath]) {
         skipSet.add(normalizeRel(mapRelPath));
       }
     }
-    // Lógica para CSS
+    // Logic for CSS
     if (
       cssRegex.test(info.entryPoint) &&
       ((inputKeys.length === 1 && inputKeys[0] === info.entryPoint) ||
         inputKeys.length === 0)
     ) {
-      // Saltar el .js inútil
+      // Skip the useless .js file
       const normalizedPath = normalizeRel(relPath);
       skipSet.add(normalizedPath);
-      // Saltar el .map correspondiente si existe
+      // Skip the corresponding .map file if it exists
       const mapRelPath = relPath + ".map";
       if (result.metafile.outputs[mapRelPath]) {
         skipSet.add(normalizeRel(mapRelPath));

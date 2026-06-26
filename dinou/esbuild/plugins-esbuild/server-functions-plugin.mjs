@@ -8,7 +8,7 @@ export default function serverFunctionsPlugin(manifestData = {}) {
     name: "server-functions-proxy",
     setup(build) {
       const root = process.cwd();
-      const serverFunctions = new Map(); // Recolectar aquí: Map<relativePath, Set<exports>>
+      const serverFunctions = new Map(); // Collect server functions here: Map<relativePath, Set<exports>>
 
       // 1. TRANSFORM FILES DURING BUILD
       build.onLoad({ filter: /\.[jt]sx?$/ }, async (args) => {
@@ -20,11 +20,11 @@ export default function serverFunctionsPlugin(manifestData = {}) {
         if (exports.length === 0) return null;
 
         const relativePath = path.relative(root, args.path);
-        serverFunctions.set(relativePath, new Set(exports)); // Guardar exports como Set para uniqueness
+        serverFunctions.set(relativePath, new Set(exports)); // Save exports as a Set to guarantee uniqueness
 
         const fileUrl = `file:///${relativePath}`;
 
-        // Proxy code (igual que antes)
+        // Generate proxy code that forwards calls to the server instead of executing the actual code
         let proxyCode = `
           import { createServerFunctionProxy } from "/__SERVER_FUNCTION_PROXY__";
         `;
@@ -69,13 +69,13 @@ export default function serverFunctionsPlugin(manifestData = {}) {
           }
         }
 
-        // Generar manifest: convertir Map a objeto simple
+        // Generate the final manifest by converting the Map to a plain object
         const manifestObj = {};
         for (const [path, exportsSet] of serverFunctions.entries()) {
           manifestObj[path] = Array.from(exportsSet);
         }
 
-        // Escribir el manifest en el output dir (ej. mismo lugar que otros assets)
+        // Write the server functions manifest JSON file to the output directory
         const manifestPath = path.join(
           "server_functions_manifest",
           "server-functions-manifest.json"

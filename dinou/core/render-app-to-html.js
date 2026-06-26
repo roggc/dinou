@@ -52,10 +52,6 @@ function renderAppToHtml(
     renderHtmlPath, // ⬅️ CHANGE 2: The script (path) is the first argument of fork (no need for "node")
     scriptArgs, // Positional arguments for the script (process.argv)
     {
-      // env: {
-      //   NODE_ENV: process.env.NODE_ENV,
-      //   DINOU_BUILD_TOOL: process.env.DINOU_BUILD_TOOL,
-      // }, // You can pass other environment variables if necessary
       // ⬅️ CHANGE 3: Apply Whitelist to execArgv, resetting inherited options
       execArgv: childExecArgv,
       // ⬅️ CHANGE 4: stdio needs 'ipc' for fork to work and for the future communication channel
@@ -129,7 +125,7 @@ function renderAppToHtml(
             if (options && options.httpOnly) {
               console.error(
                 `[Dinou Error] Cannot set HttpOnly cookie '${name}' because streaming has already started. ` +
-                  `Headers are sent, and document.cookie cannot write HttpOnly cookies.`,
+                `Headers are sent, and document.cookie cannot write HttpOnly cookies.`,
               );
               return; // We do nothing because it would fail silently in the browser
             }

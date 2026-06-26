@@ -37,7 +37,6 @@ function getSlots(currentPath, reqSegments, query) {
 
         slots[slotName] = React.createElement(Slot, {
           params: slotParams,
-          // searchParams: query,
           key: slotName,
           __modulePath: slotPath ?? null,
         });
