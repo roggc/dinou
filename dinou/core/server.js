@@ -895,7 +895,8 @@ app.post("/____server_function____", async (req, res) => {
     // Validate exportName against allowedExports
     if (
       !exportName ||
-      (exportName !== "default" && !allowedExports.has(exportName))
+      !allowedExports ||
+      !allowedExports.has(exportName)
     ) {
       return res.status(400).json({ error: "Invalid export name" });
     }
