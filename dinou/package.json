@@ -1,6 +1,6 @@
 {
   "name": "dinou-ejected",
-  "version": "4.0.10",
+  "version": "4.0.11",
   "main": "index.js",
   "private": true,
   "exports": {

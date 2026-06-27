@@ -752,7 +752,7 @@ function isOriginAllowed(req) {
   try {
     // Parse to ignore protocol (http/https) and port if they differ subtly
     const originHost = new URL(origin).host;
-    const serverHost = req.headers.host;
+    const serverHost = req.headers["x-forwarded-host"] || req.headers.host;
 
     // Compare host (domain:port)
     return originHost === serverHost;
@@ -782,7 +782,7 @@ app.post("/____server_function____", async (req, res) => {
 
     // 1. Check Origin (Prevent calls from other domains)
     const origin = req.headers.origin;
-    const host = req.headers.host;
+    const host = req.headers["x-forwarded-host"] || req.headers.host;
 
     // Note: Locally sometimes origin is undefined or null, allow in dev if necessary
     if (!isDevelopment && origin && !origin.includes(host)) {
@@ -851,10 +851,15 @@ app.post("/____server_function____", async (req, res) => {
 
     // Extract relativePath and normalize (remove 'file://' and potential '/')
     let relativePath = fileUrl.replace(/^file:\/\/\/?/, "").trim();
-    if (relativePath.startsWith("/") || relativePath.includes("..")) {
+    const normalizedRelative = relativePath.replace(/\\/g, "/");
+    if (
+      normalizedRelative.startsWith("/") ||
+      normalizedRelative.includes("..") ||
+      normalizedRelative.includes(":")
+    ) {
       return res
         .status(400)
-        .json({ error: "Invalid path: no absolute or traversal allowed" });
+        .json({ error: "Invalid path: no absolute, traversal, or drive letter allowed" });
     }
     // console.log("relPath", relativePath);
     // Restrict to 'src/' folder: prepend 'src/' if missing, and resolve absolutePath
@@ -881,6 +886,11 @@ app.post("/____server_function____", async (req, res) => {
       // Prod: use manifest (relativePath is already normalized)
       allowedExports = serverFunctionsManifest[relativePath];
     } else {
+      if (!isDevelopment) {
+        return res
+          .status(403)
+          .json({ error: "Access denied: Manifest missing in production" });
+      }
       const fileContent = readFileSync(absolutePath, "utf8"); // Reads only once
       if (!useServerRegex.test(fileContent)) {
         return res
