@@ -1,6 +1,6 @@
 {
   "name": "dinou",
-  "version": "4.0.8",
+  "version": "4.0.9",
   "description": "Full-Stack React 19 framework with React Server Components, Server Functions, and Streaming SSR.",
   "main": "index.js",
   "bin": {
@@ -47,7 +47,6 @@
     "@babel/register": "^7.27.1",
     "@babel/traverse": "^7.28.3",
     "@esbuild-plugins/tsconfig-paths": "^0.1.2",
-    "@pmmmwh/react-refresh-webpack-plugin": "^0.6.2",
     "@roggc/react-server-dom-esm": "^0.0.0-b061b597-20251212",
     "@rollup/plugin-babel": "^6.0.4",
     "@rollup/plugin-commonjs": "^28.0.6",

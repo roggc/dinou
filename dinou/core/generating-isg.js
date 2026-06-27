@@ -1,4 +1,3 @@
-// dinou/core/promote-to-static.js
 const fs = require("fs").promises;
 const path = require("path");
 const { existsSync, copyFileSync } = require("fs");
@@ -65,8 +64,8 @@ function generatingISG(reqPath, isDynamicFromServer) {
         console.log(`✅ [ISG] Successfully promoted ${reqPath} to static.`);
       } else {
         // Cleanup if failed
-        await fs.unlink(pageResult.tempPath).catch(() => {});
-        await fs.unlink(rscResult.tempPath).catch(() => {});
+        await fs.unlink(pageResult.tempPath).catch(() => { });
+        await fs.unlink(rscResult.tempPath).catch(() => { });
         console.warn(`⚠️ [ISG] Failed to generate HTML/RSC for ${reqPath}`);
       }
     } catch (e) {

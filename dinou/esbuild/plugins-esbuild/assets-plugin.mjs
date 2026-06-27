@@ -18,7 +18,7 @@ export default function assetsPlugin({ include = regex } = {}) {
 
       build.initialOptions.assetNames = "assets/[name]-[hash]";
 
-      // Manejar la carga de assets con namespaces diferentes
+      // Handle asset loading with different namespaces
       build.onResolve({ filter: include }, (args) => {
         // console.log("[assets-plugin] onResolve", args);
         const resolvedAlias =
@@ -28,7 +28,7 @@ export default function assetsPlugin({ include = regex } = {}) {
                 parentURL: pathToFileURL(args.importer).href,
               });
 
-        // CRUCIAL: Namespace diferente para entry points
+        // CRUCIAL: Different namespace for entry points
         if (args.kind === "entry-point") {
           return {
             path: resolvedAlias,
@@ -42,13 +42,13 @@ export default function assetsPlugin({ include = regex } = {}) {
         };
       });
 
-      // Loader para assets normales
+      // Loader for normal assets
       build.onLoad({ filter: /.*/, namespace: "dinou-asset" }, async (args) => {
         const contents = await fs.readFile(args.path);
         return { contents, loader: "file" };
       });
 
-      // Loader para assets entry points
+      // Loader for asset entry points
       build.onLoad(
         { filter: /.*/, namespace: "dinou-asset-entry" },
         async (args) => {
@@ -64,7 +64,7 @@ export default function assetsPlugin({ include = regex } = {}) {
         const normalizeRel = (p) => p.replace(/\\/g, "/");
         const processedSourceFiles = new Set();
 
-        // Primera pasada: assets normales (archivos individuales)
+        // First pass: normal assets (individual files)
         for (const [oldRelPath, info] of Object.entries(
           result.metafile.outputs
         )) {
@@ -88,11 +88,11 @@ export default function assetsPlugin({ include = regex } = {}) {
           processedSourceFiles.add(sourceFile);
         }
 
-        // Segunda pasada: buscar assets que están dentro de chunks
+        // Second pass: find assets that are inside chunks
         for (const [outputPath, info] of Object.entries(
           result.metafile.outputs
         )) {
-          // Solo buscar en chunks JavaScript
+          // Only search in JavaScript chunks
           if (!outputPath.endsWith(".js") || info.entryPoint) continue;
 
           for (const inputPath of Object.keys(info.inputs)) {
@@ -111,10 +111,10 @@ export default function assetsPlugin({ include = regex } = {}) {
               const scoped = createScopedName(base, sourceFile);
               const newLocal = `assets/${scoped}${ext}`;
 
-              // Leer el asset original
+              // Read the original asset
               const assetContent = await fs.readFile(sourceFile);
 
-              // Crear un nuevo output file para este asset
+              // Create a new output file for this asset
               const newOutputFile = {
                 path: path.join(outdir, newLocal),
                 contents: assetContent,
@@ -130,7 +130,7 @@ export default function assetsPlugin({ include = regex } = {}) {
               //   `Extracted asset from chunk: ${sourceFile} → ${newLocal}`
               // );
 
-              // Buscar el chunk que contiene este asset
+              // Find the chunk that contains this asset
               const chunkFile = result.outputFiles.find(
                 (f) =>
                   normalizeRel(path.relative(process.cwd(), f.path)) ===
@@ -140,12 +140,12 @@ export default function assetsPlugin({ include = regex } = {}) {
               if (chunkFile) {
                 let chunkContent = new TextDecoder().decode(chunkFile.contents);
 
-                // ENFOQUE MÁS PRECISO: Buscar el comentario específico de este asset
+                // MORE PRECISE APPROACH: Find the specific comment for this asset
                 const assetComment = `// ${inputPath}`;
                 const commentIndex = chunkContent.indexOf(assetComment);
 
                 if (commentIndex !== -1) {
-                  // Encontrar la línea siguiente que contiene la asignación de variable
+                  // Find the next line containing the variable assignment
                   const nextLineStart =
                     chunkContent.indexOf("\n", commentIndex) + 1;
                   const nextLineEnd = chunkContent.indexOf("\n", nextLineStart);
@@ -154,7 +154,7 @@ export default function assetsPlugin({ include = regex } = {}) {
                     nextLineEnd
                   );
 
-                  // Extraer el nombre de la variable (ej: "dinou_default")
+                  // Extract the variable name (e.g., "dinou_default")
                   const varMatch = assignmentLine.match(
                     /var (\w+)_default = "([^"]+)"/
                   );
@@ -163,7 +163,7 @@ export default function assetsPlugin({ include = regex } = {}) {
                     const varName = varMatch[1];
                     const oldPath = varMatch[2];
 
-                    // Reemplazar SOLO esta asignación específica
+                    // Replace ONLY this specific assignment
                     const newAssignmentLine = `var ${varName}_default = "/${newLocal}";`;
                     chunkContent =
                       chunkContent.substring(0, nextLineStart) +
@@ -175,7 +175,7 @@ export default function assetsPlugin({ include = regex } = {}) {
                     // );
                   }
                 } else {
-                  // Fallback: buscar por el nombre de archivo en la ruta
+                  // Fallback: search by filename in the path
                   const assetName = path.basename(sourceFile);
                   const escapedAssetName = escapeRegExp(assetName);
                   const pattern = new RegExp(
@@ -202,7 +202,7 @@ export default function assetsPlugin({ include = regex } = {}) {
           }
         }
 
-        // Actualizar referencias en archivos JS/CSS (código existente)
+        // Update references in JS/CSS files (existing code)
         for (const file of result.outputFiles) {
           const relPath = normalizeRel(path.relative(process.cwd(), file.path));
           if (!relPath.endsWith(".js") && !relPath.endsWith(".css")) continue;
@@ -226,7 +226,7 @@ export default function assetsPlugin({ include = regex } = {}) {
           file.contents = new TextEncoder().encode(content);
         }
 
-        // Actualizar paths (código existente)
+        // Update paths (existing code)
         for (const file of result.outputFiles) {
           const relPath = normalizeRel(path.relative(process.cwd(), file.path));
           const oldLocal = normalizeRel(path.relative(outdir, relPath));

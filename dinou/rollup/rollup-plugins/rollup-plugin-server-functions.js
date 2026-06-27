@@ -7,7 +7,7 @@ const { useServerRegex } = require("../../constants.js");
 
 function serverFunctionsPlugin() {
   const root = process.cwd();
-  const serverFunctions = new Map(); // Recolectar aquí: Map<relativePath, Set<exports>>
+  const serverFunctions = new Map(); // Collect here: Map<relativePath, Set<exports>>
 
   return {
     name: "server-functions-proxy",
@@ -18,11 +18,11 @@ function serverFunctionsPlugin() {
       if (exports.length === 0) return null;
 
       const relativePath = path.relative(root, id);
-      serverFunctions.set(relativePath, new Set(exports)); // Guardar exports como Set para uniqueness
+      serverFunctions.set(relativePath, new Set(exports)); // Save exports as a Set for uniqueness
 
       const fileUrl = `file:///${relativePath}`;
 
-      // Generamos un módulo que exporta proxies en lugar del código real
+      // Generate a module that exports proxies instead of the real code
       let proxyCode = `
         import { createServerFunctionProxy } from "/__SERVER_FUNCTION_PROXY__";
       `;
@@ -63,13 +63,13 @@ function serverFunctionsPlugin() {
         }
       }
 
-      // Generar manifest: convertir Map a objeto simple
+      // Generate manifest: convert Map to a simple object
       const manifestObj = {};
       for (const [relPath, exportsSet] of serverFunctions.entries()) {
         manifestObj[relPath] = Array.from(exportsSet);
       }
 
-      // Escribir el manifest en la carpeta especificada (ej. mismo lugar que otros assets)
+      // Write the manifest to the specified folder (e.g. same place as other assets)
       const manifestPath = path.join(
         "server_functions_manifest",
         "server-functions-manifest.json"

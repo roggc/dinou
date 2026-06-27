@@ -194,18 +194,18 @@ function reactClientManifestPlugin({
         absolute: true,
       });
 
-      // B. Extraemos los entrypoints de la configuración de Rollup
+      // B. Extract the entry points from the Rollup configuration
       const inputOption = options.input;
       let entryPoints = [];
 
       if (typeof inputOption === "string") {
-        // Caso 1: input: "src/index.js"
+        // Case 1: input: "src/index.js"
         entryPoints = [inputOption];
       } else if (Array.isArray(inputOption)) {
-        // Caso 2: input: ["src/a.js", "src/b.js"]
+        // Case 2: input: ["src/a.js", "src/b.js"]
         entryPoints = inputOption;
       } else if (typeof inputOption === "object" && inputOption !== null) {
-        // Caso 3: input: { main: "src/index.js", other: "src/other.js" }
+        // Case 3: input: { main: "src/index.js", other: "src/other.js" }
         entryPoints = Object.values(inputOption);
       }
       const uniqueFiles = new Set([...srcFiles, ...entryPoints]);

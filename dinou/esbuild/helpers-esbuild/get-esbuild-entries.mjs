@@ -68,7 +68,7 @@ export default async function getEsbuildEntries({
         continue;
       }
 
-      // Leer el archivo UNA sola vez
+      // Read the file ONLY once
       let importedCode;
       try {
         importedCode = readFileSync(absImportPathWithExt, "utf8");
@@ -81,12 +81,12 @@ export default async function getEsbuildEntries({
       }
 
       if (!isTopLevelClientComponent) {
-        // Verificar si es un client component
+        // Verify if it is a client component
         const isImportedFileClient = useClientRegex.test(importedCode.trim());
 
-        // Si es client component, NO procesar recursivamente
+        // If it is a client component, DO NOT process recursively
         if (isImportedFileClient) {
-          continue; // No procesar recursivamente client components
+          continue; // Do not recursively process client components
         }
       } else {
         const isImportedFileServer = useServerRegex.test(importedCode.trim());
@@ -96,7 +96,7 @@ export default async function getEsbuildEntries({
         }
       }
 
-      // Para módulos no-client, procesar normalmente
+      // For non-client modules, process normally
       if (
         absImportPathWithExt.endsWith(".css") ||
         absImportPathWithExt.endsWith(".scss") ||
@@ -111,15 +111,15 @@ export default async function getEsbuildEntries({
         continue;
       }
 
-      // 🚨 LA SOLUCIÓN: Si es un JSON, lo añadimos pero NO lo parseamos con Babel
+      // 🚨 THE SOLUTION: If it is a JSON file, add it but DO NOT parse it with Babel
       if (absImportPathWithExt.endsWith(".json")) {
         imports.add(absImportPathWithExt);
-        continue; // Esto evita que pase a la recursividad de Babel
+        continue; // This prevents it from entering Babel recursion
       }
 
       imports.add(absImportPathWithExt);
 
-      // Procesar imports recursivamente para módulos no-client
+      // Process imports recursively for non-client modules
       try {
         const nested = await getImportsAndAssetsAndCsss(
           importedCode,

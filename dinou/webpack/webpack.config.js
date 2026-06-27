@@ -6,7 +6,6 @@ const CopyWebpackPlugin = require("copy-webpack-plugin");
 const MiniCssExtractPlugin = require("mini-css-extract-plugin");
 const createScopedName = require("../core/createScopedName");
 const TsconfigPathsPlugin = require("tsconfig-paths-webpack-plugin");
-// const ReactRefreshWebpackPlugin = require("@pmmmwh/react-refresh-webpack-plugin");
 const manifestGeneratorPlugin = require("./plugins/manifest-generator-plugin");
 const ServerFunctionsPlugin = require("./plugins/server-functions-plugin");
 const webpack = require("webpack");
@@ -101,21 +100,12 @@ module.exports = async () => {
       environment: {
         module: true,
       },
-      // module: true,
       chunkFormat: "module", // Ensures non-entry chunks (like serverFunctionProxy) output as ESM
-      // // Optional: If webpack renames to .mjs, force .js
-      // chunkFilename: "[name]-[contenthash].js",
     },
     module: {
-      // noParse: [/[\\/]dist3[\\/]/, /[\\/]public[\\/]/],
       rules: [
         {
           test: /\.[jt]sx?$/,
-          // include: [
-          //   path.resolve(process.cwd(), "src"),
-          //   isEjected && path.resolve(process.cwd(), "dinou"),
-          //   path.resolve(__dirname, "../core"),
-          // ].filter(Boolean),
           exclude: [/node_modules\/(?!dinou)/, ...outputDirs],
           use: [
             {
@@ -128,7 +118,6 @@ module.exports = async () => {
                 plugins: [
                   "babel-plugin-react-compiler",
                   "@babel/plugin-syntax-import-meta",
-                  // isDevelopment && require.resolve("react-refresh/babel"),
                 ].filter(Boolean),
               },
             },
@@ -202,7 +191,6 @@ module.exports = async () => {
       ],
     },
     plugins: [
-      // isDevelopment && new ReactRefreshWebpackPlugin({ overlay: false }),
       new ReactServerWebpackPlugin({ isServer: false }),
       new CopyWebpackPlugin({
         patterns: [
@@ -241,16 +229,13 @@ module.exports = async () => {
       },
       plugins: configFile
         ? [
-            new TsconfigPathsPlugin({
-              configFile,
-              extensions: [".js", ".jsx", ".ts", ".tsx"],
-            }),
-          ]
+          new TsconfigPathsPlugin({
+            configFile,
+            extensions: [".js", ".jsx", ".ts", ".tsx"],
+          }),
+        ]
         : [],
     },
-    // externals: {
-    //   dinou: "dinou",
-    // },
     optimization: {
       // 2. RUNTIME CHUNK: Vital for sharing module state between entry points
       runtimeChunk: "single",
@@ -294,23 +279,23 @@ module.exports = async () => {
     },
     ...(isDevelopment
       ? {
-          devServer: {
-            port: 3001,
-            hot: false,
-            devMiddleware: {
-              index: false,
-              writeToDisk: true,
-            },
-            proxy: [
-              {
-                context: () => true,
-                target: "http://localhost:3000",
-                changeOrigin: true,
-              },
-            ],
-            client: false,
+        devServer: {
+          port: 3001,
+          hot: false,
+          devMiddleware: {
+            index: false,
+            writeToDisk: true,
           },
-        }
+          proxy: [
+            {
+              context: () => true,
+              target: "http://localhost:3000",
+              changeOrigin: true,
+            },
+          ],
+          client: false,
+        },
+      }
       : {}),
   };
 };

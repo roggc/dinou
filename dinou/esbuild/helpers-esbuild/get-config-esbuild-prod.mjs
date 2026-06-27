@@ -61,7 +61,6 @@ export default function getConfigEsbuildProd({
       "/serverFunctionProxy.js",
       "/__hmr_client__.js",
       "/react-refresh-entry.js",
-      // "dinou",
     ],
     plugins,
   };

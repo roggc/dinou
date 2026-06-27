@@ -1,8 +1,6 @@
 // plugins-esbuild/esm-hmr-plugin.mjs
 import fs from "node:fs/promises";
 import path from "node:path";
-// import * as babelCore from "@babel/core";
-// import { babelConfig } from "./babel-config.js";
 import { transformSync } from "@swc/core";
 import { createServer } from "node:http";
 import { EsmHmrEngine } from "./esm-hmr/server.js";
@@ -55,21 +53,21 @@ export default function esmHmrPlugin({
 
         const absNorm = norm(abs);
 
-        // 1. Comprobamos si es un ROOT Entry (client.jsx o error.tsx)
-        // Estos son los que tienes guardados en 'entryAbsPaths'
+        // 1. Check if it is a ROOT Entry (client.jsx or error.tsx)
+        // These are the ones saved in 'entryAbsPaths'
         const rootIndex = entryAbsPaths.findIndex(
           (entryPath) => norm(entryPath) === absNorm,
         );
 
-        // CASO A: Es Main o Error (Roots)
+        // CASE A: It is Main or Error (Roots)
         if (rootIndex !== -1) {
           const source = entrySources[rootIndex];
           if (source) {
             let injectCode = `import { createHotContext } from "/__hmr_client__.js";\n`;
             injectCode += `window.__hotContext = createHotContext;\n`;
 
-            // IMPORTANTE: Devolvemos 'source' CRUDO + inyección.
-            // Sin pasar por Babel para evitar que $RefreshSig$ rompa la inicialización.
+            // IMPORTANT: We return RAW 'source' + injection.
+            // Without passing through Babel/SWC to prevent $RefreshSig$ from breaking initialization.
             return {
               contents: injectCode + source,
               loader: "jsx",
@@ -78,31 +76,16 @@ export default function esmHmrPlugin({
           return null;
         }
 
-        // 2. Comprobamos si es cualquier OTRO Entry Point de la configuración de esbuild
-        // (Aquí están tus páginas, layouts, componentes...)
+        // 2. Check if it is any OTHER Entry Point from the esbuild configuration
+        // (Here are your pages, layouts, components...)
         const isAnEntryPoint = Object.values(entryPoints).some(
           (val) => norm(path.resolve(val)) === absNorm,
         );
 
-        // CASO B: Es una página o componente de usuario
+        // CASE B: It is a user page or component
         if (isAnEntryPoint) {
-          // AQUÍ SÍ aplicamos Babel para tener React Fast Refresh
+          // HERE we DO apply SWC transformation to enable React Fast Refresh
           const source = await fs.readFile(args.path, "utf8");
-
-          // try {
-          //   const transformed = babelCore.transformSync(source, {
-          //     ...babelConfig,
-          //     filename: abs,
-          //   }).code;
-
-          //   return {
-          //     contents: transformed,
-          //     loader: args.path.endsWith(".tsx") ? "tsx" : "jsx",
-          //   };
-          // } catch (e) {
-          //   // Si babel falla, fallback al original
-          //   return null;
-          // }
           try {
             const { code } = transformSync(source, {
               filename: abs,
@@ -133,7 +116,7 @@ export default function esmHmrPlugin({
           }
         }
 
-        // CASO C: No es un entry point (librerías, helpers internos, node_modules...)
+        // CASE C: It is not an entry point (libraries, internal helpers, node_modules...)
         return null;
       });
 
@@ -209,7 +192,7 @@ export default function esmHmrPlugin({
               if (window.__isReactRefreshBoundary && window.__isReactRefreshBoundary(module)) {
                 window.__debouncePerformReactRefresh();
               } else {
-                // Fallback: full reload si no es boundary
+                // Fallback: full reload if it is not a boundary
                 import.meta.hot.invalidate();
               }
             });
@@ -230,7 +213,7 @@ export default function esmHmrPlugin({
           // );
           return;
         }
-        // console.log("###############################", changedIds.size);
+
         if (changedIds.size === 0) return;
         const bundleFiles = Object.keys(result.metafile.outputs);
         const pendingUpdateUrls = new Set();
@@ -241,15 +224,8 @@ export default function esmHmrPlugin({
 
           for (const modulePath of modules) {
             if (changedIds.has(normalizePath(path.resolve(modulePath)))) {
-              // console.log("entry_________", fileName);
-              // console.log(
-              //   "dependencyTree",
-              //   hmrEngine.value.getDependencyTree()
-              // );
               const url = "/" + path.relative(outdir, fileName);
-              // console.log("url", url);
               const entry = hmrEngine.value.getEntry(url);
-              // console.log("entry______:", entry);
               if (entry?.isHmrAccepted) {
                 pendingUpdateUrls.add(url);
               } else {
@@ -260,11 +236,9 @@ export default function esmHmrPlugin({
         }
 
         if (needsFullReload || pendingUpdateUrls.size === 0) {
-          // console.log("Full reload____________");
           hmrEngine.value.broadcastMessage({ type: "reload" });
         } else {
           for (const url of pendingUpdateUrls) {
-            // console.log("Updateeeee____________");
             hmrEngine.value.broadcastMessage({ type: "update", url });
           }
         }
@@ -274,5 +248,4 @@ export default function esmHmrPlugin({
   };
 }
 
-// === Exporta para usar en dev.mjs ===
 export { esmHmrPlugin };

@@ -1,4 +1,3 @@
-// server-functions-loader-simple.js
 const path = require("path");
 const parseExports = require("../../core/parse-exports.js");
 const { useServerRegex } = require("../../constants.js");
@@ -40,16 +39,16 @@ const loadProxy = new Function('return import("/"+"__SERVER_FUNCTION_PROXY__")')
 export default (...args) =>
   loadProxy().then(mod =>
     (mod.default ?? mod ?? window.__SERVER_FUNCTION_PROXY_LIB__).createServerFunctionProxy(${JSON.stringify(
-      key,
-    )})(...args)
+        key,
+      )})(...args)
   );
 `;
     } else {
       proxyCode += `
 export const ${exp} = (...args) =>
   loadProxy().then(mod => (mod.default ?? mod ?? window.__SERVER_FUNCTION_PROXY_LIB__).createServerFunctionProxy(${JSON.stringify(
-    key,
-  )})(...args)
+        key,
+      )})(...args)
   );
 `;
     }

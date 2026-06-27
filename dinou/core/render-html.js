@@ -140,12 +140,12 @@ async function renderToStream(
     try {
       const isNotFound = {};
       const jsx =
-        /*Object.keys(query).length ||*/ isDevelopment ||
-        isDynamic ||
-        !hasJsxJson
+        isDevelopment ||
+          isDynamic ||
+          !hasJsxJson
           ? renderJSXToClientJSX(
-              await getJSX(reqPath, query, isNotFound, isDevelopment),
-            )
+            await getJSX(reqPath, query, isNotFound, isDevelopment),
+          )
           : ((await getSSGJSX(jsxJson)) ??
             renderJSXToClientJSX(
               await getJSX(reqPath, query, isNotFound, isDevelopment),
@@ -160,7 +160,7 @@ async function renderToStream(
               try {
                 stream.unpipe(process.stdout);
                 stream.destroy();
-              } catch {}
+              } catch { }
             }
             const isProd = process.env.NODE_ENV === "production";
 
@@ -188,28 +188,25 @@ async function renderToStream(
                   writeErrorOutput(error, isProd);
                   process.exit(1);
                 },
-                // bootstrapModules: [getAssetFromManifest("error.js")],
                 bootstrapModules: isDevelopment
                   ? [
-                      getAssetFromManifest("error.js"),
-                      isWebpack
-                        ? undefined
-                        : getAssetFromManifest("runtime.js"),
-                    ].filter(Boolean)
+                    getAssetFromManifest("error.js"),
+                    isWebpack
+                      ? undefined
+                      : getAssetFromManifest("runtime.js"),
+                  ].filter(Boolean)
                   : [getAssetFromManifest("error.js")],
                 bootstrapScriptContent: `window.__DINOU_ERROR_MESSAGE__=${JSON.stringify(
                   error.message || "Unknown error",
-                )};window.__DINOU_ERROR_NAME__=${JSON.stringify(error.name)};${
-                  isDevelopment
-                    ? `window.__DINOU_ERROR_STACK__=${JSON.stringify(
-                        error.stack || "No stack trace available",
-                      )};`
-                    : ""
-                }${
-                  isDevelopment
+                )};window.__DINOU_ERROR_NAME__=${JSON.stringify(error.name)};${isDevelopment
+                  ? `window.__DINOU_ERROR_STACK__=${JSON.stringify(
+                    error.stack || "No stack trace available",
+                  )};`
+                  : ""
+                  }${isDevelopment
                     ? `window.HMR_WEBSOCKET_URL="ws://localhost:3001";`
                     : ""
-                }`,
+                  }`,
               });
             } catch (err) {
               console.error("Render error (no error.tsx?):", err);
@@ -223,14 +220,14 @@ async function renderToStream(
         },
         bootstrapModules: isDevelopment
           ? [
-              getAssetFromManifest("main.js"),
-              isWebpack ? undefined : getAssetFromManifest("runtime.js"),
-            ].filter(Boolean)
+            getAssetFromManifest("main.js"),
+            isWebpack ? undefined : getAssetFromManifest("runtime.js"),
+          ].filter(Boolean)
           : [getAssetFromManifest("main.js")],
         ...(isDevelopment
           ? {
-              bootstrapScriptContent: `window.HMR_WEBSOCKET_URL="ws://localhost:3001";`,
-            }
+            bootstrapScriptContent: `window.HMR_WEBSOCKET_URL="ws://localhost:3001";`,
+          }
           : {}),
       });
     } catch (error) {

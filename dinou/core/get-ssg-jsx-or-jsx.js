@@ -4,10 +4,10 @@ const { getJSXJSON } = require("./jsx-json.js");
 
 async function getSSGJSXOrJSX(reqPath, query, isDevelopment = false) {
   const isNotFound = null;
-  const result = /*Object.keys(query).length ||*/ isDevelopment
+  const result = isDevelopment
     ? await getJSX(reqPath, query, isNotFound, isDevelopment)
     : (await getSSGJSX(getJSXJSON(reqPath))) ??
-      (await getJSX(reqPath, query, isNotFound, isDevelopment));
+    (await getJSX(reqPath, query, isNotFound, isDevelopment));
   return result;
 }
 

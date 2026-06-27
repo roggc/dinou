@@ -66,7 +66,6 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false) {
     const Page = pageModule.default ?? pageModule;
     jsx = React.createElement(Page, {
       params: dynamicParams ?? {},
-      // searchParams: query,
       error,
     });
 
@@ -152,7 +151,6 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false) {
 
                 updatedSlotElement = React.createElement(SlotError, {
                   params: slotErrorParams, // Resolved params (if any)
-                  // searchParams: query,
                   key: slotName,
                   error: serializedError, // We pass the captured error
                 });
@@ -176,7 +174,7 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false) {
         }
         let props = {
           params: dParams,
-          /* searchParams: query,*/ ...updatedSlots,
+          ...updatedSlots,
         };
         jsx = React.createElement(Layout, props, jsx);
         const layoutFolderPath = path.dirname(layoutPath);

@@ -1,6 +1,6 @@
 {
   "name": "dinou-ejected",
-  "version": "4.0.8",
+  "version": "4.0.9",
   "main": "index.js",
   "private": true,
   "exports": {
@@ -23,7 +23,6 @@
     "@babel/register": "^7.27.1",
     "@babel/traverse": "^7.28.3",
     "@esbuild-plugins/tsconfig-paths": "^0.1.2",
-    "@pmmmwh/react-refresh-webpack-plugin": "^0.6.2",
     "@roggc/react-server-dom-esm": "^0.0.0-b061b597-20251212",
     "@rollup/plugin-babel": "^6.0.4",
     "@rollup/plugin-commonjs": "^28.0.6",

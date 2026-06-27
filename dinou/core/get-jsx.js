@@ -109,7 +109,6 @@ async function getJSX(
 
     let props = {
       params: dynamicParams,
-      // searchParams: query,
     };
 
     const pageFolder = path.dirname(pagePath);
@@ -207,7 +206,6 @@ async function getJSX(
 
               updatedSlotElement = React.createElement(SlotError, {
                 params: slotErrorParams,
-                // searchParams: query,
                 key: slotName,
                 error: serializedError,
               });
@@ -227,7 +225,7 @@ async function getJSX(
           updatedSlots[slotName] = updatedSlotElement;
         }
       }
-      let props = { params: dParams, /*searchParams: query,*/ ...updatedSlots };
+      let props = { params: dParams, ...updatedSlots };
       if (index === layouts.length - 1 || resetLayoutPath) {
         props = { ...props, ...(pageFunctionsProps?.layout ?? {}) };
       }

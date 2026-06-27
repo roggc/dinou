@@ -11,7 +11,7 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true } = {}) {
 
         const renames = new Map(); // oldFilename → newFilename (e.g., 'chunk-ABC.js' → 'chunk-stable.js')
         const normalizeRel = (p) => p.replace(/\\/g, "/");
-        // Primero, renombrar chunks
+        // First, rename chunks
         for (const [oldRelPath, info] of Object.entries(
           result.metafile.outputs
         )) {
@@ -21,7 +21,7 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true } = {}) {
             (f) => f.startsWith("src/") && /\.(js|jsx|ts|tsx)$/.test(f)
           );
           if (!sourceFile) continue;
-          // Nombre estable basado en el archivo fuente (siempre igual)
+          // Stable name based on the source file (always the same)
           const rel = path.relative("src", sourceFile);
           const normalizedRel = rel.replace(/\\/g, "/");
           const dir = path.dirname(normalizedRel);
@@ -33,7 +33,7 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true } = {}) {
             dir === "." ? base : `${dir.replace(/\//g, "-")}-${base}`;
           let finalName;
           if (dev) {
-            finalName = `${stableName}.js`; // 100% estable en dev
+            finalName = `${stableName}.js`; // 100% stable in dev
           } else {
             const hash = oldRelPath.match(/-([A-Z0-9]+)\./)?.[1] || "";
             finalName = `${stableName}-${hash}.js`;
@@ -42,7 +42,7 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true } = {}) {
           const oldLocal = path.basename(oldRelPath);
           renames.set(oldLocal, finalRelPath);
         }
-        // Segundo, renombrar maps correspondientes a los chunks
+        // Second, rename maps corresponding to the chunks
         for (const [oldRelPath, info] of Object.entries(
           result.metafile.outputs
         )) {
@@ -56,7 +56,7 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true } = {}) {
             renames.set(oldMapLocal, newMapLocal);
           }
         }
-        // Paso 3: Actualizar referencias en importers (imports en .js)
+        // Step 3: Update references in importers (imports in .js)
         const outputs = result.metafile.outputs;
         const escapeRegExp = (string) =>
           string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -74,22 +74,22 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true } = {}) {
             const oldImportedLocal = path.basename(importedRelPath);
             const newImportedLocal = renames.get(oldImportedLocal);
             if (!newImportedLocal) continue;
-            // Reemplazar para double quotes con ./
+            // Replace for double quotes with ./
             const oldDouble = `"./${escapeRegExp(oldImportedLocal)}"`;
             const newDouble = `"./${newImportedLocal}"`;
             content = content.replace(new RegExp(oldDouble, "g"), newDouble);
-            // Reemplazar para double quotes sin ./
+            // Replace for double quotes without ./
             const oldDoubleNoDot = `"${escapeRegExp(oldImportedLocal)}"`;
             const newDoubleNoDot = `"${newImportedLocal}"`;
             content = content.replace(
               new RegExp(oldDoubleNoDot, "g"),
               newDoubleNoDot
             );
-            // Reemplazar para single quotes con ./
+            // Replace for single quotes with ./
             const oldSingle = `'./${escapeRegExp(oldImportedLocal)}'`;
             const newSingle = `'./${newImportedLocal}'`;
             content = content.replace(new RegExp(oldSingle, "g"), newSingle);
-            // Reemplazar para single quotes sin ./
+            // Replace for single quotes without ./
             const oldSingleNoDot = `'${escapeRegExp(oldImportedLocal)}'`;
             const newSingleNoDot = `'${newImportedLocal}'`;
             content = content.replace(
@@ -99,7 +99,7 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true } = {}) {
           }
           importerFile.contents = new TextEncoder().encode(content);
         }
-        // Nuevo: Actualizar sourceMappingURL en los .js que se renombran
+        // New: Update sourceMappingURL in the .js files being renamed
         for (const file of result.outputFiles) {
           if (!file.path.endsWith(".js")) continue;
           const oldRelPath = normalizeRel(
@@ -123,7 +123,7 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true } = {}) {
           );
           file.contents = new TextEncoder().encode(content);
         }
-        // Actualizar paths en outputFiles para chunks y maps
+        // Update paths in outputFiles for chunks and maps
         for (const file of result.outputFiles) {
           const relPath = normalizeRel(path.relative(process.cwd(), file.path));
           const oldLocal = path.basename(relPath);
@@ -132,7 +132,7 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true } = {}) {
             file.path = path.join(path.dirname(file.path), newLocal);
           }
         }
-        // Actualizar metafile para consistencia
+        // Update metafile for consistency
         const newOutputs = {};
         for (const oldRelPath in outputs) {
           const oldLocal = path.basename(oldRelPath);

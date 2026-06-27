@@ -7,7 +7,7 @@ const createPostCSSExtractPlugin = (options = {}) => {
 
   let extractedCSS = "";
 
-  // El plugin de PostCSS propiamente dicho
+  // Define the PostCSS plugin to intercept and extract CSS rules
   const postcssPlugin = {
     postcssPlugin: "postcss-extract",
 
@@ -18,13 +18,13 @@ const createPostCSSExtractPlugin = (options = {}) => {
         extractedCSS += root.toString();
         extractedCSS += "\n";
 
-        // Limpia el CSS original
+        // Remove all CSS rules from the original file to prevent duplicate injection
         root.removeAll();
       }
     },
   };
 
-  // Función para finalizar
+  // Write the collected CSS contents to the final output file on disk
   const finalize = () => {
     if (!extractedCSS) return;
     const outputDir = path.dirname(outputFile);
