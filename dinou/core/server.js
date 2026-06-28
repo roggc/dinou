@@ -380,7 +380,7 @@ function getContextForServerFunctionEndpoint(req, res) {
         }
 
         // SCENARIO B: Streaming active (Headers Sent)
-        // Inject JavaScript.
+        // Send safe stream command.
 
         // 🛑 Security: JS cannot write HttpOnly cookies
         if (options && options.httpOnly) {
@@ -404,11 +404,11 @@ function getContextForServerFunctionEndpoint(req, res) {
           if (options.sameSite) cookieStr += `; samesite=${options.sameSite}`;
         }
 
-        // Safe packaging for injection
+        // Safe packaging for stream command
         const safeCookieStr = JSON.stringify(cookieStr);
 
         // Write to stream
-        res.write(`<script>document.cookie = ${safeCookieStr};</script>`);
+        res.write(`D:{"type":"cookie","cookie":${safeCookieStr}}\n`);
       },
 
       clearCookie: (name, options) => {
@@ -421,13 +421,10 @@ function getContextForServerFunctionEndpoint(req, res) {
           return;
         }
 
-        // SCENARIO B: Script Injection
-        const safeName = JSON.stringify(name);
-        const safePath = JSON.stringify(path);
-
-        res.write(
-          `<script>document.cookie = ${safeName} + "=; Max-Age=0; path=" + ${safePath} + ";";</script>`,
-        );
+        // SCENARIO B: Custom stream command
+        const cookieStr = `${name}=; Max-Age=0; path=${path};`;
+        const safeCookieStr = JSON.stringify(cookieStr);
+        res.write(`D:{"type":"cookie","cookie":${safeCookieStr}}\n`);
       },
     },
   };
@@ -935,18 +932,17 @@ app.post("/____server_function____", async (req, res) => {
       } catch (err) {
         // 💡 WE INTERCEPT THE REDIRECT
         if (err && err.$$type === "dinou-internal-redirect") {
-          // 1. Always sanitize the URL
           const safeUrl = JSON.stringify(err.url);
-          const script = `<script>window.location.href = ${safeUrl};</script>`;
 
           if (!res.headersSent) {
-            // SCENARIO A: Clean (Content-Type html)
-            res.setHeader("Content-Type", "text/html");
-            return res.send(script); // res.send calls end() and return stops the function
+            // SCENARIO A: Clean (Content-Type application/json)
+            res.setHeader("Content-Type", "application/json");
+            res.setHeader("X-Dinou-Redirect", err.url);
+            return res.status(200).json({ redirect: err.url });
           } else {
-            // SCENARIO B: Dirty/Active Stream (Content-Type already set by clearCookie)
-            // Write the script to the existing stream
-            res.write(script);
+            // SCENARIO B: Dirty/Active Stream
+            // Write a custom line-based stream command
+            res.write(`D:{"type":"redirect","url":${safeUrl}}\n`);
 
             // ⚠️ IMPORTANT:
             // 1. We close the response, since we redirected and there will be no RSC payload.

@@ -31,15 +31,30 @@ export function createServerFunctionProxy(id) {
 
       if (!res.ok) throw new Error("Server function failed");
 
+      // Check header first
+      const redirectUrl = res.headers.get("X-Dinou-Redirect");
+      if (redirectUrl) {
+        window.location.href = redirectUrl;
+        return new Promise(() => {});
+      }
+
       const contentType = res.headers.get("content-type") || "";
 
-      // Case 1: Pure HTML (Simple Redirect)
+      // Reject unexpected HTML responses entirely to prevent security bugs
       if (contentType.includes("text/html")) {
         const html = await res.text();
-        const range = document.createRange();
-        const documentFragment = range.createContextualFragment(html);
-        document.body.appendChild(documentFragment);
-        return new Promise(() => {});
+        console.warn("[Dinou] Received unexpected HTML response from server function:", html);
+        throw new Error("Unexpected HTML response from server function");
+      }
+
+      // Check if it's application/json (Scenario A clean redirect or json response)
+      if (contentType.includes("application/json")) {
+        const data = await res.json();
+        if (data && data.redirect) {
+          window.location.href = data.redirect;
+          return new Promise(() => {});
+        }
+        return data;
       }
 
       // Case 2: RSC or Hybrid Stream (Buffered)
@@ -47,7 +62,6 @@ export function createServerFunctionProxy(id) {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         const encoder = new TextEncoder();
-        const scriptRegex = /<script>(.*?)<\/script>/gs;
 
         const readableStream = new ReadableStream({
           async start(controller) {
@@ -59,16 +73,20 @@ export function createServerFunctionProxy(id) {
                 const { done, value } = await reader.read();
 
                 if (done) {
-                  // If something remains in the buffer upon finishing, we send it (as long as it's not a broken script)
                   if (buffer.length > 0) {
-                    // CHECK: We search for the tag start, whether it has the closing > or not
-                    if (buffer.includes("<script")) {
-                      console.warn(
-                        "[Dinou] Stream ended with incomplete script. Discarding tail.",
-                      );
-                      // We do not enqueue.
+                    if (buffer.startsWith("D:")) {
+                      try {
+                        const payload = JSON.parse(buffer.slice(2));
+                        if (payload.type === "redirect") {
+                          isRedirecting = true;
+                          window.location.href = payload.url;
+                        } else if (payload.type === "cookie") {
+                          document.cookie = payload.cookie;
+                        }
+                      } catch (e) {
+                        console.error("[Dinou] Failed to parse stream command line at end:", e);
+                      }
                     } else {
-                      // It is safe content (e.g., "a < b" or a cut JSON that React will handle)
                       controller.enqueue(encoder.encode(buffer));
                     }
                   }
@@ -78,65 +96,46 @@ export function createServerFunctionProxy(id) {
                 // 1. ACCUMULATE
                 buffer += decoder.decode(value, { stream: true });
 
-                // 2. PROCESS COMPLETE SCRIPTS
-                // We search for complete pairs of <script>...</script>
-                let match;
+                // 2. PROCESS COMPLETE LINES
+                const lastNewlineIndex = buffer.lastIndexOf("\n");
+                if (lastNewlineIndex !== -1) {
+                  const completeChunk = buffer.slice(0, lastNewlineIndex + 1);
+                  buffer = buffer.slice(lastNewlineIndex + 1);
 
-                // We execute all complete scripts we find
-                while ((match = scriptRegex.exec(buffer)) !== null) {
-                  const fullMatch = match[0];
-                  const scriptContent = match[1];
+                  const lines = completeChunk.split("\n");
+                  let cleanChunk = "";
 
-                  // Detect redirect
-                  if (scriptContent.includes("window.location.href")) {
-                    isRedirecting = true;
+                  for (let i = 0; i < lines.length; i++) {
+                    const line = lines[i];
+                    if (!line && i === lines.length - 1) {
+                      continue;
+                    }
+
+                    if (line.startsWith("D:")) {
+                      try {
+                        const payload = JSON.parse(line.slice(2));
+                        if (payload.type === "redirect") {
+                          isRedirecting = true;
+                          window.location.href = payload.url;
+                        } else if (payload.type === "cookie") {
+                          document.cookie = payload.cookie;
+                        }
+                      } catch (e) {
+                        console.error("[Dinou] Failed to parse stream command line:", e);
+                      }
+                    } else {
+                      cleanChunk += line + "\n";
+                    }
                   }
 
-                  // Inject to DOM
-                  const range = document.createRange();
-                  const fragment = range.createContextualFragment(fullMatch); // fullMatch includes tags for correct context
-                  document.body.appendChild(fragment);
-                }
-
-                // 3. CLEAN PROCESSED SCRIPTS FROM BUFFER
-                // Once executed, we remove them so they don't go to React
-                buffer = buffer.replace(scriptRegex, "");
-
-                // 4. CALCULATE WHAT IS SAFE TO SEND (The anti-cut logic)
-                // We need to know if the buffer ends with something that LOOKS like the start of a script
-                // Dangerous patterns at the end: <, <s, <sc, <scr, <scri, <scrip, <script
-
-                let cutoffIndex = buffer.length; // Default send everything
-
-                // A) If there is an open but not closed <script> in the buffer
-                const openScriptIndex = buffer.indexOf("<script>");
-                if (openScriptIndex !== -1) {
-                  // We keep everything from the <script> onwards
-                  cutoffIndex = openScriptIndex;
-                } else {
-                  // B) If no open script, check if the end looks like a cut tag
-                  // Regex: Looks for '<' optionally followed by s, c, r, i, p, t AT THE END of the string ($)
-                  const partialTagMatch = buffer.match(/<s?c?r?i?p?t?$/);
-
-                  if (partialTagMatch) {
-                    // We save from where the suspicion starts
-                    cutoffIndex = partialTagMatch.index;
+                  if (cleanChunk) {
+                    controller.enqueue(encoder.encode(cleanChunk));
                   }
-                }
-
-                // 5. SEND SAFE CONTENT
-                const safeChunk = buffer.slice(0, cutoffIndex);
-                // What remains stays in the buffer for the next loop (chunk)
-                buffer = buffer.slice(cutoffIndex);
-
-                if (safeChunk) {
-                  controller.enqueue(encoder.encode(safeChunk));
                 }
               }
             } catch (err) {
               controller.error(err);
             } finally {
-              // If it is NOT a redirect, we close. If it is a redirect, we leave hanging (your master trick).
               if (!isRedirecting) {
                 controller.close();
               }
