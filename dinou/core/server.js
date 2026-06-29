@@ -248,20 +248,24 @@ const appUseCookieParser = cookieParser();
 const app = express();
 app.use(appUseCookieParser);
 app.use(express.json());
+const { resolveRelativeUrl } = require("./url-resolver");
 
 function getContext(req, res) {
+  let hasRedirected = false;
   // Helper to execute res methods safely
   const safeResCall = (methodName, ...args) => {
+    if (hasRedirected) return;
     if (res.headersSent) {
+      if (methodName === "redirect" && req.path.includes("____rsc_payload")) {
+        return; // Silence streaming redirects during RSC payload requests
+      }
       console.log(
         `[Dinou] res.${methodName} called but headers already sent. Ignoring.`,
       );
-      // console.warn(
-      //   `[Dinou Warning] RSC Stream active. Ignoring res.${methodName}() to avoid crash.`
-      // );
       return; // Exit silently
     }
     if (methodName === "redirect") {
+      hasRedirected = true;
       // 1. Normalize arguments (Status and URL)
       let url = args[0];
       let status = 302; // Default
@@ -272,16 +276,27 @@ function getContext(req, res) {
       }
 
       function safeRedirect(targetUrl) {
-        // Validate it's a string before calling startsWith
+        const resolvedUrl = resolveRelativeUrl(targetUrl, req.path);
+        let finalUrl = "/";
         if (
-          typeof targetUrl === "string" &&
-          targetUrl.startsWith("/") &&
-          !targetUrl.startsWith("//")
+          typeof resolvedUrl === "string" &&
+          resolvedUrl.startsWith("/") &&
+          !resolvedUrl.startsWith("//")
         ) {
-          res.redirect.apply(res, [status, targetUrl]);
+          finalUrl = resolvedUrl;
         } else {
-          res.redirect.apply(res, [status, "/"]);
+          console.warn(
+            `[Dinou Security] Blocked unsafe redirect to: ${targetUrl}`,
+          );
         }
+
+        if (req.path.includes("____rsc_payload")) {
+          res.setHeader("x-rsc-redirect", finalUrl);
+          res.status(200).end();
+          return;
+        }
+
+        res.redirect.apply(res, [status, finalUrl]);
       }
       return safeRedirect(url);
     }
@@ -351,11 +366,31 @@ function getContextForServerFunctionEndpoint(req, res) {
     },
     res: {
       redirect: (urlOrStatus, url) => {
-        const targetUrl = url || urlOrStatus;
+        const rawUrl = url || urlOrStatus;
+        const referer = req.headers["referer"];
+        let refererPath = "/";
+        if (referer) {
+          try {
+            refererPath = new URL(referer).pathname;
+          } catch (e) {}
+        }
+        const resolvedUrl = resolveRelativeUrl(rawUrl, refererPath);
+        let finalUrl = "/";
+        if (
+          typeof resolvedUrl === "string" &&
+          resolvedUrl.startsWith("/") &&
+          !resolvedUrl.startsWith("//")
+        ) {
+          finalUrl = resolvedUrl;
+        } else {
+          console.warn(
+            `[Dinou Security] Blocked unsafe server function redirect to: ${rawUrl}`,
+          );
+        }
         // We throw a special object that the endpoint will intercept
         throw {
           $$type: "dinou-internal-redirect",
-          url: targetUrl,
+          url: finalUrl,
         };
       },
       status: (code) => {
@@ -530,6 +565,11 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
         isNotFound,
         isDevelopment,
       );
+
+      if (res.headersSent) {
+        return;
+      }
+
       const manifest = isDevelopment
         ? JSON.parse(
           readFileSync(

@@ -27,6 +27,8 @@ const childExecArgv = ESSENTIAL_NODE_ARGS.concat(loaderArg);
 
 // ----------------------------------------------------
 
+const { resolveRelativeUrl } = require("./url-resolver");
+
 function renderAppToHtml(
   reqPath,
   paramsString,
@@ -82,13 +84,28 @@ function renderAppToHtml(
         if (res.headersSent) {
           // --- REDIRECT (JS Injection) ---
           if (command === "redirect") {
-            const url = args.length === 1 ? args[0] : args[1];
+            const rawUrl = args.length === 1 ? args[0] : args[1];
+            const resolvedUrl = resolveRelativeUrl(rawUrl, reqPath);
             console.log(
-              `[Dinou] Streaming active. Redirecting via JavaScript to: ${url}`,
+              `[Dinou] Streaming active. Redirecting via JavaScript to: ${resolvedUrl}`,
             );
-            const safeUrl = JSON.stringify(url);
+            let finalUrl = "/";
+            if (
+              typeof resolvedUrl === "string" &&
+              resolvedUrl.startsWith("/") &&
+              !resolvedUrl.startsWith("//")
+            ) {
+              finalUrl = resolvedUrl;
+            } else {
+              console.warn(
+                `[Dinou Security] Blocked unsafe streaming redirect to: ${rawUrl}`,
+              );
+            }
+            const safeUrl = JSON.stringify(finalUrl);
             res.write(`<script>window.location.href = ${safeUrl};</script>`);
             res.end();
+            child.stdout.unpipe(res);
+            child.kill();
             return;
           }
 
@@ -186,16 +203,19 @@ function renderAppToHtml(
             rawUrl = args[0];
           }
 
+          // Resolve relative URL relative to reqPath
+          const resolvedUrl = resolveRelativeUrl(rawUrl, reqPath);
+
           // 2. Security Logic (Safe Redirect)
           // We allow only relative routes starting with '/' but not '//'
           let finalUrl = "/";
 
           if (
-            typeof rawUrl === "string" &&
-            rawUrl.startsWith("/") &&
-            !rawUrl.startsWith("//")
+            typeof resolvedUrl === "string" &&
+            resolvedUrl.startsWith("/") &&
+            !resolvedUrl.startsWith("//")
           ) {
-            finalUrl = rawUrl;
+            finalUrl = resolvedUrl;
           } else {
             console.warn(
               `[Dinou Security] Blocked unsafe redirect to: ${rawUrl}`,
@@ -205,6 +225,8 @@ function renderAppToHtml(
 
           // 3. Execute safe redirect always using (status, url)
           res.redirect.apply(res, [status, finalUrl]);
+          child.stdout.unpipe(res);
+          child.kill();
           return;
         }
 

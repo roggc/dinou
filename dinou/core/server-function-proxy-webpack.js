@@ -1,5 +1,9 @@
 import { createFromFetch } from "react-server-dom-webpack/client";
 
+function isSafeRedirect(url) {
+  return typeof url === "string" && url.startsWith("/") && !url.startsWith("//");
+}
+
 function createServerFunctionProxy(id) {
   return new Proxy(() => { }, {
     apply: async (_target, _thisArg, args) => {
@@ -33,7 +37,7 @@ function createServerFunctionProxy(id) {
       // Check header first
       const redirectUrl = res.headers.get("X-Dinou-Redirect");
       if (redirectUrl) {
-        window.location.href = redirectUrl;
+        window.location.href = isSafeRedirect(redirectUrl) ? redirectUrl : "/";
         return new Promise(() => { });
       }
 
@@ -50,7 +54,7 @@ function createServerFunctionProxy(id) {
       if (contentType.includes("application/json")) {
         const data = await res.json();
         if (data && data.redirect) {
-          window.location.href = data.redirect;
+          window.location.href = isSafeRedirect(data.redirect) ? data.redirect : "/";
           return new Promise(() => { });
         }
         return data;
@@ -78,7 +82,7 @@ function createServerFunctionProxy(id) {
                         const payload = JSON.parse(buffer.slice(2));
                         if (payload.type === "redirect") {
                           isRedirecting = true;
-                          window.location.href = payload.url;
+                          window.location.href = isSafeRedirect(payload.url) ? payload.url : "/";
                         } else if (payload.type === "cookie") {
                           document.cookie = payload.cookie;
                         }
@@ -115,7 +119,7 @@ function createServerFunctionProxy(id) {
                         const payload = JSON.parse(line.slice(2));
                         if (payload.type === "redirect") {
                           isRedirecting = true;
-                          window.location.href = payload.url;
+                          window.location.href = isSafeRedirect(payload.url) ? payload.url : "/";
                         } else if (payload.type === "cookie") {
                           document.cookie = payload.cookie;
                         }

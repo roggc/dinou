@@ -38,7 +38,7 @@ const isHashChangeOnly = (finalPath) => {
   );
 };
 
-const getRSCPayload = (rscKey) => {
+const getRSCPayload = (rscKey, isPrefetch = false) => {
   const url = rscKey.split("::")[0];
   // 1. Check Idempotence (Avoids the infinite loop of React)
   if (cache.has(url)) {
@@ -64,7 +64,21 @@ const getRSCPayload = (rscKey) => {
   }
 
   // 3. Fetch and Cache Storage
-  const promise = createFromFetch(fetch(payloadUrl));
+  const promise = createFromFetch(
+    fetch(payloadUrl).then((res) => {
+      if (res.headers.has("x-rsc-redirect")) {
+        const redirectUrl = res.headers.get("x-rsc-redirect");
+        if (!isPrefetch) {
+          window.location.href = redirectUrl;
+        } else {
+          cache.delete(url);
+        }
+        // Return a promise that never resolves to avoid React Server DOM throwing "Connection closed"
+        return new Promise(() => {});
+      }
+      return res;
+    }),
+  );
   cache.set(url, promise); // <--- KEY TO AVOID LOOP
   return promise;
 };
@@ -84,7 +98,7 @@ function Router() {
     window.__DINOU_PREFETCH__ = (url) => {
       // 🛡️ PREFETCH PROTECTION: If it's a local hash, do nothing
       if (isHashChangeOnly(url)) return;
-      getRSCPayload(url);
+      getRSCPayload(url, true);
     };
 
     // Hydration
