@@ -17,7 +17,7 @@ function serverFunctionsPlugin() {
       const exports = parseExports(code);
       if (exports.length === 0) return null;
 
-      const relativePath = path.relative(root, id);
+      const relativePath = path.relative(root, id).replace(/\\/g, "/");
       serverFunctions.set(relativePath, new Set(exports)); // Save exports as a Set for uniqueness
 
       const fileUrl = `file:///${relativePath}`;

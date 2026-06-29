@@ -19,7 +19,7 @@ export default function serverFunctionsPlugin(manifestData = {}) {
         const exports = parseExports(code);
         if (exports.length === 0) return null;
 
-        const relativePath = path.relative(root, args.path);
+        const relativePath = path.relative(root, args.path).replace(/\\/g, "/");
         serverFunctions.set(relativePath, new Set(exports)); // Save exports as a Set to guarantee uniqueness
 
         const fileUrl = `file:///${relativePath}`;
