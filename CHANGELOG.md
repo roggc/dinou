@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.0.15] - 2026-06-29
+
+### Added
+- **VFS Routing Cache**: Introduced an in-memory Virtual File System (VFS) to cache filesystem structures under `src/` at production startup, resolving dynamic routes entirely in-memory and eliminating synchronous event loop-blocking disk I/O.
+
+### Fixed
+- **Cross-Platform Separators**: Normalized Server Functions manifest keys and runtime lookup checks to consistently use forward slashes (`/`), preventing OS path format mismatches (`\` vs `/`) and subsequent `400 Bad Request` execution errors.
+
 ## [4.0.14] - 2026-06-29
 ### Added
 - **Soft Redirects**: Exposes the SPA transition navigation internally via `window.__DINOU_ROUTER_NAVIGATE__` to enable smooth client-side redirects from both Server Functions and RSC payloads, keeping the React client state intact and preventing full browser page reloads.
