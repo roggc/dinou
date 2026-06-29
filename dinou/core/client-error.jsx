@@ -9,7 +9,7 @@ import {
 import { createFromFetch } from "@roggc/react-server-dom-esm/client";
 import { hydrateRoot } from "react-dom/client";
 import { RouterContext } from "./navigation.js";
-import { resolveUrl } from "./navigation-utils.js";
+import { resolveUrl, isExternalUrl } from "./navigation-utils.js";
 
 // ====================================================================
 // 1. GLOBAL STATE (Outside the component)
@@ -167,7 +167,7 @@ function Router() {
       }
 
       const href = anchor.getAttribute("href");
-      if (!href || href.startsWith("mailto:") || href.startsWith("tel:"))
+      if (!href || href.startsWith("mailto:") || href.startsWith("tel:") || isExternalUrl(href))
         return;
 
       // We use the unified helper

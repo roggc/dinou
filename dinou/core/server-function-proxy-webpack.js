@@ -4,6 +4,16 @@ function isSafeRedirect(url) {
   return typeof url === "string" && url.startsWith("/") && !url.startsWith("//");
 }
 
+function executeRedirect(url) {
+  const safeUrl = isSafeRedirect(url) ? url : "/";
+  const isInternal = safeUrl.startsWith("/") && !safeUrl.startsWith("//");
+  if (isInternal && typeof window !== "undefined" && window.__DINOU_ROUTER_NAVIGATE__) {
+    window.__DINOU_ROUTER_NAVIGATE__(safeUrl);
+  } else if (typeof window !== "undefined") {
+    window.location.href = safeUrl;
+  }
+}
+
 function createServerFunctionProxy(id) {
   return new Proxy(() => { }, {
     apply: async (_target, _thisArg, args) => {
@@ -37,7 +47,7 @@ function createServerFunctionProxy(id) {
       // Check header first
       const redirectUrl = res.headers.get("X-Dinou-Redirect");
       if (redirectUrl) {
-        window.location.href = isSafeRedirect(redirectUrl) ? redirectUrl : "/";
+        executeRedirect(redirectUrl);
         return new Promise(() => { });
       }
 
@@ -54,7 +64,7 @@ function createServerFunctionProxy(id) {
       if (contentType.includes("application/json")) {
         const data = await res.json();
         if (data && data.redirect) {
-          window.location.href = isSafeRedirect(data.redirect) ? data.redirect : "/";
+          executeRedirect(data.redirect);
           return new Promise(() => { });
         }
         return data;
@@ -82,7 +92,7 @@ function createServerFunctionProxy(id) {
                         const payload = JSON.parse(buffer.slice(2));
                         if (payload.type === "redirect") {
                           isRedirecting = true;
-                          window.location.href = isSafeRedirect(payload.url) ? payload.url : "/";
+                          executeRedirect(payload.url);
                         } else if (payload.type === "cookie") {
                           document.cookie = payload.cookie;
                         }
@@ -119,7 +129,7 @@ function createServerFunctionProxy(id) {
                         const payload = JSON.parse(line.slice(2));
                         if (payload.type === "redirect") {
                           isRedirecting = true;
-                          window.location.href = isSafeRedirect(payload.url) ? payload.url : "/";
+                          executeRedirect(payload.url);
                         } else if (payload.type === "cookie") {
                           document.cookie = payload.cookie;
                         }

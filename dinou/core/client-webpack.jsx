@@ -9,7 +9,7 @@ import {
 import { createFromFetch } from "react-server-dom-webpack/client";
 import { hydrateRoot } from "react-dom/client";
 import { RouterContext } from "./navigation.js";
-import { resolveUrl } from "./navigation-utils.js";
+import { resolveUrl, isExternalUrl } from "./navigation-utils.js";
 
 // ====================================================================
 // 1. GLOBAL STATE (Outside the component)
@@ -68,10 +68,13 @@ const getRSCPayload = (rscKey, isPrefetch = false) => {
     fetch(payloadUrl).then((res) => {
       if (res.headers.has("x-rsc-redirect")) {
         const redirectUrl = res.headers.get("x-rsc-redirect");
+        cache.delete(url);
         if (!isPrefetch) {
-          window.location.href = redirectUrl;
-        } else {
-          cache.delete(url);
+          if (window.__DINOU_ROUTER_NAVIGATE__) {
+            window.__DINOU_ROUTER_NAVIGATE__(redirectUrl, { replace: true });
+          } else {
+            window.location.href = redirectUrl;
+          }
         }
         // Return a promise that never resolves to avoid React Server DOM throwing "Connection closed"
         return new Promise(() => {});
@@ -92,18 +95,6 @@ function Router() {
   const [isPopState, setIsPopState] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [version, setVersion] = useState(0);
-
-  // 🔌 EFFECT 1: Expose Global Prefetch
-  useEffect(() => {
-    window.__DINOU_PREFETCH__ = (url) => {
-      // 🛡️ PREFETCH PROTECTION: If it's a local hash, do nothing
-      if (isHashChangeOnly(url)) return;
-      getRSCPayload(url, true);
-    };
-
-    // Hydration
-    document.body.setAttribute("data-hydrated", "true");
-  }, []); // Only on mount
 
   // 🧭 NAVIGATE FUNCTION (Core Logic)
   const navigate = (href, options = {}) => {
@@ -150,6 +141,26 @@ function Router() {
     });
   };
 
+  // 🔌 EFFECT 1: Expose Global Prefetch & Navigation
+  useEffect(() => {
+    window.__DINOU_PREFETCH__ = (url) => {
+      // 🛡️ PREFETCH PROTECTION: If it's a local hash, do nothing
+      if (isHashChangeOnly(url)) return;
+      getRSCPayload(url, true);
+    };
+
+    window.__DINOU_ROUTER_NAVIGATE__ = navigate;
+
+    // Hydration
+    document.body.setAttribute("data-hydrated", "true");
+
+    return () => {
+      if (window.__DINOU_ROUTER_NAVIGATE__ === navigate) {
+        window.__DINOU_ROUTER_NAVIGATE__ = undefined;
+      }
+    };
+  }, [navigate]);
+
   const back = () => window.history.back();
   const forward = () => window.history.forward();
   const refresh = () => {
@@ -188,7 +199,7 @@ function Router() {
       }
 
       const href = anchor.getAttribute("href");
-      if (!href || href.startsWith("mailto:") || href.startsWith("tel:"))
+      if (!href || href.startsWith("mailto:") || href.startsWith("tel:") || isExternalUrl(href))
         return;
 
       // We use the unified helper
