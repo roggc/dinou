@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.0.13] - 2026-06-29
+
+### Added
+- **Universal Redirects**: Full support for redirects on Server Components, `getProps`, Server Actions, and client SPA navigation.
+- **Standard Relative Paths**: Support for relative paths (`../sibling`, `./child`, `?query`, `#hash`) matching directory-first URL resolution.
+- **Absolute Link Hover**: Links now render resolved absolute paths to ensure correct browser previews and right-click behaviors.
+
+### Fixed
+- **RSC Stream Stability**: Resolved socket crashes (`Connection closed`) and duplicate Express header warnings when redirects occur during streamed RSC requests.
+- **SSR Process Leaks**: Render processes are now cleaned up immediately after an HTML redirect is triggered.
+
+### Security
+- **Redirect Sanitization**: Blocked unsafe external domains (`https://...`), protocol-relative URLs (`//...`), and scripting payloads (`javascript:...`).
+
+### Refactored
+- **Shared Helpers**: Unified path resolution logic into a shared module (`url-resolver.js`).
+
 ## [4.0.12] - 2026-06-28
 
 ### Security

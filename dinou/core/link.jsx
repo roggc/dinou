@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "./navigation.js";
+import { useRouter, usePathname } from "./navigation.js";
 import { resolveUrl } from "./navigation-utils.js";
 
 export function Link({
@@ -11,12 +11,13 @@ export function Link({
   ...props
 }) {
   const { push } = useRouter();
+  const pathname = usePathname();
+  const resolvedHref = resolveUrl(href, pathname);
 
   const handlePrefetch = () => {
     if (!prefetch || !href || fresh) return;
-    const finalPath = resolveUrl(href, window.location.pathname);
     if (window.__DINOU_PREFETCH__) {
-      window.__DINOU_PREFETCH__(finalPath);
+      window.__DINOU_PREFETCH__(resolvedHref);
     }
   };
 
@@ -29,7 +30,7 @@ export function Link({
 
   return (
     <a
-      href={href}
+      href={resolvedHref}
       onClick={handleClick}
       onMouseEnter={handlePrefetch}
       {...props}
