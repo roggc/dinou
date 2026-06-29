@@ -1,5 +1,5 @@
 const path = require("path");
-const { existsSync, readdirSync } = require("fs");
+const { existsSync, readdirSync } = require("./vfs");
 const React = require("react");
 
 function safeDecode(val) {

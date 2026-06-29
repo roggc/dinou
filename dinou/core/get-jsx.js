@@ -1,5 +1,5 @@
 const path = require("path");
-const { existsSync } = require("fs");
+const { existsSync } = require("./vfs");
 const React = require("react");
 const {
   getFilePathAndDynamicParams,
