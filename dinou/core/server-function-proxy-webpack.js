@@ -48,7 +48,7 @@ function createServerFunctionProxy(id) {
       const redirectUrl = res.headers.get("X-Dinou-Redirect");
       if (redirectUrl) {
         executeRedirect(redirectUrl);
-        return new Promise(() => { });
+        return Promise.resolve();
       }
 
       const contentType = res.headers.get("content-type") || "";
@@ -65,7 +65,7 @@ function createServerFunctionProxy(id) {
         const data = await res.json();
         if (data && data.redirect) {
           executeRedirect(data.redirect);
-          return new Promise(() => { });
+          return Promise.resolve();
         }
         return data;
       }
@@ -140,18 +140,14 @@ function createServerFunctionProxy(id) {
                       cleanChunk += line + "\n";
                     }
                   }
-
                   if (cleanChunk) {
                     controller.enqueue(encoder.encode(cleanChunk));
                   }
                 }
               }
+              controller.close();
             } catch (err) {
               controller.error(err);
-            } finally {
-              if (!isRedirecting) {
-                controller.close();
-              }
             }
           },
         });
