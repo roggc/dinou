@@ -918,10 +918,11 @@ app.post("/____server_function____", async (req, res) => {
       return res.status(404).json({ error: "File not found" });
     }
 
+    const normalizedKey = relativePath.replace(/\\/g, "/");
     let allowedExports;
     if (serverFunctionsManifest) {
       // Prod: use manifest (relativePath is already normalized)
-      allowedExports = serverFunctionsManifest[relativePath];
+      allowedExports = serverFunctionsManifest[normalizedKey];
     } else {
       if (!isDevelopment) {
         return res
