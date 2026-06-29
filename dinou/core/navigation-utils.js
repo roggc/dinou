@@ -1,4 +1,35 @@
+export function isExternalUrl(href) {
+  if (!href) return false;
+
+  // Protocol-relative (e.g. //google.com)
+  if (href.startsWith("//")) {
+    return true;
+  }
+
+  // Absolute with protocol (e.g. https://google.com)
+  if (href.includes("://")) {
+    try {
+      const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+      const url = new URL(href, origin);
+      return url.origin !== origin;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  // Other protocols (mailto:, tel:, javascript:, etc.)
+  if (/^[a-zA-Z0-9+-.]+:[^//]/.test(href) || href.startsWith("mailto:") || href.startsWith("tel:") || href.startsWith("javascript:")) {
+    return true;
+  }
+
+  return false;
+}
+
 export function resolveUrl(href, currentPathname) {
+  if (isExternalUrl(href)) {
+    return href;
+  }
+
   const origin = typeof window !== "undefined" ? window.location.origin : "http://localhost";
 
   if (href.startsWith("/") || href.includes("://")) {
