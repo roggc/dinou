@@ -121,14 +121,21 @@ function renderAppToHtml(
           // --- CLEAR COOKIE (JS Injection - Only Non-HttpOnly) ---
           if (command === "clearCookie") {
             const [name, options] = args;
-            const path = options && options.path ? options.path : "/";
             console.log(
               `[Dinou] Streaming active. Clearing cookie '${name}' via JS.`,
             );
-            const safeName = JSON.stringify(name);
-            const safePath = JSON.stringify(path);
+            let cookieStr = `${name}=; Max-Age=0`;
+            const path = options?.path || "/";
+            cookieStr += `; path=${path}`;
+            if (options) {
+              if (options.domain) cookieStr += `; domain=${options.domain}`;
+              if (options.secure) cookieStr += `; secure`;
+              if (options.sameSite) cookieStr += `; samesite=${options.sameSite}`;
+            }
+            cookieStr += ";";
+            const safeCookieStr = JSON.stringify(cookieStr);
             res.write(
-              `<script>document.cookie = ${safeName} + "=; Max-Age=0; path=" + ${safePath} + ";";</script>`,
+              `<script>document.cookie = ${safeCookieStr};</script>`,
             );
             return;
           }

@@ -447,8 +447,6 @@ function getContextForServerFunctionEndpoint(req, res) {
       },
 
       clearCookie: (name, options) => {
-        const path = options?.path || "/";
-
         // SCENARIO A: Native
         if (!res.headersSent) {
           res.setHeader("Content-Type", "text/x-component");
@@ -457,7 +455,15 @@ function getContextForServerFunctionEndpoint(req, res) {
         }
 
         // SCENARIO B: Custom stream command
-        const cookieStr = `${name}=; Max-Age=0; path=${path};`;
+        let cookieStr = `${name}=; Max-Age=0`;
+        const path = options?.path || "/";
+        cookieStr += `; path=${path}`;
+        if (options) {
+          if (options.domain) cookieStr += `; domain=${options.domain}`;
+          if (options.secure) cookieStr += `; secure`;
+          if (options.sameSite) cookieStr += `; samesite=${options.sameSite}`;
+        }
+        cookieStr += ";";
         const safeCookieStr = JSON.stringify(cookieStr);
         res.write(`D:{"type":"cookie","cookie":${safeCookieStr}}\n`);
       },

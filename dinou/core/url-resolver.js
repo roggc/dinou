@@ -1,4 +1,7 @@
 function resolveRelativeUrl(href, currentPathname) {
+  if (!href || typeof href !== "string") {
+    return "/";
+  }
   if (href.startsWith("/") || href.includes("://")) {
     return href;
   }
