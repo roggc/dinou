@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.0.16] - 2026-06-30
+
+### Fixed
+- **Cookie Deletion Attributes**: Reconstructed streaming cookie deletion to serialize and include `domain`, `secure`, and `sameSite` properties, ensuring browsers match scopes and delete cookies correctly.
+- **Defensive Redirects**: Added a safety check in `resolveRelativeUrl` to fallback to `/` if the destination path is invalid (such as undefined or null), avoiding server crashes.
+- **TypeScript Type Definitions**: Updated the `clearCookie` signature in `index.d.ts` to accept the full `CookieOptions` interface, resolving compilation errors when using `sameSite` or `secure` attributes.
+
 ## [4.0.15] - 2026-06-29
 
 ### Added

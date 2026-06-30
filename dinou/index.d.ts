@@ -55,7 +55,7 @@ export interface ResponseProxy {
    * @param name Name of the cookie to clear.
    * @param options Cookie options (e.g., domain, path).
    */
-  clearCookie(name: string, options?: { domain?: string; path?: string }): void;
+  clearCookie(name: string, options?: CookieOptions): void;
 
   /**
    * Sends a command to the main process to set an HTTP header.
