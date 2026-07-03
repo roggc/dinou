@@ -1,6 +1,18 @@
+const path = require("path");
+global.__webpack_require__ = function (id) {
+  if (global.__webpack_require_map__ && global.__webpack_require_map__[id]) {
+    return require(global.__webpack_require_map__[id]);
+  }
+  if (typeof id === "string" && id.startsWith("./")) {
+    id = path.resolve(process.cwd(), id);
+  }
+  return require(id);
+};
+global.__webpack_chunk_load__ = function (chunkId) {
+  return Promise.resolve();
+};
+
 require("./register-paths");
-require("./register-hooks.js");
-const babelPluginRegisterImports = require("./babel-plugin-register-imports.js");
 const babelRegister = require("@babel/register");
 babelRegister({
   ignore: [/node_modules[\\/](?!dinou)/],
@@ -8,7 +20,7 @@ babelRegister({
     ["@babel/preset-react", { runtime: "automatic" }],
     "@babel/preset-typescript",
   ],
-  plugins: [babelPluginRegisterImports, "@babel/transform-modules-commonjs"],
+  plugins: ["@babel/transform-modules-commonjs"],
   extensions: [".js", ".jsx", ".ts", ".tsx"],
 });
 const addHook = require("./asset-require-hook.js");
@@ -26,9 +38,7 @@ addHook({
 const getAssetFromManifest = require("./get-asset-from-manifest.js");
 const { renderToPipeableStream } = require("react-dom/server");
 const getJSX = require("./get-jsx");
-const getSSGJSX = require("./get-ssg-jsx.js");
 const { getErrorJSX } = require("./get-error-jsx");
-const { renderJSXToClientJSX } = require("./render-jsx-to-client-jsx");
 const isDevelopment = process.env.NODE_ENV !== "production";
 const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 const { requestStorage } = require("./request-context.js");
@@ -124,13 +134,121 @@ function writeErrorOutput(error, isProd) {
   );
 }
 
+function getImportMapHtml() {
+  const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
+  if (isWebpack) return "";
+
+  const fs = require("fs");
+  const path = require("path");
+  const { pathToFileURL } = require("url");
+
+  const manifestPath = path.resolve(
+    process.cwd(),
+    "react_client_manifest/react-client-manifest.json"
+  );
+
+  if (!fs.existsSync(manifestPath)) {
+    return "";
+  }
+
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    const imports = {};
+    const moduleBasePath = pathToFileURL(process.cwd()).href + "/";
+
+    for (const [key, val] of Object.entries(manifest)) {
+      let specifier = key;
+      if (specifier.startsWith(moduleBasePath)) {
+        specifier = specifier.slice(moduleBasePath.length);
+      }
+      const hashIdx = specifier.indexOf("#");
+      if (hashIdx !== -1) {
+        specifier = specifier.slice(0, hashIdx);
+      }
+      imports[specifier] = val.id;
+    }
+
+    return `<script type="importmap">{"imports":${JSON.stringify(imports)}}</script><script>(function(){const map=document.querySelector('script[type="importmap"]');if(map)map.remove();if(document.currentScript)document.currentScript.remove();})();</script>`;
+  } catch (err) {
+    console.error("Error generating importmap:", err);
+    return "";
+  }
+}
+
+let cachedSsrManifest = null;
+let cachedRequireMap = null;
+function getSsrManifest() {
+  if (!isDevelopment && cachedSsrManifest) return cachedSsrManifest;
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const ssrManifestPath = path.resolve(
+      process.cwd(),
+      isDevelopment ? "public/react-ssr-manifest.json" : "dist3/react-ssr-manifest.json"
+    );
+    const clientManifestPath = path.resolve(
+      process.cwd(),
+      isDevelopment ? "public/react-client-manifest.json" : "dist3/react-client-manifest.json"
+    );
+
+    const ssrContent = fs.readFileSync(ssrManifestPath, "utf8");
+    const ssrManifest = JSON.parse(ssrContent);
+
+    if (fs.existsSync(clientManifestPath)) {
+      const clientContent = fs.readFileSync(clientManifestPath, "utf8");
+      const clientManifest = JSON.parse(clientContent);
+
+      const { fileURLToPath } = require("url");
+      const requireMap = {};
+      for (const [fileUrl, entry] of Object.entries(clientManifest)) {
+        if (entry && entry.id !== undefined) {
+          try {
+            requireMap[entry.id] = fileURLToPath(fileUrl);
+          } catch {}
+        }
+      }
+      global.__webpack_require_map__ = requireMap;
+      cachedRequireMap = requireMap;
+
+      if (ssrManifest.moduleMap) {
+        for (const [modId, exports] of Object.entries(ssrManifest.moduleMap)) {
+          for (const [expName, expData] of Object.entries(exports)) {
+            if (expData && expData.specifier) {
+              const clientEntry = clientManifest[expData.specifier];
+              if (clientEntry) {
+                expData.id = clientEntry.id;
+                expData.chunks = clientEntry.chunks;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    cachedSsrManifest = ssrManifest;
+    return cachedSsrManifest;
+  } catch (e) {
+    if (cachedSsrManifest) {
+      console.warn("Using cached SSR manifest due to read error:", e.message);
+      if (cachedRequireMap) {
+        global.__webpack_require_map__ = cachedRequireMap;
+      }
+      return cachedSsrManifest;
+    }
+    console.error("Error reading SSR manifest:", e);
+    return {};
+  }
+}
+
+const { createFromNodeStream } = isWebpack
+  ? require("react-server-dom-webpack/client")
+  : require("@roggc/react-server-dom-esm/client");
+
 async function renderToStream(
   reqPath,
   query,
   serializedBox,
   isDynamic,
-  hasJsxJson,
-  jsxJson,
 ) {
   const context = {
     req: serializedBox.req,
@@ -138,21 +256,15 @@ async function renderToStream(
   };
   await requestStorage.run(context, async () => {
     try {
-      const isNotFound = {};
-      const jsx =
-        isDevelopment ||
-          isDynamic ||
-          !hasJsxJson
-          ? renderJSXToClientJSX(
-            await getJSX(reqPath, query, isNotFound, isDevelopment),
-          )
-          : ((await getSSGJSX(jsxJson)) ??
-            renderJSXToClientJSX(
-              await getJSX(reqPath, query, isNotFound, isDevelopment),
-            ));
-      if (isNotFound.value) {
-        context.res.status(404);
-      }
+      const { createReadStream } = require("fs");
+      const rscStream = createReadStream(null, { fd: 4 });
+      const { pathToFileURL } = require("url");
+      const baseUrl = pathToFileURL(process.cwd()).href + "/";
+
+      const jsx = isWebpack
+        ? await createFromNodeStream(rscStream, getSsrManifest())
+        : await createFromNodeStream(rscStream, baseUrl, baseUrl);
+
       const stream = renderToPipeableStream(jsx, {
         onError(error) {
           process.nextTick(async () => {
@@ -181,6 +293,11 @@ async function renderToStream(
 
               const errorStream = renderToPipeableStream(errorJSX, {
                 onShellReady() {
+                  const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
+          if (!isWebpack) {
+            const importMapHtml = getImportMapHtml();
+            process.stdout.write(importMapHtml);
+          }
                   errorStream.pipe(process.stdout);
                 },
                 onError(err) {
@@ -216,6 +333,11 @@ async function renderToStream(
           });
         },
         onShellReady() {
+          const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
+          if (!isWebpack) {
+            const importMapHtml = getImportMapHtml();
+            process.stdout.write(importMapHtml);
+          }
           stream.pipe(process.stdout);
         },
         bootstrapModules: isDevelopment
@@ -250,8 +372,6 @@ const reqPath = process.argv[2] || "/";
 const query = JSON.parse(process.argv[3] || "{}");
 const serializedBox = JSON.parse(process.argv[4] || "{}");
 const isDynamic = process.argv[5] === "true";
-const hasJsxJson = process.argv[6] === "true";
-const jsxJson = JSON.parse(process.argv[7] || "{}");
 
 process.on("uncaughtException", (error) => {
   process.stdout.write(formatErrorHtml(error));
@@ -281,8 +401,6 @@ renderToStream(
   query,
   serializedBox,
   isDynamic,
-  hasJsxJson,
-  jsxJson,
 ).catch((err) => {
   console.error("❌ Fatal error starting render stream:", err);
   process.exit(1);

@@ -8,18 +8,25 @@ export function redirect(destination) {
   // 1. We try to get the server context
   if (typeof window === "undefined") {
     // getContext() must be accessible here
-    const dynamicRequire = require;
-    const { getContext } = dynamicRequire(
-      /* webpackIgnore: true */ "./request-context.js"
-    );
-    const ctx = getContext();
+    const dynamicRequire =
+      typeof __dinou_require__ !== "undefined"
+        ? __dinou_require__
+        : typeof require !== "undefined"
+          ? require
+          : null;
+    if (dynamicRequire) {
+      const { getContext } = dynamicRequire(
+        /* webpackIgnore: true */ "./request-context.js"
+      );
+      const ctx = getContext();
 
-    // 2. If we are on the server and headers have NOT been sent yet...
-    // We can do a real HTTP redirect (Status 307).
-    // This is better for SEO and speed in Hard Navigation.
-    if (ctx && ctx.res) {
-      ctx.res.redirect(destination);
-      return <ClientRedirect to={destination} />;
+      // 2. If we are on the server and headers have NOT been sent yet...
+      // We can do a real HTTP redirect (Status 307).
+      // This is better for SEO and speed in Hard Navigation.
+      if (ctx && ctx.res) {
+        ctx.res.redirect(destination);
+        return <ClientRedirect to={destination} />;
+      }
     }
   }
 

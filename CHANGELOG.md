@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.0.0] - 2026-07-04
+
+### Added
+- **Dynamic Parameter Validation (`validateParams`)**: Added support for synchronous or asynchronous `validateParams` functions in `page_functions.ts` to validate and sandbox dynamic route segments on the main thread prior to rendering.
+- **ISG Generation Opt-Out (`allowISG`)**: Added support for `allowISG` functions in `page_functions.ts` to disable on-demand Incremental Static Generation (ISG) for undeclared route parameters, returning 404 instead.
+- **VFS Page Config Cache**: Added `pageFunctionsConfigCache` to cache route configurations (allowISG, validateParams, staticPaths) under `pagePath` at production startup and runtime, eliminating filesystem crawls and dynamic import execution overhead on subsequent requests.
+- **Built-in Security Shield (WAF)**: Integrated a lightweight in-memory regex firewall to intercept common bot probes and exploit scanners (PHP, WordPress, Git, backup files, etc.) in nanoseconds.
+
+### Fixed
+- **Windows File Locks (EPERM Resolution)**: Switched the static HTML and RSC readers from open read streams to memory buffers via `readFileSync`, immediately releasing OS file descriptors and preventing concurrent file renaming locks under load.
+- **Asset Fallback 404 Routing**: Restored immediate plain-text 404 responses for non-existent routes containing file extensions, avoiding manifest read crashes (`ENOENT`) when browser/test runners poll for assets on startup.
+- **Integrated not_found Layouts**: Refactored the route redirection logic to evaluate custom nested `not_found` React templates for blocked or invalid dynamic parameters instead of returning plain-text responses.
+- **Playwright Test Stability**: Optimized headless WebKit/Firefox ISR tests by avoiding costly browser context recreations and using randomized cache-busting queries.
+
+### Refactored
+- **Native RSC Stream Rendering**: Replaced custom JSX JSON serialization and parsing with React's native Server DOM stream renderer (`renderToPipeableStream` and `createFromNodeStream`).
+- **Cleaned Dead Code**: Removed obsolete bundler warnings checker logic and redundant root build directory (`dist`) creation.
+
 ## [4.0.16] - 2026-06-30
 
 ### Fixed

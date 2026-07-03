@@ -12,6 +12,7 @@ async function getJSX(
   query,
   isNotFound = null,
   isDevelopment = false,
+  forceNotFound = false,
 ) {
   const srcFolder = path.resolve(process.cwd(), "src");
   const reqSegments = reqPath.split("/").filter(Boolean);
@@ -52,7 +53,7 @@ async function getJSX(
   let jsx;
   let pageFunctionsProps;
 
-  if (!pagePath) {
+  if (!pagePath || forceNotFound) {
     if (isNotFound) isNotFound.value = true;
     const [notFoundPath, dParams] = getFilePathAndDynamicParams(
       reqSegments,

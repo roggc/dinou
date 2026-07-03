@@ -7,7 +7,9 @@ const {
 } = require("./get-file-path-and-dynamic-params");
 const importModule = require("./import-module");
 const { requestStorage } = require("./request-context.js");
-const { setJSXJSON } = require("./jsx-json.js");
+
+const staticRoutes = new Set();
+const staticMetadata = new Map();
 
 function safeDecode(val) {
   try {
@@ -77,16 +79,6 @@ function createBailoutProxy(target, label, onBailout) {
  */
 async function buildStaticPages() {
   const srcFolder = path.resolve(process.cwd(), "src");
-  const distFolder = path.resolve(process.cwd(), "dist");
-
-  if (existsSync(distFolder)) {
-    rmSync(distFolder, { recursive: true, force: true });
-    console.log("Deleted existing dist folder");
-  }
-
-  if (!existsSync(distFolder)) {
-    mkdirSync(distFolder, { recursive: true });
-  }
 
   /**
    * Recursively traverses the page directory tree to collect all eligible static routes.
@@ -947,14 +939,12 @@ async function buildStaticPages() {
         cookies: mockRes._cookies,
       };
 
-      // Store the serialized RSC JSON, revalidation timer, and side effects (cookies/redirects)
-      setJSXJSON(reqPath, {
-        jsx: serializeReactElement(jsx),
+      staticRoutes.add(reqPath);
+      staticMetadata.set(reqPath, {
         revalidate: revalidate?.(),
-        generatedAt: Date.now(),
-        metadata: { effects: sideEffects },
+        effects: sideEffects,
       });
-      console.log(`Serialized JSX for page at ${reqPath}`);
+      console.log(`Registered static page at ${reqPath}`);
     } catch (err) {
       console.error(`Error building page ${segments.join("/")}:`, err);
       continue;
@@ -1227,99 +1217,29 @@ async function buildStaticPage(reqPath, isDynamic = null) {
       cookies: mockRes._cookies,
     };
 
-    setJSXJSON(reqPath, {
-      jsx: serializeReactElement(jsx),
+    staticRoutes.add(reqPath);
+    staticMetadata.set(reqPath, {
       revalidate: revalidate?.(),
-      generatedAt: Date.now(),
-      metadata: { effects: sideEffects },
+      effects: sideEffects,
     });
-
-    console.warn(`Generated serialized jsx at page: ${reqPath}`);
+    console.warn(`Registered rebuilt static page at ${reqPath}`);
   } catch (error) {
     console.error(`Error building page ${reqPath}:`, error);
     throw error;
   }
 }
 
-function filterProps(props_) {
-  if (React.isValidElement(props_)) {
-    return serializeReactElement(props_);
-  }
-  if (Array.isArray(props_)) {
-    return props_.map((item) => filterProps(item));
-  }
-  if (props_ && typeof props_ === "object") {
-    const props = {};
-    for (const [key, value] of Object.entries(props_)) {
-      if (!key.startsWith("_")) {
-        props[key] = filterProps(value);
-      }
-    }
-    return props;
-  }
-  return props_;
+function getStaticPaths() {
+  return Array.from(staticRoutes);
 }
 
-/**
- * Recursively serializes a React element tree into a custom JSON format.
- * This format represents the React Server Component (RSC) payload sent to the client,
- * mapping HTML tags, React fragments, Suspense boundaries, and Client Component stubs.
- */
-function serializeReactElement(element) {
-  if (React.isValidElement(element)) {
-    let type;
-    let modulePath = null;
-    let componentName = null;
-    let isPackage = false;
-
-    if (typeof element.type === "string") {
-      type = element.type;
-    } else if (element.type === Symbol.for("react.fragment")) {
-      type = "Fragment";
-    } else if (element.type === Symbol.for("react.suspense")) {
-      type = "Suspense";
-    } else {
-      modulePath = element.__modulePath;
-      if (modulePath) {
-        type = "__clientComponent__";
-      }
-      try {
-        componentName = element.type.displayName || element.type.name;
-      } catch (e) { }
-
-      if (!modulePath && global.__DINOU_MODULE_MAP) {
-        const meta = global.__DINOU_MODULE_MAP.get(element.type);
-        modulePath = meta?.id;
-        isPackage = meta?.isPackage;
-        if (!isPackage && modulePath) {
-          type = "__clientComponent__";
-        }
-      }
-    }
-
-    return {
-      type,
-      name: componentName,
-      isPackage,
-      modulePath: isPackage
-        ? modulePath
-        : modulePath
-          ? path.relative(process.cwd(), modulePath).split(path.sep).join("/")
-          : null,
-      props: {
-        ...filterProps(element.props),
-        children: Array.isArray(element.props.children)
-          ? element.props.children.map((child) => serializeReactElement(child))
-          : element.props.children
-            ? serializeReactElement(element.props.children)
-            : undefined,
-      },
-    };
-  }
-  return element;
+function getStaticMetadata(reqPath) {
+  return staticMetadata.get(reqPath);
 }
 
 module.exports = {
   buildStaticPages,
   buildStaticPage,
+  getStaticPaths,
+  getStaticMetadata,
 };

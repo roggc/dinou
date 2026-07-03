@@ -1,8 +1,9 @@
 const path = require("path");
-const { mkdirSync, createWriteStream } = require("fs");
+const { mkdirSync, createWriteStream, existsSync } = require("fs");
 const fs = require("fs").promises;
 const renderAppToHtml = require("./render-app-to-html.js");
-const getSSGMetadata = require("./get-ssg-metadata.js");
+const { getStaticMetadata } = require("./build-static-pages.js");
+const { processMetadata } = require("./get-ssg-metadata.js");
 
 const OUT_DIR = path.resolve("dist2");
 
@@ -64,7 +65,11 @@ async function generateStaticPage(reqPath) {
       capturedStatus
     );
 
-    const sideEffectScripts = getSSGMetadata(reqPath);
+    const metadata = getStaticMetadata(finalReqPath);
+    let sideEffectScripts = "";
+    if (metadata && metadata.effects) {
+      sideEffectScripts = processMetadata(metadata.effects);
+    }
 
     await new Promise((resolve, reject) => {
       if (sideEffectScripts) fileStream.write(sideEffectScripts);
@@ -80,6 +85,19 @@ async function generateStaticPage(reqPath) {
       });
       fileStream.on("error", reject);
     });
+
+    if (metadata) {
+      const metadataPath = path.join(OUT_DIR, finalReqPath, "metadata.json");
+      await fs.writeFile(
+        metadataPath,
+        JSON.stringify({
+          revalidate: metadata.revalidate,
+          generatedAt: Date.now(),
+          effects: metadata.effects,
+        }, null, 2),
+        "utf8"
+      );
+    }
 
     const status = capturedStatus.value || 200;
     const success = status !== 500;

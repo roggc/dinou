@@ -1,14 +1,18 @@
 const fs = require("fs");
 const path = require("path");
 const { PassThrough } = require("stream");
-const getSSGJSXOrJSX = require("./get-ssg-jsx-or-jsx.js");
-const { renderToPipeableStream } = require("react-server-dom-webpack/server");
+const url = require("url");
+const getJSX = require("./get-jsx.js");
+const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
+const { renderToPipeableStream } = isWebpack
+  ? require("react-server-dom-webpack/server")
+  : require("@roggc/react-server-dom-esm/server");
 
 // 👇 Your context storage
 const { requestStorage } = require("./request-context.js");
 
 const OUT_DIR = path.resolve("dist2");
-const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
+// const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 
 async function generateStaticRSCs(routes) {
   const manifest = JSON.parse(
@@ -110,8 +114,10 @@ async function generateStaticRSCs(routes) {
 
       // 1. The entire lifecycle of the stream must be inside the storage
       await requestStorage.run(mockContext, async () => {
-        const jsx = await getSSGJSXOrJSX(reqPath, {});
-        const { pipe } = renderToPipeableStream(jsx, manifest);
+        const jsx = await getJSX(reqPath, {}, null, false);
+        const { pipe } = isWebpack
+          ? renderToPipeableStream(jsx, manifest)
+          : renderToPipeableStream(jsx, url.pathToFileURL(process.cwd()).href + "/");
 
         pipe(passThrough);
         passThrough.pipe(fileStream);

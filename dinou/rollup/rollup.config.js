@@ -78,7 +78,7 @@ module.exports = async function () {
     },
     // 🛑 ADD THIS MAGIC LINE
     // Tells Rollup: "Keep entry point signatures (export names) intact"
-    preserveEntrySignatures: "exports-only",
+    preserveEntrySignatures: "strict",
     external: [
       "/refresh.js",
       "/__hmr_client__.js",
@@ -109,7 +109,6 @@ module.exports = async function () {
       }),
       commonjs({
         include: isEjected ? [/node_modules/, /dinou/] : /node_modules/,
-        transformMixedEsModules: true,
       }),
       dinouAssetPlugin({
         include: regex,

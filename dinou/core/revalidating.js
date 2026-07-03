@@ -6,41 +6,44 @@ const { buildStaticPage } = require("./build-static-pages");
 const generateStaticRSC = require("./generate-static-rsc");
 const { safeRename } = require("./safe-rename");
 const { updateStatus } = require("./status-manifest");
-const { getJSXJSON } = require("./jsx-json");
 
 const regenerating = new Set();
 
 function revalidating(reqPath, isDynamicFromServer) {
   const dist2Folder = path.resolve(process.cwd(), "dist2");
-  const jsxJSON = getJSXJSON(reqPath);
-  if (!jsxJSON) return;
+  const metadataPath = path.join(dist2Folder, reqPath, "metadata.json");
 
-  const { revalidate, generatedAt } = jsxJSON;
+  if (regenerating.has(reqPath)) return;
 
-  const isExpired =
-    typeof revalidate === "number" &&
-    revalidate > 0 &&
-    Date.now() > generatedAt + revalidate;
+  fs.readFile(metadataPath, "utf8")
+    .then((content) => {
+      const metadata = JSON.parse(content);
+      const { revalidate, generatedAt } = metadata;
 
-  if (isExpired && !regenerating.has(reqPath)) {
-    try {
-      if (existsSync(path.join(dist2Folder, reqPath, "index.html")))
-        copyFileSync(
-          path.join(dist2Folder, reqPath, "index.html"),
-          path.join(dist2Folder, reqPath, "index._old.html")
-        );
-      if (existsSync(path.join(dist2Folder, reqPath, "rsc.rsc")))
-        copyFileSync(
-          path.join(dist2Folder, reqPath, "rsc.rsc"),
-          path.join(dist2Folder, reqPath, "rsc._old.rsc")
-        );
-    } catch (e) {}
+      const isExpired =
+        typeof revalidate === "number" &&
+        revalidate > 0 &&
+        Date.now() > generatedAt + revalidate;
 
-    regenerating.add(reqPath);
+      if (isExpired && !regenerating.has(reqPath)) {
+        try {
+          if (existsSync(path.join(dist2Folder, reqPath, "index.html")))
+            copyFileSync(
+              path.join(dist2Folder, reqPath, "index.html"),
+              path.join(dist2Folder, reqPath, "index._old.html")
+            );
+          if (existsSync(path.join(dist2Folder, reqPath, "rsc.rsc")))
+            copyFileSync(
+              path.join(dist2Folder, reqPath, "rsc.rsc"),
+              path.join(dist2Folder, reqPath, "rsc._old.rsc")
+            );
+        } catch (e) {}
 
-    (async () => {
-      try {
-        console.log(`[ISR] Starting regeneration for ${reqPath}...`);
+        regenerating.add(reqPath);
+
+        (async () => {
+          try {
+            console.log(`[ISR] Starting regeneration for ${reqPath}...`);
         const isDynamic = {};
         await buildStaticPage(reqPath, isDynamic);
         if (isDynamic.value) {
@@ -80,6 +83,7 @@ function revalidating(reqPath, isDynamicFromServer) {
       }
     })();
   }
+  }).catch((err) => {});
 }
 
 module.exports = { revalidating, regenerating };

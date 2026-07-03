@@ -6,6 +6,37 @@ const createScopedName = require("./createScopedName");
 const { extensionsWithDot } = require("./asset-extensions.js");
 const { getAbsPathWithExt } = require("./get-abs-path-with-ext.js");
 
+const Module = require("module");
+const originalResolveFilename = Module._resolveFilename;
+const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
+
+let reactServerPath, reactDomServerPath, reactJsxRuntimePath, reactJsxDevRuntimePath;
+
+if (!isWebpack) {
+  const reactPkgJson = require.resolve("react/package.json");
+  reactServerPath = path.join(path.dirname(reactPkgJson), "react.react-server.js");
+  reactJsxRuntimePath = path.join(path.dirname(reactPkgJson), "jsx-runtime.react-server.js");
+  reactJsxDevRuntimePath = path.join(path.dirname(reactPkgJson), "jsx-dev-runtime.react-server.js");
+
+  const reactDomPkgJson = require.resolve("react-dom/package.json");
+  reactDomServerPath = path.join(path.dirname(reactDomPkgJson), "react-dom.react-server.js");
+}
+
+Module._resolveFilename = function (request, parent, isMain, options) {
+  if (!isWebpack) {
+    if (request === "react") {
+      return reactServerPath;
+    } else if (request === "react-dom") {
+      return reactDomServerPath;
+    } else if (request === "react/jsx-runtime") {
+      return reactJsxRuntimePath;
+    } else if (request === "react/jsx-dev-runtime") {
+      return reactJsxDevRuntimePath;
+    }
+  }
+  return originalResolveFilename.call(this, request, parent, isMain, options);
+};
+
 require("./css-require-hook.js")();
 
 exports.resolve = async function resolve(specifier, context, defaultResolve) {
@@ -59,9 +90,59 @@ exports.load = async function load(url, context, defaultLoad) {
       throw e;
     }
     const rel = path.relative(process.cwd(), filename);
-    if (ext === ".js" && !rel.startsWith("src" + path.sep))
-      return defaultLoad(url, context, defaultLoad);
     const source = fs.readFileSync(filename, "utf-8");
+    const urlToReturn = pathToFileURL(filename).href;
+
+    const useClientRegex =
+      /^\s*(?:(?:\/\/[^\n]*\n\s*)|(?:\/\*[\s\S]*?\*\/\s*))*['"]use client['"]/;
+    const hasUseClient = useClientRegex.test(source);
+
+    const esmSyntaxRegex = /^(?:import|export)\b/m;
+    const hasESMSyntax = esmSyntaxRegex.test(source);
+
+    if (ext === ".js" && !rel.startsWith("src" + path.sep) && !hasESMSyntax) {
+      return defaultLoad(url, context, defaultLoad);
+    }
+
+    const isReactServer = process.execArgv.some(arg => arg.includes("react-server"));
+    if (isReactServer && hasUseClient) {
+      const parseExports = require("./parse-exports.js");
+      const exports = parseExports(source);
+      let newSrc = "";
+      if (isWebpack) {
+        newSrc += 'import { registerClientReference } from "react-server-dom-webpack/server";\n';
+      } else {
+        const packageJsonPath = require.resolve("@roggc/react-server-dom-esm/package.json");
+        const serverNodePath = path.join(path.dirname(packageJsonPath), "server.node.js");
+        const serverNodeUrl = pathToFileURL(serverNodePath).href;
+        newSrc += `import pkg from ${JSON.stringify(serverNodeUrl)};\n`;
+        newSrc += 'const {registerClientReference} = pkg;\n';
+      }
+      for (const name of exports) {
+        if (name === 'default') {
+          newSrc += 'export default ';
+          newSrc += 'registerClientReference(function() {';
+          newSrc += 'throw new Error(' + JSON.stringify("Attempted to call the default export of " + urlToReturn + " from the server but it's on the client.") + ');';
+          newSrc += '},';
+          newSrc += JSON.stringify(urlToReturn) + ',';
+          newSrc += JSON.stringify(name) + ');\n';
+        } else {
+          newSrc += 'export const ' + name + ' = ';
+          newSrc += 'registerClientReference(function() {';
+          newSrc += 'throw new Error(' + JSON.stringify("Attempted to call " + name + "() from the server but " + name + " is on the client.") + ');';
+          newSrc += '},';
+          newSrc += JSON.stringify(urlToReturn) + ',';
+          newSrc += JSON.stringify(name) + ');\n';
+        }
+      }
+      return {
+        format: "module",
+        source: newSrc,
+        shortCircuit: true,
+        url: urlToReturn,
+      };
+    }
+
     if (ext === ".js") {
       return {
         format: "module",
@@ -81,7 +162,7 @@ exports.load = async function load(url, context, defaultLoad) {
       ast: false,
     });
 
-    const urlToReturn = pathToFileURL(filename).href;
+    // const urlToReturn = pathToFileURL(filename).href;
 
     return {
       format: "module",

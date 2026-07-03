@@ -11,6 +11,32 @@ const { getAbsPathWithExt } = require("../../core/get-abs-path-with-ext.js");
 const { useClientRegex } = require("../../constants.js");
 const parseExports = require("../../core/parse-exports.js");
 
+function getDefaultExportName(code) {
+  let name = null;
+  try {
+    const ast = parser.parse(code, {
+      sourceType: "module",
+      plugins: ["jsx", "typescript"],
+    });
+    traverse(ast, {
+      ExportDefaultDeclaration(p) {
+        const decl = p.node.declaration;
+        if (decl.type === "Identifier") {
+          name = decl.name;
+        } else if (
+          (decl.type === "FunctionDeclaration" || decl.type === "ClassDeclaration") &&
+          decl.id
+        ) {
+          name = decl.id.name;
+        }
+      },
+    });
+  } catch (e) {
+    // Ignore parse errors
+  }
+  return name;
+}
+
 function reactClientManifestPlugin({
   srcDir = path.resolve("src"),
   manifestPath = "react_client_manifest/react-client-manifest.json",
@@ -150,41 +176,6 @@ function reactClientManifestPlugin({
     return fileName.startsWith("page.") || fileName.startsWith("layout.");
   }
 
-  function isAsyncDefaultExport(code) {
-    const ast = parser.parse(code, {
-      sourceType: "module",
-      plugins: ["jsx", "typescript"],
-    });
-
-    let isAsync = false;
-
-    traverse(ast, {
-      ExportDefaultDeclaration(path) {
-        let decl = path.node.declaration;
-
-        if (decl.type === "Identifier") {
-          const binding = path.scope.getBinding(decl.name);
-          if (binding && binding.path) {
-            decl = binding.path.node;
-            if (decl.type === "VariableDeclarator") {
-              decl = decl.init;
-            }
-          }
-        }
-
-        if (
-          decl &&
-          (decl.type === "FunctionDeclaration" ||
-            decl.type === "ArrowFunctionExpression" ||
-            decl.type === "FunctionExpression")
-        ) {
-          isAsync = decl.async;
-        }
-      },
-    });
-
-    return isAsync;
-  }
 
   return {
     name: "react-client-manifest",
@@ -224,11 +215,6 @@ function reactClientManifestPlugin({
             name: path.basename(absPath, path.extname(absPath)),
           });
         } else if (isPageOrLayout(absPath)) {
-          if (!isAsyncDefaultExport(code)) {
-            this.warn(
-              `[react-client-manifest] The file ${normalizedPath} is a page or layout without "use client" directive, but its default export is not an async function. Add "use client" if it's a client component, or make the default export async if it's a server component.`
-            );
-          }
           serverModules.add(normalizedPath);
           this.addWatchFile(absPath);
           const { imports, assets, csss } = await getImportsAndAssetsAndCsss(
@@ -255,6 +241,24 @@ function reactClientManifestPlugin({
               name: path.basename(cssPath, path.extname(cssPath)),
             });
           }
+        }
+      }
+    },
+    async transform(code, id) {
+      if (id.includes("\0") || id.startsWith("commonjsHelpers") || id.includes("node_modules/rollup") || id.includes("react-refresh")) return;
+      const normalizedId = id.split(path.sep).join(path.posix.sep);
+      const isClientModule = useClientRegex.test(code.trim());
+
+      if (isClientModule) {
+        console.log("👉 [react-client-manifest] Found client module in transform:", normalizedId);
+        if (!clientModules.has(normalizedId)) {
+          clientModules.add(normalizedId);
+          updateManifestForModule(id, code, true);
+          this.emitFile({
+            type: "chunk",
+            id: id,
+            name: path.basename(id, path.extname(id)),
+          });
         }
       }
     },
@@ -290,11 +294,6 @@ function reactClientManifestPlugin({
       } else {
         clientModules.delete(normalizedId);
         if (isPageOrLayout(id)) {
-          if (!isAsyncDefaultExport(code)) {
-            this.warn(
-              `[react-client-manifest] The file ${normalizedId} is a page or layout without "use client" directive, but its default export is not an async function. Add "use client" if it's a client component, or make the default export async if it's a server component.`
-            );
-          }
           serverModules.add(normalizedId);
           this.addWatchFile(id);
           const { imports, assets, csss } = await getImportsAndAssetsAndCsss(
@@ -322,12 +321,52 @@ function reactClientManifestPlugin({
     generateBundle(outputOptions, bundle) {
       for (const [fileName, chunk] of Object.entries(bundle)) {
         if (chunk.type !== "chunk") continue;
+
+        // Process entry point facadeModuleId for default export preservation
+        if (chunk.facadeModuleId) {
+          const absModulePath = path.resolve(chunk.facadeModuleId);
+          if (!absModulePath.includes("\0") && !absModulePath.startsWith("commonjsHelpers")) {
+            const fileUrl = pathToFileURL(absModulePath).href;
+            manifest[fileUrl] = {
+              id: "/" + fileName,
+              chunks: "default",
+              name: "default",
+            };
+            manifest[fileUrl + "#default"] = {
+              id: "/" + fileName,
+              chunks: "default",
+              name: "default",
+            };
+
+            if (!chunk.exports.includes("default")) {
+              try {
+                const originalCode = readFileSync(absModulePath, "utf8");
+                const defaultName = getDefaultExportName(originalCode);
+                if (defaultName && chunk.exports.includes(defaultName)) {
+                  chunk.code += `\nexport { ${defaultName} as default };\n`;
+                  chunk.exports.push("default");
+                  console.log(`👉 [react-client-manifest] Appended default export alias to chunk ${fileName}: export { ${defaultName} as default };`);
+                }
+              } catch (err) {
+                // Ignore errors
+              }
+            }
+          }
+        }
+
+        // Map all modules in the chunk to this chunk in the manifest (only if they are client modules)
         for (const modulePath of Object.keys(chunk.modules)) {
+          if (modulePath.includes("\0") || modulePath.startsWith("commonjsHelpers")) continue;
           const absModulePath = path.resolve(modulePath);
-          const baseFileUrl = pathToFileURL(absModulePath).href;
-          for (const manifestKey in manifest) {
-            if (manifestKey.startsWith(baseFileUrl)) {
-              manifest[manifestKey].id = "/" + fileName;
+          const normalizedPath = absModulePath.split(path.sep).join(path.posix.sep);
+
+          if (clientModules.has(normalizedPath)) {
+            const fileUrl = pathToFileURL(absModulePath).href;
+            // Update the chunk id for all exports of this module
+            for (const key of Object.keys(manifest)) {
+              if (key === fileUrl || key.startsWith(fileUrl + "#")) {
+                manifest[key].id = "/" + fileName;
+              }
             }
           }
         }
