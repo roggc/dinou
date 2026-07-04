@@ -250,7 +250,7 @@ function reactClientManifestPlugin({
       const isClientModule = useClientRegex.test(code.trim());
 
       if (isClientModule) {
-        console.log("👉 [react-client-manifest] Found client module in transform:", normalizedId);
+        // console.log("👉 [react-client-manifest] Found client module in transform:", normalizedId);
         if (!clientModules.has(normalizedId)) {
           clientModules.add(normalizedId);
           updateManifestForModule(id, code, true);
@@ -345,7 +345,7 @@ function reactClientManifestPlugin({
                 if (defaultName && chunk.exports.includes(defaultName)) {
                   chunk.code += `\nexport { ${defaultName} as default };\n`;
                   chunk.exports.push("default");
-                  console.log(`👉 [react-client-manifest] Appended default export alias to chunk ${fileName}: export { ${defaultName} as default };`);
+                  // console.log(`👉 [react-client-manifest] Appended default export alias to chunk ${fileName}: export { ${defaultName} as default };`);
                 }
               } catch (err) {
                 // Ignore errors

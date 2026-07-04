@@ -11,8 +11,8 @@ export function redirect(destination) {
     const dynamicRequire =
       typeof __dinou_require__ !== "undefined"
         ? __dinou_require__
-        : typeof require !== "undefined"
-          ? require
+        : typeof module !== "undefined" && typeof module.require === "function"
+          ? module.require.bind(module)
           : null;
     if (dynamicRequire) {
       const { getContext } = dynamicRequire(

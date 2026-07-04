@@ -80,11 +80,12 @@ exports.load = async function load(url, context, defaultLoad) {
     return { format: "module", source, shortCircuit: true, url };
   }
 
-  if (/\.(jsx|tsx|ts|js)$/.test(url)) {
+  const cleanUrl = url.split("?")[0];
+  if (/\.(jsx|tsx|ts|js)$/.test(cleanUrl)) {
     let filename;
     try {
       filename = fileURLToPath(
-        url.startsWith("file://") ? url : pathToFileURL(url).href
+        cleanUrl.startsWith("file://") ? cleanUrl : pathToFileURL(cleanUrl).href
       );
     } catch (e) {
       throw e;

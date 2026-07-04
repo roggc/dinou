@@ -8,6 +8,7 @@ import { regex as assetRegex } from "../core/asset-extensions.js";
 import normalizePath from "./helpers-esbuild/normalize-path.mjs";
 import { fileURLToPath, pathToFileURL } from "url";
 import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-module.mjs";
+import { useServerRegex } from "../constants.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -146,6 +147,16 @@ const debounceRecreateAndReload = () => {
   }, 300);
 };
 
+let reloadTimer = null;
+const debounceReload = () => {
+  if (reloadTimer) clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => {
+    if (hmrEngine.value) {
+      hmrEngine.value.broadcastMessage({ type: "reload" });
+    }
+  }, 100);
+};
+
 watcher.on("add", async (file) => {
   const ext = path.extname(file);
   if (codeCssRegex.test(ext) || assetRegex.test(ext)) {
@@ -198,7 +209,13 @@ function existsInManifest(resolvedFile, manifest) {
 watcher.on("change", async (file) => {
   const resolvedFile = normalizePath(path.resolve(file));
   const oldManifest = { ...manifest };
+  const oldEntryKeys = JSON.stringify(Object.keys(entryPoints).sort());
+
   await updateEntriesAndComponents();
+
+  const newEntryKeys = JSON.stringify(Object.keys(entryPoints).sort());
+  const entryPointsChanged = oldEntryKeys !== newEntryKeys;
+
   // Check if changed file is a client component
   const isClientModule = clientComponentsPaths.includes(resolvedFile);
   const isServerModule = currentServerFiles.has(resolvedFile);
@@ -215,6 +232,18 @@ watcher.on("change", async (file) => {
     changedIds.add(resolvedFile);
     return;
   }
-  // Server module, css module, or other file changed
-  debounceRecreateAndReload();
+
+  // If it's a Server Action module ("use server"), do not reload the browser
+  const fileContent = await fs.readFile(resolvedFile, "utf8").catch(() => "");
+  const isServerAction = useServerRegex.test(fileContent.trim());
+  if (isServerAction) {
+    return;
+  }
+
+  // Only recreate context and reload if entry points actually changed or it's a CSS file
+  if (entryPointsChanged || file.endsWith(".css") || file.endsWith(".scss")) {
+    debounceRecreateAndReload();
+  } else {
+    debounceReload();
+  }
 });
