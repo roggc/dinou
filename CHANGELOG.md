@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.0.0] - 2026-07-05
+
+### Added
+- **Dynamic Parameter Validation (`validateParams`)**: Support for defining `validateParams` in `page_functions.ts` to validate route parameters on the server and return a 404 response immediately if invalid.
+- **ISG Generation Opt-Out (`allowISG`)**: Support for defining `allowISG` in `page_functions.ts` to disable on-demand Incremental Static Generation (ISG) for undeclared route parameters.
+- **Anti-Bot Shield**: Integrated an in-memory Express middleware firewall to detect and block common bot scans and malicious queries instantly.
+
+### Refactored
+- **Native RSC Flight Payload Streaming**: Major architectural refactor replacing process-to-process custom JSX serialization/deserialization with React's native streaming of RSC Flight payloads via `createFromNodeStream` on the SSR process.
+
 ## [4.0.16] - 2026-06-30
 
 ### Fixed

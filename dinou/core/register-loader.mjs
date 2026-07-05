@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
+globalThis.__dinou_require__ = require;
 
 const loaderPath = require.resolve("./babel-esm-loader.js");
 

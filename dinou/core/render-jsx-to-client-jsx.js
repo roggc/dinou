@@ -1,14 +1,13 @@
 // Function to check if a component is a client component
 function isClientComponent(type) {
-  if (typeof type !== "function") {
+  if (!type) {
     return false;
   }
-  const isAsync =
-    type instanceof Object.getPrototypeOf(async function () {}).constructor;
-  if (isAsync) {
-    return false;
-  }
-  return true;
+  const CLIENT_REFERENCE = Symbol.for("react.client.reference");
+  return (
+    (typeof type === "function" && type.$$typeof === CLIENT_REFERENCE) ||
+    (typeof type === "object" && type.$$typeof === CLIENT_REFERENCE)
+  );
 }
 
 function renderJSXToClientJSX(jsx, key = null) {

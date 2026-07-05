@@ -2,22 +2,22 @@
 
 [![Documentation](https://img.shields.io/badge/docs-dinou.dev-blue?style=flat-square)](https://dinou.dev)
 
-### **Full-Stack React 19 Framework**
+### **Lightweight-Ejectable Full-Stack React 19 Framework**
 
 ---
 
-Support for React Server Components (RSC), Server-Side Rendering (SSR), Static Generation (SSG), Incremental Static Generation (ISG), and Incremental Static Regeneration (ISR).
+Support for React Server Components (RSC), Server Functions, Server-Side Rendering (SSR), Static Generation (SSG), Incremental Static Generation (ISG), and Incremental Static Regeneration (ISR).
 
 ## Key Features
 
-- **React Server Components:** Built on the React 19 core, leveraging Suspense and Streaming for optimal performance without client-side waterfalls.
-- **Server Functions:** Type-safe RPC actions. Execute server-side logic directly from your components without creating manual API endpoints.
-- **Automatic Static Bailout:** Static by default (SSG). Automatically switches to Dynamic Rendering (SSR) when request-specific data (cookies, headers, search params) is detected.
-- **Full-Featured Router:** Client-side soft navigation including `push`, `replace`, `back`, `forward`, and `refresh` (soft reload).
-- **Generation Strategies:** Comprehensive support for Incremental Static Regeneration (ISR) and Incremental Static Generation (ISG).
-- **Bundler Agnostic:** The only framework that lets you choose your build engine. Switch between Webpack, Rollup, or Esbuild via configuration.
-- **Smart Navigation:** `<Link>` component with automatic prefetching and opt-in `fresh` data fetching for volatile states.
-- **File-System Routing:** Intuitive routing based on `page.{jsx,tsx}` files located within the `src` directory structure.
+- **React Server Components:** Native integration of React 19 Server Components, streaming HTML/RSC payloads progressively using `renderToPipeableStream` and Suspense.
+- **Server Functions:** Functions marked with `"use server"` that execute on the server and can be called from client components. Supports returning rendered React components (Server or Client) directly to the client.
+- **Automatic Static Bailout:** Static by default (SSG). Bypasses static files and evaluates dynamically at request time if the request accesses headers, cookies, or query parameters.
+- **Client Router:** Client-side soft navigation (`push`, `replace`, `back`, `forward`, `refresh`) with a `useNavigationLoading` hook to track transition loading states.
+- **Generation Strategies:** Support for background Incremental Static Regeneration (ISR) and on-demand Incremental Static Generation (ISG) which generates and caches pages on their very first request.
+- **Bundler Agnostic:** Supports Webpack, Rollup, and Esbuild as build engines, chosen by executing the corresponding npm or npx script (e.g., `dev:rollup`, `build:webpack`).
+- **Navigation Prefetching:** `<Link>` component with automatic prefetching on hover, and an opt-in `fresh` prop to bypass the client cache.
+- **File-System Routing:** Routing based on `page.{jsx,tsx}` file paths, supporting optional segments, catch-all paths, Route Groups, and Parallel Route slots (with layout error containment).
 
 ## Table of contents
 
@@ -51,15 +51,18 @@ Support for React Server Components (RSC), Server-Side Rendering (SSR), Static G
   - [2. `getStaticPaths` (Static Generation)](#2-getstaticpaths-static-generation)
   - [3. `revalidate` (ISR)](#3-revalidate-isr)
   - [4. `dynamic` (Force SSR)](#4-dynamic-force-ssr)
+  - [5. `validateParams` (Route Parameter Validation)](#5-validateparams-route-parameter-validation)
+  - [6. `allowISG` (Control On-Demand Generation)](#6-allowisg-control-on-demand-generation)
 - [⚡ React Compiler & Automatic Optimizations](#-react-compiler--automatic-optimizations)
   - [Integration Strategy](#integration-strategy)
   - [Code Example](#code-example)
 - [📚 API Reference](#-api-reference)
   - [1. Components (`dinou`)](#1-components-dinou)
-  - [2. Hooks & Utilities (`dinou`)](#2-hooks--utilities-dinou)
-  - [3. Server-Only Utilities (`dinou`)](#3-server-only-utilities-dinou)
-  - [4. Page Configuration (`page_functions.ts`)](#4-page-configuration-page_functionsts)
-  - [5. File Conventions Cheatsheet](#5-file-conventions-cheatsheet)
+  - [2. Utilities (`dinou`)](#2-utilities-dinou)
+  - [3. Client Hooks (`dinou` - Client Components Only)](#3-client-hooks-dinou---client-components-only)
+  - [4. Server-Only Utilities (`dinou`)](#4-server-only-utilities-dinou)
+  - [5. Page Configuration (`page_functions.ts`)](#5-page-configuration-page_functionsts)
+  - [6. File Conventions Cheatsheet](#6-file-conventions-cheatsheet)
 - [🎨 Favicons](#-favicons)
 - [🔐 Environment Variables (`.env`)](#-environment-variables-env)
 - [💅 Styles (Tailwind, CSS Modules, & Global CSS)](#-styles-tailwind-css-modules--global-css)
@@ -246,6 +249,18 @@ export default function Controls() {
 }
 ```
 
+#### Relative Routing (Directory-First Convention)
+
+Relative paths in both `<Link>` and programmatic navigation (`router.push`) resolve by treating the current path segment as a directory. The framework internally appends a trailing slash `/` to the current pathname before resolving.
+
+| Current Path | Target Path | Resolves To (Dinou) | Resolves To (Native Browser) |
+| :----------- | :---------- | :------------------ | :--------------------------- |
+| `/blog/post` | `details`   | `/blog/post/details`| `/blog/details`              |
+| `/blog/post` | `./details` | `/blog/post/details`| `/blog/details`              |
+| `/blog/post` | `../about`  | `/blog/about`       | `/about`                     |
+
+To navigate from `/blog/post` to `/blog/about`, use `../about` or the absolute path `/blog/about`.
+
 ## Layouts & Hierarchical Rendering
 
 Dinou uses a nested routing system. Layouts, Error pages, and Not Found pages cascade down the directory hierarchy.
@@ -284,7 +299,7 @@ The Root Layout that applies to a specific page can receive additional props by 
 
 ```typescript
 // src/foo/bar/page_functions.ts
-export async function getProps({ params }) {
+export async function getProps(params) {
   // fetch data using route params
   const data = await fetchData(params.id);
   // 'layout' props are injected into the Root Layout for this page
@@ -689,15 +704,16 @@ For advanced control over rendering behavior, data fetching, and static generati
 
 Use this function to fetch data based on the **route parameters** and inject it into your Page and Layout.
 
-> **Design Note:** `getProps` only receives `params`. To use request-specific data like `searchParams` or `cookies`, fetch data directly inside your Server Components using `Suspense` or Hooks to avoid blocking the initial HTML render.
+> **Design Note:** While `getProps` only receives the route `params` as its parameter, you can still read cookies, headers, or query parameters by calling `getContext()` since the function executes on the server.
+> Because `getProps` blocks the rendering process at request time, keep it fast for dynamic routes. Note that this does not affect pre-rendered static pages (SSG) since their data is fetched at server startup. In Incremental Static Generation (ISG), it only blocks the very first request by the first visitor before the page is cached. If you need slow dynamic fetches on dynamic routes, defer them to a `Suspense` boundary wrapping a Server Function.
 
-- **Arguments:** `{ params }` (The dynamic route parameters).
+- **Arguments:** `params` (The dynamic route parameters).
 - **Returns:** An object with `page` and `layout` keys containing the props.
 
 ```typescript
 // src/blog/[slug]/page_functions.ts
 
-export async function getProps({ params }) {
+export async function getProps(params) {
   // 1. Fetch data based on the URL path (e.g., /blog/my-post)
   const post = await db.getPost(params.slug);
 
@@ -866,6 +882,36 @@ export function dynamic() {
 }
 ```
 
+### 5. `validateParams` (Route Parameter Validation)
+
+Allows validating dynamic parameters on the server prior to rendering or static generation. Returning `false` blocks rendering and returns a 404 response.
+
+- **Arguments:** `params` (The dynamic route parameters).
+- **Returns:** `boolean` or `Promise<boolean>`.
+
+```typescript
+// src/posts/[id]/page_functions.ts
+export function validateParams(params) {
+  // Reject route parameter and return 404 instantly if not numeric
+  return typeof params.id === "string" && /^\d+$/.test(params.id);
+}
+```
+
+### 6. `allowISG` (Control On-Demand Generation)
+
+Enables or disables Incremental Static Generation (ISG) on-demand for dynamic routes. If disabled (returns `false`), routes not pre-rendered at server startup via `getStaticPaths` will return a 404 instead of generating dynamically on-demand.
+
+- **Returns:** `boolean` or `Promise<boolean>`.
+
+```typescript
+// src/items/[id]/page_functions.ts
+export function allowISG() {
+  // Only serve paths generated at startup by getStaticPaths.
+  // Abort on-demand generation for other IDs.
+  return false;
+}
+```
+
 ## ⚡ React Compiler & Automatic Optimizations
 
 Dinou integrates the **React Compiler** (React 19+) out of the box. It analyzes your code and automatically applies fine-grained memoization to values and functions.
@@ -971,26 +1017,32 @@ return <ClientRedirect to="/" />;
 
 ---
 
-### 2. Hooks & Utilities (`dinou`)
+### 2. Utilities (`dinou`)
 
-Functions available in **both** Server and Client environments.
+Functions available in server and client environments.
 
 #### `redirect(destination)`
 
-Stops execution and redirects the user.
+Immediately halts rendering/execution and redirects the user. Works in Server Components, Client Components, Server Functions, and Page Functions.
 
-- **Server:** Sets HTTP 307 header (if headers not sent).
-- **Client:** Renders `<ClientRedirect />`.
-- **Usage:** Use with `return` to halt rendering.
+- **Relative Paths:** Supports relative destinations resolving directory-first (filesystem style), matching the resolution rules of `<Link>` and programmatic navigation.
+- **Server:** Sets HTTP 307 header (if headers are not sent).
+- **Client:** Renders `<ClientRedirect />` internally to trigger soft client-side transition.
+- **Usage:** Always use with `return` to immediately stop rendering:
+  ```javascript
+  import { redirect } from "dinou";
+  if (!user) return redirect("/login");
+  ```
 
-```javascript
-import { redirect } from "dinou";
-if (!user) return redirect("/login");
-```
+---
+
+### 3. Client Hooks (`dinou` - Client Components Only)
+
+Hooks that can **only** be used inside Client Components (files starting with `"use client"`). In React 19, calling these hooks inside a Server Component will throw a compilation/runtime crash.
 
 #### `useSearchParams()`
 
-Returns a standard [`URLSearchParams`](https://developer.mozilla.org/en-US/docs/Web/API/URLSearchParams) object to read the query string.
+Returns a standard [`URLSearchParams`](https://developer.mozilla.org/en-US/docs/Web/API/URLSearchParams) object representing the query parameters of the current URL.
 
 ```javascript
 import { useSearchParams } from "dinou";
@@ -1002,46 +1054,62 @@ export default function SearchPage() {
 }
 ```
 
-**Behavior & Static Generation (Bailout):**
-
-| Component Type       | Behavior during Build                              | Result                                                                                                                        |
-| :------------------- | :------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------- |
-| **Server Component** | Accessing this hook triggers a **Static Bailout**. | The page opts out of SSG and switches to **Dynamic Rendering** (SSR) on demand.                                               |
-| **Client Component** | Does **NOT** trigger a bailout.                    | The page remains **Static (SSG)**. The initial HTML renders with empty params, and the browser updates values upon hydration. |
-
-> **⚠️ Client Component Warning:**
-> If used in a Client Component on a static page, be aware of **Hydration Mismatches**. The server renders with empty params (since they don't exist at build time), but the browser renders with the real URL.
-> **Recommendation:** If the initial UI depends heavily on params, pass them as props from a Server Component to force Dynamic Rendering.
-
-**Common Methods:**
-
-- `.get(name)`: Returns the first value.
-- `.getAll(name)`: Returns all values (useful for `?id=1&id=2`).
-- `.has(name)`: Checks existence.
-- `.toString()`: Returns the query string.
+- **Static Generation (Bailout):** Accessing `useSearchParams()` in a Client Component does **NOT** trigger a static bailout at server startup. The page remains static (SSG). The server pre-renders the page with empty query parameters, and the client updates the values upon hydration in the browser.
+- **Hydration Warning:** If the initial UI depends heavily on query parameters, pass them as props from a Server Component or Page Functions instead to avoid UI flickering/hydration mismatches.
 
 #### `usePathname()`
 
-Returns the current URL pathname as a `string` (e.g., `/blog/post-1`).
+Returns the normalized current URL pathname as a `string` (e.g., `/blog/post-1`).
 
-#### `useRouter()` (Client Only)
+```javascript
+import { usePathname } from "dinou";
+
+export default function PageInfo() {
+  const pathname = usePathname();
+  return <p>Current path: {pathname}</p>;
+}
+```
+
+#### `useRouter()`
 
 Provides programmatic navigation methods.
 
-- **Methods:** `.push(href)`, `.replace(href)`, `.back()`, `.forward()`, `.refresh()`.
-- **Note:** Only works inside Client Components (`"use client"`).
+- **Methods:**
+  - `.push(href)`: Navigate to a new route. Supports relative pathnames (directory-first convention).
+  - `.replace(href)`: Replace the current history entry. Supports relative pathnames.
+  - `.back()`: Navigate back in history.
+  - `.forward()`: Navigate forward in history.
+  - `.refresh()`: Soft reload. Re-fetches Server Component data without reloading the browser.
 
-#### `useNavigationLoading()` (Client Only)
+```javascript
+import { useRouter } from "dinou";
 
-Returns a `boolean` indicating if a client-side navigation is in progress.
+export default function BackButton() {
+  const router = useRouter();
+  return <button onClick={() => router.back()}>Back</button>;
+}
+```
+
+#### `useNavigationLoading()`
+
+Returns a `boolean` indicating if a client-side navigation transition is currently in progress.
+
+```javascript
+import { useNavigationLoading } from "dinou";
+
+export default function LoadingBar() {
+  const isLoading = useNavigationLoading();
+  return isLoading ? <div className="loading-spinner" /> : null;
+}
+```
 
 ---
 
-### 3. Server-Only Utilities (`dinou`)
+### 4. Server-Only Utilities (`dinou`)
 
 #### `getContext()`
 
-Retrieves the request/response context. **Server Components Only**.
+Retrieves the request/response context. Available **only** inside server-side execution threads (Server Components, `page_functions` like `getProps`, and Server Functions).
 
 - **Returns:** `{ req, res }`.
 - **req:** `headers`, `cookies`, `query`, `path`, `method`.
@@ -1087,7 +1155,7 @@ export default function Page() {
 
 ---
 
-### 4. Page Configuration (`page_functions.ts`)
+### 5. Page Configuration (`page_functions.ts`)
 
 Export these functions from `page_functions.{ts,js}` to configure the associated `page.tsx`.
 
@@ -1103,15 +1171,15 @@ export function getStaticPaths() {
 }
 ```
 
-#### `getProps({ params })`
+#### `getProps(params)`
 
 **Async** function to fetch data on the server and pass it as props to the Page component and to the Root Layout (if exists).
 
-- **Receives:** Object with resolved `params`.
+- **Receives:** Resolved `params` object.
 - **Returns:** Object with the props.
 
 ```typescript
-export async function getProps({ params }) {
+export async function getProps(params) {
   const data = await db.getItem(params.id);
   return { page: { item: data }, layout: { title: data.title } }; // Available as props in page.tsx and Root Layout of this particular page.
 }
@@ -1141,9 +1209,34 @@ export function dynamic() {
 }
 ```
 
+#### `validateParams(params)`
+
+Validates dynamic parameters on the server prior to rendering or static generation. Returning `false` blocks the request and returns a 404 response.
+
+- **Receives:** Resolved `params` object.
+- **Returns:** `boolean` or `Promise<boolean>`.
+
+```typescript
+export function validateParams(params) {
+  return /^\d+$/.test(params.id);
+}
+```
+
+#### `allowISG()`
+
+Controls on-demand Incremental Static Generation (ISG) for routes not generated at server startup.
+
+- **Returns:** `boolean` or `Promise<boolean>`.
+
+```typescript
+export function allowISG() {
+  return false; // Only serve getStaticPaths, return 404 for others
+}
+```
+
 ---
 
-### 5. File Conventions Cheatsheet
+### 6. File Conventions Cheatsheet
 
 Dinou recognizes specific filenames to build the routing hierarchy.
 

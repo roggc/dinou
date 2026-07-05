@@ -1,13 +1,34 @@
-// dinou/index.mjs
-import dinou from "./index.js";
+import { getContext } from "./core/request-context.js";
+import {
+  usePathname,
+  useSearchParams,
+  useRouter,
+  useNavigationLoading,
+} from "./core/navigation.js";
+import { redirect } from "./core/redirect.jsx";
+import { ClientRedirect } from "./core/client-redirect.jsx";
+import { Link } from "./core/link.jsx";
 
-export const getContext = dinou.getContext;
-export const usePathname = dinou.usePathname;
-export const useSearchParams = dinou.useSearchParams;
-export const useRouter = dinou.useRouter;
-export const useNavigationLoading = dinou.useNavigationLoading;
-export const redirect = dinou.redirect;
-export const ClientRedirect = dinou.ClientRedirect;
-export const Link = dinou.Link;
+const dinou = {
+  getContext,
+  usePathname,
+  useSearchParams,
+  useRouter,
+  useNavigationLoading,
+  redirect,
+  ClientRedirect,
+  Link,
+};
+
+export {
+  getContext,
+  usePathname,
+  useSearchParams,
+  useRouter,
+  useNavigationLoading,
+  redirect,
+  ClientRedirect,
+  Link,
+};
 
 export default dinou;

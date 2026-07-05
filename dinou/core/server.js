@@ -1,17 +1,53 @@
 require("dotenv/config");
-require("./register-paths");
-require("./register-hooks.js");
-const webpackRegister = require("react-server-dom-webpack/node-register");
+const Module = require("module");
+const originalResolveFilename = Module._resolveFilename;
+const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
+globalThis.__dinou_require__ = require;
 const path = require("path");
+
+let reactServerPath, reactDomServerPath, reactJsxRuntimePath, reactJsxDevRuntimePath;
+
+if (!isWebpack) {
+  const reactPkgJson = require.resolve("react/package.json");
+  reactServerPath = path.join(path.dirname(reactPkgJson), "react.react-server.js");
+  reactJsxRuntimePath = path.join(path.dirname(reactPkgJson), "jsx-runtime.react-server.js");
+  reactJsxDevRuntimePath = path.join(path.dirname(reactPkgJson), "jsx-dev-runtime.react-server.js");
+
+  const reactDomPkgJson = require.resolve("react-dom/package.json");
+  reactDomServerPath = path.join(path.dirname(reactDomPkgJson), "react-dom.react-server.js");
+}
+
+Module._resolveFilename = function (request, parent, isMain, options) {
+  if (!isWebpack) {
+    if (request === "react") {
+      return reactServerPath;
+    } else if (request === "react-dom") {
+      return reactDomServerPath;
+    } else if (request === "react/jsx-runtime") {
+      return reactJsxRuntimePath;
+    } else if (request === "react/jsx-dev-runtime") {
+      return reactJsxDevRuntimePath;
+    }
+  }
+  return originalResolveFilename.call(this, request, parent, isMain, options);
+};
+
+require("./register-paths");
+const webpackRegister = require("react-server-dom-webpack/node-register");
 const { readFileSync, existsSync, createReadStream } = require("fs");
-const { renderToPipeableStream } = require("react-server-dom-webpack/server");
+// const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
+const { renderToPipeableStream } = isWebpack
+  ? require("react-server-dom-webpack/server")
+  : require("@roggc/react-server-dom-esm/server");
 const express = require("express");
 const getJSX = require("./get-jsx.js");
+const { getFilePathAndDynamicParams } = require("./get-file-path-and-dynamic-params.js");
 const { getErrorJSX } = require("./get-error-jsx.js");
 const addHook = require("./asset-require-hook.js");
 const { extensions } = require("./asset-extensions.js");
-webpackRegister();
-const babelPluginRegisterImports = require("./babel-plugin-register-imports.js");
+if (isWebpack) {
+  webpackRegister();
+}
 const babelRegister = require("@babel/register");
 babelRegister({
   ignore: [/node_modules[\\/](?!dinou)/],
@@ -19,7 +55,7 @@ babelRegister({
     ["@babel/preset-react", { runtime: "automatic" }],
     "@babel/preset-typescript",
   ],
-  plugins: [babelPluginRegisterImports, "@babel/transform-modules-commonjs"],
+  plugins: ["@babel/transform-modules-commonjs"],
   extensions: [".js", ".jsx", ".ts", ".tsx"],
 });
 const createScopedName = require("./createScopedName");
@@ -39,8 +75,7 @@ const { revalidating, regenerating } = require("./revalidating.js");
 const isDevelopment = process.env.NODE_ENV !== "production";
 const outputFolder = isDevelopment ? "public" : "dist3";
 const chokidar = require("chokidar");
-const { fileURLToPath } = require("url");
-const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
+const { fileURLToPath, pathToFileURL } = require("url");
 const parseExports = require("./parse-exports.js");
 const { requestStorage } = require("./request-context.js");
 const { useServerRegex } = require("../constants.js");
@@ -248,6 +283,35 @@ const appUseCookieParser = cookieParser();
 const app = express();
 app.use(appUseCookieParser);
 app.use(express.json());
+
+// ============================================================
+// 🛡️ ANTI-BOT SHIELD (Prevent ISG from collapsing)
+// ============================================================
+const botGarbagePatterns = [
+  /\.php$/i, // Any PHP file
+  /\.env$/i, // Attempts to steal environment variables
+  /\.git\b/i, // Attempts to access Git repository
+  /wp-admin/i, // WordPress admin
+  /wp-content/i, // WordPress content
+  /wp-includes/i, // WordPress core files
+  /xmlrpc\.php/i, // WordPress DDoS attacks
+  /\.sql$/i, // Attempts to download database dumps
+  /\.asp$/i, // Legacy ASP pages
+  /\.jsp$/i, // JSP pages
+  /\.cgi$/i, // Old CGI scripts
+  /\.bak$/i, // Backup files
+  /\.log$/i, // Log files
+];
+
+app.use((req, res, next) => {
+  const isGarbage = botGarbagePatterns.some((pattern) => pattern.test(req.path));
+  if (isGarbage) {
+    // Return 404 immediately to prevent the ISG engine from spawning processes
+    return res.status(404).send("Not Found");
+  }
+  next();
+});
+
 const { resolveRelativeUrl } = require("./url-resolver");
 
 function getContext(req, res) {
@@ -372,7 +436,7 @@ function getContextForServerFunctionEndpoint(req, res) {
         if (referer) {
           try {
             refererPath = new URL(referer).pathname;
-          } catch (e) {}
+          } catch (e) { }
         }
         const resolvedUrl = resolveRelativeUrl(rawUrl, refererPath);
         let finalUrl = "/";
@@ -474,12 +538,27 @@ function getContextForServerFunctionEndpoint(req, res) {
 
 app.use(express.static(path.resolve(process.cwd(), outputFolder)));
 
+const clientManifestResolvedPath = path.resolve(
+  process.cwd(),
+  isWebpack
+    ? `${outputFolder}/react-client-manifest.json`
+    : `react_client_manifest/react-client-manifest.json`,
+);
+
+function isManifestReady() {
+  try {
+    return existsSync(clientManifestResolvedPath) && readFileSync(clientManifestResolvedPath, "utf8").trim().length > 2;
+  } catch (e) {
+    return false;
+  }
+}
+
 let isReady = isDevelopment; // In dev we are always ready (or almost)
 
 app.get("/__DINOU_STATUS_PLAYWRIGHT__", (req, res) => {
   res.json({
     status: "ok",
-    isReady,
+    isReady: isDevelopment ? isManifestReady() : isReady,
     mode: isDevelopment ? "development" : "production",
   });
 });
@@ -554,16 +633,17 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
       }
       if (existsSync(payloadPath)) {
         res.setHeader("Content-Type", "application/octet-stream");
-        const readStream = createReadStream(payloadPath);
-        readStream.on("error", (err) => {
+        try {
+          const buffer = readFileSync(payloadPath);
+          return res.send(buffer);
+        } catch (err) {
           console.error("Error reading RSC file:", err);
-          res.status(500).end();
-        });
-        return readStream.pipe(res);
+          return res.status(500).end();
+        }
       }
     }
     const context = getContext(req, res);
-    const isNotFound = null;
+    const isNotFound = {};
     await requestStorage.run(context, async () => {
       const jsx = await getJSX(
         reqPath,
@@ -571,6 +651,10 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
         isNotFound,
         isDevelopment,
       );
+
+      if (isNotFound.value) {
+        res.status(404);
+      }
 
       if (res.headersSent) {
         return;
@@ -590,7 +674,9 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
         )
         : cachedClientManifest;
 
-      const { pipe } = renderToPipeableStream(jsx, manifest);
+      const { pipe } = isWebpack
+        ? renderToPipeableStream(jsx, manifest)
+        : renderToPipeableStream(jsx, pathToFileURL(process.cwd()).href + "/");
       pipe(res);
     });
   } catch (error) {
@@ -639,7 +725,9 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
         ),
       )
       : cachedClientManifest;
-    const { pipe } = renderToPipeableStream(jsx, manifest);
+    const { pipe } = isWebpack
+      ? renderToPipeableStream(jsx, manifest)
+      : renderToPipeableStream(jsx, pathToFileURL(process.cwd()).href + "/");
     pipe(res);
   } catch (error) {
     console.error("Error rendering RSC:", error);
@@ -647,9 +735,116 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
   }
 });
 
-app.get(/^\/.*\/?$/, (req, res) => {
+const pageFunctionsConfigCache = new Map();
+
+app.get(/^\/.*\/?$/, async (req, res) => {
   try {
+    const reqSegments = req.path.split("/").filter(Boolean);
+    const srcFolder = path.resolve(process.cwd(), "src");
+    const [pagePath, dynamicParams] = getFilePathAndDynamicParams(
+      reqSegments,
+      req.query,
+      srcFolder,
+    );
+
+    if (!pagePath) {
+      if (path.extname(req.path)) {
+        return res.status(404).send("Not Found");
+      }
+    }
+
+    let isPathBlocked = false;
+
+    if (pagePath) {
+      let cachedConfig = pageFunctionsConfigCache.get(pagePath);
+      if (!cachedConfig) {
+        const pageFolder = path.dirname(pagePath);
+        const [pageFunctionsPath] = getFilePathAndDynamicParams(
+          reqSegments,
+          req.query,
+          pageFolder,
+          "page_functions",
+          true,
+          true,
+          undefined,
+          reqSegments.length,
+        );
+
+        if (pageFunctionsPath) {
+          const pageFunctionsModule = await importModule(pageFunctionsPath);
+          const allowISGValue = pageFunctionsModule.allowISG
+            ? await pageFunctionsModule.allowISG()
+            : true;
+
+          let staticPathsSet = null;
+          if (pageFunctionsModule.getStaticPaths) {
+            const paths = await pageFunctionsModule.getStaticPaths();
+            staticPathsSet = new Set(
+              (paths || []).map((pathObj) => {
+                const sortedEntries = Object.entries(pathObj).sort((a, b) =>
+                  a[0].localeCompare(b[0])
+                );
+                return JSON.stringify(sortedEntries);
+              })
+            );
+          }
+
+          cachedConfig = {
+            allowISG: allowISGValue,
+            staticPathsSet,
+            validateParams: pageFunctionsModule.validateParams || null,
+          };
+        } else {
+          cachedConfig = {
+            allowISG: true,
+            staticPathsSet: null,
+            validateParams: null,
+          };
+        }
+
+        if (!isDevelopment) {
+          pageFunctionsConfigCache.set(pagePath, cachedConfig);
+        }
+      }
+
+      const { allowISG: allowISGValue, staticPathsSet, validateParams: validateParamsFn } = cachedConfig;
+      const hasParams = Object.keys(dynamicParams || {}).length > 0;
+      if (hasParams) {
+        if (validateParamsFn) {
+          const isValid = await validateParamsFn(dynamicParams);
+          if (!isValid) {
+            isPathBlocked = true;
+          }
+        }
+
+        if (!isPathBlocked && allowISGValue === false) {
+          let isPathAllowed = false;
+          if (staticPathsSet) {
+            const sortedQueryEntries = Object.entries(dynamicParams)
+              .sort((a, b) => a[0].localeCompare(b[0]))
+              .map(([k, v]) => {
+                if (Array.isArray(v)) return [k, v.join(",")];
+                return [k, String(v)];
+              });
+            const serializedQuery = JSON.stringify(sortedQueryEntries);
+            isPathAllowed = staticPathsSet.has(serializedQuery);
+          }
+          if (!isPathAllowed) {
+            if (isDevelopment) {
+              isPathBlocked = true;
+            } else {
+              const htmlPath = path.join("dist2", req.path, "index.html");
+              if (!existsSync(htmlPath)) {
+                isPathBlocked = true;
+              }
+            }
+          }
+        }
+      }
+    }
+
     const reqPath = req.path.endsWith("/") ? req.path : req.path + "/";
+
     // 1. Correct Map initialization
     if (!isDynamic.has(reqPath)) {
       // Initialize with a mutable object.
@@ -660,7 +855,7 @@ app.get(/^\/.*\/?$/, (req, res) => {
     // Get reference to the mutable object
     const dynamicState = isDynamic.get(reqPath);
     // console.log("dynamicState.value", dynamicState.value);
-    if (!isDevelopment && !dynamicState.value) {
+    if (!isDevelopment && !dynamicState.value && pagePath && !isPathBlocked) {
       revalidating(reqPath, dynamicState);
       let htmlPathOld;
       if (regenerating.has(reqPath)) {
@@ -680,29 +875,19 @@ app.get(/^\/.*\/?$/, (req, res) => {
         } else {
           res.statusCode = 200; // Default
         }
-        const rStream = createReadStream(fileToRead);
-
-        rStream.on("error", (err) => {
-          console.error("Error reading HTML file:", err);
-          if (!res.headersSent) res.status(500).send("Server Error");
-        });
-
-        // 1. IMPORTANT: We use { end: false } so pipe doesn't close the response
-        rStream.pipe(res, { end: false });
-
-        // 2. When the file finishes sending...
-        rStream.on("end", () => {
-          // 3. Write our additional content
+        try {
+          const htmlContent = readFileSync(fileToRead);
+          res.write(htmlContent);
           if (htmlPathOld) {
             res.write("<script>window.__DINOU_USE_OLD_RSC__=true;</script>");
           }
           res.write("<script>window.__DINOU_USE_STATIC__=true;</script>");
-
-          // 4. Manually close the response (now we do)
           res.end();
-        });
-
-        return; // The stream is already flowing
+        } catch (err) {
+          console.error("Error reading HTML file:", err);
+          if (!res.headersSent) res.status(500).send("Server Error");
+        }
+        return;
       }
     }
 
@@ -739,6 +924,7 @@ app.get(/^\/.*\/?$/, (req, res) => {
           res,
           capturedStatus,
           isDynamic,
+          isPathBlocked,
         );
 
         res.setHeader("Content-Type", "text/html");
@@ -968,57 +1154,56 @@ app.post("/____server_function____", async (req, res) => {
       return res.status(400).json({ error: "Export is not a function" });
     }
 
-    await processLimiter.run(async () => {
-      const context = getContextForServerFunctionEndpoint(req, res);
+    const context = getContextForServerFunctionEndpoint(req, res);
 
-      let result;
-      try {
-        result = await requestStorage.run(context, async () => {
-          return await fn(...args);
-        });
-      } catch (err) {
-        // 💡 WE INTERCEPT THE REDIRECT
-        if (err && err.$$type === "dinou-internal-redirect") {
-          const safeUrl = JSON.stringify(err.url);
+    let result;
+    try {
+      result = await requestStorage.run(context, async () => {
+        return await fn(...args);
+      });
+    } catch (err) {
+      // 💡 WE INTERCEPT THE REDIRECT
+      if (err && err.$$type === "dinou-internal-redirect") {
+        const safeUrl = JSON.stringify(err.url);
 
-          if (!res.headersSent) {
-            // SCENARIO A: Clean (Content-Type application/json)
-            res.setHeader("Content-Type", "application/json");
-            res.setHeader("X-Dinou-Redirect", err.url);
-            return res.status(200).json({ redirect: err.url });
-          } else {
-            // SCENARIO B: Dirty/Active Stream
-            // Write a custom line-based stream command
-            res.write(`D:{"type":"redirect","url":${safeUrl}}\n`);
+        if (!res.headersSent) {
+          // SCENARIO A: Clean (Content-Type application/json)
+          res.setHeader("Content-Type", "application/json");
+          res.setHeader("X-Dinou-Redirect", err.url);
+          return res.status(200).json({ redirect: err.url });
+        } else {
+          // SCENARIO B: Dirty/Active Stream
+          // Write a custom line-based stream command
+          res.write(`D:{"type":"redirect","url":${safeUrl}}\n`);
 
-            // ⚠️ IMPORTANT:
-            // 1. We close the response, since we redirected and there will be no RSC payload.
-            res.end();
-
-            // 2. WE STOP execution so it doesn't continue to res.json() below.
-            return;
-          }
+          // ⚠️ IMPORTANT:
+          // 1. We close the response, since we redirected and there will be no RSC payload.
+          // 2. WE STOP execution so it doesn't continue to res.json() below.
+          res.end();
+          return;
         }
-        throw err; // If it's another error, throw it to the outer catch
       }
+      throw err; // If it's another error, throw it to the outer catch
+    }
 
-      if (!res.headersSent) res.setHeader("Content-Type", "text/x-component");
-      const manifestPath = path.resolve(
-        process.cwd(),
-        isWebpack
-          ? `${outputFolder}/react-client-manifest.json`
-          : `react_client_manifest/react-client-manifest.json`,
-      );
-      // Verify that the manifest exists to avoid errors
-      if (!existsSync(manifestPath)) {
-        return res.status(500).json({ error: "Manifest not found" });
-      }
-      const manifest = isDevelopment
-        ? JSON.parse(readFileSync(manifestPath, "utf8"))
-        : cachedClientManifest;
-      const { pipe } = renderToPipeableStream(result, manifest);
-      pipe(res);
-    });
+    if (!res.headersSent) res.setHeader("Content-Type", "text/x-component");
+    const manifestPath = path.resolve(
+      process.cwd(),
+      isWebpack
+        ? `${outputFolder}/react-client-manifest.json`
+        : `react_client_manifest/react-client-manifest.json`,
+    );
+    // Verify that the manifest exists to avoid errors
+    if (!existsSync(manifestPath)) {
+      return res.status(500).json({ error: "Manifest not found" });
+    }
+    const manifest = isDevelopment
+      ? JSON.parse(readFileSync(manifestPath, "utf8"))
+      : cachedClientManifest;
+    const { pipe } = isWebpack
+      ? renderToPipeableStream(result, manifest)
+      : renderToPipeableStream(result, pathToFileURL(process.cwd()).href + "/");
+    pipe(res);
   } catch (err) {
     console.error(`Server function error [${req.body?.id}]:`, err);
     // In production, do not send full err.message to avoid leaks

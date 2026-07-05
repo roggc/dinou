@@ -1,10 +1,45 @@
 const path = require("path");
-const { fork } = require("child_process"); // ⬅️ CHANGE 1: We use fork
+const { fork } = require("child_process");
 const url = require("url");
-const { getJSXJSON, hasJSXJSON } = require("./jsx-json");
+const fs = require("fs");
+const getJSX = require("./get-jsx.js");
+const { requestStorage } = require("./request-context.js");
+
+const isDevelopment = process.env.NODE_ENV !== "production";
+const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
+
+const { renderToPipeableStream } = isWebpack
+  ? require("react-server-dom-webpack/server")
+  : require("@roggc/react-server-dom-esm/server");
+
+const manifestPath = path.resolve(
+  process.cwd(),
+  isWebpack
+    ? (isDevelopment ? "public/react-client-manifest.json" : "dist3/react-client-manifest.json")
+    : "react_client_manifest/react-client-manifest.json"
+);
+
+let cachedManifest = null;
+function getManifest() {
+  if (!isDevelopment && cachedManifest) return cachedManifest;
+  try {
+    const content = fs.readFileSync(manifestPath, "utf8");
+    const parsed = JSON.parse(content);
+    if (parsed && Object.keys(parsed).length > 0) {
+      cachedManifest = parsed;
+    }
+    return cachedManifest || parsed;
+  } catch (e) {
+    if (cachedManifest) {
+      console.warn("Using cached client manifest due to read error:", e.message);
+      return cachedManifest;
+    }
+    console.error("Error reading client manifest:", e);
+    return {};
+  }
+}
 
 function toFileUrl(p) {
-  // Converts to file://, cross-platform
   return url.pathToFileURL(p).href;
 }
 
@@ -13,21 +48,122 @@ const registerLoaderPath = toFileUrl(
 );
 const renderHtmlPath = path.resolve(__dirname, "render-html.js");
 
-// ----------------------------------------------------
-// 💡 WHITELIST STRATEGY
-// ----------------------------------------------------
-
-// 1. Define ESSENTIAL Node.js flags that the child must have.
-//    (We leave the list empty to avoid inheriting problematic flags)
 const ESSENTIAL_NODE_ARGS = [];
-
-// 2. Add the loader --import, which is the only confirmed necessity.
 const loaderArg = `--import=${registerLoaderPath}`;
 const childExecArgv = ESSENTIAL_NODE_ARGS.concat(loaderArg);
 
-// ----------------------------------------------------
-
 const { resolveRelativeUrl } = require("./url-resolver");
+
+function createParentResponseWrapper(reqPath, res, child) {
+  let hasRedirected = false;
+
+  const safeRedirect = (targetUrl) => {
+    if (hasRedirected) return;
+    hasRedirected = true;
+
+    const resolvedUrl = resolveRelativeUrl(targetUrl, reqPath);
+    let finalUrl = "/";
+    if (
+      typeof resolvedUrl === "string" &&
+      resolvedUrl.startsWith("/") &&
+      !resolvedUrl.startsWith("//")
+    ) {
+      finalUrl = resolvedUrl;
+    } else {
+      console.warn(
+        `[Dinou Security] Blocked unsafe redirect to: ${targetUrl}`,
+      );
+    }
+
+    if (res.headersSent) {
+      console.log(
+        `[Dinou] Streaming active. Redirecting via JavaScript to: ${finalUrl}`,
+      );
+      const safeUrl = JSON.stringify(finalUrl);
+      res.write(`<script>window.location.href = ${safeUrl};</script>`);
+      res.end();
+      child.stdout.unpipe(res);
+      child.kill();
+    } else {
+      res.redirect(302, finalUrl);
+      child.stdout.unpipe(res);
+      child.kill();
+    }
+  };
+
+  return {
+    setHeader: (name, value) => {
+      if (res.headersSent) {
+        console.warn(
+          `[Dinou Warning] Cannot set header '${name}' because streaming started.`,
+        );
+      } else {
+        res.setHeader(name, value);
+      }
+    },
+    cookie: (name, value, options) => {
+      if (res.headersSent) {
+        if (options && options.httpOnly) {
+          console.error(
+            `[Dinou Error] Cannot set HttpOnly cookie '${name}' because streaming has already started.`,
+          );
+          return;
+        }
+        console.log(
+          `[Dinou] Streaming active. Setting cookie '${name}' via JS.`,
+        );
+        let cookieStr = `${name}=${encodeURIComponent(value)}`;
+        if (options) {
+          if (options.path) cookieStr += `; path=${options.path}`;
+          if (options.domain) cookieStr += `; domain=${options.domain}`;
+          if (options.maxAge) cookieStr += `; max-age=${options.maxAge}`;
+          if (options.expires)
+            cookieStr += `; expires=${new Date(options.expires).toUTCString()}`;
+          if (options.secure) cookieStr += `; secure`;
+          if (options.sameSite)
+            cookieStr += `; samesite=${options.sameSite}`;
+        }
+        const safeCookieStr = JSON.stringify(cookieStr);
+        res.write(`<script>document.cookie = ${safeCookieStr};</script>`);
+      } else {
+        res.cookie(name, value, options);
+      }
+    },
+    clearCookie: (name, options) => {
+      if (res.headersSent) {
+        console.log(
+          `[Dinou] Streaming active. Clearing cookie '${name}' via JS.`,
+        );
+        let cookieStr = `${name}=; Max-Age=0`;
+        const path = options?.path || "/";
+        cookieStr += `; path=${path}`;
+        if (options) {
+          if (options.domain) cookieStr += `; domain=${options.domain}`;
+          if (options.secure) cookieStr += `; secure`;
+          if (options.sameSite) cookieStr += `; samesite=${options.sameSite}`;
+        }
+        cookieStr += ";";
+        const safeCookieStr = JSON.stringify(cookieStr);
+        res.write(`<script>document.cookie = ${safeCookieStr};</script>`);
+      } else {
+        res.clearCookie(name, options);
+      }
+    },
+    redirect: (arg1, arg2) => {
+      const url = arg2 || arg1;
+      safeRedirect(url);
+    },
+    status: (code) => {
+      if (res.headersSent) {
+        console.warn(
+          `[Dinou Warning] HTTP status '${code}' ignored because streaming started.`,
+        );
+      } else {
+        res.status(code);
+      }
+    },
+  };
+}
 
 function renderAppToHtml(
   reqPath,
@@ -36,30 +172,61 @@ function renderAppToHtml(
   res,
   capturedStatus = null,
   isDynamic = false,
+  forceNotFound = false,
 ) {
-  const jsxJson = getJSXJSON(reqPath);
-  const hasJsxJson = hasJSXJSON(reqPath);
-  // We replicate the array of positional arguments passed to the script
-  // [renderHtmlPath, reqPath, paramsString, cookiesString]
-  const scriptArgs = [
-    reqPath,
-    paramsString,
-    contextForChild ? JSON.stringify(contextForChild) : JSON.stringify({}),
-    isDynamic ? "true" : "false",
-    hasJsxJson ? "true" : "false",
-    JSON.stringify(hasJsxJson ? jsxJson : {}),
-  ];
-
   const child = fork(
-    renderHtmlPath, // ⬅️ CHANGE 2: The script (path) is the first argument of fork (no need for "node")
-    scriptArgs, // Positional arguments for the script (process.argv)
+    renderHtmlPath,
+    [
+      reqPath,
+      paramsString,
+      contextForChild ? JSON.stringify(contextForChild) : JSON.stringify({}),
+      isDynamic ? "true" : "false",
+    ],
     {
-      // ⬅️ CHANGE 3: Apply Whitelist to execArgv, resetting inherited options
       execArgv: childExecArgv,
-      // ⬅️ CHANGE 4: stdio needs 'ipc' for fork to work and for the future communication channel
-      stdio: ["ignore", "pipe", "pipe", "ipc"], // stdin, stdout, stderr, ipc
+      stdio: ["ignore", "pipe", "pipe", "ipc", "pipe"], // fd 4 is the RSC stream pipe
     },
   );
+
+  const query = JSON.parse(paramsString || "{}");
+  const rscPath = path.resolve(process.cwd(), "dist2", reqPath.replace(/^\//, ""), "rsc.rsc");
+  const hasStaticRsc = !isDynamic && fs.existsSync(rscPath);
+
+  if (hasStaticRsc) {
+    try {
+      const rscBuffer = fs.readFileSync(rscPath);
+      child.stdio[4].write(rscBuffer);
+      child.stdio[4].end();
+    } catch (err) {
+      console.error(`[Dinou] Failed to read static RSC from ${rscPath}:`, err.message);
+      if (child.stdio[4]) child.stdio[4].destroy();
+    }
+  } else {
+    // Dynamic SSR render: render RSC in parent and pipe to fd 4
+    const isNotFound = {};
+    const parentRes = createParentResponseWrapper(reqPath, res, child);
+    const context = {
+      req: contextForChild ? contextForChild.req : {},
+      res: parentRes,
+    };
+    requestStorage.run(context, () => {
+      getJSX(reqPath, query, isNotFound, isDevelopment, forceNotFound)
+        .then((jsx) => {
+          if (isNotFound.value) {
+            parentRes.status(404);
+          }
+          const manifest = getManifest();
+          const { pipe } = isWebpack
+            ? renderToPipeableStream(jsx, manifest)
+            : renderToPipeableStream(jsx, url.pathToFileURL(process.cwd()).href + "/");
+          pipe(child.stdio[4]);
+        })
+        .catch((err) => {
+          console.error("Error rendering JSX in parent renderAppToHtml:", err);
+          if (child.stdio[4]) child.stdio[4].destroy();
+        });
+    });
+  }
 
   // 💡 on('message') Implementation (IPC Channel)
   // ----------------------------------------------------

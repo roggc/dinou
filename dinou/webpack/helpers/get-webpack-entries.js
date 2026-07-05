@@ -138,41 +138,6 @@ async function getCSSEntries({
     return fileName.startsWith("page.") || fileName.startsWith("layout.");
   }
 
-  function isAsyncDefaultExport(code) {
-    const ast = parser.parse(code, {
-      sourceType: "module",
-      plugins: ["jsx", "typescript"],
-    });
-
-    let isAsync = false;
-
-    traverse.default(ast, {
-      ExportDefaultDeclaration(path) {
-        let decl = path.node.declaration;
-
-        if (decl.type === "Identifier") {
-          const binding = path.scope.getBinding(decl.name);
-          if (binding && binding.path) {
-            decl = binding.path.node;
-            if (decl.type === "VariableDeclarator") {
-              decl = decl.init;
-            }
-          }
-        }
-
-        if (
-          decl &&
-          (decl.type === "FunctionDeclaration" ||
-            decl.type === "ArrowFunctionExpression" ||
-            decl.type === "FunctionExpression")
-        ) {
-          isAsync = decl.async;
-        }
-      },
-    });
-
-    return isAsync;
-  }
 
   const files = await glob(["**/*.{js,jsx,ts,tsx}"], {
     cwd: srcDir,
@@ -209,11 +174,6 @@ async function getCSSEntries({
         }
       });
     } else if (isPageOrLayout(absPath)) {
-      if (!isAsyncDefaultExport(code)) {
-        console.warn(
-          `[react-client-manifest] The file ${normalizedPath} is a page or layout without "use client" directive, but its default export is not an async function.`,
-        );
-      }
       try {
         const { csss } = await getImportsAndAssetsAndCsss(code, absPath);
 

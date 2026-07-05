@@ -1,12 +1,16 @@
 const fs = require("fs");
 const path = require("path");
 const { PassThrough } = require("stream");
-const getSSGJSXOrJSX = require("./get-ssg-jsx-or-jsx.js");
-const { renderToPipeableStream } = require("react-server-dom-webpack/server");
+const url = require("url");
+const getJSX = require("./get-jsx.js");
+const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
+const { renderToPipeableStream } = isWebpack
+  ? require("react-server-dom-webpack/server")
+  : require("@roggc/react-server-dom-esm/server");
 const { requestStorage } = require("./request-context.js");
 
 const OUT_DIR = path.resolve("dist2");
-const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
+// const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 
 async function generateStaticRSC(reqPath) {
   const finalReqPath = reqPath.endsWith("/") ? reqPath : reqPath + "/";
@@ -94,8 +98,10 @@ async function generateStaticRSC(reqPath) {
     const passThrough = new PassThrough();
 
     await requestStorage.run(mockContext, async () => {
-      const jsx = await getSSGJSXOrJSX(finalReqPath, {});
-      const { pipe } = renderToPipeableStream(jsx, manifest);
+      const jsx = await getJSX(finalReqPath, {}, null, false);
+      const { pipe } = isWebpack
+        ? renderToPipeableStream(jsx, manifest)
+        : renderToPipeableStream(jsx, url.pathToFileURL(process.cwd()).href + "/");
       pipe(passThrough);
       passThrough.pipe(fileStream);
 

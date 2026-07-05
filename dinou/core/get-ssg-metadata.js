@@ -1,9 +1,6 @@
-const { getJSXJSON, hasJSXJSON } = require("./jsx-json");
+function processMetadata(effects) {
+  if (!effects) return "";
 
-function processMetadata(metadata) {
-  if (!metadata || !metadata.effects) return "";
-
-  const { effects } = metadata;
   let scriptContent = "";
 
   if (effects.cookies && effects.cookies.length > 0) {
@@ -29,11 +26,6 @@ function processMetadata(metadata) {
   return `<script>(function(){ ${scriptContent} })();</script>`;
 }
 
-function getSSGMetadata(reqPath) {
-  if (!hasJSXJSON(reqPath)) return;
-  const { metadata } = getJSXJSON(reqPath);
-  const script = processMetadata(metadata);
-  return script;
-}
-
-module.exports = getSSGMetadata;
+module.exports = {
+  processMetadata,
+};

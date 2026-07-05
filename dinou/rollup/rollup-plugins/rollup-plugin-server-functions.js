@@ -47,7 +47,7 @@ function serverFunctionsPlugin() {
       };
     },
     // 🪄 After manifest exists, replace the placeholder with the final URL
-    generateBundle(options, bundle) {
+    async generateBundle(options, bundle) {
       const manifest = manifestGeneratorPlugin.manifestData;
       const hashedPath =
         "/" + (manifest["serverFunctionProxy.js"] || "serverFunctionProxy.js");
@@ -74,14 +74,12 @@ function serverFunctionsPlugin() {
         "server_functions_manifest",
         "server-functions-manifest.json"
       );
-      fs.mkdir(path.dirname(manifestPath), { recursive: true })
-        .then(() =>
-          fs.writeFile(manifestPath, JSON.stringify(manifestObj, null, 2))
-        )
-        .then(() => {
-          // console.log(`[rollup-server-functions] Generated manifest at ${manifestPath}`);
-        })
-        .catch(console.error);
+      try {
+        await fs.mkdir(path.dirname(manifestPath), { recursive: true });
+        await fs.writeFile(manifestPath, JSON.stringify(manifestObj, null, 2));
+      } catch (err) {
+        console.error(err);
+      }
     },
   };
 }

@@ -1,7 +1,7 @@
 {
   "name": "dinou",
-  "version": "4.0.16",
-  "description": "Full-Stack React 19 framework with React Server Components, Server Functions, and Streaming SSR.",
+  "version": "5.0.0",
+  "description": "Lightweight-Ejectable Full-Stack React 19 Framework with support for React Server Components (RSC), Server Functions, Server-Side Rendering (SSR), Static Generation (SSG), Incremental Static Generation (ISG), and Incremental Static Regeneration (ISR)",
   "main": "index.js",
   "bin": {
     "dinou": "./cli.js"
