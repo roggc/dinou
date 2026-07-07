@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.0.1] - 2026-07-07
+
+### Fixed
+- **ESM SSR Navigation Context Resolution**: Replaced direct `require` with a dynamic loader hook (`__dinou_require__` or `module.require`) in `navigation.js` to resolve the request context inside ESM SSR execution trees (e.g., Esbuild and Rollup client bundlers), preventing `ReferenceError: require is not defined` and resolving client component hydration mismatches during route resolution.
+
 ## [5.0.0] - 2026-07-05
 
 ### Added
