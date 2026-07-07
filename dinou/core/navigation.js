@@ -58,11 +58,11 @@ export function useRouter() {
   if (!context) {
     // On the server we return empty functions to not break the rendering
     return {
-      push: () => {},
-      replace: () => {},
-      back: () => {},
-      forward: () => {},
-      refresh: () => {},
+      push: () => { },
+      replace: () => { },
+      back: () => { },
+      forward: () => { },
+      refresh: () => { },
     };
   }
 
@@ -95,16 +95,24 @@ export function usePathname() {
   // 🟢 1. SERVER LOGIC (SSR)
   if (typeof window === "undefined") {
     try {
-      const dynamicRequire = require;
-      // 🛡️ webpackIgnore to avoid bundling server things
-      const { getContext } = dynamicRequire(
-        /* webpackIgnore: true */ "./request-context.js"
-      );
-      const ctx = getContext();
-      if (ctx && ctx.req) {
-        return normalizePath(ctx.req.path);
+      const dynamicRequire =
+        typeof __dinou_require__ !== "undefined"
+          ? __dinou_require__
+          : typeof module !== "undefined" && typeof module.require === "function"
+            ? module.require.bind(module)
+            : null;
+      if (dynamicRequire) {
+        const { getContext } = dynamicRequire(
+          /* webpackIgnore: true */ "./request-context.js"
+        );
+        const ctx = getContext();
+        if (ctx && ctx.req) {
+          return normalizePath(ctx.req.path);
+        }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.log("error getContext usePathname", e);
+    }
   }
 
   // 🔵 2. CLIENT LOGIC
@@ -126,20 +134,27 @@ export function useSearchParams() {
   // 🟢 1. SERVER LOGIC
   if (typeof window === "undefined") {
     try {
-      const dynamicRequire = require;
-      const { getContext } = dynamicRequire(
-        /* webpackIgnore: true */ "./request-context.js"
-      );
-      const ctx = getContext();
-      if (ctx && ctx.req && ctx.req.query) {
-        const params = new URLSearchParams();
-        Object.entries(ctx.req.query).forEach(([key, val]) => {
-          if (Array.isArray(val)) val.forEach((v) => params.append(key, v));
-          else if (val) params.append(key, val);
-        });
-        return params;
+      const dynamicRequire =
+        typeof __dinou_require__ !== "undefined"
+          ? __dinou_require__
+          : typeof module !== "undefined" && typeof module.require === "function"
+            ? module.require.bind(module)
+            : null;
+      if (dynamicRequire) {
+        const { getContext } = dynamicRequire(
+          /* webpackIgnore: true */ "./request-context.js"
+        );
+        const ctx = getContext();
+        if (ctx && ctx.req && ctx.req.query) {
+          const params = new URLSearchParams();
+          Object.entries(ctx.req.query).forEach(([key, val]) => {
+            if (Array.isArray(val)) val.forEach((v) => params.append(key, v));
+            else if (val) params.append(key, val);
+          });
+          return params;
+        }
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   // 🔵 2. CLIENT LOGIC
