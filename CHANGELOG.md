@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Native React 19 Server Actions & `callServer` Support**: Enabled full integration for submitting forms directly from Server Components using the native `<form action={ServerAction}>` pattern.
   - **Client-side Integration**: Implemented the global `callServer` option hook within `createFromFetch` in both the ESM client (`client.jsx`) and Webpack client (`client-webpack.jsx`). React now intercepts form submits and marshals arguments through Dinou's `createServerFunctionProxy` seamlessly.
   - **Server-side Module Loader Integration**: Updated `babel-esm-loader.js` to automatically scan `"use server"` files and register exported functions using React's `registerServerReference` runtime call.
-  - **Cross-Platform Compatibility Fix**: Modified the server reference URL registration inside the ESM loader to utilize paths relative to the project root (`file:///src/...`) instead of absolute URLs. This resolves security validation rejections (`400 Bad Request` on Windows due to drive letter/colon conflicts) and guarantees identical behavior across Windows, macOS, and Linux.
+- **Route-Level Soft Navigation Error Recovery**: Integrated client-side React `ErrorBoundary` support wrapping the router context. If rendering crashes during a soft navigation or initial mount (on either Server or Client components), the router captures the failure and dynamically fetches `/____rsc_payload_error____` to render the custom slot-based error page fallback, avoiding white screens and React root unmounts.
+
 
 ## [5.0.2] - 2026-07-08
 

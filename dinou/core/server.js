@@ -797,7 +797,43 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
     });
   } catch (error) {
     console.error("Error rendering RSC:", error);
-    res.status(500).send("Internal Server Error");
+    try {
+      const serializedError = {
+        message: error.message || "Unknown Error",
+        name: error.name,
+        stack: isDevelopment ? error.stack : undefined,
+      };
+      const context = getContext(req, res);
+      await requestStorage.run(context, async () => {
+        const jsx = await getErrorJSX(
+          reqPath,
+          { ...req.query },
+          serializedError,
+          isDevelopment,
+        );
+        const manifest = isDevelopment
+          ? JSON.parse(
+            readFileSync(
+              path.resolve(
+                process.cwd(),
+                isWebpack
+                  ? `${outputFolder}/react-client-manifest.json`
+                  : `react_client_manifest/react-client-manifest.json`,
+              ),
+              "utf8",
+            ),
+          )
+          : cachedClientManifest;
+        const { pipe } = isWebpack
+          ? renderToPipeableStream(jsx, manifest)
+          : renderToPipeableStream(jsx, pathToFileURL(process.cwd()).href + "/");
+        res.status(500);
+        pipe(res);
+      });
+    } catch (innerError) {
+      console.error("Fatal error rendering fallback error RSC:", innerError);
+      res.status(500).send("Internal Server Error");
+    }
   }
 }
 
@@ -822,29 +858,33 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
     const reqPath = (
       req.path.endsWith("/") ? req.path : req.path + "/"
     ).replace("/____rsc_payload_error____", "");
-    const jsx = await getErrorJSX(
-      reqPath,
-      { ...req.query },
-      req.body.error,
-      isDevelopment,
-    );
-    const manifest = isDevelopment
-      ? JSON.parse(
-        readFileSync(
-          path.resolve(
-            process.cwd(),
-            isWebpack
-              ? `${outputFolder}/react-client-manifest.json`
-              : `react_client_manifest/react-client-manifest.json`,
+
+    const context = getContext(req, res);
+    await requestStorage.run(context, async () => {
+      const jsx = await getErrorJSX(
+        reqPath,
+        { ...req.query },
+        req.body.error,
+        isDevelopment,
+      );
+      const manifest = isDevelopment
+        ? JSON.parse(
+          readFileSync(
+            path.resolve(
+              process.cwd(),
+              isWebpack
+                ? `${outputFolder}/react-client-manifest.json`
+                : `react_client_manifest/react-client-manifest.json`,
+            ),
+            "utf8",
           ),
-          "utf8",
-        ),
-      )
-      : cachedClientManifest;
-    const { pipe } = isWebpack
-      ? renderToPipeableStream(jsx, manifest)
-      : renderToPipeableStream(jsx, pathToFileURL(process.cwd()).href + "/");
-    pipe(res);
+        )
+        : cachedClientManifest;
+      const { pipe } = isWebpack
+        ? renderToPipeableStream(jsx, manifest)
+        : renderToPipeableStream(jsx, pathToFileURL(process.cwd()).href + "/");
+      pipe(res);
+    });
   } catch (error) {
     console.error("Error rendering RSC:", error);
     res.status(500).send("Internal Server Error");
@@ -1210,6 +1250,12 @@ app.post("/____server_function____", async (req, res) => {
 
     // Extract relativePath and normalize (remove 'file://' and potential '/')
     let relativePath = fileUrl.replace(/^file:\/\/\/?/, "").trim();
+    if (path.isAbsolute(relativePath)) {
+      const cwd = process.cwd();
+      const normalizedCwd = cwd.charAt(0).toLowerCase() + cwd.slice(1);
+      const normalizedRelativePath = relativePath.charAt(0).toLowerCase() + relativePath.slice(1);
+      relativePath = path.relative(normalizedCwd, normalizedRelativePath);
+    }
     const normalizedRelative = relativePath.replace(/\\/g, "/");
     if (
       normalizedRelative.startsWith("/") ||
@@ -1220,7 +1266,7 @@ app.post("/____server_function____", async (req, res) => {
         .status(400)
         .json({ error: "Invalid path: no absolute, traversal, or drive letter allowed" });
     }
-    // console.log("relPath", relativePath);
+    
     // Restrict to 'src/' folder: prepend 'src/' if missing, and resolve absolutePath
     if (!relativePath.startsWith("src/") && !relativePath.startsWith("src\\")) {
       relativePath = path.join("src", relativePath);
@@ -1234,7 +1280,7 @@ app.post("/____server_function____", async (req, res) => {
         .status(403)
         .json({ error: "Access denied: file outside src directory" });
     }
-    // console.log("absPath", absolutePath);
+    
     // Verify that the file exists
     if (!existsSync(absolutePath)) {
       return res.status(404).json({ error: "File not found" });
@@ -1257,8 +1303,8 @@ app.post("/____server_function____", async (req, res) => {
           .status(403)
           .json({ error: "Not a valid server function file" });
       }
-      // Parse exports (you need to implement parseExports on server if not present)
-      const exports = parseExports(fileContent); // Assume you move parseExports to a shared util
+      // Parse exports
+      const exports = parseExports(fileContent);
       allowedExports = new Set(exports);
     }
 
@@ -1271,10 +1317,10 @@ app.post("/____server_function____", async (req, res) => {
       return res.status(400).json({ error: "Invalid export name" });
     }
 
-    // Proceed with import (using your importModule)
+    // Proceed with import
     const mod = await importModule(absolutePath);
 
-    // Validate exportName: only allow 'default' or others if you define a whitelist
+    // Validate exportName
     if (!exportName || (exportName !== "default" && !mod[exportName])) {
       return res.status(400).json({ error: "Invalid export name" });
     }

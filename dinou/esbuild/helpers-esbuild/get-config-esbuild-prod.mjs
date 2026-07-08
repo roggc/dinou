@@ -56,6 +56,9 @@ export default function getConfigEsbuildProd({
     metafile: true,
     logLevel: "warning",
     minify: true,
+    define: {
+      "process.env.NODE_ENV": JSON.stringify("production"),
+    },
     external: [
       "/__SERVER_FUNCTION_PROXY__",
       "/serverFunctionProxy.js",

@@ -5,6 +5,7 @@ import {
   useTransition,
   useLayoutEffect,
   useMemo,
+  Component,
 } from "react";
 import { createFromFetch } from "react-server-dom-webpack/client";
 import { hydrateRoot } from "react-dom/client";
@@ -93,6 +94,98 @@ const getRSCPayload = (rscKey, isPrefetch = false) => {
   return promise;
 };
 
+const getErrorRSCPayload = (route, error) => {
+  const url = route.split("::")[0];
+  const cacheKey = `error::${url}::${error.message || String(error)}`;
+  if (cache.has(cacheKey)) {
+    return cache.get(cacheKey);
+  }
+
+  const payloadUrl = "/____rsc_payload_error____" + url;
+  const promise = createFromFetch(
+    fetch(payloadUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        error: {
+          message: error.message || "Unknown Error",
+          name: error.name,
+          stack: error.stack,
+        },
+      }),
+    }).then((res) => {
+      if (res.headers.has("x-rsc-redirect")) {
+        const redirectUrl = res.headers.get("x-rsc-redirect");
+        cache.delete(cacheKey);
+        if (window.__DINOU_ROUTER_NAVIGATE__) {
+          window.__DINOU_ROUTER_NAVIGATE__(redirectUrl, { replace: true });
+        } else {
+          window.location.href = redirectUrl;
+        }
+        return new Promise(() => {});
+      }
+      return res;
+    }),
+    {
+      callServer: async (id, args) => {
+        const proxy = createServerFunctionProxy(id);
+        return proxy(...args);
+      }
+    }
+  );
+  cache.set(cacheKey, promise);
+  return promise;
+};
+
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("[Dinou] ErrorBoundary caught error:", error, errorInfo);
+    if (this.props.onError) {
+      this.props.onError(error);
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      if (this.props.fallback) {
+        return this.props.fallback(this.state.error);
+      }
+      const isDev = process.env.NODE_ENV !== "production";
+      return (
+        <div style={{ padding: "20px", fontFamily: "sans-serif" }}>
+          <h2>Application Error</h2>
+          <p>An unexpected error occurred on the client.</p>
+          <pre style={{ backgroundColor: "#f5f5f5", padding: "15px", borderRadius: "5px", overflowX: "auto" }}>
+            {isDev ? (
+              <>
+                <div style={{ fontWeight: "bold", marginBottom: "10px" }}>
+                  {this.state.error?.name || "Error"}: {this.state.error?.message || String(this.state.error)}
+                </div>
+                <div>{this.state.error?.stack}</div>
+              </>
+            ) : (
+              this.state.error?.message || String(this.state.error)
+            )}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+
 // ====================================================================
 // 3. ROUTER COMPONENT
 // ====================================================================
@@ -102,6 +195,7 @@ function Router() {
   const [isPopState, setIsPopState] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [version, setVersion] = useState(0);
+  const [navError, setNavError] = useState(null);
 
   // 🧭 NAVIGATE FUNCTION (Core Logic)
   const navigate = (href, options = {}) => {
@@ -145,6 +239,7 @@ function Router() {
     startTransition(() => {
       setIsPopState(false);
       setRoute(finalPath);
+      setNavError(null);
     });
   };
 
@@ -181,6 +276,7 @@ function Router() {
     startTransition(() => {
       // 3. Increment version to force re-execution of useMemo
       setVersion((v) => v + 1);
+      setNavError(null);
     });
   };
 
@@ -227,6 +323,7 @@ function Router() {
       startTransition(() => {
         setIsPopState(true);
         setRoute(target);
+        setNavError(null);
       });
     };
 
@@ -272,7 +369,7 @@ function Router() {
 
   // RSC Logic
   const rscKey = route + "::" + version;
-  const content = getRSCPayload(rscKey);
+  const content = navError ? getErrorRSCPayload(route, navError) : getRSCPayload(rscKey);
 
   const contextValue = useMemo(
     () => ({
@@ -288,7 +385,12 @@ function Router() {
 
   return (
     <RouterContext.Provider value={contextValue}>
-      {use(content)}
+      <ErrorBoundary
+        key={navError ? "error" : "normal"}
+        onError={setNavError}
+      >
+        {use(content)}
+      </ErrorBoundary>
     </RouterContext.Provider>
   );
 }

@@ -16,7 +16,10 @@ module.exports = function (source) {
 
   // Build IDs
   const moduleId = this.resourcePath;
-  const relativePath = path.relative(process.cwd(), moduleId);
+  const cwd = process.cwd();
+  const normalizedCwd = cwd.charAt(0).toLowerCase() + cwd.slice(1);
+  const normalizedModuleId = moduleId.charAt(0).toLowerCase() + moduleId.slice(1);
+  const relativePath = path.relative(normalizedCwd, normalizedModuleId);
   const normalizedPath = relativePath.replace(/\\/g, "/");
 
   const fileUrl = `file:///${normalizedPath}`;
