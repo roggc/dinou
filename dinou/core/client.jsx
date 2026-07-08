@@ -64,6 +64,12 @@ const getRSCPayload = (rscKey, isPrefetch = false) => {
     payloadUrl = "/____rsc_payload____" + url;
   }
 
+  const buildId = window.__DINOU_BUILD_ID__;
+  if (buildId) {
+    payloadUrl += (payloadUrl.includes("?") ? "&" : "?") + "buildId=" + buildId;
+    window.__DINOU_BUILD_ID__ = undefined;
+  }
+
   // 3. Fetch and Cache Storage
   const promise = createFromFetch(
     fetch(payloadUrl).then((res) => {

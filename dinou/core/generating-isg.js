@@ -41,33 +41,28 @@ function generatingISG(reqPath, isDynamicFromServer) {
         return; // 👋 We exit without doing anything, the page is dynamic
       }
 
-      // B. Generate HTML and RSC (Same as ISR)
-      const [pageResult, rscResult] = await Promise.all([
-        generateStaticPage(reqPath),
-        generateStaticRSC(reqPath),
-      ]);
+      // B. Generate HTML and RSC sequentially (RSC first, then HTML)
+      const rscResult = await generateStaticRSC(reqPath);
+      if (!rscResult.success) {
+        console.warn(`⚠️ [ISG] RSC generation failed for ${reqPath}. Aborting.`);
+        await fs.unlink(rscResult.tempPath).catch(() => {});
+        return;
+      }
 
-      // C. Transactional Commit
-      if (pageResult.success && rscResult.success) {
+      // Commit the RSC payload immediately so that generateStaticPage can read it
+      await safeRename(rscResult.tempPath, rscResult.finalPath);
+
+      const pageResult = await generateStaticPage(reqPath);
+      if (pageResult.success) {
         await safeRename(pageResult.tempPath, pageResult.finalPath);
-
-        // 2. Rename RSC (.tmp -> .rsc)
-        // HERE is where the EPERM used to fail
-        await safeRename(rscResult.tempPath, rscResult.finalPath);
-        // // Rename .tmp -> Final
-        // await fs.rename(pageResult.tempPath, pageResult.finalPath);
-        // await fs.rename(rscResult.tempPath, rscResult.finalPath);
-
-        // Update Manifest
         updateStatus(reqPath, pageResult.status);
         isDynamicFromServer.value = false;
         console.log(`✅ [ISG] Successfully promoted ${reqPath} to static.`);
       } else {
-        // Cleanup if failed
-        await fs.unlink(pageResult.tempPath).catch(() => { });
-        await fs.unlink(rscResult.tempPath).catch(() => { });
-        console.warn(`⚠️ [ISG] Failed to generate HTML/RSC for ${reqPath}`);
+        await fs.unlink(pageResult.tempPath).catch(() => {});
+        console.warn(`⚠️ [ISG] HTML generation failed for ${reqPath}. Aborting commit.`);
       }
+
     } catch (e) {
       console.error(`[ISG] Critical error promoting ${reqPath}:`, e);
     } finally {

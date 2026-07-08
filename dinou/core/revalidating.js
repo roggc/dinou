@@ -37,7 +37,9 @@ function revalidating(reqPath, isDynamicFromServer) {
               path.join(dist2Folder, reqPath, "rsc.rsc"),
               path.join(dist2Folder, reqPath, "rsc._old.rsc")
             );
-        } catch (e) {}
+        } catch (e) {
+          console.error("[ISR] copyFileSync error:", e);
+        }
 
         regenerating.add(reqPath);
 
@@ -55,14 +57,19 @@ function revalidating(reqPath, isDynamicFromServer) {
           return;
         }
 
-        const [pageResult, rscResult] = await Promise.all([
-          generateStaticPage(reqPath),
-          generateStaticRSC(reqPath),
-        ]);
+        const rscResult = await generateStaticRSC(reqPath);
+        if (!rscResult.success) {
+          console.warn(`⚠️ [ISR] RSC generation failed for ${reqPath}. Aborting.`);
+          await fs.unlink(rscResult.tempPath).catch(() => {});
+          return;
+        }
 
-        if (pageResult.success && rscResult.success) {
+        // Commit the RSC payload immediately so that generateStaticPage can read it
+        await safeRename(rscResult.tempPath, rscResult.finalPath);
+
+        const pageResult = await generateStaticPage(reqPath);
+        if (pageResult.success) {
           await safeRename(pageResult.tempPath, pageResult.finalPath);
-          await safeRename(rscResult.tempPath, rscResult.finalPath);
           updateStatus(reqPath, pageResult.status);
           isDynamicFromServer.value = false;
           console.log(
@@ -70,11 +77,9 @@ function revalidating(reqPath, isDynamicFromServer) {
           );
         } else {
           console.warn(
-            `⚠️ [ISR] Partial failure for ${reqPath}. Aborting commit.`
+            `⚠️ [ISR] HTML generation failed for ${reqPath}. Aborting commit.`
           );
-
           await fs.unlink(pageResult.tempPath).catch(() => {});
-          await fs.unlink(rscResult.tempPath).catch(() => {});
         }
       } catch (e) {
         console.error(`[ISR] Critical error regenerating ${reqPath}:`, e);
