@@ -11,6 +11,7 @@ import { createFromFetch } from "@roggc/react-server-dom-esm/client";
 import { hydrateRoot } from "react-dom/client";
 import { RouterContext } from "./navigation.js";
 import { resolveUrl, isExternalUrl } from "./navigation-utils.js";
+import { createServerFunctionProxy } from "./server-function-proxy.js";
 
 // ====================================================================
 // 1. GLOBAL STATE (Outside the component)
@@ -88,6 +89,12 @@ const getRSCPayload = (rscKey, isPrefetch = false) => {
       }
       return res;
     }),
+    {
+      callServer: async (id, args) => {
+        const proxy = createServerFunctionProxy(id);
+        return proxy(...args);
+      }
+    }
   );
   cache.set(url, promise); // <--- KEY TO AVOID LOOP
   return promise;

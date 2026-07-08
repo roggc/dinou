@@ -144,6 +144,48 @@ exports.load = async function load(url, context, defaultLoad) {
       };
     }
 
+    const { useServerRegex } = require("../constants.js");
+    const hasUseServer = useServerRegex.test(source);
+
+    if (isReactServer && hasUseServer) {
+      const parseExports = require("./parse-exports.js");
+      const exports = parseExports(source);
+
+      const { code } = await transformAsync(source, {
+        filename,
+        presets: [
+          ["@babel/preset-react", { runtime: "automatic" }],
+          "@babel/preset-typescript",
+        ],
+        sourceMaps: "inline",
+        ast: false,
+      });
+
+      let newSrc = code + "\n\n";
+
+      if (!isWebpack) {
+        const packageJsonPath = require.resolve("@roggc/react-server-dom-esm/package.json");
+        const serverNodePath = path.join(path.dirname(packageJsonPath), "server.node.js");
+        const serverNodeUrl = pathToFileURL(serverNodePath).href;
+        newSrc += `import pkgServer from ${JSON.stringify(serverNodeUrl)};\n`;
+        newSrc += 'const {registerServerReference} = pkgServer;\n';
+      }
+
+      const relativeFileUrl = "file:///" + rel.replace(/\\/g, "/");
+      for (const name of exports) {
+        if (name !== 'default') {
+          newSrc += `registerServerReference(${name}, ${JSON.stringify(relativeFileUrl)}, ${JSON.stringify(name)});\n`;
+        }
+      }
+
+      return {
+        format: "module",
+        source: newSrc,
+        shortCircuit: true,
+        url: urlToReturn,
+      };
+    }
+
     if (ext === ".js") {
       return {
         format: "module",
