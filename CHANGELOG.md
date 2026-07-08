@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.0.2] - 2026-07-08
+
+### 🛡️ Security & Route Control
+* **Route Validation in RSC Payload Endpoints**: Unified security checks across endpoints. Direct requests to fetch RSC payloads (`/____rsc_payload____/*`) now enforce `validateParams()` and `allowISG()` checks matching the main HTML document loader behavior. This prevents direct payload scraping or scanning of blocked/invalid dynamic route parameters.
+
+### 🐛 Bug Fixes
+* **Sequential Compilation in ISR & ISG**: Resolved a critical race condition that caused disk cache desynchronization and persistent hydration mismatch errors.
+  * **Issue**: `Promise.all` compiled the RSC payload and HTML page in parallel. The HTML generator read the `rsc.rsc` file from disk before the new payload finished writing, saving a stale timestamp/state in the static HTML file.
+  * **Solution**: Refactored `revalidating.js` and `generating-isg.js` to execute sequentially. The RSC payload is compiled and committed first, ensuring the HTML compiler reads the freshly generated RSC file.
+* **ESM Loader Compatibility for Slot Error Boundaries (`importModule` vs `require`)**: Fixed a server-side crash when using React client hooks inside slot error components (`error.tsx`).
+  * **Issue**: The framework used CommonJS `require()` to import the slot error components, bypassing the registered ESM custom loader (`register-loader.mjs`). This caused `"use client"` components to be evaluated as Server Components, failing with `useState is not a function`.
+  * **Solution**: Updated `get-jsx.js` and `get-error-jsx.js` to load slot error modules using `await importModule()`, ensuring they are correctly resolved as Client Component References.
+
 ## [5.0.1] - 2026-07-07
 
 ### Fixed

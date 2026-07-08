@@ -140,7 +140,7 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false) {
                 );
 
               if (slotErrorPath) {
-                const slotErrorModule = require(slotErrorPath);
+                const slotErrorModule = await importModule(slotErrorPath);
                 const SlotError = slotErrorModule.default ?? slotErrorModule;
 
                 const serializedError = {

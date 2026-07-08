@@ -621,11 +621,28 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
     //   reqPath
     // );
     if ((!isDevelopment && !dynamicState.value) || isStatic) {
+      let currentGeneratedAt = null;
+      try {
+        const metadataPath = path.join("dist2", reqPath, "metadata.json");
+        if (existsSync(metadataPath)) {
+          const metaObj = JSON.parse(readFileSync(metadataPath, "utf8"));
+          currentGeneratedAt = metaObj.generatedAt || null;
+        }
+      } catch (e) {}
+
+      const useOld =
+        isOld ||
+        regenerating.has(reqPath) ||
+        (req.query.buildId &&
+          currentGeneratedAt &&
+          req.query.buildId !== String(currentGeneratedAt));
+
       const payloadPath = path.resolve(
         "dist2",
         reqPath.replace(/^\//, ""),
-        isOld || regenerating.has(reqPath) ? "rsc._old.rsc" : "rsc.rsc",
+        useOld ? "rsc._old.rsc" : "rsc.rsc",
       );
+
       const distDir = path.resolve("dist2");
 
       if (!payloadPath.startsWith(distDir)) {
@@ -633,6 +650,7 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
       }
       if (existsSync(payloadPath)) {
         res.setHeader("Content-Type", "application/octet-stream");
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
         try {
           const buffer = readFileSync(payloadPath);
           return res.send(buffer);
@@ -642,6 +660,103 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
         }
       }
     }
+    let isPathBlocked = false;
+    const reqSegments = reqPath.split("/").filter(Boolean);
+    const srcFolder = path.resolve(process.cwd(), "src");
+    const [pagePath, dynamicParams] = getFilePathAndDynamicParams(
+      reqSegments,
+      req.query,
+      srcFolder,
+    );
+
+    if (pagePath) {
+      let cachedConfig = pageFunctionsConfigCache.get(pagePath);
+      if (!cachedConfig) {
+        const pageFolder = path.dirname(pagePath);
+        const [pageFunctionsPath] = getFilePathAndDynamicParams(
+          reqSegments,
+          req.query,
+          pageFolder,
+          "page_functions",
+          true,
+          true,
+          undefined,
+          reqSegments.length,
+        );
+
+        if (pageFunctionsPath) {
+          const pageFunctionsModule = await importModule(pageFunctionsPath);
+          const allowISGValue = pageFunctionsModule.allowISG
+            ? await pageFunctionsModule.allowISG()
+            : true;
+
+          let staticPathsSet = null;
+          if (pageFunctionsModule.getStaticPaths) {
+            const paths = await pageFunctionsModule.getStaticPaths();
+            staticPathsSet = new Set(
+              (paths || []).map((pathObj) => {
+                const sortedEntries = Object.entries(pathObj).sort((a, b) =>
+                  a[0].localeCompare(b[0])
+                );
+                return JSON.stringify(sortedEntries);
+              })
+            );
+          }
+
+          cachedConfig = {
+            allowISG: allowISGValue,
+            staticPathsSet,
+            validateParams: pageFunctionsModule.validateParams || null,
+          };
+        } else {
+          cachedConfig = {
+            allowISG: true,
+            staticPathsSet: null,
+            validateParams: null,
+          };
+        }
+
+        if (!isDevelopment) {
+          pageFunctionsConfigCache.set(pagePath, cachedConfig);
+        }
+      }
+
+      const { allowISG: allowISGValue, staticPathsSet, validateParams: validateParamsFn } = cachedConfig;
+      const hasParams = Object.keys(dynamicParams || {}).length > 0;
+      if (hasParams) {
+        if (validateParamsFn) {
+          const isValid = await validateParamsFn(dynamicParams);
+          if (!isValid) {
+            isPathBlocked = true;
+          }
+        }
+
+        if (!isPathBlocked && allowISGValue === false) {
+          let isPathAllowed = false;
+          if (staticPathsSet) {
+            const sortedQueryEntries = Object.entries(dynamicParams)
+              .sort((a, b) => a[0].localeCompare(b[0]))
+              .map(([k, v]) => {
+                if (Array.isArray(v)) return [k, v.join(",")];
+                return [k, String(v)];
+              });
+            const serializedQuery = JSON.stringify(sortedQueryEntries);
+            isPathAllowed = staticPathsSet.has(serializedQuery);
+          }
+          if (!isPathAllowed) {
+            if (isDevelopment) {
+              isPathBlocked = true;
+            } else {
+              const htmlPath = path.join("dist2", reqPath, "index.html");
+              if (!existsSync(htmlPath)) {
+                isPathBlocked = true;
+              }
+            }
+          }
+        }
+      }
+    }
+
     const context = getContext(req, res);
     const isNotFound = {};
     await requestStorage.run(context, async () => {
@@ -650,6 +765,7 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
         { ...req.query },
         isNotFound,
         isDevelopment,
+        isPathBlocked,
       );
 
       if (isNotFound.value) {
@@ -868,6 +984,7 @@ app.get(/^\/.*\/?$/, async (req, res) => {
 
       if (existsSync(fileToRead) && !dynamicState.value) {
         res.setHeader("Content-Type", "text/html");
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
         const meta = getStatus[reqPath];
 
         if (meta && meta.status) {
@@ -876,13 +993,26 @@ app.get(/^\/.*\/?$/, async (req, res) => {
           res.statusCode = 200; // Default
         }
         try {
-          const htmlContent = readFileSync(fileToRead);
-          res.write(htmlContent);
+          let htmlContent = readFileSync(fileToRead, "utf8");
+          let buildId = "";
+          try {
+            const metadataPath = path.join("dist2", reqPath, "metadata.json");
+            if (existsSync(metadataPath)) {
+              const metaObj = JSON.parse(readFileSync(metadataPath, "utf8"));
+              buildId = metaObj.generatedAt || "";
+            }
+          } catch (e) {}
+
+          let scripts = `<script>window.__DINOU_USE_STATIC__=true;</script>`;
           if (htmlPathOld) {
-            res.write("<script>window.__DINOU_USE_OLD_RSC__=true;</script>");
+            scripts += `<script>window.__DINOU_USE_OLD_RSC__=true;</script>`;
           }
-          res.write("<script>window.__DINOU_USE_STATIC__=true;</script>");
-          res.end();
+          if (buildId) {
+            scripts += `<script>window.__DINOU_BUILD_ID__="${buildId}";</script>`;
+          }
+
+          htmlContent = htmlContent.replace("</head>", `${scripts}</head>`);
+          res.send(htmlContent);
         } catch (err) {
           console.error("Error reading HTML file:", err);
           if (!res.headersSent) res.status(500).send("Server Error");
