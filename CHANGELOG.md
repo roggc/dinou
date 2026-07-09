@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [5.0.3] - 2026-07-08
+## [5.0.3] - 2026-07-09
 
 ### Added
 - **Native React 19 Server Actions & `callServer` Support**: Enabled full integration for submitting forms directly from Server Components using the native `<form action={ServerAction}>` pattern.
