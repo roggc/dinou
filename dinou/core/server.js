@@ -629,7 +629,7 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
           const metaObj = JSON.parse(readFileSync(metadataPath, "utf8"));
           currentGeneratedAt = metaObj.generatedAt || null;
         }
-      } catch (e) {}
+      } catch (e) { }
 
       const useOld =
         isOld ||
@@ -1042,7 +1042,7 @@ app.get(/^\/.*\/?$/, async (req, res) => {
               const metaObj = JSON.parse(readFileSync(metadataPath, "utf8"));
               buildId = metaObj.generatedAt || "";
             }
-          } catch (e) {}
+          } catch (e) { }
 
           let scripts = `<script>window.__DINOU_USE_STATIC__=true;</script>`;
           if (htmlPathOld) {
@@ -1250,17 +1250,17 @@ app.post("/____server_function____", async (req, res) => {
     }
 
     let relativePath;
-    
+
     // Check if the URL is a relative reference (e.g. file:///src/...)
     // If so, extract it directly without using fileURLToPath (which throws on Windows without a drive letter)
     const isRelativeSrc = fileUrl.startsWith("file:///src/") || fileUrl.startsWith("file:///src\\");
-    
+
     if (isRelativeSrc) {
       relativePath = fileUrl.replace(/^file:\/\/\/?/, "").trim();
     } else {
       const resolvedPath = fileURLToPath(fileUrl);
       relativePath = resolvedPath;
-      
+
       const normalizedCwd = normalizePathCase(process.cwd());
       const normalizedResolved = normalizePathCase(resolvedPath);
 
@@ -1280,7 +1280,7 @@ app.post("/____server_function____", async (req, res) => {
         .status(400)
         .json({ error: "Invalid path: no absolute, traversal, or drive letter allowed" });
     }
-    
+
     // Restrict to 'src/' folder: prepend 'src/' if missing, and resolve absolutePath
     if (!relativePath.startsWith("src/") && !relativePath.startsWith("src\\")) {
       relativePath = path.join("src", relativePath);
@@ -1294,10 +1294,10 @@ app.post("/____server_function____", async (req, res) => {
         .status(403)
         .json({ error: "Access denied: file outside src directory" });
     }
-    
+
     // Verify that the file exists
     if (!existsSync(absolutePath)) {
-      console.error("❌ [Dinou Server Function 404] File not found! id:", id, "relativePath:", relativePath, "absolutePath:", absolutePath);
+      // console.error("❌ [Dinou Server Function 404] File not found! id:", id, "relativePath:", relativePath, "absolutePath:", absolutePath);
       return res.status(404).json({ error: "File not found" });
     }
 
