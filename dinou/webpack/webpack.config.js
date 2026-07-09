@@ -45,7 +45,17 @@ const outputDirs = [
 
 function cleanDir(dir) {
   if (fs.existsSync(dir)) {
-    fs.rmSync(dir, { recursive: true, force: true });
+    try {
+      const files = fs.readdirSync(dir);
+      for (const file of files) {
+        const fullPath = path.join(dir, file);
+        fs.rmSync(fullPath, { recursive: true, force: true });
+      }
+    } catch (e) {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch (err) {}
+    }
   }
 }
 
@@ -61,6 +71,7 @@ module.exports = async () => {
       maxEntrypointSize: 512000,
       maxAssetSize: 512000,
     },
+    cache: false,
     mode: isDevelopment ? "development" : "production",
     entry: {
       main: [path.resolve(__dirname, "../core/client-webpack.jsx")].filter(
