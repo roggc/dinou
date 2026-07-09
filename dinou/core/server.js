@@ -5,6 +5,8 @@ const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 globalThis.__dinou_require__ = require;
 const path = require("path");
 
+const { normalizePathCase } = require("./path-utils.js");
+
 let reactServerPath, reactDomServerPath, reactJsxRuntimePath, reactJsxDevRuntimePath;
 
 if (!isWebpack) {
@@ -124,11 +126,10 @@ if (isDevelopment) {
       while (attempts < maxRetries) {
         try {
           // console.log(`Attempting to load manifest (try ${attempts + 1})...`);
-          return JSON.parse(readFileSync(manifestPath, "utf8"));
+          const text = readFileSync(manifestPath, "utf8");
+          if (!text.trim()) throw new Error("Empty JSON");
+          return JSON.parse(text);
         } catch (err) {
-          if (err.code !== "ENOENT") {
-            throw err; // Rethrow if it's not a file not found error
-          }
           attempts++;
           if (attempts >= maxRetries) {
             throw err; // Rethrow after max retries
@@ -1248,13 +1249,26 @@ app.post("/____server_function____", async (req, res) => {
       return res.status(400).json({ error: "Invalid file URL format" });
     }
 
-    // Extract relativePath and normalize (remove 'file://' and potential '/')
-    let relativePath = fileUrl.replace(/^file:\/\/\/?/, "").trim();
-    if (path.isAbsolute(relativePath)) {
-      const cwd = process.cwd();
-      const normalizedCwd = cwd.charAt(0).toLowerCase() + cwd.slice(1);
-      const normalizedRelativePath = relativePath.charAt(0).toLowerCase() + relativePath.slice(1);
-      relativePath = path.relative(normalizedCwd, normalizedRelativePath);
+    let relativePath;
+    
+    // Check if the URL is a relative reference (e.g. file:///src/...)
+    // If so, extract it directly without using fileURLToPath (which throws on Windows without a drive letter)
+    const isRelativeSrc = fileUrl.startsWith("file:///src/") || fileUrl.startsWith("file:///src\\");
+    
+    if (isRelativeSrc) {
+      relativePath = fileUrl.replace(/^file:\/\/\/?/, "").trim();
+    } else {
+      const resolvedPath = fileURLToPath(fileUrl);
+      relativePath = resolvedPath;
+      
+      const normalizedCwd = normalizePathCase(process.cwd());
+      const normalizedResolved = normalizePathCase(resolvedPath);
+
+      if (normalizedResolved.startsWith(normalizedCwd)) {
+        relativePath = path.relative(normalizedCwd, normalizedResolved);
+      } else {
+        relativePath = relativePath.replace(/^[\\/]+/, "");
+      }
     }
     const normalizedRelative = relativePath.replace(/\\/g, "/");
     if (
@@ -1283,6 +1297,7 @@ app.post("/____server_function____", async (req, res) => {
     
     // Verify that the file exists
     if (!existsSync(absolutePath)) {
+      console.error("❌ [Dinou Server Function 404] File not found! id:", id, "relativePath:", relativePath, "absolutePath:", absolutePath);
       return res.status(404).json({ error: "File not found" });
     }
 

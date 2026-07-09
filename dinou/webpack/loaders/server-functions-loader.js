@@ -1,4 +1,6 @@
 const path = require("path");
+
+const { normalizePathCase } = require("../../core/path-utils.js");
 const parseExports = require("../../core/parse-exports.js");
 const { useServerRegex } = require("../../constants.js");
 
@@ -16,10 +18,10 @@ module.exports = function (source) {
 
   // Build IDs
   const moduleId = this.resourcePath;
-  const cwd = process.cwd();
-  const normalizedCwd = cwd.charAt(0).toLowerCase() + cwd.slice(1);
-  const normalizedModuleId = moduleId.charAt(0).toLowerCase() + moduleId.slice(1);
-  const relativePath = path.relative(normalizedCwd, normalizedModuleId);
+  const relativePath = path.relative(
+    normalizePathCase(process.cwd()),
+    normalizePathCase(moduleId)
+  );
   const normalizedPath = relativePath.replace(/\\/g, "/");
 
   const fileUrl = `file:///${normalizedPath}`;
