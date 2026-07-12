@@ -1026,10 +1026,10 @@ app.get(/^\/.*\/?$/, async (req, res) => {
       if (existsSync(fileToRead) && !dynamicState.value) {
         res.setHeader("Content-Type", "text/html");
         res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-        const meta = getStatus[reqPath];
+        const status = getStatus(reqPath);
 
-        if (meta && meta.status) {
-          res.statusCode = meta.status;
+        if (status) {
+          res.statusCode = status;
         } else {
           res.statusCode = 200; // Default
         }

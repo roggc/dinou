@@ -10,7 +10,7 @@ const OUT_DIR = path.resolve("dist2");
 async function generateStaticPage(reqPath) {
   const finalReqPath = reqPath.endsWith("/") ? reqPath : reqPath + "/";
   const htmlPath = path.join(OUT_DIR, finalReqPath, "index.html");
-  const tempHtmlPath = path.join(OUT_DIR, finalReqPath, "index.html.tmp");
+  const tempHtmlPath = path.join(OUT_DIR, finalReqPath, `index.html.${Date.now()}-${Math.random()}.tmp`);
 
   const query = {};
   const paramsString = JSON.stringify(query);
@@ -94,6 +94,7 @@ async function generateStaticPage(reqPath) {
           revalidate: metadata.revalidate,
           generatedAt: Date.now(),
           effects: metadata.effects,
+          tags: metadata.tags || [],
         }, null, 2),
         "utf8"
       );

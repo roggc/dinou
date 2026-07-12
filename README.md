@@ -1,6 +1,6 @@
 # **Dinou**
 
-[![Documentation](https://img.shields.io/badge/docs-dinou.dev-blue?style=flat-square)](https://dinou.dev)
+[![Documentation](https://img.shields.io/badge/docs-dinou.dev-blue?style=flat-square)](https://dinou.dev) [![Version](https://img.shields.io/badge/version-5.1.0-orange?style=flat-square)](https://www.npmjs.com/package/dinou)
 
 ### **Lightweight-Ejectable Full-Stack React 19 Framework**
 
@@ -53,6 +53,7 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [4. `dynamic` (Force SSR)](#4-dynamic-force-ssr)
   - [5. `validateParams` (Route Parameter Validation)](#5-validateparams-route-parameter-validation)
   - [6. `allowISG` (Control On-Demand Generation)](#6-allowisg-control-on-demand-generation)
+  - [7. `getCacheTags` (Route Caching Tags)](#7-getcachetags-route-caching-tags)
 - [⚡ React Compiler & Automatic Optimizations](#-react-compiler--automatic-optimizations)
   - [Integration Strategy](#integration-strategy)
   - [Code Example](#code-example)
@@ -60,7 +61,7 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [1. Components (`dinou`)](#1-components-dinou)
   - [2. Utilities (`dinou`)](#2-utilities-dinou)
   - [3. Client Hooks (`dinou` - Client Components Only)](#3-client-hooks-dinou---client-components-only)
-  - [4. Server-Only Utilities (`dinou`)](#4-server-only-utilities-dinou)
+  - [4. Server-Only Utilities (`dinou` & `dinou/server`)](#4-server-only-utilities)
   - [5. Page Configuration (`page_functions.ts`)](#5-page-configuration-page_functionsts)
   - [6. File Conventions Cheatsheet](#6-file-conventions-cheatsheet)
 - [🎨 Favicons](#-favicons)
@@ -912,6 +913,21 @@ export function allowISG() {
 }
 ```
 
+### 7. `getCacheTags` (Route Caching Tags)
+
+Associates invalidation tags with the pre-rendered or dynamic route for tag-based on-demand revalidation.
+
+- **Arguments:** `params` (The dynamic route parameters).
+- **Returns:** `string[]` or `Promise<string[]>` (an array of cache tags).
+
+```typescript
+// src/posts/[id]/page_functions.ts
+export async function getCacheTags(params) {
+  // Tag this page with a generic collection tag and a specific resource tag
+  return ["posts", `post-${params.id}`];
+}
+```
+
 ## ⚡ React Compiler & Automatic Optimizations
 
 Dinou integrates the **React Compiler** (React 19+) out of the box. It analyzes your code and automatically applies fine-grained memoization to values and functions.
@@ -1105,15 +1121,49 @@ export default function LoadingBar() {
 
 ---
 
-### 4. Server-Only Utilities (`dinou`)
+### 4. Server-Only Utilities
 
-#### `getContext()`
+#### `getContext()` (from `"dinou"`)
 
 Retrieves the request/response context. Available **only** inside server-side execution threads (Server Components, `page_functions` like `getProps`, and Server Functions).
 
 - **Returns:** `{ req, res }`.
 - **req:** `headers`, `cookies`, `query`, `path`, `method`.
 - **res:** `status()`, `setHeader()`, `redirect()`, `cookie()`, `clearCookie()`.
+
+#### On-Demand Revalidation (from `"dinou/server"`)
+
+These server-only utilities must be imported from the `"dinou/server"` entry point.
+
+##### `revalidatePath(path)`
+
+Triggers background regeneration of static files for the targeted route path. Supports relative paths (e.g. `./` or `detalles`), resolved relative to the request referer context at runtime.
+
+- **Arguments:** `path` (a string representing the route to revalidate).
+- **Returns:** `void`.
+
+```javascript
+import { revalidatePath } from "dinou/server";
+
+export async function action() {
+  revalidatePath("/blog/posts");
+}
+```
+
+##### `revalidateTag(tag)`
+
+Triggers background regeneration of all routes registered with the matching cache tag.
+
+- **Arguments:** `tag` (a string representing the tag to invalidate).
+- **Returns:** `void`.
+
+```javascript
+import { revalidateTag } from "dinou/server";
+
+export async function action() {
+  revalidateTag("posts");
+}
+```
 
 #### ⚠️ Security Warning: `getContext` in Client Components
 
@@ -1231,6 +1281,19 @@ Controls on-demand Incremental Static Generation (ISG) for routes not generated 
 ```typescript
 export function allowISG() {
   return false; // Only serve getStaticPaths, return 404 for others
+}
+```
+
+#### `getCacheTags(params)`
+
+Defines cache tags associated with the pre-rendered page for tag-based invalidation.
+
+- **Receives:** Resolved `params` object.
+- **Returns:** `string[]` or `Promise<string[]>` (an array of cache tag strings).
+
+```typescript
+export function getCacheTags(params) {
+  return ["posts", `post-${params.id}`];
 }
 ```
 

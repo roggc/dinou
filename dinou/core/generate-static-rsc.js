@@ -15,9 +15,8 @@ const OUT_DIR = path.resolve("dist2");
 async function generateStaticRSC(reqPath) {
   const finalReqPath = reqPath.endsWith("/") ? reqPath : reqPath + "/";
 
-  // 1. PATHS: Final and Temporary
   const payloadPath = path.join(OUT_DIR, finalReqPath, "rsc.rsc");
-  const tempPayloadPath = payloadPath + ".tmp"; // 👈 We write here
+  const tempPayloadPath = path.join(OUT_DIR, finalReqPath, `rsc.rsc.${Date.now()}-${Math.random()}.tmp`);
 
   // 👇 2. MOCK RES (Complete and Robust Version)
   const mockRes = {
