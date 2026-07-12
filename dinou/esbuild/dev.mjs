@@ -26,6 +26,10 @@ const absPathToClientRedirect = path.resolve(
   __dirname,
   "../core/client-redirect.jsx"
 );
+const absPathToLink = path.resolve(
+  __dirname,
+  "../core/link.jsx"
+);
 
 const frameworkEntryPoints = {
   main: path.resolve(__dirname, "../core/client.jsx"),
@@ -40,6 +44,7 @@ const frameworkEntryPoints = {
     "react-refresh/react-refresh-entry.js"
   ),
   dinouClientRedirect: absPathToClientRedirect,
+  dinouLink: absPathToLink,
 };
 
 const changedIds = new Set();
@@ -67,6 +72,12 @@ async function updateEntriesAndComponents() {
   updateManifestForModule(
     absPathToClientRedirect,
     await fs.readFile(absPathToClientRedirect, "utf8"),
+    true,
+    manifest
+  );
+  updateManifestForModule(
+    absPathToLink,
+    await fs.readFile(absPathToLink, "utf8"),
     true,
     manifest
   );

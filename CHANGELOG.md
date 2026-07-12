@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.1.2] - 2026-07-12
+
+### Fixed
+- **Client Link Import Resolution**: Fixed `TypeError: Failed to resolve module specifier 'dinou/core/link.jsx'` client-side crashes occurring when importing and rendering `<Link>` from `"dinou"` inside Server Components under Esbuild and Rollup compilation environments.
+
 ## [5.1.1] - 2026-07-12
 
 ### Fixed
