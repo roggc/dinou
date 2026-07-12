@@ -107,6 +107,7 @@ async function generateStaticPages(routes) {
             revalidate: metadata.revalidate,
             generatedAt: Date.now(),
             effects: metadata.effects,
+            tags: metadata.tags || [],
           }, null, 2),
           "utf8"
         );

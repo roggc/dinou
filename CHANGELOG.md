@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.1.0] - 2026-07-11
+
+### Added
+- **On-Demand Revalidation API**: Added `revalidatePath` and `revalidateTag` exports to the new `"dinou/server"` server-only entry point.
+  - **`revalidatePath(path)`**: Triggers the purge and background regeneration of static files for the targeted route. Fully supports relative path navigation inputs (e.g. `./` or `detalles`), resolved dynamically at runtime using the active request context and the `referer` header.
+  - **`revalidateTag(tag)`**: Scans statically generated outputs to locate and regenerate all routes associated with the matching cache tag.
+- **Route Caching Tags (`getCacheTags`)**: Integrated support for defining a custom `getCacheTags(params)` function inside route-level `page_functions` files. Registered tags are saved into the route's `metadata.json` during compile time and subsequent on-demand builds for tag-based invalidation queries.
+- **Lazy Load Module Boundaries**: Implemented dynamic CJS `require` and ESM `import()` layers inside the `"dinou/server"` entry point. This safely halts recursive import chains, preventing client-side bundlers and SSR rendering subprocesses from evaluating server-exclusive Node.js runtime code.
+
+### Fixed
+- **Slot Error Boundary Recovery during Static Site Generation (SSG)**: Implemented isolated try-catch evaluation blocks and local `error.jsx` fallback resolutions for layout slots inside `build-static-pages.js`. This matches the runtime router's slot containment behavior, preventing slot-level crashes from bubbling up and aborting compile-time builds or revalidation processes.
+- **HTTP Status Retrieval Bug in Static Serving (`getStatus`)**: Corrected the invocation of the status manifest retrieval logic in `server.js` (replacing the faulty `getStatus[reqPath]` property lookup with the correct `getStatus(reqPath)` function call). This ensures the server serves pre-rendered static pages with their recorded status codes (e.g. `500` for slot/page errors) instead of falling back to a `200 OK` default.
+
 ## [5.0.3] - 2026-07-09
 
 ### Added
