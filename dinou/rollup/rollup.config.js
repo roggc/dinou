@@ -52,6 +52,10 @@ module.exports = async function () {
           __dirname,
           "../core/client-redirect.jsx",
         ),
+        dinouLink: path.resolve(
+          __dirname,
+          "../core/link.jsx",
+        ),
       }
       : {
         main: path.resolve(__dirname, "../core/client.jsx"),
@@ -63,6 +67,10 @@ module.exports = async function () {
         dinouClientRedirect: path.resolve(
           __dirname,
           "../core/client-redirect.jsx",
+        ),
+        dinouLink: path.resolve(
+          __dirname,
+          "../core/link.jsx",
         ),
       },
     output: {
