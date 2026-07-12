@@ -108,8 +108,7 @@ async function revalidatePath(reqPath) {
       }
     }
   } catch (e) {
-    console.error(`[Revalidate] Critical error revalidating ${cleanPath}:`, e);
-    throw e;
+    console.warn(`⚠️ [Revalidate] Failed to revalidate ${cleanPath}:`, e.message || e);
   }
 }
 

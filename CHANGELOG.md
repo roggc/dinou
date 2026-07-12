@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.1.1] - 2026-07-12
+
+### Fixed
+- **Safe Route Invalidation (`revalidatePath`)**: Added graceful try-catch error handling to `revalidatePath` to capture missing or invalid route resolution errors. It now logs a console warning instead of re-throwing exceptions, preventing runtime crashes in server functions or webhooks when targeting non-existent routes.
+
 ## [5.1.0] - 2026-07-11
 
 ### Added
