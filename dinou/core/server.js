@@ -72,6 +72,18 @@ addHook({
 });
 const importModule = require("./import-module");
 const generateStatic = require("./generate-static.js");
+
+// Load Dinou configuration and plugins
+let dinouConfig = { plugins: [] };
+const dinouConfigPath = path.resolve(process.cwd(), "dinou.config.js");
+if (existsSync(dinouConfigPath)) {
+  try {
+    dinouConfig = require(dinouConfigPath);
+  } catch (err) {
+    console.error("[Dinou] Error loading dinou.config.js:", err);
+  }
+}
+
 const renderAppToHtml = require("./render-app-to-html.js");
 const { revalidating, regenerating } = require("./revalidating.js");
 const isDevelopment = process.env.NODE_ENV !== "production";
@@ -283,6 +295,21 @@ const cookieParser = require("cookie-parser");
 const appUseCookieParser = cookieParser();
 const app = express();
 app.use(appUseCookieParser);
+
+// Run plugins onServerInit hook
+if (dinouConfig.plugins && Array.isArray(dinouConfig.plugins)) {
+  for (const plugin of dinouConfig.plugins) {
+    if (typeof plugin.onServerInit === "function") {
+      try {
+        plugin.onServerInit(app);
+        console.log(`[Dinou] Plugin initialized: "${plugin.name || "unnamed"}"`);
+      } catch (err) {
+        console.error(`[Dinou] Error initializing plugin "${plugin.name || "unnamed"}":`, err);
+      }
+    }
+  }
+}
+
 app.use(express.json());
 
 // ============================================================
@@ -406,6 +433,20 @@ function getContext(req, res) {
       redirect: (...args) => safeResCall("redirect", ...args),
     },
   };
+
+  // Run plugins onRequestContext hook
+  if (dinouConfig.plugins && Array.isArray(dinouConfig.plugins)) {
+    for (const plugin of dinouConfig.plugins) {
+      if (typeof plugin.onRequestContext === "function") {
+        try {
+          plugin.onRequestContext(req, res, context);
+        } catch (err) {
+          console.error(`[Dinou] Error running onRequestContext in plugin "${plugin.name || "unnamed"}":`, err);
+        }
+      }
+    }
+  }
+
   return context;
 }
 
@@ -534,6 +575,20 @@ function getContextForServerFunctionEndpoint(req, res) {
       },
     },
   };
+
+  // Run plugins onRequestContext hook
+  if (dinouConfig.plugins && Array.isArray(dinouConfig.plugins)) {
+    for (const plugin of dinouConfig.plugins) {
+      if (typeof plugin.onRequestContext === "function") {
+        try {
+          plugin.onRequestContext(req, res, context);
+        } catch (err) {
+          console.error(`[Dinou] Error running onRequestContext in plugin "${plugin.name || "unnamed"}":`, err);
+        }
+      }
+    }
+  }
+
   return context;
 }
 
@@ -1084,6 +1139,20 @@ app.get(/^\/.*\/?$/, async (req, res) => {
       },
       // Do not include res here
     };
+
+    // Run plugins onRequestContext hook
+    if (dinouConfig.plugins && Array.isArray(dinouConfig.plugins)) {
+      for (const plugin of dinouConfig.plugins) {
+        if (typeof plugin.onRequestContext === "function") {
+          try {
+            plugin.onRequestContext(req, res, contextForChild);
+          } catch (err) {
+            console.error(`[Dinou] Error running onRequestContext in plugin "${plugin.name || "unnamed"}":`, err);
+          }
+        }
+      }
+    }
+
     processLimiter
       .run(async () => {
         const isDynamic = true;

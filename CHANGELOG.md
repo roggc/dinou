@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [5.2.0] - 2026-07-13
+
+### Added
+- **Lightweight Plugin System & `dinou.config.js` support**: Added native support for extending the framework without manually modifying the core Express server.
+  * **Config Loader**: Automatically loads a `dinou.config.js` file at the root of the project to initialize custom plugins.
+  * **`onServerInit(app)` Hook**: Allows plugins to register global Express middlewares, custom endpoints (like webhooks), or API routes.
+  * **`onRequestContext(req, res, context)` Hook**: Allows plugins to inject custom properties (like `locale` or `userId`) into the RSC context across standard page requests, Server Actions, and dynamic compilation child processes.
+  * **Try-Catch Isolation**: Wrapped plugin hooks in safe boundaries with named logging to prevent third-party plugin errors from crashing the server.
+
 ## [5.1.2] - 2026-07-12
 
 ### Fixed
