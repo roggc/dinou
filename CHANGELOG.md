@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   * **`onRequestContext(req, res, context)` Hook**: Allows plugins to inject custom properties (like `locale` or `userId`) into the RSC context across standard page requests, Server Actions, and dynamic compilation child processes.
   * **Try-Catch Isolation**: Wrapped plugin hooks in safe boundaries with named logging to prevent third-party plugin errors from crashing the server.
 
+### Fixed
+- **URL resolution for search params**: Fixed `useSearchParams` and `usePathname` to work correctly with URL hashes.
+
 ## [5.1.2] - 2026-07-12
 
 ### Fixed
