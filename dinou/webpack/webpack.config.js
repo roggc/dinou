@@ -13,7 +13,7 @@ const { regex } = require("../core/asset-extensions");
 const getCSSEntries = require("./helpers/get-webpack-entries");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
-const outputDirectory = isDevelopment ? "public" : "dist3";
+const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
 
 function getConfigFileIfExists() {
   const tsconfigPath = path.resolve(process.cwd(), "tsconfig.json");
@@ -39,8 +39,8 @@ console.log(
 const projectRoot = process.cwd();
 
 const outputDirs = [
-  path.resolve(projectRoot, "public"),
-  path.resolve(projectRoot, "dist3"),
+  path.resolve(projectRoot, ".dinou/public"),
+  path.resolve(projectRoot, ".dinou/dist3"),
 ];
 
 function cleanDir(dir) {
@@ -54,7 +54,7 @@ function cleanDir(dir) {
     } catch (e) {
       try {
         fs.rmSync(dir, { recursive: true, force: true });
-      } catch (err) {}
+      } catch (err) { }
     }
   }
 }

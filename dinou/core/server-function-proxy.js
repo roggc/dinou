@@ -1,4 +1,3 @@
-// public/server-function-proxy.js
 import { createFromFetch } from "@roggc/react-server-dom-esm/client";
 
 function isSafeRedirect(url) {
@@ -16,7 +15,7 @@ function executeRedirect(url) {
 }
 
 export function createServerFunctionProxy(id) {
-  return new Proxy(() => {}, {
+  return new Proxy(() => { }, {
     apply: async (_target, _thisArg, args) => {
       let body;
       const headers = {

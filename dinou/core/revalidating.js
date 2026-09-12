@@ -10,7 +10,7 @@ const { updateStatus } = require("./status-manifest");
 const regenerating = new Set();
 
 function revalidating(reqPath, isDynamicFromServer) {
-  const dist2Folder = path.resolve(process.cwd(), "dist2");
+  const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
   const metadataPath = path.join(dist2Folder, reqPath, "metadata.json");
 
   if (regenerating.has(reqPath)) return;
@@ -46,49 +46,49 @@ function revalidating(reqPath, isDynamicFromServer) {
         (async () => {
           try {
             console.log(`[ISR] Starting regeneration for ${reqPath}...`);
-        const isDynamic = {};
-        await buildStaticPage(reqPath, isDynamic);
-        if (isDynamic.value) {
-          isDynamicFromServer.value = true;
-          console.log(
-            `[ISR] Bailout detected for ${reqPath}. Switching to Dynamic.`
-          );
+            const isDynamic = {};
+            await buildStaticPage(reqPath, isDynamic);
+            if (isDynamic.value) {
+              isDynamicFromServer.value = true;
+              console.log(
+                `[ISR] Bailout detected for ${reqPath}. Switching to Dynamic.`
+              );
 
-          return;
-        }
+              return;
+            }
 
-        const rscResult = await generateStaticRSC(reqPath);
-        if (!rscResult.success) {
-          console.warn(`⚠️ [ISR] RSC generation failed for ${reqPath}. Aborting.`);
-          await fs.unlink(rscResult.tempPath).catch(() => {});
-          return;
-        }
+            const rscResult = await generateStaticRSC(reqPath);
+            if (!rscResult.success) {
+              console.warn(`⚠️ [ISR] RSC generation failed for ${reqPath}. Aborting.`);
+              await fs.unlink(rscResult.tempPath).catch(() => { });
+              return;
+            }
 
-        // Commit the RSC payload immediately so that generateStaticPage can read it
-        await safeRename(rscResult.tempPath, rscResult.finalPath);
+            // Commit the RSC payload immediately so that generateStaticPage can read it
+            await safeRename(rscResult.tempPath, rscResult.finalPath);
 
-        const pageResult = await generateStaticPage(reqPath);
-        if (pageResult.success) {
-          await safeRename(pageResult.tempPath, pageResult.finalPath);
-          updateStatus(reqPath, pageResult.status);
-          isDynamicFromServer.value = false;
-          console.log(
-            `✅ [ISR] Successfully committed ${reqPath} (Status: ${pageResult.status})`
-          );
-        } else {
-          console.warn(
-            `⚠️ [ISR] HTML generation failed for ${reqPath}. Aborting commit.`
-          );
-          await fs.unlink(pageResult.tempPath).catch(() => {});
-        }
-      } catch (e) {
-        console.error(`[ISR] Critical error regenerating ${reqPath}:`, e);
-      } finally {
-        regenerating.delete(reqPath);
+            const pageResult = await generateStaticPage(reqPath);
+            if (pageResult.success) {
+              await safeRename(pageResult.tempPath, pageResult.finalPath);
+              updateStatus(reqPath, pageResult.status);
+              isDynamicFromServer.value = false;
+              console.log(
+                `✅ [ISR] Successfully committed ${reqPath} (Status: ${pageResult.status})`
+              );
+            } else {
+              console.warn(
+                `⚠️ [ISR] HTML generation failed for ${reqPath}. Aborting commit.`
+              );
+              await fs.unlink(pageResult.tempPath).catch(() => { });
+            }
+          } catch (e) {
+            console.error(`[ISR] Critical error regenerating ${reqPath}:`, e);
+          } finally {
+            regenerating.delete(reqPath);
+          }
+        })();
       }
-    })();
-  }
-  }).catch((err) => {});
+    }).catch((err) => { });
 }
 
 module.exports = { revalidating, regenerating };

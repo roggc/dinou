@@ -7,7 +7,7 @@ const { getStaticMetadata } = require("./build-static-pages.js");
 const { processMetadata } = require("./get-ssg-metadata.js");
 const { updateStatus } = require("./status-manifest.js");
 
-const OUT_DIR = path.resolve("dist2");
+const OUT_DIR = path.resolve(".dinou/dist2");
 
 async function generateStaticPages(routes) {
   for (const route of routes) {
@@ -57,9 +57,9 @@ async function generateStaticPages(routes) {
             console.warn(`[SSG] Status ${code} ignored for ${reqPath}`);
           capturedStatus.value = code;
         },
-        setHeader: () => {},
-        clearCookie: () => {},
-        redirect: () => {},
+        setHeader: () => { },
+        clearCookie: () => { },
+        redirect: () => { },
       };
 
       htmlStream = renderAppToHtml(

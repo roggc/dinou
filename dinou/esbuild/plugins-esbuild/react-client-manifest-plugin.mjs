@@ -7,7 +7,7 @@ import parseExports from "../../core/parse-exports.js";
 import { useClientRegex } from "../../constants.js";
 
 export default function reactClientManifestPlugin({
-  manifestPath = "react_client_manifest/react-client-manifest.json",
+  manifestPath = ".dinou/react_client_manifest/react-client-manifest.json",
   manifest = {},
 } = {}) {
   return {

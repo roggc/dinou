@@ -5,7 +5,7 @@ const renderAppToHtml = require("./render-app-to-html.js");
 const { getStaticMetadata } = require("./build-static-pages.js");
 const { processMetadata } = require("./get-ssg-metadata.js");
 
-const OUT_DIR = path.resolve("dist2");
+const OUT_DIR = path.resolve(".dinou/dist2");
 
 async function generateStaticPage(reqPath) {
   const finalReqPath = reqPath.endsWith("/") ? reqPath : reqPath + "/";
@@ -52,9 +52,9 @@ async function generateStaticPage(reqPath) {
       status: (code) => {
         capturedStatus.value = code;
       },
-      setHeader: () => {},
-      clearCookie: () => {},
-      redirect: () => {},
+      setHeader: () => { },
+      clearCookie: () => { },
+      redirect: () => { },
     };
 
     htmlStream = renderAppToHtml(
@@ -112,7 +112,7 @@ async function generateStaticPage(reqPath) {
       status: status,
     };
   } catch (error) {
-    await fs.unlink(tempHtmlPath).catch(() => {});
+    await fs.unlink(tempHtmlPath).catch(() => { });
     return { success: false, tempPath: tempHtmlPath };
   }
 }

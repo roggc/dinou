@@ -13,10 +13,10 @@ import { useServerRegex } from "../constants.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const outdir = "public";
+const outdir = ".dinou/public";
 await fs.rm(outdir, { recursive: true, force: true });
-await fs.rm("react_client_manifest", { recursive: true, force: true });
-await fs.rm("server_functions_manifest", { recursive: true, force: true });
+await fs.rm(".dinou/react_client_manifest", { recursive: true, force: true });
+await fs.rm(".dinou/server_functions_manifest", { recursive: true, force: true });
 
 let currentCtx = null; // Track the active esbuild context
 let debounceTimer = null; // For debouncing recreations

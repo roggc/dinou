@@ -13,7 +13,7 @@ const manifestData = {};
 
 export default function getConfigEsbuildProd({
   entryPoints,
-  outdir = "dist3",
+  outdir = ".dinou/dist3",
   manifest = {},
 }) {
   let plugins = [
@@ -22,7 +22,7 @@ export default function getConfigEsbuildProd({
     cssProcessorPlugin({ outdir }),
     reactClientManifestPlugin({
       manifest,
-      manifestPath: `react_client_manifest/react-client-manifest.json`,
+      manifestPath: `.dinou/react_client_manifest/react-client-manifest.json`,
     }),
     assetsPlugin(),
     manifestGeneratorPlugin(manifestData),

@@ -5,11 +5,11 @@ const generateStaticPages = require("./generate-static-pages");
 const { buildStaticPages, getStaticPaths } = require("./build-static-pages");
 
 async function generateStatic() {
-  const distFolder2 = path.resolve(process.cwd(), "dist2");
+  const distFolder2 = path.resolve(process.cwd(), ".dinou/dist2");
 
   if (existsSync(distFolder2)) {
     rmSync(distFolder2, { recursive: true, force: true });
-    console.log("Deleted existing dist2 folder");
+    console.log("Deleted existing .dinou/dist2 folder");
   }
 
   await buildStaticPages();

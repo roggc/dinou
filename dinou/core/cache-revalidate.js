@@ -39,7 +39,7 @@ async function revalidatePath(reqPath) {
       if (referer) {
         try {
           currentPathname = new URL(referer).pathname;
-        } catch (e) {}
+        } catch (e) { }
       } else {
         currentPathname = ctx.req.path || "/";
       }
@@ -55,7 +55,7 @@ async function revalidatePath(reqPath) {
     cleanPath = cleanPath.slice(0, -1);
   }
 
-  const dist2Folder = path.resolve(process.cwd(), "dist2");
+  const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
   const reqPathWithSlash = cleanPath.endsWith("/") ? cleanPath : cleanPath + "/";
 
   // Check if there is an existing page to copy to _old
@@ -89,7 +89,7 @@ async function revalidatePath(reqPath) {
     if (!rscResult.success) {
       console.warn(`⚠️ [Revalidate] RSC generation failed for ${cleanPath}.`);
       if (rscResult.tempPath && existsSync(rscResult.tempPath)) {
-        await fs.unlink(rscResult.tempPath).catch(() => {});
+        await fs.unlink(rscResult.tempPath).catch(() => { });
       }
       return;
     }
@@ -104,7 +104,7 @@ async function revalidatePath(reqPath) {
     } else {
       console.warn(`⚠️ [Revalidate] HTML generation failed for ${cleanPath}.`);
       if (pageResult.tempPath && existsSync(pageResult.tempPath)) {
-        await fs.unlink(pageResult.tempPath).catch(() => {});
+        await fs.unlink(pageResult.tempPath).catch(() => { });
       }
     }
   } catch (e) {
@@ -114,7 +114,7 @@ async function revalidatePath(reqPath) {
 
 async function revalidateTag(tag) {
   console.log(`[Revalidate] Starting on-demand revalidation for tag: "${tag}"...`);
-  const dist2Folder = path.resolve(process.cwd(), "dist2");
+  const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
   if (!existsSync(dist2Folder)) return;
 
   const metadataFiles = await walkMetadataFiles(dist2Folder);

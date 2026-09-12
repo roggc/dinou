@@ -18,7 +18,7 @@ const { regex } = require("../core/asset-extensions.js");
 const manifestGeneratorPlugin = require("./rollup-plugins/manifest-generator-plugin.js");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
-const outputDirectory = isDevelopment ? "public" : "dist3";
+const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
 
 const localDinouPath = path.resolve(process.cwd(), "dinou");
 const isEjected = fs.existsSync(localDinouPath);
@@ -96,8 +96,8 @@ module.exports = async function () {
       del({
         targets: [
           `${outputDirectory}/*`,
-          "react_client_manifest/*",
-          "server_functions_manifest/*",
+          ".dinou/react_client_manifest/*",
+          ".dinou/server_functions_manifest/*",
         ],
         runOnce: true,
         hook: "buildStart",
@@ -157,7 +157,7 @@ module.exports = async function () {
       }),
       reactClientManifest({
         manifestPath: path.join(
-          "react_client_manifest",
+          ".dinou/react_client_manifest",
           "react-client-manifest.json",
         ),
       }),
@@ -168,9 +168,9 @@ module.exports = async function () {
     ].filter(Boolean),
     watch: {
       exclude: [
-        "public/**",
-        "react_client_manifest/**",
-        "server_functions_manifest/**",
+        ".dinou/public/**",
+        ".dinou/react_client_manifest/**",
+        ".dinou/server_functions_manifest/**",
       ],
     },
     onwarn(warning, warn) {

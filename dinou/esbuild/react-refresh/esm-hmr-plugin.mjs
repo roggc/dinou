@@ -20,7 +20,7 @@ export default function esmHmrPlugin({
     name: "esm-hmr",
 
     setup(build) {
-      const outdir = build.initialOptions.outdir || "public";
+      const outdir = build.initialOptions.outdir || ".dinou/public";
       const entryPoints = build.initialOptions.entryPoints;
 
       const entrySources = [];

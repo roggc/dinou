@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [6.0.0] - 2026-09-13
+
+### Changed
+- **Unified `.dinou/` Directory for Build Artifacts & Manifests**: Relocated all compiler outputs, client/server bundles, and runtime metadata under a single `.dinou/` root directory instead of generating multiple folders across the project root.
+  * **Build Artifacts Relocation**:
+    - `dist2` (pre-rendered static & ISR HTML/RSC payloads) moved to `.dinou/dist2`
+    - `dist3` (production bundles & manifests) moved to `.dinou/dist3`
+    - `public` (development client bundles & compiled CSS) moved to `.dinou/public`
+    - `react_client_manifest` moved to `.dinou/react_client_manifest`
+    - `server_functions_manifest` moved to `.dinou/server_functions_manifest`
+  * **Clean Project Root & Improved DX**: Eliminates root-level clutter, giving projects a clean, minimal, and production-ready structure.
+  * **User Assets Isolation**: The root `public/` directory is now exclusively reserved for user static assets (images, favicons, fonts), preventing compiler bundles from mixing with user files.
+  * **Simplified `.gitignore`**: Projects now only require a single `.dinou/` entry in `.gitignore` instead of managing multiple build directory rules.
+  * **Effortless Cache Invalidation**: Wiping the compilation cache or performing clean builds can now be done in one command by deleting `.dinou/` (`rm -rf .dinou`).
+  * **Full Multi-Bundler Alignment**: Updated all Rollup, Esbuild, and Webpack compiler runners and custom manifest plugins to resolve into `.dinou/` seamlessly across development and production environments.
+
 ## [5.2.0] - 2026-07-13
 
 ### Added

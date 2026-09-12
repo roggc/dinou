@@ -39,7 +39,7 @@ function getDefaultExportName(code) {
 
 function reactClientManifestPlugin({
   srcDir = path.resolve("src"),
-  manifestPath = "react_client_manifest/react-client-manifest.json",
+  manifestPath = ".dinou/react_client_manifest/react-client-manifest.json",
   assetInclude = regex,
 } = {}) {
   const manifest = {};

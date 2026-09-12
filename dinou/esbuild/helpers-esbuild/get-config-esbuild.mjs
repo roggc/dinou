@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 
 export default function getConfigEsbuild({
   entryPoints,
-  outdir = "public",
+  outdir = ".dinou/public",
   manifest = {},
   changedIds,
   hmrEngine,
