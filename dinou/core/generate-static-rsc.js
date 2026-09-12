@@ -9,7 +9,7 @@ const { renderToPipeableStream } = isWebpack
   : require("@roggc/react-server-dom-esm/server");
 const { requestStorage } = require("./request-context.js");
 
-const OUT_DIR = path.resolve("dist2");
+const OUT_DIR = path.resolve(".dinou/dist2");
 // const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 
 async function generateStaticRSC(reqPath) {
@@ -83,8 +83,8 @@ async function generateStaticRSC(reqPath) {
       fs.readFileSync(
         path.resolve(
           isWebpack
-            ? "dist3/react-client-manifest.json"
-            : "react_client_manifest/react-client-manifest.json"
+            ? ".dinou/dist3/react-client-manifest.json"
+            : ".dinou/react_client_manifest/react-client-manifest.json"
         ),
         "utf8"
       )

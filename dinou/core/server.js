@@ -87,7 +87,7 @@ if (existsSync(dinouConfigPath)) {
 const renderAppToHtml = require("./render-app-to-html.js");
 const { revalidating, regenerating } = require("./revalidating.js");
 const isDevelopment = process.env.NODE_ENV !== "production";
-const outputFolder = isDevelopment ? "public" : "dist3";
+const outputFolder = isDevelopment ? ".dinou/public" : ".dinou/dist3";
 const chokidar = require("chokidar");
 const { fileURLToPath, pathToFileURL } = require("url");
 const parseExports = require("./parse-exports.js");
@@ -101,11 +101,11 @@ if (isDevelopment) {
     process.cwd(),
     isWebpack
       ? `${outputFolder}/react-client-manifest.json`
-      : `react_client_manifest/react-client-manifest.json`,
+      : `.dinou/react_client_manifest/react-client-manifest.json`,
   );
   const manifestFolderPath = path.resolve(
     process.cwd(),
-    isWebpack ? outputFolder : "react_client_manifest",
+    isWebpack ? outputFolder : ".dinou/react_client_manifest",
   );
 
   let manifestWatcher = null;
@@ -278,7 +278,7 @@ if (!isDevelopment) {
     process.cwd(),
     isWebpack
       ? `${outputFolder}/server-functions-manifest.json`
-      : `server_functions_manifest/server-functions-manifest.json`,
+      : `.dinou/server_functions_manifest/server-functions-manifest.json`,
   ); // Adjust 'dist/' to your outdir
   if (existsSync(manifestPath)) {
     serverFunctionsManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -598,7 +598,7 @@ const clientManifestResolvedPath = path.resolve(
   process.cwd(),
   isWebpack
     ? `${outputFolder}/react-client-manifest.json`
-    : `react_client_manifest/react-client-manifest.json`,
+    : `.dinou/react_client_manifest/react-client-manifest.json`,
 );
 
 function isManifestReady() {
@@ -638,7 +638,7 @@ if (!isDevelopment) {
         process.cwd(),
         isWebpack
           ? `${outputFolder}/react-client-manifest.json`
-          : `react_client_manifest/react-client-manifest.json`,
+          : `.dinou/react_client_manifest/react-client-manifest.json`,
       ),
       "utf8",
     ),
@@ -679,7 +679,7 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
     if ((!isDevelopment && !dynamicState.value) || isStatic) {
       let currentGeneratedAt = null;
       try {
-        const metadataPath = path.join("dist2", reqPath, "metadata.json");
+        const metadataPath = path.join(".dinou/dist2", reqPath, "metadata.json");
         if (existsSync(metadataPath)) {
           const metaObj = JSON.parse(readFileSync(metadataPath, "utf8"));
           currentGeneratedAt = metaObj.generatedAt || null;
@@ -694,12 +694,12 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
           req.query.buildId !== String(currentGeneratedAt));
 
       const payloadPath = path.resolve(
-        "dist2",
+        ".dinou/dist2",
         reqPath.replace(/^\//, ""),
         useOld ? "rsc._old.rsc" : "rsc.rsc",
       );
 
-      const distDir = path.resolve("dist2");
+      const distDir = path.resolve(".dinou/dist2");
 
       if (!payloadPath.startsWith(distDir)) {
         return res.status(403).end();
@@ -803,7 +803,7 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
             if (isDevelopment) {
               isPathBlocked = true;
             } else {
-              const htmlPath = path.join("dist2", reqPath, "index.html");
+              const htmlPath = path.join(".dinou/dist2", reqPath, "index.html");
               if (!existsSync(htmlPath)) {
                 isPathBlocked = true;
               }
@@ -839,7 +839,7 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
               process.cwd(),
               isWebpack
                 ? `${outputFolder}/react-client-manifest.json`
-                : `react_client_manifest/react-client-manifest.json`,
+                : `.dinou/react_client_manifest/react-client-manifest.json`,
             ),
             "utf8",
           ),
@@ -874,7 +874,7 @@ async function serveRSCPayload(req, res, isOld = false, isStatic = false) {
                 process.cwd(),
                 isWebpack
                   ? `${outputFolder}/react-client-manifest.json`
-                  : `react_client_manifest/react-client-manifest.json`,
+                  : `.dinou/react_client_manifest/react-client-manifest.json`,
               ),
               "utf8",
             ),
@@ -930,7 +930,7 @@ app.post(/^\/____rsc_payload_error____\/.*\/?$/, async (req, res) => {
               process.cwd(),
               isWebpack
                 ? `${outputFolder}/react-client-manifest.json`
-                : `react_client_manifest/react-client-manifest.json`,
+                : `.dinou/react_client_manifest/react-client-manifest.json`,
             ),
             "utf8",
           ),
@@ -1045,7 +1045,7 @@ app.get(/^\/.*\/?$/, async (req, res) => {
             if (isDevelopment) {
               isPathBlocked = true;
             } else {
-              const htmlPath = path.join("dist2", req.path, "index.html");
+              const htmlPath = path.join(".dinou/dist2", req.path, "index.html");
               if (!existsSync(htmlPath)) {
                 isPathBlocked = true;
               }
@@ -1072,9 +1072,9 @@ app.get(/^\/.*\/?$/, async (req, res) => {
       let htmlPathOld;
       if (regenerating.has(reqPath)) {
         // Still regenerating, serve old HTML if exists
-        htmlPathOld = path.join("dist2", reqPath, "index._old.html");
+        htmlPathOld = path.join(".dinou/dist2", reqPath, "index._old.html");
       }
-      const htmlPath = path.join("dist2", reqPath, "index.html");
+      const htmlPath = path.join(".dinou/dist2", reqPath, "index.html");
       // Decide which file to read
       const fileToRead = htmlPathOld || htmlPath;
 
@@ -1092,7 +1092,7 @@ app.get(/^\/.*\/?$/, async (req, res) => {
           let htmlContent = readFileSync(fileToRead, "utf8");
           let buildId = "";
           try {
-            const metadataPath = path.join("dist2", reqPath, "metadata.json");
+            const metadataPath = path.join(".dinou/dist2", reqPath, "metadata.json");
             if (existsSync(metadataPath)) {
               const metaObj = JSON.parse(readFileSync(metadataPath, "utf8"));
               buildId = metaObj.generatedAt || "";
@@ -1463,7 +1463,7 @@ app.post("/____server_function____", async (req, res) => {
       process.cwd(),
       isWebpack
         ? `${outputFolder}/react-client-manifest.json`
-        : `react_client_manifest/react-client-manifest.json`,
+        : `.dinou/react_client_manifest/react-client-manifest.json`,
     );
     // Verify that the manifest exists to avoid errors
     if (!existsSync(manifestPath)) {

@@ -9,7 +9,7 @@ const { safeRename } = require("./safe-rename");
 const { updateStatus } = require("./status-manifest");
 
 function generatingISG(reqPath, isDynamicFromServer) {
-  const dist2Folder = path.resolve(process.cwd(), "dist2");
+  const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
   // 1. Concurrency Protection
   if (regenerating.has(reqPath)) return;
   try {
@@ -45,7 +45,7 @@ function generatingISG(reqPath, isDynamicFromServer) {
       const rscResult = await generateStaticRSC(reqPath);
       if (!rscResult.success) {
         console.warn(`⚠️ [ISG] RSC generation failed for ${reqPath}. Aborting.`);
-        await fs.unlink(rscResult.tempPath).catch(() => {});
+        await fs.unlink(rscResult.tempPath).catch(() => { });
         return;
       }
 
@@ -59,7 +59,7 @@ function generatingISG(reqPath, isDynamicFromServer) {
         isDynamicFromServer.value = false;
         console.log(`✅ [ISG] Successfully promoted ${reqPath} to static.`);
       } else {
-        await fs.unlink(pageResult.tempPath).catch(() => {});
+        await fs.unlink(pageResult.tempPath).catch(() => { });
         console.warn(`⚠️ [ISG] HTML generation failed for ${reqPath}. Aborting commit.`);
       }
 

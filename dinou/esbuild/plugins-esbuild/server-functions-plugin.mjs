@@ -77,7 +77,7 @@ export default function serverFunctionsPlugin(manifestData = {}) {
 
         // Write the server functions manifest JSON file to the output directory
         const manifestPath = path.join(
-          "server_functions_manifest",
+          ".dinou/server_functions_manifest",
           "server-functions-manifest.json"
         );
         await fs.mkdir(path.dirname(manifestPath), { recursive: true });

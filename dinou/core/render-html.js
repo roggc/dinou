@@ -144,7 +144,7 @@ function getImportMapHtml() {
 
   const manifestPath = path.resolve(
     process.cwd(),
-    "react_client_manifest/react-client-manifest.json"
+    ".dinou/react_client_manifest/react-client-manifest.json"
   );
 
   if (!fs.existsSync(manifestPath)) {
@@ -184,11 +184,11 @@ function getSsrManifest() {
     const path = require("path");
     const ssrManifestPath = path.resolve(
       process.cwd(),
-      isDevelopment ? "public/react-ssr-manifest.json" : "dist3/react-ssr-manifest.json"
+      isDevelopment ? ".dinou/public/react-ssr-manifest.json" : ".dinou/dist3/react-ssr-manifest.json"
     );
     const clientManifestPath = path.resolve(
       process.cwd(),
-      isDevelopment ? "public/react-client-manifest.json" : "dist3/react-client-manifest.json"
+      isDevelopment ? ".dinou/public/react-client-manifest.json" : ".dinou/dist3/react-client-manifest.json"
     );
 
     const ssrContent = fs.readFileSync(ssrManifestPath, "utf8");
@@ -204,7 +204,7 @@ function getSsrManifest() {
         if (entry && entry.id !== undefined) {
           try {
             requireMap[entry.id] = fileURLToPath(fileUrl);
-          } catch {}
+          } catch { }
         }
       }
       global.__webpack_require_map__ = requireMap;
@@ -294,10 +294,10 @@ async function renderToStream(
               const errorStream = renderToPipeableStream(errorJSX, {
                 onShellReady() {
                   const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
-          if (!isWebpack) {
-            const importMapHtml = getImportMapHtml();
-            process.stdout.write(importMapHtml);
-          }
+                  if (!isWebpack) {
+                    const importMapHtml = getImportMapHtml();
+                    process.stdout.write(importMapHtml);
+                  }
                   errorStream.pipe(process.stdout);
                 },
                 onError(err) {

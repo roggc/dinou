@@ -1522,7 +1522,7 @@ Dinou is flexible and integrates with three major bundlers: **esbuild** (default
 
 ### Development
 
-Starts the development server with hot reloading. Files are emitted to the `public` folder.
+Starts the development server with hot reloading. Files are emitted to the `./dinou/public` folder.
 
 | Command               | Bundler     | Description                |
 | :-------------------- | :---------- | :------------------------- |
@@ -1533,7 +1533,7 @@ Starts the development server with hot reloading. Files are emitted to the `publ
 
 ### Production Build
 
-Compiles the application for production. Files are emitted to the `dist3` folder.
+Compiles the application for production. Files are emitted to the `.dinou/dist3` folder.
 
 | Command                 | Bundler                |
 | :---------------------- | :--------------------- |
@@ -1544,7 +1544,7 @@ Compiles the application for production. Files are emitted to the `dist3` folder
 
 ### Start Production Server
 
-Runs the built application from the `dist3` folder.
+Runs the built application from the `.dinou/dist3` folder.
 
 | Command                 | Description                         |
 | :---------------------- | :---------------------------------- |

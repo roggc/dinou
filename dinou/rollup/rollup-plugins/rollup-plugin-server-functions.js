@@ -71,7 +71,7 @@ function serverFunctionsPlugin() {
 
       // Write the manifest to the specified folder (e.g. same place as other assets)
       const manifestPath = path.join(
-        "server_functions_manifest",
+        ".dinou/server_functions_manifest",
         "server-functions-manifest.json"
       );
       try {

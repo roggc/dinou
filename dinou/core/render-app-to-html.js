@@ -15,8 +15,8 @@ const { renderToPipeableStream } = isWebpack
 const manifestPath = path.resolve(
   process.cwd(),
   isWebpack
-    ? (isDevelopment ? "public/react-client-manifest.json" : "dist3/react-client-manifest.json")
-    : "react_client_manifest/react-client-manifest.json"
+    ? (isDevelopment ? ".dinou/public/react-client-manifest.json" : ".dinou/dist3/react-client-manifest.json")
+    : ".dinou/react_client_manifest/react-client-manifest.json"
 );
 
 let cachedManifest = null;
@@ -189,7 +189,7 @@ function renderAppToHtml(
   );
 
   const query = JSON.parse(paramsString || "{}");
-  const rscPath = path.resolve(process.cwd(), "dist2", reqPath.replace(/^\//, ""), "rsc.rsc");
+  const rscPath = path.resolve(process.cwd(), ".dinou/dist2", reqPath.replace(/^\//, ""), "rsc.rsc");
   const hasStaticRsc = !isDynamic && fs.existsSync(rscPath);
 
   if (hasStaticRsc) {

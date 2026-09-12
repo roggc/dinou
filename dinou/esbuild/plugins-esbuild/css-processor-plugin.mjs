@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
 import resolve from "resolve";
 import createPostCSSExtractPlugin from "../plugins-postcss/postcss-extract-plugin.js";
 
-export default function cssProcessorPlugin({ outdir = "public" } = {}) {
+export default function cssProcessorPlugin({ outdir = ".dinou/public" } = {}) {
   const { finalize, plugin: extractor } = createPostCSSExtractPlugin({
     outputFile: `${outdir}/styles.css`,
   });
