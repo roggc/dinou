@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - **URL resolution for search params**: Fixed `useSearchParams` and `usePathname` to work correctly with URL hashes.
-- **Server Actions with FormData**: Fixed server actions to correctly handle FormData arguments, supporting formData in any positionin the args list.
+- **Server Actions with FormData**: Fixed server actions to correctly handle FormData arguments, supporting formData in any position in the args list.
 
 ## [5.1.2] - 2026-07-12
 
