@@ -126,7 +126,7 @@ export function usePathname() {
     return "";
   }
 
-  const path = fullRoute.split("?")[0];
+  const path = fullRoute.split("#")[0].split("?")[0];
   return normalizePath(path);
 }
 
@@ -165,6 +165,6 @@ export function useSearchParams() {
 
   if (typeof fullRoute !== "string") return new URLSearchParams();
 
-  const searchPart = fullRoute.split("?")[1] || "";
+  const searchPart = (fullRoute.split("?")[1] || "").split("#")[0];
   return new URLSearchParams(searchPart);
 }
