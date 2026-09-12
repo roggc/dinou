@@ -1280,7 +1280,12 @@ app.post("/____server_function____", async (req, res) => {
       const formData = new FormData();
 
       for (const key in req.body) {
-        if (key === "__dinou_func_id" || key === "__dinou_args") continue;
+        if (
+          key === "__dinou_func_id" ||
+          key === "__dinou_args" ||
+          key === "__dinou_formData_index"
+        )
+          continue;
         formData.append(key, req.body[key]);
       }
 
@@ -1291,15 +1296,22 @@ app.post("/____server_function____", async (req, res) => {
         }
       }
 
-      args = [formData];
-
       if (req.body.__dinou_args) {
         try {
-          const extraArgs = JSON.parse(req.body.__dinou_args);
-          args.push(...extraArgs);
+          const parsedArgs = JSON.parse(req.body.__dinou_args);
+          if (req.body.__dinou_formData_index !== undefined) {
+            const formDataIndex = parseInt(req.body.__dinou_formData_index, 10);
+            parsedArgs[formDataIndex] = formData;
+            args = parsedArgs;
+          } else {
+            args = [formData, ...parsedArgs];
+          }
         } catch (e) {
-          console.error("Error parsing extra args in multipart request");
+          console.error("Error parsing extra args in multipart request", e);
+          args = [formData];
         }
+      } else {
+        args = [formData];
       }
     } else {
       id = req.body.id;

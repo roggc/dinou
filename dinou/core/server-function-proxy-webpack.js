@@ -22,13 +22,17 @@ function createServerFunctionProxy(id) {
         "x-server-function-call": "1",
       };
 
-      if (args[0] instanceof FormData) {
-        const formData = args[0];
+      const formDataIndex = args.findIndex((arg) => arg instanceof FormData);
+
+      if (formDataIndex !== -1) {
+        const formData = args[formDataIndex];
 
         formData.append("__dinou_func_id", id);
+        formData.append("__dinou_formData_index", String(formDataIndex));
 
         if (args.length > 1) {
-          formData.append("__dinou_args", JSON.stringify(args.slice(1)));
+          const serializedArgs = args.map((arg, i) => (i === formDataIndex ? null : arg));
+          formData.append("__dinou_args", JSON.stringify(serializedArgs));
         }
 
         body = formData;
