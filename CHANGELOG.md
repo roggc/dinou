@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [6.0.1] - 2026-09-14
+
+### Fixed
+- **ESM Loader Module Harmonization (Dev Mode)**: Fixed module instance bifurcation in Node.js by synchronizing URL resolution between static ESM imports (`babel-esm-loader.js`) and dynamic Server Function imports (`import-module.js`) using consistent `?mtime` cache-busting. Server Functions and SSR now share the exact same in-memory module instances and state across page reloads without requiring `globalThis` or disk persistence.
+- **Loader Query Param Sanitization**: Stripped query parameters from `parentURL` and `specifier` in `get-abs-path-with-ext.js` to prevent path resolution and extension lookup issues on relative imports decorated with `?mtime`.
+- **Asset & CSS Loader Safe Resolution**: Ensured asset and CSS hooks in `babel-esm-loader.js` strip query strings before calling `fileURLToPath` and Node's `require()`.
+- **Loader Return URL Consistency**: Updated `babel-esm-loader.js` `load` hooks to preserve the incoming resolved module URL across all code paths, avoiding cache mismatches in Node's module graph.
+
 ## [6.0.0] - 2026-09-13
 
 ### Changed

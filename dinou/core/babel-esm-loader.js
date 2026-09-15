@@ -41,10 +41,22 @@ Module._resolveFilename = function (request, parent, isMain, options) {
 
 require("./css-require-hook.js")();
 
+function getMtimeParam(absPath) {
+  try {
+    const stats = fs.statSync(absPath);
+    return Math.round(stats.mtimeMs);
+  } catch (e) {
+    return Date.now();
+  }
+}
+
 exports.resolve = async function resolve(specifier, context, defaultResolve) {
   const absPathWithExt = getAbsPathWithExt(specifier, context);
   if (absPathWithExt) {
-    const url = pathToFileURL(absPathWithExt).href;
+    let url = pathToFileURL(absPathWithExt).href;
+    if (process.env.NODE_ENV !== "production") {
+      url += `?mtime=${getMtimeParam(absPathWithExt)}`;
+    }
 
     return {
       url,
@@ -63,7 +75,7 @@ exports.load = async function load(url, context, defaultLoad) {
 
   if (assetExts.includes(ext)) {
     // Return a tiny stub that mimics what asset-require-hook would do
-    const filepath = fileURLToPath(url);
+    const filepath = fileURLToPath(url.split("?")[0]);
     const localName = path.basename(filepath, ext);
     const hashedName = createScopedName(localName, filepath);
     const virtualExport = `export default "/assets/${hashedName}${ext}";`;
@@ -77,7 +89,7 @@ exports.load = async function load(url, context, defaultLoad) {
   }
 
   if (ext === ".css") {
-    const mod = require(fileURLToPath(url));
+    const mod = require(fileURLToPath(url.split("?")[0]));
     const source = `export default ${JSON.stringify(mod)};`;
     return { format: "module", source, shortCircuit: true, url };
   }
@@ -145,7 +157,7 @@ exports.load = async function load(url, context, defaultLoad) {
         format: "module",
         source: newSrc,
         shortCircuit: true,
-        url: urlToReturn,
+        url,
       };
     }
 
@@ -187,7 +199,7 @@ exports.load = async function load(url, context, defaultLoad) {
         format: "module",
         source: newSrc,
         shortCircuit: true,
-        url: urlToReturn,
+        url,
       };
     }
 
@@ -216,7 +228,7 @@ exports.load = async function load(url, context, defaultLoad) {
       format: "module",
       source: code,
       shortCircuit: true,
-      url: urlToReturn,
+      url,
     };
   }
 

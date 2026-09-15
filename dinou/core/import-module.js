@@ -1,6 +1,16 @@
 const { pathToFileURL } = require("url");
 const path = require("path");
+const fs = require("fs");
 const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
+
+function getMtimeParam(absPath) {
+  try {
+    const stats = fs.statSync(absPath);
+    return Math.round(stats.mtimeMs);
+  } catch (e) {
+    return Date.now();
+  }
+}
 
 async function importModule(modulePath) {
   const absPath = path.isAbsolute(modulePath)
@@ -10,7 +20,7 @@ async function importModule(modulePath) {
   if (!isWebpack) {
     let fileUrl = pathToFileURL(absPath).href;
     if (process.env.NODE_ENV !== "production") {
-      fileUrl += `?t=${Date.now()}`;
+      fileUrl += `?mtime=${getMtimeParam(absPath)}`;
     }
     const mod = await import(fileUrl);
     return mod;
@@ -31,7 +41,7 @@ async function importModule(modulePath) {
     ) {
       let fileUrl = pathToFileURL(absPath).href;
       if (process.env.NODE_ENV !== "production") {
-        fileUrl += `?t=${Date.now()}`;
+        fileUrl += `?mtime=${getMtimeParam(absPath)}`;
       }
       const mod = await import(fileUrl);
       return mod;

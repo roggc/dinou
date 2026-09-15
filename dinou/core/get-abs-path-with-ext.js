@@ -78,22 +78,26 @@ function tryExtensions(filePath) {
 }
 
 exports.getAbsPathWithExt = function getAbsPathWithExt(specifier, context) {
+  const cleanSpecifier = specifier ? specifier.split("?")[0] : specifier;
+  if (!cleanSpecifier) return null;
+
   if (aliasMap.size > 0) {
     for (const [alias, info] of aliasMap.entries()) {
-      if (specifier.startsWith(alias)) {
+      if (cleanSpecifier.startsWith(alias)) {
         const absPath = path.resolve(
           info.resolvedTargetBase,
-          specifier.slice(alias.length)
+          cleanSpecifier.slice(alias.length)
         );
         return tryExtensions(absPath);
       }
     }
   }
 
-  if (specifier.startsWith("./") || specifier.startsWith("../")) {
-    const parentURL = context.parentURL || pathToFileURL(process.cwd()).href;
-    const parentDir = path.dirname(fileURLToPath(parentURL));
-    const absPath = path.resolve(parentDir, specifier);
+  if (cleanSpecifier.startsWith("./") || cleanSpecifier.startsWith("../")) {
+    const parentURL = context?.parentURL || pathToFileURL(process.cwd()).href;
+    const cleanParentURL = parentURL.split("?")[0];
+    const parentDir = path.dirname(fileURLToPath(cleanParentURL));
+    const absPath = path.resolve(parentDir, cleanSpecifier);
     return tryExtensions(absPath);
   }
 
