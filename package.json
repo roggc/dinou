@@ -10,6 +10,14 @@
     ".": {
       "import": "./dinou/index.mjs",
       "require": "./dinou/index.js"
+    },
+    "./env": {
+      "types": "./dinou/env.d.ts"
+    },
+    "./server": {
+      "types": "./dinou/server.d.ts",
+      "import": "./dinou/server.mjs",
+      "require": "./dinou/server.js"
     }
   },
   "types": "./dinou/index.d.ts",
