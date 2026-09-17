@@ -1,6 +1,6 @@
 {
   "name": "dinou",
-  "version": "6.0.1",
+  "version": "6.1.0",
   "description": "Lightweight-Ejectable Full-Stack React 19 Framework with support for React Server Components (RSC), Server Functions, Server-Side Rendering (SSR), Static Generation (SSG), Incremental Static Generation (ISG), and Incremental Static Regeneration (ISR)",
   "main": "index.js",
   "bin": {
@@ -10,6 +10,14 @@
     ".": {
       "import": "./dinou/index.mjs",
       "require": "./dinou/index.js"
+    },
+    "./env": {
+      "types": "./dinou/env.d.ts"
+    },
+    "./server": {
+      "types": "./dinou/server.d.ts",
+      "import": "./dinou/server.mjs",
+      "require": "./dinou/server.js"
     }
   },
   "types": "./dinou/index.d.ts",

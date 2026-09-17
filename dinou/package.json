@@ -1,12 +1,15 @@
 {
   "name": "dinou-ejected",
-  "version": "6.0.1",
+  "version": "6.1.0",
   "main": "index.js",
   "private": true,
   "exports": {
     ".": {
       "import": "./index.mjs",
       "require": "./index.js"
+    },
+    "./env": {
+      "types": "./env.d.ts"
     },
     "./server": {
       "types": "./server.d.ts",

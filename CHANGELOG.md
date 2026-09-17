@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [6.1.0] - 2026-09-18
+
+### Added
+- **Ambient types export**: Added `./env` subpath export for built-in asset and CSS module type declarations via `dinou-env.d.ts` (supporting both Server and Client Components without cluttering `src/`).
+
+### Fixed
+- **Package exports**: Added missing `./server` export mapping in root `package.json`, fixing TypeScript resolution for non-ejected installations.
+
 ## [6.0.1] - 2026-09-14
 
 ### Fixed
