@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [6.1.1] - 2026-09-19
+
+### Bug Fixes
+- **TypeScript exports**: Added missing `"types"` condition to the root `"."` export mapping in `package.json`, fixing module declaration resolution under `"moduleResolution": "bundler"`.
+
 ## [6.1.0] - 2026-09-18
 
 ### Added

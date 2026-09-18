@@ -8,6 +8,7 @@
   },
   "exports": {
     ".": {
+      "types": "./dinou/index.d.ts",
       "import": "./dinou/index.mjs",
       "require": "./dinou/index.js"
     },
