@@ -87,6 +87,46 @@ try {
       outdir,
     })
   );
+
+  // 🚀 Server & Adapter Pre-bundling with react-server condition
+  console.log("[esbuild] Pre-bundling server handler and adapters with conditions: ['react-server']...");
+  await esbuild.build({
+    entryPoints: {
+      handler: path.resolve(__dirname, "../core/handler.js"),
+      netlify: path.resolve(__dirname, "../adapters/netlify.js"),
+    },
+    bundle: true,
+    platform: "node",
+    target: "node20",
+    format: "esm",
+    conditions: ["react-server", "node", "import"],
+    outdir: ".dinou/dist3/server",
+    external: [
+      "express",
+      "chokidar",
+      "dotenv",
+      "fsevents",
+      "@swc/core",
+      "@babel/core",
+      "esbuild",
+    ],
+    banner: {
+      js: "import { createRequire as ___createRequire } from 'node:module'; import { fileURLToPath as ___fileURLToPath } from 'node:url'; import ___path from 'node:path'; const require = ___createRequire(import.meta.url || ___path.resolve(process.cwd(), 'package.json')); const __filename = import.meta.url ? ___fileURLToPath(import.meta.url) : ___path.resolve(process.cwd(), 'index.js'); const __dirname = ___path.dirname(__filename); process.env.NODE_ENV = process.env.NODE_ENV || 'production';",
+    },
+    sourcemap: true,
+  });
+  await fs.writeFile(
+    path.resolve(process.cwd(), ".dinou/dist3/server/package.json"),
+    JSON.stringify({ type: "module" }, null, 2)
+  );
+  console.log("[esbuild] Server bundles created at .dinou/dist3/server/");
+
+  // 🏗️ Pre-render static pages (SSG) at build time
+  const { execSync } = await import("node:child_process");
+  execSync(`"${process.execPath}" "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
+    stdio: "inherit",
+    env: { ...process.env, NODE_ENV: "production" },
+  });
 } catch (err) {
   console.error("Error in build:", err);
 }

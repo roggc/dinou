@@ -16,7 +16,11 @@
       "types": "./server.d.ts",
       "import": "./server.mjs",
       "require": "./server.js"
-    }
+    },
+    "./adapters/bun": "./adapters/bun.js",
+    "./adapters/deno": "./adapters/deno.js",
+    "./adapters/cloudflare": "./adapters/cloudflare.js",
+    "./adapters/netlify": "./adapters/netlify.js"
   },
   "types": "./index.d.ts",
   "scripts": {

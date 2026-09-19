@@ -172,14 +172,26 @@ async function getJSX(
       )[0];
       const Layout = layoutModule.default ?? layoutModule;
       const updatedSlots = {};
-      for (const [slotName, slotElement] of Object.entries(slots)) {
+      for (const [slotName, slotValue] of Object.entries(slots)) {
         let updatedSlotElement;
+        const slotFilePath = slotValue?.slotPath || slotValue?.props?.__modulePath;
+        const slotParams = slotValue?.slotParams || slotValue?.props?.params || {};
         try {
-          await asyncRenderJSXToClientJSX(slotElement);
-          updatedSlotElement = slotElement;
+          let elementToRender;
+          if (slotValue && slotValue.slotPath) {
+            const slotModule = await importModule(slotValue.slotPath);
+            const Slot = slotModule.default ?? slotModule;
+            elementToRender = React.createElement(Slot, {
+              params: slotParams,
+              key: slotName,
+              __modulePath: slotValue.slotPath,
+            });
+          } else {
+            elementToRender = slotValue;
+          }
+          await asyncRenderJSXToClientJSX(elementToRender);
+          updatedSlotElement = elementToRender;
         } catch (e) {
-          const slotFilePath = slotElement.props?.__modulePath;
-
           if (slotFilePath) {
             const realSlotFolder = path.dirname(slotFilePath);
 

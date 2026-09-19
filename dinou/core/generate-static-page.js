@@ -91,6 +91,7 @@ async function generateStaticPage(reqPath) {
       await fs.writeFile(
         metadataPath,
         JSON.stringify({
+          status: capturedStatus.value || 200,
           revalidate: metadata.revalidate,
           generatedAt: Date.now(),
           effects: metadata.effects,

@@ -14,27 +14,38 @@ const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 
 let reactServerPath, reactDomServerPath, reactJsxRuntimePath, reactJsxDevRuntimePath;
 
-if (!isWebpack) {
-  const reactPkgJson = require.resolve("react/package.json");
-  reactServerPath = path.join(path.dirname(reactPkgJson), "react.react-server.js");
-  reactJsxRuntimePath = path.join(path.dirname(reactPkgJson), "jsx-runtime.react-server.js");
-  reactJsxDevRuntimePath = path.join(path.dirname(reactPkgJson), "jsx-dev-runtime.react-server.js");
+const reactPkgJson = require.resolve("react/package.json");
+reactServerPath = path.join(path.dirname(reactPkgJson), "react.react-server.js");
+reactJsxRuntimePath = path.join(path.dirname(reactPkgJson), "jsx-runtime.react-server.js");
+reactJsxDevRuntimePath = path.join(path.dirname(reactPkgJson), "jsx-dev-runtime.react-server.js");
 
-  const reactDomPkgJson = require.resolve("react-dom/package.json");
-  reactDomServerPath = path.join(path.dirname(reactDomPkgJson), "react-dom.react-server.js");
-}
+const reactDomPkgJson = require.resolve("react-dom/package.json");
+reactDomServerPath = path.join(path.dirname(reactDomPkgJson), "react-dom.react-server.js");
+
+let roggcServerNodePath, webpackServerNodePath;
+try {
+  const roggcPkg = require.resolve("@roggc/react-server-dom-esm/package.json");
+  roggcServerNodePath = path.join(path.dirname(roggcPkg), "server.node.js");
+} catch (e) {}
+
+try {
+  const wpPkg = require.resolve("react-server-dom-webpack/package.json");
+  webpackServerNodePath = path.join(path.dirname(wpPkg), "server.node.js");
+} catch (e) {}
 
 Module._resolveFilename = function (request, parent, isMain, options) {
-  if (!isWebpack) {
-    if (request === "react") {
-      return reactServerPath;
-    } else if (request === "react-dom") {
-      return reactDomServerPath;
-    } else if (request === "react/jsx-runtime") {
-      return reactJsxRuntimePath;
-    } else if (request === "react/jsx-dev-runtime") {
-      return reactJsxDevRuntimePath;
-    }
+  if (request === "react") {
+    return reactServerPath;
+  } else if (request === "react-dom") {
+    return reactDomServerPath;
+  } else if (request === "react/jsx-runtime") {
+    return reactJsxRuntimePath;
+  } else if (request === "react/jsx-dev-runtime") {
+    return reactJsxDevRuntimePath;
+  } else if (request === "@roggc/react-server-dom-esm/server" && roggcServerNodePath) {
+    return roggcServerNodePath;
+  } else if (request === "react-server-dom-webpack/server" && webpackServerNodePath) {
+    return webpackServerNodePath;
   }
   return originalResolveFilename.call(this, request, parent, isMain, options);
 };
@@ -51,6 +62,27 @@ function getMtimeParam(absPath) {
 }
 
 exports.resolve = async function resolve(specifier, context, defaultResolve) {
+  if (process.env.DINOU_PROCESS !== "ssr-html") {
+    if (specifier === "react") {
+      return { url: pathToFileURL(reactServerPath).href, shortCircuit: true };
+    }
+    if (specifier === "react/jsx-runtime") {
+      return { url: pathToFileURL(reactJsxRuntimePath).href, shortCircuit: true };
+    }
+    if (specifier === "react/jsx-dev-runtime") {
+      return { url: pathToFileURL(reactJsxDevRuntimePath).href, shortCircuit: true };
+    }
+    if (specifier === "react-dom") {
+      return { url: pathToFileURL(reactDomServerPath).href, shortCircuit: true };
+    }
+    if (specifier === "@roggc/react-server-dom-esm/server" && roggcServerNodePath) {
+      return { url: pathToFileURL(roggcServerNodePath).href, shortCircuit: true };
+    }
+    if (specifier === "react-server-dom-webpack/server" && webpackServerNodePath) {
+      return { url: pathToFileURL(webpackServerNodePath).href, shortCircuit: true };
+    }
+  }
+
   const absPathWithExt = getAbsPathWithExt(specifier, context);
   if (absPathWithExt) {
     let url = pathToFileURL(absPathWithExt).href;
@@ -122,20 +154,17 @@ exports.load = async function load(url, context, defaultLoad) {
       return defaultLoad(url, context, defaultLoad);
     }
 
-    const isReactServer = process.execArgv.some(arg => arg.includes("react-server"));
+    const isReactServer = process.env.DINOU_PROCESS !== "ssr-html";
     if (isReactServer && hasUseClient) {
       const parseExports = require("./parse-exports.js");
       const exports = parseExports(source);
-      let newSrc = "";
-      if (isWebpack) {
-        newSrc += 'import { registerClientReference } from "react-server-dom-webpack/server";\n';
-      } else {
-        const packageJsonPath = require.resolve("@roggc/react-server-dom-esm/package.json");
-        const serverNodePath = path.join(path.dirname(packageJsonPath), "server.node.js");
-        const serverNodeUrl = pathToFileURL(serverNodePath).href;
-        newSrc += `import pkg from ${JSON.stringify(serverNodeUrl)};\n`;
-        newSrc += 'const {registerClientReference} = pkg;\n';
-      }
+      const clientPkgPath = isWebpack
+        ? require.resolve("react-server-dom-webpack/package.json")
+        : require.resolve("@roggc/react-server-dom-esm/package.json");
+      const clientServerNodePath = path.join(path.dirname(clientPkgPath), "server.node.js");
+      const clientServerNodeUrl = pathToFileURL(clientServerNodePath).href;
+      let newSrc = `import pkg from ${JSON.stringify(clientServerNodeUrl)};\n`;
+      newSrc += 'const {registerClientReference} = pkg;\n';
       for (const name of exports) {
         if (name === 'default') {
           newSrc += 'export default ';
@@ -180,13 +209,13 @@ exports.load = async function load(url, context, defaultLoad) {
 
       let newSrc = code + "\n\n";
 
-      if (!isWebpack) {
-        const packageJsonPath = require.resolve("@roggc/react-server-dom-esm/package.json");
-        const serverNodePath = path.join(path.dirname(packageJsonPath), "server.node.js");
-        const serverNodeUrl = pathToFileURL(serverNodePath).href;
-        newSrc += `import pkgServer from ${JSON.stringify(serverNodeUrl)};\n`;
-        newSrc += 'const {registerServerReference} = pkgServer;\n';
-      }
+      const serverPkgPath = isWebpack
+        ? require.resolve("react-server-dom-webpack/package.json")
+        : require.resolve("@roggc/react-server-dom-esm/package.json");
+      const serverNodePath = path.join(path.dirname(serverPkgPath), "server.node.js");
+      const serverNodeUrl = pathToFileURL(serverNodePath).href;
+      newSrc += `import pkgServer from ${JSON.stringify(serverNodeUrl)};\n`;
+      newSrc += 'const {registerServerReference} = pkgServer;\n';
 
       const relativeFileUrl = "file:///" + rel.replace(/\\/g, "/");
       for (const name of exports) {

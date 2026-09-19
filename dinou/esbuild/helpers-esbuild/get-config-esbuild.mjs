@@ -27,10 +27,11 @@ export default function getConfigEsbuild({
     esmHmrPlugin({ entryNames: ["main", "error"], changedIds, hmrEngine }),
   ];
 
-  if (existsSync("favicons")) {
+  const staticDir = existsSync("public") ? "public" : (existsSync("favicons") ? "favicons" : null);
+  if (staticDir) {
     plugins = [
       copyStaticFiles({
-        src: "favicons",
+        src: staticDir,
         dest: outdir,
       }),
       ...plugins,

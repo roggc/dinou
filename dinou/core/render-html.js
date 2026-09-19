@@ -15,6 +15,7 @@ global.__webpack_chunk_load__ = function (chunkId) {
 require("./register-paths");
 const babelRegister = require("@babel/register");
 babelRegister({
+  cache: false,
   ignore: [/node_modules[\\/](?!dinou)/],
   presets: [
     ["@babel/preset-react", { runtime: "automatic" }],
@@ -166,6 +167,21 @@ function getImportMapHtml() {
         specifier = specifier.slice(0, hashIdx);
       }
       imports[specifier] = val.id;
+
+      const srcIdx = key.indexOf("/src/");
+      if (srcIdx !== -1) {
+        const srcRel = "src/" + key.slice(srcIdx + 5).split("#")[0];
+        imports[srcRel] = val.id;
+        imports["/" + srcRel] = val.id;
+        imports["./" + srcRel] = val.id;
+      }
+      const dinouIdx = key.indexOf("/dinou/");
+      if (dinouIdx !== -1) {
+        const dinouRel = "dinou/" + key.slice(dinouIdx + 7).split("#")[0];
+        imports[dinouRel] = val.id;
+        imports["/" + dinouRel] = val.id;
+        imports["./" + dinouRel] = val.id;
+      }
     }
 
     return `<script type="importmap">{"imports":${JSON.stringify(imports)}}</script><script>(function(){const map=document.querySelector('script[type="importmap"]');if(map)map.remove();if(document.currentScript)document.currentScript.remove();})();</script>`;
@@ -211,7 +227,12 @@ function getSsrManifest() {
       cachedRequireMap = requireMap;
 
       if (ssrManifest.moduleMap) {
+        const extraEntries = {};
         for (const [modId, exports] of Object.entries(ssrManifest.moduleMap)) {
+          const altId = modId.startsWith("./") ? modId.slice(2) : "./" + modId;
+          if (!ssrManifest.moduleMap[altId]) {
+            extraEntries[altId] = exports;
+          }
           for (const [expName, expData] of Object.entries(exports)) {
             if (expData && expData.specifier) {
               const clientEntry = clientManifest[expData.specifier];
@@ -222,6 +243,7 @@ function getSsrManifest() {
             }
           }
         }
+        Object.assign(ssrManifest.moduleMap, extraEntries);
       }
     }
 

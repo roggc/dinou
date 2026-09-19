@@ -65,7 +65,29 @@ module.exports = async () => {
   // 🔥 CLEAN HARD
   cleanDir(outputDir);
   const [cssEntries] = await getCSSEntries();
-  return {
+
+  let clientDone = false;
+  let serverDone = false;
+  let ssgExecuted = false;
+
+  function runPostBuild() {
+    if (clientDone && serverDone && !ssgExecuted) {
+      ssgExecuted = true;
+      const fs = require("fs");
+      const serverDir = path.resolve(process.cwd(), ".dinou/dist3/server");
+      fs.mkdirSync(serverDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(serverDir, "package.json"),
+        JSON.stringify({ type: "module" }, null, 2)
+      );
+      const { execSync } = require("child_process");
+      execSync(`"${process.execPath}" "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
+        stdio: "inherit",
+        env: { ...process.env, NODE_ENV: "production", DINOU_BUILD_TOOL: "webpack" },
+      });
+    }
+  }
+  const clientConfig = {
     performance: {
       hints: isDevelopment ? false : "warning",
       maxEntrypointSize: 512000,
@@ -104,7 +126,7 @@ module.exports = async () => {
       path: path.resolve(process.cwd(), outputDirectory),
       filename: "[name]-[contenthash].js",
       publicPath: "/",
-      clean: true,
+      clean: isDevelopment,
       library: {
         type: "module",
       },
@@ -117,7 +139,7 @@ module.exports = async () => {
       rules: [
         {
           test: /\.[jt]sx?$/,
-          exclude: [/node_modules\/(?!dinou)/, ...outputDirs],
+          exclude: [/[\\/]node_modules[\\/](?!dinou)/, ...outputDirs],
           use: [
             {
               loader: "babel-loader",
@@ -206,6 +228,11 @@ module.exports = async () => {
       new CopyWebpackPlugin({
         patterns: [
           {
+            from: "public",
+            to: ".",
+            noErrorOnMissing: true,
+          },
+          {
             from: "favicons",
             to: ".",
             noErrorOnMissing: true,
@@ -226,6 +253,14 @@ module.exports = async () => {
       new ServerFunctionsPlugin({
         manifest: manifestGeneratorPlugin.manifestData,
       }),
+      !isDevelopment && {
+        apply(compiler) {
+          compiler.hooks.done.tap("PostBuildClient", () => {
+            clientDone = true;
+            runPostBuild();
+          });
+        },
+      },
     ].filter(Boolean),
     resolve: {
       extensions: [".js", ".jsx", ".ts", ".tsx"],
@@ -237,6 +272,10 @@ module.exports = async () => {
       // 🎯 ADD THIS:
       alias: {
         ...(isEjected ? { dinou: localDinouPath } : {}),
+      },
+      fallback: {
+        async_hooks: false,
+        "node:async_hooks": false,
       },
       plugins: configFile
         ? [
@@ -309,4 +348,67 @@ module.exports = async () => {
       }
       : {}),
   };
+
+  if (isDevelopment) {
+    return clientConfig;
+  }
+
+  const serverConfig = {
+    mode: "production",
+    target: "node20",
+    experiments: {
+      outputModule: true,
+    },
+    entry: {
+      handler: path.resolve(__dirname, "../core/handler.js"),
+      netlify: path.resolve(__dirname, "../adapters/netlify.js"),
+    },
+    output: {
+      path: path.resolve(process.cwd(), outputDirectory, "server"),
+      filename: "[name].js",
+      library: {
+        type: "module",
+      },
+      chunkFormat: "module",
+    },
+    resolve: {
+      conditionNames: ["react-server", "node", "import", "require"],
+      extensions: [".js", ".jsx", ".ts", ".tsx"],
+      alias: {
+        ...(isEjected ? { dinou: localDinouPath } : {}),
+      },
+    },
+    externals: [
+      "express",
+      "chokidar",
+      "dotenv",
+      "fsevents",
+      "@swc/core",
+      "@babel/core",
+      "esbuild",
+    ],
+    module: {
+      exprContextCritical: false,
+    },
+    ignoreWarnings: [
+      /Critical dependency/,
+    ],
+    plugins: [
+      new webpack.BannerPlugin({
+        banner: "import { createRequire as ___createRequire } from 'node:module'; import { fileURLToPath as ___fileURLToPath } from 'node:url'; import ___path from 'node:path'; const require = ___createRequire(import.meta.url || ___path.resolve(process.cwd(), 'package.json')); globalThis.__dinou_require__ = require; const __filename = import.meta.url ? ___fileURLToPath(import.meta.url) : ___path.resolve(process.cwd(), 'index.js'); const __dirname = ___path.dirname(__filename); process.env.NODE_ENV = process.env.NODE_ENV || 'production';",
+        raw: true,
+        entryOnly: false,
+      }),
+      {
+        apply(compiler) {
+          compiler.hooks.done.tap("PostBuildServer", () => {
+            serverDone = true;
+            runPostBuild();
+          });
+        },
+      },
+    ],
+  };
+
+  return [clientConfig, serverConfig];
 };

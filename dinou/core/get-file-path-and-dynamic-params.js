@@ -1,6 +1,5 @@
 const path = require("path");
 const { existsSync, readdirSync } = require("./vfs");
-const React = require("react");
 
 function safeDecode(val) {
   try {
@@ -31,15 +30,11 @@ function getSlots(currentPath, reqSegments, query) {
       );
 
       if (slotPath) {
-        const slotModule = require(slotPath);
-        const Slot = slotModule.default ?? slotModule;
         const slotName = entry.name.slice(1);
-
-        slots[slotName] = React.createElement(Slot, {
-          params: slotParams,
-          key: slotName,
-          __modulePath: slotPath ?? null,
-        });
+        slots[slotName] = {
+          slotPath,
+          slotParams,
+        };
       }
     } else if (entry.name.startsWith("(") && entry.name.endsWith(")")) {
       const groupPath = path.join(currentPath, entry.name);

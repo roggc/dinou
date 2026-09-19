@@ -7,3 +7,14 @@ export async function revalidateTag(tag) {
   const { revalidateTag: fn } = await import("./core/cache-revalidate.js");
   return fn(tag);
 }
+
+export {
+  StorageAdapter,
+  FileSystemStorage,
+  CloudflareKVStorage,
+  DenoKVStorage,
+  MemoryStorage,
+  RedisStorage,
+  getStorageAdapter,
+  setStorageAdapter,
+} from "./core/storage-adapter.js";

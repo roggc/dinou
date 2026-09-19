@@ -104,6 +104,7 @@ async function generateStaticPages(routes) {
         await fs.writeFile(
           metadataPath,
           JSON.stringify({
+            status: capturedStatus.value || 200,
             revalidate: metadata.revalidate,
             generatedAt: Date.now(),
             effects: metadata.effects,

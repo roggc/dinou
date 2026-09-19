@@ -1,7 +1,6 @@
 const { pathToFileURL } = require("url");
 const path = require("path");
 const fs = require("fs");
-const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 
 function getMtimeParam(absPath) {
   try {
@@ -12,42 +11,64 @@ function getMtimeParam(absPath) {
   }
 }
 
+function normalizeKey(p) {
+  if (!p) return "";
+  let s = String(p).replace(/\\/g, "/");
+  s = s.replace(/^file:\/\/\/?/, "");
+  const cwd = typeof process !== "undefined" && typeof process.cwd === "function"
+    ? process.cwd().replace(/\\/g, "/")
+    : "";
+  if (cwd && s.startsWith(cwd)) {
+    s = s.slice(cwd.length);
+  }
+  s = s.replace(/^\/+/, "").replace(/^\.\//, "");
+  return s;
+}
+
 async function importModule(modulePath) {
+  const registry = typeof globalThis !== "undefined" ? globalThis.__DINOU_ROUTE_MODULES__ : null;
+  if (registry) {
+    const key = normalizeKey(modulePath);
+    if (registry[key]) {
+      const loader = registry[key];
+      return typeof loader === "function" ? await loader() : loader;
+    }
+    // Also try with or without extensions / leading src/
+    const alternateKeys = [
+      key,
+      key.startsWith("src/") ? key.slice(4) : "src/" + key,
+      key.replace(/\.[jt]sx?$/, ""),
+    ];
+    for (const alt of alternateKeys) {
+      if (registry[alt]) {
+        const loader = registry[alt];
+        return typeof loader === "function" ? await loader() : loader;
+      }
+    }
+  }
+
   const absPath = path.isAbsolute(modulePath)
     ? modulePath
     : path.resolve(process.cwd(), modulePath);
 
-  if (!isWebpack) {
-    let fileUrl = pathToFileURL(absPath).href;
-    if (process.env.NODE_ENV !== "production") {
-      fileUrl += `?mtime=${getMtimeParam(absPath)}`;
-    }
-    const mod = await import(fileUrl);
-    return mod;
+  let fileUrl = pathToFileURL(absPath).href;
+  if (process.env.NODE_ENV !== "production") {
+    fileUrl += `?mtime=${getMtimeParam(absPath)}`;
   }
 
-  try {
-    if (process.env.NODE_ENV !== "production") {
-      try {
-        const resolved = require.resolve(absPath);
-        delete require.cache[resolved];
-      } catch (e) {}
-    }
-    return require(absPath);
-  } catch (err) {
-    if (
-      err.code === "ERR_REQUIRE_ESM" ||
-      /require\(\) of ES Module/.test(err.message)
-    ) {
-      let fileUrl = pathToFileURL(absPath).href;
-      if (process.env.NODE_ENV !== "production") {
-        fileUrl += `?mtime=${getMtimeParam(absPath)}`;
-      }
-      const mod = await import(fileUrl);
-      return mod;
-    }
-    throw err;
+  const mod = await import(/* webpackIgnore: true */ fileUrl);
+  return mod;
+}
+
+function registerRouteModules(modulesMap) {
+  if (typeof globalThis !== "undefined") {
+    globalThis.__DINOU_ROUTE_MODULES__ = {
+      ...(globalThis.__DINOU_ROUTE_MODULES__ || {}),
+      ...modulesMap,
+    };
   }
 }
+
+importModule.register = registerRouteModules;
 
 module.exports = importModule;

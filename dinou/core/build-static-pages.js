@@ -902,19 +902,30 @@ async function buildStaticPages() {
                 false,
               )[0];
               const updatedSlots = {};
-              for (const [slotName, slotElement] of Object.entries(slots)) {
-                const alreadyFoundPath = slotElement.props?.__modulePath;
-                const slotElementWithModule = {
-                  ...slotElement,
-                  __modulePath: alreadyFoundPath ?? null,
-                };
-
+              for (const [slotName, slotValue] of Object.entries(slots)) {
                 let updatedSlotElement;
+                const slotFilePath = slotValue?.slotPath || slotValue?.props?.__modulePath;
+                const slotParams = slotValue?.slotParams || slotValue?.props?.params || {};
+
                 try {
-                  await asyncRenderJSXToClientJSX(slotElementWithModule);
-                  updatedSlotElement = slotElementWithModule;
+                  let elementToRender;
+                  if (slotValue && slotValue.slotPath) {
+                    const slotModule = await importModule(slotValue.slotPath);
+                    const Slot = slotModule.default ?? slotModule;
+                    elementToRender = React.createElement(Slot, {
+                      params: slotParams,
+                      key: slotName,
+                      __modulePath: slotValue.slotPath,
+                    });
+                  } else {
+                    elementToRender = {
+                      ...slotValue,
+                      __modulePath: slotFilePath ?? null,
+                    };
+                  }
+                  await asyncRenderJSXToClientJSX(elementToRender);
+                  updatedSlotElement = elementToRender;
                 } catch (e) {
-                  const slotFilePath = alreadyFoundPath;
                   if (slotFilePath) {
                     const realSlotFolder = path.dirname(slotFilePath);
                     const [slotErrorPath, slotErrorParams] =
@@ -1233,19 +1244,30 @@ async function buildStaticPage(reqPath, isDynamic = null) {
               false,
             )[0];
             const updatedSlots = {};
-            for (const [slotName, slotElement] of Object.entries(slots)) {
-              const alreadyFoundPath = slotElement.props?.__modulePath;
-              const slotElementWithModule = {
-                ...slotElement,
-                __modulePath: alreadyFoundPath ?? null,
-              };
-
+            for (const [slotName, slotValue] of Object.entries(slots)) {
               let updatedSlotElement;
+              const slotFilePath = slotValue?.slotPath || slotValue?.props?.__modulePath;
+              const slotParams = slotValue?.slotParams || slotValue?.props?.params || {};
+
               try {
-                await asyncRenderJSXToClientJSX(slotElementWithModule);
-                updatedSlotElement = slotElementWithModule;
+                let elementToRender;
+                if (slotValue && slotValue.slotPath) {
+                  const slotModule = await importModule(slotValue.slotPath);
+                  const Slot = slotModule.default ?? slotModule;
+                  elementToRender = React.createElement(Slot, {
+                    params: slotParams,
+                    key: slotName,
+                    __modulePath: slotValue.slotPath,
+                  });
+                } else {
+                  elementToRender = {
+                    ...slotValue,
+                    __modulePath: slotFilePath ?? null,
+                  };
+                }
+                await asyncRenderJSXToClientJSX(elementToRender);
+                updatedSlotElement = elementToRender;
               } catch (e) {
-                const slotFilePath = alreadyFoundPath;
                 if (slotFilePath) {
                   const realSlotFolder = path.dirname(slotFilePath);
                   const [slotErrorPath, slotErrorParams] =

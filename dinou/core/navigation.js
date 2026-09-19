@@ -91,24 +91,16 @@ export function useRouter() {
   };
 }
 
+const DINOU_CONTEXT_KEY = Symbol.for("dinou.request.context.storage");
+
 export function usePathname() {
   // 🟢 1. SERVER LOGIC (SSR)
   if (typeof window === "undefined") {
     try {
-      const dynamicRequire =
-        typeof __dinou_require__ !== "undefined"
-          ? __dinou_require__
-          : typeof module !== "undefined" && typeof module.require === "function"
-            ? module.require.bind(module)
-            : null;
-      if (dynamicRequire) {
-        const { getContext } = dynamicRequire(
-          /* webpackIgnore: true */ "./request-context.js"
-        );
-        const ctx = getContext();
-        if (ctx && ctx.req) {
-          return normalizePath(ctx.req.path);
-        }
+      const storage = globalThis[DINOU_CONTEXT_KEY];
+      const ctx = storage && typeof storage.getStore === "function" ? storage.getStore() : null;
+      if (ctx && ctx.req) {
+        return normalizePath(ctx.req.path);
       }
     } catch (e) {
       console.log("error getContext usePathname", e);
@@ -134,25 +126,15 @@ export function useSearchParams() {
   // 🟢 1. SERVER LOGIC
   if (typeof window === "undefined") {
     try {
-      const dynamicRequire =
-        typeof __dinou_require__ !== "undefined"
-          ? __dinou_require__
-          : typeof module !== "undefined" && typeof module.require === "function"
-            ? module.require.bind(module)
-            : null;
-      if (dynamicRequire) {
-        const { getContext } = dynamicRequire(
-          /* webpackIgnore: true */ "./request-context.js"
-        );
-        const ctx = getContext();
-        if (ctx && ctx.req && ctx.req.query) {
-          const params = new URLSearchParams();
-          Object.entries(ctx.req.query).forEach(([key, val]) => {
-            if (Array.isArray(val)) val.forEach((v) => params.append(key, v));
-            else if (val) params.append(key, val);
-          });
-          return params;
-        }
+      const storage = globalThis[DINOU_CONTEXT_KEY];
+      const ctx = storage && typeof storage.getStore === "function" ? storage.getStore() : null;
+      if (ctx && ctx.req && ctx.req.query) {
+        const params = new URLSearchParams();
+        Object.entries(ctx.req.query).forEach(([key, val]) => {
+          if (Array.isArray(val)) val.forEach((v) => params.append(key, v));
+          else if (val) params.append(key, val);
+        });
+        return params;
       }
     } catch (e) { }
   }

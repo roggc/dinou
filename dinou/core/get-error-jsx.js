@@ -108,17 +108,28 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false) {
         const layoutModule = await importModule(layoutPath);
         const Layout = layoutModule.default ?? layoutModule;
         const updatedSlots = {};
-        for (const [slotName, slotElement] of Object.entries(slots)) {
+        for (const [slotName, slotValue] of Object.entries(slots)) {
           let updatedSlotElement;
+          const slotFilePath = slotValue?.slotPath || slotValue?.props?.__modulePath;
+          const slotParams = slotValue?.slotParams || slotValue?.props?.params || {};
           try {
-            await asyncRenderJSXToClientJSX(slotElement);
-            updatedSlotElement = slotElement;
+            let elementToRender;
+            if (slotValue && slotValue.slotPath) {
+              const slotModule = await importModule(slotValue.slotPath);
+              const Slot = slotModule.default ?? slotModule;
+              elementToRender = React.createElement(Slot, {
+                params: slotParams,
+                key: slotName,
+                __modulePath: slotValue.slotPath,
+              });
+            } else {
+              elementToRender = slotValue;
+            }
+            await asyncRenderJSXToClientJSX(elementToRender);
+            updatedSlotElement = elementToRender;
           } catch (e) {
             // 1. RECOVER THE REAL PATH
-            // We use the "hack" (metadata) that we inject in getSlots.
-            // This gives us the path to the file: .../src/(group)/@sidebar/page.tsx
-            const slotFilePath = slotElement.props?.__modulePath;
-
+            // Gives us the path to the file: .../src/(group)/@sidebar/page.tsx
             if (slotFilePath) {
               // 2. GET THE SLOT FOLDER
               // Remove the file name to stay with the directory:

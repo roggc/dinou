@@ -31,7 +31,7 @@ console.log(
 
 module.exports = async function () {
   const del = (await import("rollup-plugin-delete")).default;
-  return {
+  const clientConfig = {
     input: isDevelopment
       ? {
         runtime: path.resolve(
@@ -148,11 +148,15 @@ module.exports = async function () {
       }),
       copy({
         targets: [
-          {
+          fs.existsSync("public") && {
+            src: "public/*",
+            dest: outputDirectory,
+          },
+          fs.existsSync("favicons") && {
             src: "favicons/*",
             dest: outputDirectory,
           },
-        ],
+        ].filter(Boolean),
         flatten: true,
       }),
       reactClientManifest({
@@ -194,4 +198,70 @@ module.exports = async function () {
       warn(warning);
     },
   };
+
+  if (isDevelopment) {
+    return clientConfig;
+  }
+
+  const serverConfig = {
+    input: {
+      handler: path.resolve(__dirname, "../core/handler.js"),
+      netlify: path.resolve(__dirname, "../adapters/netlify.js"),
+    },
+    output: {
+      dir: path.resolve(outputDirectory, "server"),
+      format: "esm",
+      entryFileNames: "[name].js",
+      chunkFileNames: "[name]-[hash].js",
+      sourcemap: true,
+      banner: "import { createRequire as ___createRequire } from 'node:module'; import { fileURLToPath as ___fileURLToPath } from 'node:url'; import ___path from 'node:path'; const require = ___createRequire(import.meta.url || ___path.resolve(process.cwd(), 'package.json')); globalThis.__dinou_require__ = require; const __filename = import.meta.url ? ___fileURLToPath(import.meta.url) : ___path.resolve(process.cwd(), 'index.js'); const __dirname = ___path.dirname(__filename); process.env.NODE_ENV = process.env.NODE_ENV || 'production';",
+    },
+    external: [
+      "express",
+      "chokidar",
+      "dotenv",
+      "fsevents",
+      "@swc/core",
+      "@babel/core",
+      "esbuild",
+    ],
+    plugins: [
+      replace({
+        preventAssignment: true,
+        "process.env.NODE_ENV": JSON.stringify("production"),
+      }),
+      json(),
+      resolve({
+        exportConditions: ["react-server", "node", "import"],
+        preferBuiltins: true,
+        browser: false,
+      }),
+      commonjs({
+        ignoreDynamicRequires: true,
+      }),
+      {
+        name: "post-build-server",
+        closeBundle() {
+          const fs = require("fs");
+          fs.writeFileSync(
+            path.resolve(process.cwd(), ".dinou/dist3/server/package.json"),
+            JSON.stringify({ type: "module" }, null, 2)
+          );
+          const { execSync } = require("child_process");
+          execSync(`"${process.execPath}" "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
+            stdio: "inherit",
+            env: { ...process.env, NODE_ENV: "production" },
+          });
+        },
+      },
+    ],
+    onwarn(warning, warn) {
+      if (warning.code === "CIRCULAR_DEPENDENCY" || warning.code === "EVAL") {
+        return;
+      }
+      warn(warning);
+    },
+  };
+
+  return [clientConfig, serverConfig];
 };

@@ -12,14 +12,13 @@ const { resolveRelativeUrl } = require("./url-resolver");
 
 async function walkMetadataFiles(dir, fileList = []) {
   try {
-    const files = await fs.readdir(dir);
-    for (const file of files) {
-      const filePath = path.join(dir, file);
-      const stat = await fs.stat(filePath);
-      if (stat.isDirectory()) {
-        await walkMetadataFiles(filePath, fileList);
-      } else if (file === "metadata.json") {
-        fileList.push(filePath);
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walkMetadataFiles(entryPath, fileList);
+      } else if (entry.name === "metadata.json") {
+        fileList.push(entryPath);
       }
     }
   } catch (err) {
