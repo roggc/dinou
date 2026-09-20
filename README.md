@@ -34,11 +34,18 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [Error Handling (`error.jsx`)](#error-handling-errorjsx)
   - [Not Found (`not_found.jsx`)](#not-found-not_foundjsx)
   - [Advanced Layout Control (Flags)](#advanced-layout-control-flags)
-- [Data Fetching & Rendering](#data-fetching--rendering)
-  - [Server Components (Async Data)](#server-components-async-data)
-  - [Hybrid Rendering Engine](#hybrid-rendering-engine)
+- [Server and Client Components](#server-and-client-components)
+  - [Server Components (Default)](#server-components-default)
+  - [Client Components (`"use client"`)](#client-components-use-client)
+  - [Composition Patterns](#composition-patterns)
+- [Data Fetching](#data-fetching)
+  - [Async Data in Server Components](#async-data-in-server-components)
+  - [Streaming with `<Suspense>`](#streaming-with-suspense)
+- [Rendering Strategies](#rendering-strategies)
+  - [Zero-Config Hybrid Model](#zero-config-hybrid-model)
+  - [Static Site Generation (SSG at Build Time)](#static-site-generation-ssg-at-build-time)
   - [Incremental Static Regeneration (ISR)](#incremental-static-regeneration-isr)
-  - [Client Components](#client-components)
+  - [Incremental Static Generation (ISG)](#incremental-static-generation-isg)
 - [Server Functions (`"use server"`) & Suspense](#server-functions-use-server--suspense)
   - [Usage in Server Components (Streaming)](#usage-in-server-components-streaming)
   - [Usage in Client Components (Reactive)](#usage-in-client-components-reactive)
@@ -369,80 +376,204 @@ If you have a marketing page at `src/marketing/page.jsx` and you don't want it t
 2. Create an empty file named `reset_layout` inside `src/marketing/`.
 3. **Result:** `src/marketing/page.jsx` will only use the marketing layout, ignoring the global root layout.
 
-## Data Fetching & Rendering
+## Server and Client Components
 
-Dinou leverages React 19 Server Components to allow direct data access on the server without sending that logic to the client.
+Dinou is built natively on React 19 Server Components (RSC). Understanding the boundary between Server and Client Components is fundamental to building optimal full-stack applications.
 
-### Server Components (Async Data)
+### Server Components (Default)
 
-You can define a React Server Component by using an `async` function.
+By default, every page, layout, and component inside the `src/` directory is a **Server Component**.
+
+- **Zero Client Bundle Impact:** Server Components execute only on the server/edge. Their code, dependencies, and internal logic are never downloaded by the client browser.
+- **Direct Backend & Database Access:** You can directly query databases, access the filesystem, or communicate with private internal microservices using standard `async/await`.
+- **Security by Default:** Database credentials, secrets, and private tokens stay securely on the server without risk of leaking into client bundles.
+- **Progressive Streaming:** Output is streamed progressively to the client as standard HTML and React Flight RPC payloads.
 
 ```jsx
-// src/blog/page.jsx
+// src/page.jsx (Server Component by default)
 import db from "@/lib/db";
 
 export default async function Page() {
-  const posts = await db.query("SELECT * FROM posts");
-
-  return (
-    <ul>
-      {posts.map((post) => (
-        <li key={post.id}>{post.title}</li>
-      ))}
-    </ul>
-  );
+  const user = await db.users.findFirst();
+  return <h1>Welcome back, {user.name}!</h1>;
 }
 ```
 
-### Hybrid Rendering Engine
+### Client Components (`"use client"`)
 
-Dinou employs a **Zero-Config Hybrid Model**. You do not need to configure pages as "Static" or "Dynamic" manually. The framework decides at runtime:
+When a component needs browser APIs, React state, or user event listeners, declare it as a **Client Component** by placing the `"use client"` directive at the very top of the file (before any imports).
 
-1. **Static (SSG):** Pages are pre-rendered at start time by default.
-2. **Dynamic (SSR):** If a page utilizes request-specific APIs (Cookies, Headers, Search Params), it automatically opts out of static generation and renders on demand.
+- **Use cases:** React state and lifecycle hooks (`useState`, `useReducer`, `useEffect`), event handlers (`onClick`, `onChange`, `onSubmit`), browser APIs (`localStorage`, `window`, `navigator`), and Dinou client hooks (`useSearchParams`, `useRouter`, `useNavigationLoading`).
+- **SSR & Hydration:** Client Components are still pre-rendered on the server to fast initial HTML, and then hydrated with interactive JavaScript in the browser.
 
 ```jsx
-import { getContext } from "dinou";
-
-export default async function Profile() {
-  const ctx = getContext();
-  if (!ctx) return null;
-
-  // accessing cookies automatically switches this page to Dynamic Rendering (SSR)
-  const token = ctx.req.cookies.session_token;
-
-  const user = await fetchUser(token);
-  return <h1>Hello, {user.name}</h1>;
-}
-```
-
-### Incremental Static Regeneration (ISR)
-
-You can enable ISR to update static pages in the background without rebuilding the entire site. Export a `revalidate` function from your `page_functions.ts`.
-
-```typescript
-// src/blog/page_functions.ts
-
-// This page will regenerate at most once every 60 seconds
-export function revalidate() {
-  return 60000; // time in milliseconds
-}
-```
-
-### Client Components
-
-To add interactivity (useState, useEffect, event listeners), place the `"use client"` directive at the top of your file.
-
-```jsx
+// src/components/counter.jsx
 "use client";
 
 import { useState } from "react";
 
 export default function Counter() {
   const [count, setCount] = useState(0);
-  return <button onClick={() => setCount((c) => c + 1)}>{count}</button>;
+  return (
+    <button onClick={() => setCount((c) => c + 1)}>
+      Clicked {count} times
+    </button>
+  );
 }
 ```
+
+### Composition Patterns
+
+To maximize performance, keep Client Components as leaves at the edges of your component tree.
+
+- **Passing Server Components as Children:** A Client Component can accept Server Components via the `children` prop or custom props. The child Server Component runs on the server and its code is not included in the client bundle:
+
+```jsx
+// src/components/modal.jsx (Client Component)
+"use client";
+
+import { useState } from "react";
+
+export default function Modal({ children }) {
+  const [isOpen, setIsOpen] = useState(false);
+  return (
+    <div>
+      <button onClick={() => setIsOpen(!isOpen)}>Toggle Dialog</button>
+      {isOpen && <div className="dialog">{children}</div>}
+    </div>
+  );
+}
+
+// src/page.jsx (Server Component)
+import Modal from "@/components/modal";
+import UserAnalytics from "@/components/user-analytics"; // Server Component
+
+export default function Page() {
+  return (
+    <Modal>
+      {/* UserAnalytics executes purely on the server */}
+      <UserAnalytics />
+    </Modal>
+  );
+}
+```
+
+---
+
+## Data Fetching
+
+Data fetching in Dinou is direct, declarative, and built on native JavaScript promises without external query wrappers.
+
+### Async Data in Server Components
+
+Server Components can be declared as `async` functions, allowing you to `await` data directly within your component:
+
+```jsx
+// src/blog/page.jsx
+import db from "@/lib/db";
+
+export default async function BlogPage() {
+  const posts = await db.query("SELECT * FROM posts ORDER BY date DESC");
+
+  return (
+    <main>
+      <h1>Latest Posts</h1>
+      <ul>
+        {posts.map((post) => (
+          <li key={post.id}>
+            <h2>{post.title}</h2>
+            <p>{post.excerpt}</p>
+          </li>
+        ))}
+      </ul>
+    </main>
+  );
+}
+```
+
+### Streaming with `<Suspense>`
+
+For components with slower data queries, wrap them in React's native `<Suspense>`. Dinou streams the fast parts of the layout immediately (`renderToPipeableStream`), and streams the delayed data into place as soon as the promise resolves:
+
+```jsx
+// src/dashboard/page.jsx
+import { Suspense } from "react";
+import QuickStats from "@/components/quick-stats";
+import HeavyAnalytics from "@/components/heavy-analytics"; // slow database query
+
+export default function DashboardPage() {
+  return (
+    <div>
+      {/* Renders and streams immediately */}
+      <QuickStats />
+
+      {/* Streams in progressively without blocking the rest of the layout */}
+      <Suspense fallback={<p>Loading real-time analytics...</p>}>
+        <HeavyAnalytics />
+      </Suspense>
+    </div>
+  );
+}
+```
+
+> **Client-Side Data Fetching:** To trigger or refresh data queries from inside Client Components, use [Server Functions](#server-functions-use-server--suspense) with React 19's native `use()` hook and `<Suspense>`.
+
+---
+
+## Rendering Strategies
+
+Dinou incorporates an intelligent **Zero-Config Hybrid Rendering Engine**. You do not need to manually configure routes as "Static" or "Dynamic"—the framework automatically detects the optimal strategy.
+
+### Zero-Config Hybrid Model
+
+1. **Static by Default (SSG):** If a route does not access request-specific information (cookies, headers, search parameters), Dinou generates static HTML and RSC payloads into `.dinou/dist2/`.
+2. **Dynamic on Demand (SSR):** If a route accesses request-time headers, cookies, or query parameters via `getContext()`, Dinou automatically bails out of static generation and renders the page dynamically per request.
+
+```jsx
+// src/profile/page.jsx
+import { getContext } from "dinou";
+import { fetchUser } from "@/lib/auth";
+
+export default async function ProfilePage() {
+  const ctx = getContext();
+  
+  // Accessing request cookies automatically switches this page to Dynamic SSR
+  const token = ctx?.req.cookies?.session_token;
+  if (!token) return <p>Please log in</p>;
+
+  const user = await fetchUser(token);
+  return <h1>Welcome, {user.name}</h1>;
+}
+```
+
+### Static Site Generation (SSG at Build Time)
+
+In Dinou v7, static pre-rendering runs automatically during the production build (`npm run build`). All static routes and catch-all dynamic paths declared via `getStaticPaths()` in `page_functions.ts` are generated into `.dinou/dist2/` before the server starts. This enables zero cold-start latency and instant static site exports (`npm run export-static`).
+
+### Incremental Static Regeneration (ISR)
+
+Incremental Static Regeneration allows you to serve pre-rendered static pages while periodically refreshing them in the background when content changes.
+
+Export a `revalidate` function from your route's `page_functions.ts`:
+
+```typescript
+// src/blog/page_functions.ts
+
+// This page will regenerate in the background at most once every 60 seconds
+export function revalidate() {
+  return 60000; // time in milliseconds
+}
+```
+
+- **How it works:** When a request arrives after the revalidation window has elapsed, the cached page is served immediately (stale-while-revalidate), while Dinou regenerates the new page in the background.
+- **On-Demand Revalidation:** You can also trigger immediate cache purging from Server Functions or webhooks using `revalidatePath("/blog")` or `revalidateTag("posts")` (see [On-Demand Revalidation](#on-demand-revalidation-from-dinouserver)).
+- **Edge ISR:** On edge platforms like Deno Deploy, ISR seamlessly uses distributed key-value storage (`DenoKVStorage`) without needing a persistent disk.
+
+### Incremental Static Generation (ISG)
+
+For dynamic routes with millions of potential pages (e.g. `/products/[id]`), generating every single page at build time is impractical. Dinou supports **ISG**: pages not pre-rendered at build time are rendered and cached on their very first request, and served as static files for all subsequent requests.
+
+---
 
 ## Server Functions (`"use server"`) & Suspense
 
