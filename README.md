@@ -40,8 +40,8 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [Incremental Static Regeneration (ISR)](#incremental-static-regeneration-isr)
   - [Client Components](#client-components)
 - [Server Functions (`"use server"`) & Suspense](#server-functions-use-server--suspense)
-  - [Usage in Client Components (Reactive)](#usage-in-client-components-reactive)
   - [Usage in Server Components (Streaming)](#usage-in-server-components-streaming)
+  - [Usage in Client Components (Reactive)](#usage-in-client-components-reactive)
   - [Server Actions (Form Mutations)](#server-actions-form-mutations)
 - [Advanced Patterns: The "Dinou Pattern"](#advanced-patterns-the-dinou-pattern)
   - [The Concept](#the-concept)
@@ -485,7 +485,7 @@ export default async function Page({ params: { id } }) {
 }
 ```
 
-### Usage in Client Components (Reactive with React 19)
+### Usage in Client Components (Reactive)
 
 In Client Components (`"use client"`), Server Functions return a standard JavaScript Promise. You can resolve and stream them using pure React 19 primitives: **`<Suspense>`** and the **`use()`** hook.
 
@@ -548,13 +548,35 @@ export async function createPost(formData) {
 }
 ```
 
-#### Usage in Components
+#### 1. In Server Components (Zero-JS Progressive Enhancement)
 
-You can import the function and use it directly in your JSX. You can also use the `useFormStatus` hook (from React 19) to show loading states while the action is executing.
+Server Actions can be used directly inside **Server Components** without needing `"use client"`. This enables true Progressive Enhancement: forms submit and execute on the server even if JavaScript is disabled or still downloading in the browser:
 
 ```jsx
-// src/new-post/page.jsx
+// src/new-post/page.jsx (Server Component)
+import { createPost } from "@/actions/create-post";
+
+export default function NewPostPage() {
+  return (
+    <form action={createPost}>
+      {/* The 'name' attribute is required for FormData extraction */}
+      <input name="title" placeholder="Title" required />
+      <textarea name="content" placeholder="Content" required />
+
+      <button type="submit">Create Post</button>
+    </form>
+  );
+}
+```
+
+#### 2. In Client Components (Interactive with `useFormStatus`)
+
+You can also pass Server Actions to forms inside **Client Components** (`"use client"`). This allows you to integrate client-side interactivity, such as disabling buttons or displaying spinners with React's `useFormStatus` hook:
+
+```jsx
+// src/new-post/page.jsx (Client Component)
 "use client";
+
 import { useFormStatus } from "react-dom";
 import { createPost } from "@/actions/create-post";
 
@@ -570,7 +592,6 @@ function SubmitButton() {
 export default function Page() {
   return (
     <form action={createPost}>
-      {/* The 'name' attribute is required for FormData extraction */}
       <input name="title" placeholder="Title" required />
       <textarea name="content" placeholder="Content" required />
 
