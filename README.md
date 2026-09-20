@@ -566,146 +566,252 @@ export default function Page() {
 
 ## Advanced Patterns: The "Dinou Pattern"
 
-Dinou introduces a powerful pattern for handling mutations and list updates without full page reloads. By combining **Server Functions**, **Global State** (e.g., `jotai-wrapper`), and **`react-enhanced-suspense`**, you can achieve granular reactivity.
+Dinou introduces a powerful architectural pattern for handling mutations and data synchronization with surgical reactivity and **zero external dependencies**.
 
 ### The Concept
 
-In Dinou, **Server Functions can return Client Components**. We leverage this to return a "Headless State Updater" component after a mutation. This component renders nothing but updates a global `resourceId` atom (key), triggering a re-fetch of specific data.
+In standard React Server Components architectures, mutating data often triggers a full-route revalidation or requires complex client-side cache synchronizers.
 
-### Implementation
+In Dinou, **Server Functions can return Client Components over Flight RPC**. The **"Dinou Pattern"** leverages this unique capability:
 
-#### 1. The Global Store
+1. A mutation Server Function executes in the backend (database mutation).
+2. Instead of returning raw JSON or triggering a heavy route refresh, it returns an invisible **Headless Client Component** (an "Updater").
+3. When this updater streams down and mounts in the browser, its `useEffect` triggers a lightweight, native React store (`useSyncExternalStore`).
+4. Any dependent UI listening to that store key automatically refetches and streams its updated Server Component UI into a standard React 19 `<Suspense>` boundary.
 
-Define an atom to hold the `resourceId` key.
+> **Zero Dependencies:** This pattern relies entirely on pure React 19 primitives (`useSyncExternalStore`, `use()`, `Suspense`). Optionally, you can substitute the store with any state manager of your choice (Jotai, Zustand, Nanostores, Redux), but no third-party library is required.
 
-```javascript
-// src/atoms.js
-import { atom } from "jotai";
-import getAPIFromAtoms from "jotai-wrapper";
+---
 
-export const { useAtom, useSetAtom, useAtomValue, getAtom, selectAtom } =
-  getAPIFromAtoms({
-    tasksListKey: atom(0),
-    isAddTask: atom(false),
-    // rest of atoms...
-  });
+### Architectural Flow
+
+```
+[1. User Form] --(Calls Server Function)--> [2. Node/Edge DB Mutation]
+                                                      |
+                                            (Returns Headless Component)
+                                                      |
+                                                      v
+[5. Refetched UI] <-- (useSyncExternalStore) <-- [3. <PatternTaskUpdater /> mounts]
+      ^                        ^
+      |                        |
+[<Suspense>]             [4. Global Key++]
 ```
 
-#### 2. The Headless Updater (Client Component)
+---
 
-A tiny component whose only job is to update the atoms when it mounts.
+### Implementation Example
 
-```jsx
+#### 1. The Global Store (`src/pattern-store.ts`)
+
+A pure React 19 store using `useSyncExternalStore` (0 dependencies, SSR-compatible):
+
+```typescript
+// src/pattern-store.ts
+import { useSyncExternalStore } from "react";
+
+let tasksListKey = 0;
+const listeners = new Set<() => void>();
+
+export const patternStore = {
+  getSnapshot: () => tasksListKey,
+  incrementTasksListKey: () => {
+    tasksListKey += 1;
+    listeners.forEach((listener) => listener());
+  },
+  subscribe: (listener: () => void) => {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  },
+};
+
+export function useTasksListKey(): number {
+  return useSyncExternalStore(
+    patternStore.subscribe,
+    patternStore.getSnapshot,
+    patternStore.getSnapshot // SSR compatibility
+  );
+}
+```
+
+> **Note:** If you already use a state management library (such as Jotai or Zustand), you can use an atom or store selector here instead of `useSyncExternalStore`.
+
+#### 2. The Headless Updater (`src/components/pattern-updater.tsx`)
+
+A tiny Client Component that emits no visual DOM, but executes state synchronization upon mounting in the browser:
+
+```tsx
+// src/components/pattern-updater.tsx
 "use client";
+
 import { useEffect } from "react";
-import { useSetAtom } from "@/atoms";
+import { patternStore } from "../pattern-store";
 
-export default function AddTaskUpdater() {
-  const setTasksListKey = useSetAtom("tasksListKey");
-  const setIsAddTask = useSetAtom("isAddTask");
-
+export default function PatternTaskUpdater({
+  id,
+  taskText,
+}: {
+  id?: string;
+  taskText?: string;
+}) {
   useEffect(() => {
-    // Update the key to force a re-fetch
-    setTasksListKey((k) => k + 1);
-    setIsAddTask(false);
-  }, [setTasksListKey, setIsAddTask]);
+    // When mounted on the client after Server Function response,
+    // atomically updates the store key, invalidating dependent queries
+    patternStore.incrementTasksListKey();
+  }, [id, taskText]);
 
-  return null; // It renders nothing visually
+  return null; // Headless: emits no DOM nodes
 }
 ```
 
-#### 3. The Server Function (Mutation)
+#### 3. The Server Functions (`src/server-functions/pattern-demo.tsx`)
 
-Performs the database operation and **returns the Client Component**.
+Server Functions marked with `"use server"` can perform database operations and return React components:
 
-```jsx
+```tsx
+// src/server-functions/pattern-demo.tsx
 "use server";
-import AddTaskUpdater from "../components/add-task-updater";
-import { tasks } from "./db";
 
-export async function addTask(text) {
-  // Perform DB mutation
-  tasks.push(text);
+import type { ReactNode } from "react";
+import PatternTaskUpdater from "../components/pattern-updater";
+import PatternTasksList from "../components/pattern-tasks-list";
+import { tasksDb } from "./db";
 
-  // 🪄 Magic: Return the updater to run logic on the client
-  return <AddTaskUpdater />;
+/**
+ * 1. Mutation: Executes in Node.js/Edge and returns the Headless updater
+ */
+export async function addPatternTask(text: string): Promise<ReactNode> {
+  const trimmed = text.trim();
+  const id = Math.random().toString(36).substring(2, 9);
+  
+  if (trimmed) {
+    tasksDb.unshift({ id, text: trimmed, createdAt: new Date().toLocaleTimeString() });
+  }
+
+  // Magic: The server orchestrates the client by returning the updater component
+  return <PatternTaskUpdater key={id} id={id} taskText={trimmed} />;
+}
+
+/**
+ * 2. Query: Returns the data pre-rendered on the server via Flight RPC
+ */
+export async function fetchPatternTasks(): Promise<ReactNode> {
+  return <PatternTasksList tasks={[...tasksDb]} />;
 }
 ```
 
-#### 4. The Page (Consuming the Pattern)
+#### 4. The Client Page (`src/page.tsx`)
 
-Use `react-enhanced-suspense` with the `resourceId` prop. When the `resourceId` (in this case `tasksListKey`) changes, the Server Function (`tasksList`) is re-evaluated.
+Consuming the pattern using native React 19 `<Suspense>` and the `use()` hook:
 
-```jsx
+```tsx
+// src/page.tsx
 "use client";
-import Suspense from "react-enhanced-suspense";
-import { useAtomValue, useAtom } from "@/atoms";
-import { addTask } from "./server-functions/add-task";
-import { tasksList } from "./server-functions/tasks-list";
-import { useState } from "react";
+
+import { useState, useEffect, Suspense, use, type ReactNode } from "react";
+import { addPatternTask, fetchPatternTasks } from "./server-functions/pattern-demo";
+import { useTasksListKey } from "./pattern-store";
+
+// Helper component resolving promises via native React 19 `use()`
+function Stream({ promise }: { promise: Promise<ReactNode> }) {
+  const content = use(promise);
+  return <>{content}</>;
+}
 
 export default function Page() {
-  const tasksListKey = useAtomValue("tasksListKey");
-  const [isAddTask, setIsAddTask] = useAtom("isAddTask");
+  const tasksListKey = useTasksListKey();
   const [text, setText] = useState("");
+  const [isMutating, setIsMutating] = useState(false);
+  const [mutationPromise, setMutationPromise] = useState<Promise<ReactNode> | null>(null);
+  const [tasksPromise, setTasksPromise] = useState<Promise<ReactNode>>(() => fetchPatternTasks());
+
+  // When the Headless Updater increments tasksListKey in the store,
+  // we request the fresh list from the server (Flight streaming)
+  useEffect(() => {
+    if (tasksListKey > 0) {
+      setTasksPromise(fetchPatternTasks());
+    }
+  }, [tasksListKey]);
+
+  const handleAddTask = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = text.trim();
+    if (!trimmed || isMutating) return;
+
+    setIsMutating(true);
+    const p = addPatternTask(trimmed);
+    p.finally(() => {
+      setIsMutating(false);
+      setText("");
+    });
+    setMutationPromise(p);
+  };
 
   return (
     <div>
-      {/* The Mutation Form */}
-      <input type="text" onChange={(e) => setText(e.target.value)} />
-      <button onClick={() => setIsAddTask(true)}>Add Task</button>
+      {/* 1. Mutation Form */}
+      <form onSubmit={handleAddTask}>
+        <input
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="New task..."
+          disabled={isMutating}
+        />
+        <button type="submit" disabled={isMutating || !text.trim()}>
+          {isMutating ? "Adding..." : "Add Task"}
+        </button>
+      </form>
 
-      {/* Conditionally render the mutation suspense */}
-      {isAddTask && (
-        <Suspense fallback="Adding task..." resourceId="add-task">
-          {() => addTask(text)}
+      {/* 2. Mutation Stream (Mounts the Headless Updater) */}
+      {mutationPromise && (
+        <Suspense fallback={<div>Executing mutation on server...</div>}>
+          <Stream promise={mutationPromise} />
         </Suspense>
       )}
 
-      {/* The Reactive List */}
-      {/* Changing resourceId forces Suspense to re-fetch tasksList */}
-      <Suspense
-        fallback={<div>Loading tasks...</div>}
-        resourceId={`tasks-list-${tasksListKey}`}
-      >
-        {() => tasksList()}
+      {/* 3. Reactive Tasks List Stream */}
+      <Suspense fallback={<div>Loading updated list...</div>}>
+        <Stream promise={tasksPromise} />
       </Suspense>
     </div>
   );
 }
 ```
 
-#### 5. The Data Fetching Components
+#### 5. The Display Component (`src/components/pattern-tasks-list.tsx`)
 
-The Server Function responsible for fetching data:
+A standard Client Component rendering the task items:
 
-```jsx
-// src/server-functions/tasks-list.jsx
-"use server";
-import { tasks } from "./db";
-import TasksListDisplay from "../components/tasks-list-display";
-
-export async function tasksList() {
-  return <TasksListDisplay tasks={tasks} />;
-}
-```
-
-The Client Component responsible for rendering the list:
-
-```jsx
-// src/components/tasks-list-display.jsx
+```tsx
+// src/components/pattern-tasks-list.tsx
 "use client";
 
-export default function TasksListDisplay({ tasks }) {
+export interface PatternTaskItem {
+  id: string;
+  text: string;
+  createdAt: string;
+}
+
+export default function PatternTasksList({ tasks }: { tasks: PatternTaskItem[] }) {
+  if (!tasks || tasks.length === 0) {
+    return <p>No tasks found.</p>;
+  }
+
   return (
-    <div>
-      {tasks.map((t, index) => (
-        <div key={index}>{t}</div>
+    <ul>
+      {tasks.map((task) => (
+        <li key={task.id}>
+          <span>{task.text}</span> — <small>{task.createdAt}</small>
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }
 ```
+
+---
 
 ## Page Configuration (`page_functions.ts`)
 
