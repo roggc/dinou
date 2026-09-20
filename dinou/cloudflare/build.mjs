@@ -5,13 +5,21 @@ import fs from "node:fs";
 import path from "node:path";
 import esbuild from "esbuild";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { generateRouteModulesCode } = require("../core/route-generator.js");
 
 const projectRoot = process.cwd();
 const cloudflareDir = path.resolve(projectRoot, ".dinou/cloudflare");
 fs.mkdirSync(cloudflareDir, { recursive: true });
+
+// Locate dinou root: ejected in project or in package directory
+const dinouDir = fs.existsSync(path.resolve(projectRoot, "dinou"))
+  ? path.resolve(projectRoot, "dinou")
+  : path.resolve(__dirname, "..");
+const cloudflareAdapterPath = path.resolve(dinouDir, "adapters/cloudflare.js").replace(/\\/g, "/");
 
 console.log("⚡ [Dinou Cloudflare] Generating static route modules...");
 const routeModulesCode = generateRouteModulesCode(projectRoot, "../..");
@@ -54,7 +62,7 @@ if (sfManifestPath) {
 const workerEntryContent = `// Auto-generated worker entry for Cloudflare Workers
 import "./route-modules.js";
 ${manifestInlines}
-import worker from "../../dinou/adapters/cloudflare.js";
+import worker from "${cloudflareAdapterPath}";
 
 export default worker;
 `;
@@ -96,7 +104,7 @@ try {
     external: externalList,
     alias: {
       "@": path.resolve(projectRoot, "src"),
-      dinou: path.resolve(projectRoot, "dinou"),
+      dinou: dinouDir,
     },
     loader: {
       ".js": "jsx",

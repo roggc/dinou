@@ -5,13 +5,22 @@ import fs from "node:fs";
 import path from "node:path";
 import esbuild from "esbuild";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { generateRouteModulesCode } = require("../core/route-generator.js");
 
 const projectRoot = process.cwd();
 const denoDir = path.resolve(projectRoot, ".dinou/deno");
 fs.mkdirSync(denoDir, { recursive: true });
+
+// Locate dinou root: ejected in project or in package directory
+const dinouDir = fs.existsSync(path.resolve(projectRoot, "dinou"))
+  ? path.resolve(projectRoot, "dinou")
+  : path.resolve(__dirname, "..");
+const handlerPath = path.resolve(dinouDir, "core/handler.js").replace(/\\/g, "/");
+const storagePath = path.resolve(dinouDir, "core/storage-adapter.js").replace(/\\/g, "/");
 
 console.log("⚡ [Dinou Deno Edge] Generating static route modules...");
 const routeModulesCode = generateRouteModulesCode(projectRoot, "../..");
@@ -54,8 +63,8 @@ if (sfManifestPath) {
 const denoEntryContent = `// Auto-generated entry for Deno Deploy / Edge
 import "./route-modules.js";
 ${manifestInlines}
-import { handleRequest } from "../../dinou/core/handler.js";
-import { setStorageAdapter, DenoKVStorage } from "../../dinou/core/storage-adapter.js";
+import { handleRequest } from "${handlerPath}";
+import { setStorageAdapter, DenoKVStorage } from "${storagePath}";
 
 // Auto-configure Deno KV Storage for ISR on Edge
 if (typeof Deno !== "undefined" && typeof Deno.openKv === "function") {
@@ -112,7 +121,7 @@ try {
     external: externalList,
     alias: {
       "@": path.resolve(projectRoot, "src"),
-      dinou: path.resolve(projectRoot, "dinou"),
+      dinou: dinouDir,
     },
     loader: {
       ".js": "jsx",

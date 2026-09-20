@@ -10,10 +10,12 @@ console.log("🚀 Starting Dinou ejecting process...");
 fs.cpSync(dinouPath, path.join(projectRoot, "dinou"), {
   recursive: true,
 });
-console.log("✅ Files copyed to ./dinou");
+console.log("✅ Files copied to ./dinou");
 
 const pkgPath = path.join(projectRoot, "package.json");
 const pkg = require(pkgPath);
+
+pkg.scripts = pkg.scripts || {};
 
 pkg.scripts["dev:express"] =
   "node --conditions react-server --import ./dinou/core/register-loader.mjs ./dinou/core/server.js";
@@ -30,6 +32,7 @@ pkg.scripts["dev:express:webpack"] =
 pkg.scripts["dev:webpack"] =
   'concurrently "npm run dev:express:webpack" "npm run dev_webpack"';
 pkg.scripts.dev = "npm run dev:esbuild";
+
 pkg.scripts["build:esbuild"] =
   "cross-env NODE_ENV=production node dinou/esbuild/build.mjs";
 pkg.scripts["build:rollup"] =
@@ -37,13 +40,40 @@ pkg.scripts["build:rollup"] =
 pkg.scripts["build:webpack"] =
   "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js";
 pkg.scripts.build = "npm run build:esbuild";
+
 pkg.scripts["start:esbuild"] =
-  "cross-env NODE_ENV=production node --conditions react-server --import ./dinou/core/register-loader.mjs ./dinou/core/server.js";
+  "cross-env NODE_ENV=production node ./dinou/core/server.js";
 pkg.scripts["start:rollup"] =
-  "cross-env NODE_ENV=production node --conditions react-server --import ./dinou/core/register-loader.mjs ./dinou/core/server.js";
+  "cross-env NODE_ENV=production node ./dinou/core/server.js";
 pkg.scripts["start:webpack"] =
-  "cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack node --conditions react-server --import ./dinou/core/register-loader.mjs ./dinou/core/server.js";
+  "cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack node ./dinou/core/server.js";
 pkg.scripts.start = "npm run start:esbuild";
+
+pkg.scripts["start:bun"] = "bun dinou/adapters/bun.js";
+pkg.scripts["start:deno"] =
+  "deno run --allow-net --allow-read --allow-env dinou/adapters/deno.js";
+
+pkg.scripts["build:cloudflare"] =
+  "npm run build && node ./dinou/cloudflare/build.mjs";
+pkg.scripts["build:cloudflare:rollup"] =
+  "npm run build:rollup && node ./dinou/cloudflare/build.mjs";
+pkg.scripts["build:cloudflare:webpack"] =
+  "npm run build:webpack && node ./dinou/cloudflare/build.mjs";
+
+pkg.scripts["build:deno"] = "npm run build && node ./dinou/deno/build.mjs";
+pkg.scripts["build:deno:rollup"] =
+  "npm run build:rollup && node ./dinou/deno/build.mjs";
+pkg.scripts["build:deno:webpack"] =
+  "npm run build:webpack && node ./dinou/deno/build.mjs";
+
+pkg.scripts["export-static"] = "npm run export-static:esbuild";
+pkg.scripts["export-static:esbuild"] =
+  "npm run build:esbuild && node ./dinou/core/export-static.mjs";
+pkg.scripts["export-static:rollup"] =
+  "npm run build:rollup && node ./dinou/core/export-static.mjs";
+pkg.scripts["export-static:webpack"] =
+  "npm run build:webpack && node ./dinou/core/export-static.mjs";
+
 delete pkg.scripts.eject;
 
 if (!pkg.dependencies) {
@@ -73,12 +103,11 @@ function detectPackageManager() {
 }
 
 const pm = detectPackageManager();
-console.log(`🕵️  Package manager detected: ${pm}`);
+console.log(`📦 Package manager detected: ${pm}`);
 
-// const installCommand = pm === "yarn" ? "yarn" : `${pm} install`;
 const installCommand = `${pm} install`;
 
-console.log(`📦 Executing '${installCommand}' to link dependencies...`);
+console.log(`🔄 Executing '${installCommand}' to link dependencies...`);
 
 try {
   execSync(installCommand, { stdio: "inherit", cwd: projectRoot });

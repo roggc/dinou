@@ -19,7 +19,11 @@
       "types": "./dinou/server.d.ts",
       "import": "./dinou/server.mjs",
       "require": "./dinou/server.js"
-    }
+    },
+    "./adapters/bun": "./dinou/adapters/bun.js",
+    "./adapters/deno": "./dinou/adapters/deno.js",
+    "./adapters/cloudflare": "./dinou/adapters/cloudflare.js",
+    "./adapters/netlify": "./dinou/adapters/netlify.js"
   },
   "types": "./dinou/index.d.ts",
   "scripts": {
