@@ -1,12 +1,12 @@
 # **Dinou**
 
-[![Documentation](https://img.shields.io/badge/docs-dinou.dev-blue?style=flat-square)](https://dinou.dev) [![Version](https://img.shields.io/badge/version-6.1.1-orange?style=flat-square)](https://www.npmjs.com/package/dinou)
+[![Documentation](https://img.shields.io/badge/docs-dinou.dev-blue?style=flat-square)](https://dinou.dev) [![Version](https://img.shields.io/badge/version-7.0.0-orange?style=flat-square)](https://www.npmjs.com/package/dinou)
 
 ### **Lightweight-Ejectable Full-Stack React 19 Framework**
 
 ---
 
-Support for React Server Components (RSC), Server Functions, Server-Side Rendering (SSR), Static Generation (SSG), Incremental Static Generation (ISG), and Incremental Static Regeneration (ISR).
+Support for React Server Components (RSC), Server Functions, Server-Side Rendering (SSR), Static Generation (SSG), Incremental Static Generation (ISG), Incremental Static Regeneration (ISR), and Universal Multi-Platform Deployment (Node.js, Bun, Deno, Cloudflare Workers, Netlify, Static Hosts).
 
 ## Key Features
 
@@ -57,27 +57,37 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
 - [⚡ React Compiler & Automatic Optimizations](#-react-compiler--automatic-optimizations)
   - [Integration Strategy](#integration-strategy)
   - [Code Example](#code-example)
-- [📚 API Reference](#-api-reference)
+- [📖 API Reference](#-api-reference)
   - [1. Components (`dinou`)](#1-components-dinou)
   - [2. Utilities (`dinou`)](#2-utilities-dinou)
   - [3. Client Hooks (`dinou` - Client Components Only)](#3-client-hooks-dinou---client-components-only)
   - [4. Server-Only Utilities (`dinou` & `dinou/server`)](#4-server-only-utilities)
-  - [5. Page Configuration (`page_functions.ts`)](#5-page-configuration-page_functionsts)
-  - [6. File Conventions Cheatsheet](#6-file-conventions-cheatsheet)
-- [🎨 Favicons](#-favicons)
+  - [5. Pluggable Storage & Edge ISR (`dinou/server`)](#5-pluggable-storage--edge-isr-dinouserver)
+  - [6. Runtime Adapters (`dinou/adapters/*`)](#6-runtime-adapters-dinouadapters)
+  - [7. Page Configuration (`page_functions.ts`)](#7-page-configuration-page_functionsts)
+  - [8. File Conventions Cheatsheet](#8-file-conventions-cheatsheet)
+- [📁 Static Assets & Public Folder (`public/`)](#-static-assets--public-folder-public)
 - [🔐 Environment Variables (`.env`)](#-environment-variables-env)
-- [💅 Styles (Tailwind, CSS Modules, & Global CSS)](#-styles-tailwind-css-modules--global-css)
+- [🎨 Styles (Tailwind, CSS Modules, & Global CSS)](#-styles-tailwind-css-modules--global-css)
   - [1. Link the Stylesheet](#1-link-the-stylesheet)
   - [2. Full Example (Layout + Global CSS + Modules)](#2-full-example-layout--global-css--modules)
 - [🖼️ Assets & Media](#️-assets--media)
-- [🔗 Import Aliases (`@/`)](#-import-aliases-)
+- [🏷️ Import Aliases (`@/`)](#️-import-aliases-)
 - [⚡ Bundlers & Running the App](#-bundlers--running-the-app)
   - [Development](#development)
-  - [Production Build](#production-build)
-  - [Start Production Server](#start-production-server)
-- [⏏️ Eject Dinou](#️-eject-dinou)
-- [🚀 Deployment](#-deployment)
-- [📦 Changelog](#-changelog)
+  - [Production Build & SSG](#production-build--ssg)
+  - [Start Production Server (Node, Bun, Deno)](#start-production-server-node-bun-deno)
+  - [Edge Application Bundling (Cloudflare & Deno Deploy)](#edge-application-bundling-cloudflare--deno-deploy)
+  - [Standalone Static Export](#standalone-static-export)
+- [📦 Eject Dinou](#-eject-dinou)
+- [🚀 Deployment Guide](#-deployment-guide)
+  - [1. Node.js Platforms (DigitalOcean, Render, Railway, Fly.io, Docker)](#1-nodejs-platforms-digitalocean-render-railway-flyio-docker)
+  - [2. Bun Standalone Server](#2-bun-standalone-server)
+  - [3. Deno Deploy & Edge](#3-deno-deploy--edge)
+  - [4. Cloudflare Workers / Pages](#4-cloudflare-workers--pages)
+  - [5. Netlify (Serverless Functions v2)](#5-netlify-serverless-functions-v2)
+  - [6. Pure Static Hosting (Surge.sh, GitHub Pages, Cloudflare Pages, S3)](#6-pure-static-hosting-surgesh-github-pages-cloudflare-pages-s3)
+- [📜 Changelog](#-changelog)
 - [📄 License](#-license)
 
 ## Getting Started
@@ -977,7 +987,7 @@ function ExpensiveComponent({ data }) {
 }
 ```
 
-## 📚 API Reference
+## 📖 API Reference
 
 ### 1. Components (`dinou`)
 
@@ -1205,7 +1215,57 @@ export default function Page() {
 
 ---
 
-### 5. Page Configuration (`page_functions.ts`)
+---
+
+### 5. Pluggable Storage & Edge ISR (`dinou/server`)
+
+Dinou v7 features a decoupled, pluggable storage architecture. Incremental Static Regeneration (ISR) and static page caching are managed via a uniform storage interface rather than hardcoded local filesystem operations.
+
+#### `setStorageAdapter(adapter)`
+Sets the global storage adapter for Dinou runtime caching and ISR invalidation.
+
+```typescript
+import { setStorageAdapter, MemoryStorageAdapter } from "dinou/server";
+
+// Configure in-memory storage (useful for unit tests or ephemeral environments)
+setStorageAdapter(new MemoryStorageAdapter());
+```
+
+#### `getStorageAdapter()`
+Returns the currently active storage adapter instance.
+
+#### Built-in Storage Adapters:
+| Adapter Class | Platform Target | Persistence Strategy |
+| :--- | :--- | :--- |
+| **`FSStorageAdapter`** (Default) | Node.js, Bun, Docker, VPS | Writes static pages and RSC payloads to `.dinou/dist2/`. |
+| **`MemoryStorageAdapter`** | Ephemeral, Automated Testing | Fast in-memory `Map` store. Resets on process exit. |
+| **`DenoKVStorage`** | Deno Deploy & Edge | Uses native `Deno.openKv()` for global multi-region Edge ISR. |
+| **`StorageAdapter`** | Custom backends | Abstract base class to implement custom stores (Redis, Cloudflare KV, Upstash, S3). |
+
+---
+
+### 6. Runtime Adapters (`dinou/adapters/*`)
+
+Dinou provides dedicated, zero-dependency adapters that map native platform requests into Dinou's universal Web Standards request handler (`(Request) => Promise<Response>`):
+
+```javascript
+// Cloudflare Workers
+import worker from "dinou/adapters/cloudflare";
+export default worker;
+
+// Bun
+import { fetch } from "dinou/adapters/bun";
+export default { fetch };
+
+// Deno
+import { fetch } from "dinou/adapters/deno";
+Deno.serve(fetch);
+
+// Netlify Functions v2
+export { default, config } from "dinou/adapters/netlify";
+```
+
+### 7. Page Configuration (`page_functions.ts`)
 
 Export these functions from `page_functions.{ts,js}` to configure the associated `page.tsx`.
 
@@ -1299,7 +1359,7 @@ export function getCacheTags(params) {
 
 ---
 
-### 6. File Conventions Cheatsheet
+### 8. File Conventions Cheatsheet
 
 Dinou recognizes specific filenames to build the routing hierarchy.
 
@@ -1323,14 +1383,27 @@ Create these empty files to alter how layouts apply to a specific route director
 | `no_layout_error`     | The `error.tsx` in this folder will render without any layout.                                       |
 | `no_layout_not_found` | The `not-found.tsx` in this folder will render without any layout.                                   |
 
-## 🎨 Favicons
+## 📁 Static Assets & Public Folder (`public/`)
 
-To add a favicon to your application:
+Dinou provides a standard **`public/`** directory at the root of your project for uncompiled static assets. Any file placed inside `public/` is automatically copied to `.dinou/dist3/` during production builds and served directly from the root URL path (`/`).
 
-1. Generate your assets using a tool like [favicon.io](https://favicon.io/).
-2. Unzip the downloaded folder.
-3. Rename the folder to `favicons` and place it in the **root** of your project.
-4. Update your root `layout.tsx` (or `page.tsx`) to include the references in the `<head>` tag:
+### Typical `public/` Structure:
+```
+my-dinou-app/
+├── public/
+│   ├── favicon.ico
+│   ├── favicon-32x32.png
+│   ├── apple-touch-icon.png
+│   ├── site.webmanifest
+│   ├── robots.txt
+│   ├── sitemap.xml
+│   └── og-image.png
+├── src/
+└── package.json
+```
+
+### Linking Assets in Root Layout:
+Update your root `layout.tsx` (or `page.tsx`) to reference your static assets:
 
 ```typescript
 "use client";
@@ -1342,7 +1415,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     <html lang="en">
       <head>
         <title>Dinou App</title>
-        <link rel="icon" type="image/png" href="/favicon.ico" />
+        <link rel="icon" type="image/x-icon" href="/favicon.ico" />
         <link
           rel="apple-touch-icon"
           sizes="180x180"
@@ -1354,12 +1427,6 @@ export default function Layout({ children }: { children: ReactNode }) {
           sizes="32x32"
           href="/favicon-32x32.png"
         />
-        <link
-          rel="icon"
-          type="image/png"
-          sizes="16x16"
-          href="/favicon-16x16.png"
-        />
         <link rel="manifest" href="/site.webmanifest" />
       </head>
       <body>{children}</body>
@@ -1367,6 +1434,10 @@ export default function Layout({ children }: { children: ReactNode }) {
   );
 }
 ```
+
+> **Note on Static Routes:** Static files in `public/` take precedence over dynamic application routes. For example, `public/robots.txt` will be served immediately without executing React Server Components.
+>
+> **Backward Compatibility:** Dinou maintains full backward compatibility for existing projects using the legacy `favicons/` folder. Both `public/` and `favicons/` are supported simultaneously.
 
 ## 🔐 Environment Variables (`.env`)
 
@@ -1381,7 +1452,7 @@ API_SECRET=my_secret_value
 DB_HOST=localhost
 ```
 
-## 💅 Styles (Tailwind, CSS Modules, & Global CSS)
+## 🎨 Styles (Tailwind, CSS Modules, & Global CSS)
 
 Dinou supports **Tailwind CSS**, **CSS Modules** (`.module.css`), and standard **Global CSS** (`.css`) out of the box.
 
@@ -1494,7 +1565,7 @@ declare module "*.png" {
 
 > **Customization:** If you need to support additional extensions, you can [eject](#-eject-dinou) Dinou and modify `dinou/core/asset-extensions.js`.
 
-## 🔗 Import Aliases (`@/`)
+## 🏷️ Import Aliases (`@/`)
 
 Dinou supports import aliases (e.g., `import Button from "@/components/Button"`). Configure paths in your `tsconfig.json`.
 
@@ -1518,11 +1589,11 @@ Dinou supports import aliases (e.g., `import Button from "@/components/Button"`)
 
 ## ⚡ Bundlers & Running the App
 
-Dinou is flexible and integrates with three major bundlers: **esbuild** (default), **Rollup**, and **Webpack**.
+Dinou is flexible and bundler-agnostic, integrating with three major compilers: **esbuild** (default), **Rollup**, and **Webpack**. In Dinou v7, commands are organized into intuitive families for development, production, edge bundling, and static site export.
 
 ### Development
 
-Starts the development server with hot reloading. Files are emitted to the `./dinou/public` folder.
+Starts the development server with hot module reloading:
 
 | Command               | Bundler     | Description                |
 | :-------------------- | :---------- | :------------------------- |
@@ -1531,29 +1602,55 @@ Starts the development server with hot reloading. Files are emitted to the `./di
 | `npm run dev:rollup`  | **Rollup**  | Uses Rollup for bundling.  |
 | `npm run dev:webpack` | **Webpack** | Uses Webpack for bundling. |
 
-### Production Build
+### Production Build & SSG
 
-Compiles the application for production. Files are emitted to the `.dinou/dist3` folder.
+Compiles client/server bundles into `.dinou/dist3` and **automatically pre-renders all static pages (SSG) into `.dinou/dist2`** at build time:
 
-| Command                 | Bundler                |
-| :---------------------- | :--------------------- |
-| `npm run build`         | **esbuild** (Default)  |
-| `npm run build:esbuild` | **esbuild** (Explicit) |
-| `npm run build:rollup`  | **Rollup**             |
-| `npm run build:webpack` | **Webpack**            |
+| Command                 | Bundler                | Description                                       |
+| :---------------------- | :--------------------- | :------------------------------------------------ |
+| `npm run build`         | **esbuild** (Default)  | Fast production bundle & pre-rendering.           |
+| `npm run build:esbuild` | **esbuild** (Explicit) | Explicit esbuild build script.                    |
+| `npm run build:rollup`  | **Rollup**             | Full tree-shaking production build.               |
+| `npm run build:webpack` | **Webpack**            | Enterprise Webpack production build.              |
 
-### Start Production Server
+### Start Production Server (Node, Bun, Deno)
 
-Runs the built application from the `.dinou/dist3` folder.
+Runs the production server. In Dinou v7, Node.js production start is completely clean and flagless:
 
-| Command                 | Description                         |
-| :---------------------- | :---------------------------------- |
-| `npm start`             | Same as `npm run start:esbuild`.    |
-| `npm run start:esbuild` | Use it after building with esbuild. |
-| `npm run start:rollup`  | Use it after building with Rollup.  |
-| `npm run start:webpack` | Use it after building with Webpack. |
+| Command                 | Runtime            | Description                                                |
+| :---------------------- | :----------------- | :--------------------------------------------------------- |
+| `npm start`             | **Node.js**        | Runs production server (`cross-env NODE_ENV=production node ./dinou/core/server.js`). |
+| `npm run start:esbuild` | **Node.js**        | Explicit start for esbuild build.                          |
+| `npm run start:rollup`  | **Node.js**        | Explicit start for Rollup build.                           |
+| `npm run start:webpack` | **Node.js**        | Start with Webpack runtime flag.                           |
+| `npm run start:bun`     | **Bun**            | High-performance Bun native server with zero-copy assets.  |
+| `npm run start:deno`    | **Deno**           | Deno standalone server with explicit sandbox permissions.  |
 
-## ⏏️ Eject Dinou
+### Edge Application Bundling (Cloudflare & Deno Deploy)
+
+Packages your entire application into a single self-contained Edge bundle with inlined manifests:
+
+| Command                           | Target                    | Output Artifact                     |
+| :-------------------------------- | :------------------------ | :---------------------------------- |
+| `npm run build:cloudflare`        | **Cloudflare Workers**    | `.dinou/cloudflare/worker.js`       |
+| `npm run build:cloudflare:rollup` | **Cloudflare (Rollup)**   | `.dinou/cloudflare/worker.js`       |
+| `npm run build:cloudflare:webpack`| **Cloudflare (Webpack)**  | `.dinou/cloudflare/worker.js`       |
+| `npm run build:deno`              | **Deno Deploy / Edge**    | `.dinou/deno/main.js`              |
+| `npm run build:deno:rollup`       | **Deno Deploy (Rollup)**  | `.dinou/deno/main.js`              |
+| `npm run build:deno:webpack`      | **Deno Deploy (Webpack)** | `.dinou/deno/main.js`              |
+
+### Standalone Static Export
+
+Generates a standalone, serverless static website in the `out/` directory for zero-cost static hosting:
+
+| Command                        | Bundler                | Output Directory |
+| :----------------------------- | :--------------------- | :--------------- |
+| `npm run export-static`        | **esbuild** (Default)  | `out/`          |
+| `npm run export-static:esbuild`| **esbuild**            | `out/`          |
+| `npm run export-static:rollup` | **Rollup**             | `out/`          |
+| `npm run export-static:webpack`| **Webpack**            | `out/`          |
+
+## 📦 Eject Dinou
 
 If you need full control over the configuration or internal logic, you can "eject" the framework.
 
@@ -1565,29 +1662,140 @@ npx dinou eject
 
 This will copy the entire Dinou core into a `dinou/` folder in your project root, allowing you to modify build scripts, server logic, and configuration files directly.
 
-## 🚀 Deployment
+## 🚀 Deployment Guide
 
-Dinou apps can be deployed to any platform supporting Node.js, provided you can pass custom flags.
+Dinou v7 is **completely runtime-agnostic**. Built strictly on Web Standards (`Request`, `Response`, `ReadableStream`, `Headers`), Dinou applications can be deployed to any platform in the JavaScript ecosystem without vendor lock-in.
 
-### ✅ Recommended: DigitalOcean App Platform
+---
 
-Dinou works seamlessly on DigitalOcean. It allows full control over the runtime command, essential for the required `--conditions react-server` flag.
+### 1. Node.js Platforms (DigitalOcean, Render, Railway, Fly.io, Docker)
 
-### ❌ Not Supported: Netlify
+Dinou works seamlessly on any Node.js hosting provider without requiring custom Node flags.
 
-Netlify is currently incompatible because it does not support passing custom Node.js flags (`--conditions react-server`) during runtime.
+#### DigitalOcean App Platform (Recommended PaaS):
+1. Connect your GitHub repository to DigitalOcean App Platform.
+2. Configure your build settings:
+   - **Build Command**: `npm run build`
+   - **Run Command**: `npm start`
+   - **HTTP Port**: `3000` (Dinou automatically binds to `process.env.PORT`).
 
-### 🛠 Other Platforms (Render, Fly.io, Railway, etc.)
-
-Ensure your platform allows customization of the start command. Your start command should look like:
-
-```bash
-node --conditions react-server ...
+#### Docker / VPS (Ubuntu, Debian, PM2):
+```dockerfile
+FROM node:22-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY . .
+RUN npm run build
+ENV NODE_ENV=production
+ENV PORT=3000
+EXPOSE 3000
+CMD ["npm", "start"]
 ```
 
-_(Or use `npm start` if your package.json scripts are configured correctly)._
+---
 
-## 📦 Changelog
+### 2. Bun Standalone Server
+
+Bun delivers ultra-fast startup times and high-throughput static asset serving via zero-copy `Bun.file()`:
+
+1. Build your application:
+   ```bash
+   npm run build
+   ```
+2. Start with Bun:
+   ```bash
+   npm run start:bun
+   ```
+   *(Configurable via `PORT` environment variable, defaults to `3000`)*.
+
+---
+
+### 3. Deno Deploy & Edge
+
+Deploy to Deno's global edge network across 35+ regions with automated Deno KV storage for Edge ISR:
+
+1. Bundle for Deno:
+   ```bash
+   npm run build:deno
+   ```
+   *(Generates standalone bundle `.dinou/deno/main.js`)*.
+2. Deploy via Deno CLI:
+   ```bash
+   deployctl deploy --project=<your-project-name> .dinou/deno/main.js
+   ```
+   > **Edge ISR Support:** On Deno Deploy, Dinou automatically detects `Deno.openKv()` and configures `DenoKVStorage`, giving your application globally distributed Incremental Static Regeneration without needing a local filesystem.
+
+---
+
+### 4. Cloudflare Workers / Pages
+
+Deploy directly to Cloudflare's serverless edge infrastructure:
+
+1. Bundle for Cloudflare:
+   ```bash
+   npm run build:cloudflare
+   ```
+   *(Generates `.dinou/cloudflare/worker.js` with inlined route manifests)*.
+2. Configure `wrangler.jsonc` or `wrangler.toml` in your root:
+   ```json
+   {
+     "name": "my-dinou-app",
+     "main": ".dinou/cloudflare/worker.js",
+     "compatibility_date": "2025-03-01",
+     "compatibility_flags": ["nodejs_compat"],
+     "assets": {
+       "directory": ".dinou/dist3",
+       "binding": "ASSETS"
+     }
+   }
+   ```
+3. Deploy with Wrangler:
+   ```bash
+   npx wrangler deploy
+   ```
+
+---
+
+### 5. Netlify (Serverless Functions v2)
+
+Deploy seamlessly to Netlify using the official zero-dependency adapter:
+
+1. Create `netlify/functions/dinou.js`:
+   ```javascript
+   export { default, config } from "dinou/adapters/netlify";
+   ```
+2. Configure `netlify.toml` in your project root:
+   ```toml
+   [build]
+     command = "npm run build"
+     publish = ".dinou/dist3"
+
+   [functions]
+     directory = "netlify/functions"
+   ```
+3. Push to your Git repository connected to Netlify. Client assets from `.dinou/dist3` are served globally from Netlify CDN at edge speed, while dynamic SSR and Server Functions route directly to the serverless function.
+
+---
+
+### 6. Pure Static Hosting (Surge.sh, GitHub Pages, Cloudflare Pages, S3)
+
+If your project consists of static pages (`SSG`) and doesn't require on-demand server rendering, export it as a standalone static site:
+
+1. Export static bundle:
+   ```bash
+   npm run export-static
+   ```
+   *(Builds the app and unifies `.dinou/dist3` assets and `.dinou/dist2` pre-rendered HTML into an `out/` folder)*.
+2. Deploy the `out/` folder anywhere:
+   - **Surge.sh**: `npx surge out my-app.surge.sh`
+   - **GitHub Pages**: `npx gh-pages -d out`
+   - **Cloudflare Pages (Direct Upload)**: `npx wrangler pages deploy out`
+   - **AWS S3 / DO Spaces**: Sync the `out/` directory directly to your bucket with CDN enabled.
+
+---
+
+## 📜 Changelog
 
 For a detailed list of changes, enhancements, and bug fixes across versions, see the [CHANGELOG.md](./CHANGELOG.md).
 
