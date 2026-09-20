@@ -493,25 +493,67 @@ export default async function BlogPage() {
 
 ### Streaming with `<Suspense>`
 
-For components with slower data queries, wrap them in React's native `<Suspense>`. Dinou streams the fast parts of the layout immediately (`renderToPipeableStream`), and streams the delayed data into place as soon as the promise resolves:
+For components with slower or delayed data sources, wrap them in React's native `<Suspense>`. Dinou streams the fast shell and static UI immediately using `renderToPipeableStream`, and then streams the deferred Server Component HTML chunk over the wire the instant its promise resolves.
+
+#### 1. The Slow Async Component (`src/components/heavy-analytics.jsx`)
+
+A standard asynchronous Server Component that fetches data:
 
 ```jsx
-// src/dashboard/page.jsx
+// src/components/heavy-analytics.jsx (Server Component)
+import db from "@/lib/db";
+
+export default async function HeavyAnalytics() {
+  // Simulates a heavy database query or slow external API
+  const metrics = await db.analytics.aggregate({ timeRange: "30d" });
+
+  return (
+    <div className="analytics-card">
+      <h3>Monthly Visitors: {metrics.totalVisits}</h3>
+      <p>Conversion Rate: {metrics.conversionRate}%</p>
+    </div>
+  );
+}
+```
+
+#### 2. The Fast Component (`src/components/quick-stats.jsx`)
+
+A lightweight component that has no async delay:
+
+```jsx
+// src/components/quick-stats.jsx (Server Component)
+export default function QuickStats() {
+  return (
+    <div className="quick-stats">
+      <p>System Status: 🟢 All systems operational</p>
+    </div>
+  );
+}
+```
+
+#### 3. The Page Streaming the Components (`src/dashboard/page.jsx`)
+
+Wrap the slow async component in `<Suspense>`:
+
+```jsx
+// src/dashboard/page.jsx (Server Component)
 import { Suspense } from "react";
 import QuickStats from "@/components/quick-stats";
-import HeavyAnalytics from "@/components/heavy-analytics"; // slow database query
+import HeavyAnalytics from "@/components/heavy-analytics";
 
 export default function DashboardPage() {
   return (
-    <div>
-      {/* Renders and streams immediately */}
+    <main>
+      <h1>Dashboard Overview</h1>
+
+      {/* 1. Renders and streams to the client immediately */}
       <QuickStats />
 
-      {/* Streams in progressively without blocking the rest of the layout */}
-      <Suspense fallback={<p>Loading real-time analytics...</p>}>
+      {/* 2. Streams the fallback initially, then streams HeavyAnalytics once resolved */}
+      <Suspense fallback={<p className="loading-badge">Loading real-time analytics...</p>}>
         <HeavyAnalytics />
       </Suspense>
-    </div>
+    </main>
   );
 }
 ```
