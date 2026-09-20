@@ -72,7 +72,7 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [1. Link the Stylesheet](#1-link-the-stylesheet)
   - [2. Full Example (Layout + Global CSS + Modules)](#2-full-example-layout--global-css--modules)
 - [🖼️ Assets & Media](#️-assets--media)
-- [🏷️ Import Aliases (`@/`)](#️-import-aliases-)
+- [🏷️ TypeScript & Import Aliases (`@/`)](#️-typescript--import-aliases-)](#️-typescript--import-aliases-)
 - [⚡ Bundlers & Running the App](#-bundlers--running-the-app)
   - [Development](#development)
   - [Production Build & SSG](#production-build--ssg)
@@ -1524,14 +1524,7 @@ export default function Page() {
 }
 ```
 
-**`src/css.d.ts`** (TypeScript support for modules):
-
-```typescript
-declare module "*.module.css" {
-  const classes: { [key: string]: string };
-  export default classes;
-}
-```
+> **TypeScript Support:** You do not need to create manual `src/css.d.ts` files. Dinou includes built-in ambient types for CSS Modules via `dinou/env`. Simply reference `dinou-env.d.ts` in your project root (see [TypeScript & Import Aliases](#-typescript--import-aliases-)).
 
 ## 🖼️ Assets & Media
 
@@ -1552,38 +1545,49 @@ export default function Component() {
 }
 ```
 
-**TypeScript Configuration:**
-To avoid type errors, create a declaration file (e.g., `src/assets.d.ts`):
-
-```typescript
-declare module "*.png" {
-  const value: string;
-  export default value;
-}
-// Repeat for other extensions used (jpg, svg, mp4, etc.)
-```
+> **Built-in TypeScript Support:** You do not need to create manual `src/assets.d.ts` files. Dinou includes built-in ambient declarations for all supported image and media formats through `dinou/env`. Simply include `dinou-env.d.ts` at the root of your project.
 
 > **Customization:** If you need to support additional extensions, you can [eject](#-eject-dinou) Dinou and modify `dinou/core/asset-extensions.js`.
 
-## 🏷️ Import Aliases (`@/`)
+## 🏷️ TypeScript & Import Aliases (`@/`)
 
-Dinou supports import aliases (e.g., `import Button from "@/components/Button"`). Configure paths in your `tsconfig.json`.
+Dinou provides first-class TypeScript support with zero clutter. Ambient type declarations for assets (images, videos, audio), CSS Modules (`*.module.css`), and framework globals are provided by Dinou's built-in `./env` export.
 
-**`tsconfig.json` (TypeScript):**
+### 1. Ambient Declarations (`dinou-env.d.ts`)
+
+Create a `dinou-env.d.ts` file at the root of your project:
+
+```typescript
+// dinou-env.d.ts
+/// <reference types="dinou/env" />
+```
+
+This automatically provides complete type declarations across your entire project without needing separate `css.d.ts` or `assets.d.ts` files inside `src/`.
+
+### 2. Recommended `tsconfig.json`
+
+Configure paths and bundler module resolution in your `tsconfig.json`:
 
 ```json
 {
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": [
+        "src/*"
+      ]
     },
     "allowJs": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "strict": true
+    "strict": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler"
   },
-  "include": ["src"]
+  "include": [
+    "src",
+    "dinou-env.d.ts"
+  ]
 }
 ```
 
