@@ -99,6 +99,16 @@ async function generateStaticPages(routes) {
         fileStream.on("error", reject);
       });
 
+      // Inject static hydration script into pre-rendered HTML
+      try {
+        let htmlContent = await fs.readFile(htmlPath, "utf8");
+        const staticScript = `<script>window.__DINOU_USE_STATIC__=true;</script>`;
+        if (htmlContent.includes("</head>") && !htmlContent.includes("__DINOU_USE_STATIC__")) {
+          htmlContent = htmlContent.replace("</head>", `${staticScript}</head>`);
+          await fs.writeFile(htmlPath, htmlContent, "utf8");
+        }
+      } catch (e) {}
+
       if (metadata) {
         const metadataPath = path.join(OUT_DIR, reqPath, "metadata.json");
         await fs.writeFile(

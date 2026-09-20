@@ -43,10 +43,11 @@ function getEdgeRenderer() {
 function renderRSCStream(model, manifest, options = {}) {
   if (isEdgeRuntime(options)) {
     const edge = getEdgeRenderer();
-    const manifestOrUrl = isWebpack
-      ? manifest
-      : (options.baseUrl || "/");
-    return edge.renderToReadableStream(model, manifestOrUrl, options);
+    const clientManifest =
+      manifest ||
+      (typeof globalThis !== "undefined" && globalThis.__DINOU_CLIENT_MANIFEST__) ||
+      {};
+    return edge.renderToReadableStream(model, clientManifest, options);
   }
 
   const node = getNodeRenderer();

@@ -26,8 +26,9 @@ async function getJSX(
   });
 
   let pagePath;
+  let folderPath = "";
   if (!hasRouterSyntax) {
-    const folderPath = path.join(srcFolder, ...reqSegments);
+    folderPath = path.join(srcFolder, ...reqSegments);
     if (existsSync(folderPath)) {
       for (const ext of [".tsx", ".ts", ".jsx", ".js"]) {
         const candidatePath = path.join(folderPath, `page${ext}`);

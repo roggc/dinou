@@ -15,6 +15,13 @@ function normalizeKey(p) {
   if (!p) return "";
   let s = String(p).replace(/\\/g, "/");
   s = s.replace(/^file:\/\/\/?/, "");
+  if (s.length > 2 && s[1] === ":") s = s.slice(2);
+  const srcIdx = s.indexOf("/src/");
+  if (srcIdx !== -1) {
+    s = s.slice(srcIdx + 1);
+  } else if (s.startsWith("/src/")) {
+    s = s.slice(1);
+  }
   const cwd = typeof process !== "undefined" && typeof process.cwd === "function"
     ? process.cwd().replace(/\\/g, "/")
     : "";
@@ -38,6 +45,8 @@ async function importModule(modulePath) {
       key,
       key.startsWith("src/") ? key.slice(4) : "src/" + key,
       key.replace(/\.[jt]sx?$/, ""),
+      key.startsWith("src/") ? key : "src/" + key,
+      key.startsWith("/") ? key : "/" + key,
     ];
     for (const alt of alternateKeys) {
       if (registry[alt]) {

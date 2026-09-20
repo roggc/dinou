@@ -866,6 +866,10 @@ async function handleRequest(request, platformContext = {}) {
   }
 
   // Dynamic SSR Render
+  if (isEdgeRuntime(platformContext)) {
+    return new Response("Not Found", { status: 404 });
+  }
+
   const contextForChild = {
     req: {
       query: { ...queryObj },

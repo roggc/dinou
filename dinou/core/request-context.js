@@ -15,8 +15,8 @@ if (typeof window === "undefined") {
       const reqFn =
         typeof globalThis.__dinou_require__ === "function"
           ? globalThis.__dinou_require__
-          : typeof eval === "function"
-            ? eval("require")
+          : typeof require === "function"
+            ? require
             : null;
       if (typeof reqFn === "function") {
         const asyncHooks = reqFn("node:async_hooks") || reqFn("async_hooks");

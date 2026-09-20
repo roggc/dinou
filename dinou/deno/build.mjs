@@ -5,11 +5,13 @@ import fs from "node:fs";
 import path from "node:path";
 import esbuild from "esbuild";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { generateRouteModulesCode } = require("../core/route-generator.js");
+const parseExports = require("../core/parse-exports.js");
+const { useClientRegex } = require("../constants.js");
 
 const projectRoot = process.cwd();
 const denoDir = path.resolve(projectRoot, ".dinou/deno");
@@ -47,8 +49,16 @@ const sfManifestPath = findManifest("server-functions-manifest.json", "server_fu
 
 let manifestInlines = "";
 if (clientManifestPath) {
-  const content = fs.readFileSync(clientManifestPath, "utf8");
-  manifestInlines += `\nglobalThis.__DINOU_CLIENT_MANIFEST__ = ${content};\n`;
+  const rawManifest = JSON.parse(fs.readFileSync(clientManifestPath, "utf8"));
+  const normalizedManifest = { ...rawManifest };
+  for (const [k, v] of Object.entries(rawManifest)) {
+    if (k.startsWith("file:///c:/")) {
+      normalizedManifest["file:///C:/" + k.slice(11)] = v;
+    } else if (k.startsWith("file:///C:/")) {
+      normalizedManifest["file:///c:/" + k.slice(11)] = v;
+    }
+  }
+  manifestInlines += `\nglobalThis.__DINOU_CLIENT_MANIFEST__ = ${JSON.stringify(normalizedManifest)};\n`;
 } else {
   manifestInlines += `\nglobalThis.__DINOU_CLIENT_MANIFEST__ = {};\n`;
 }
@@ -106,6 +116,50 @@ const externalList = [
   ...nodeBuiltins.map((b) => "node:" + b),
 ];
 
+const clientReferencesPlugin = {
+  name: "dinou-client-references",
+  setup(build) {
+    build.onLoad({ filter: /\.[jt]sx?$/ }, async (args) => {
+      if (args.path.includes("node_modules")) return null;
+      const normalizedPath = args.path.replace(/\\/g, "/");
+      if (normalizedPath.includes("dinou/core/navigation")) return null;
+
+      let code;
+      try {
+        code = fs.readFileSync(args.path, "utf8");
+      } catch (e) {
+        return null;
+      }
+
+      if (!useClientRegex.test(code.trim())) return null;
+
+      const exports = parseExports(code);
+      const absPath = path.resolve(args.path);
+      const fileUrl = pathToFileURL(absPath).href;
+
+      let proxyCode = `import { createClientModuleProxy } from "react-server-dom-webpack/server.edge";\n`;
+      proxyCode += `const proxy = createClientModuleProxy(${JSON.stringify(fileUrl)});\n`;
+
+      for (const name of exports) {
+        if (name === "default") {
+          proxyCode += `export default proxy.default;\n`;
+        } else {
+          proxyCode += `export const ${name} = proxy[${JSON.stringify(name)}];\n`;
+        }
+      }
+
+      if (!exports.includes("default")) {
+        proxyCode += `export default proxy.default;\n`;
+      }
+
+      return {
+        contents: proxyCode,
+        loader: "js",
+      };
+    });
+  },
+};
+
 const outfile = path.join(denoDir, "main.js");
 
 try {
@@ -119,6 +173,10 @@ try {
     mainFields: ["module", "main"],
     conditions: ["deno", "worker", "react-server", "browser"],
     external: externalList,
+    plugins: [clientReferencesPlugin],
+    banner: {
+      js: "import { createRequire as ___createRequire } from 'node:module'; const require = ___createRequire(import.meta.url || 'file:///deno-entry.js'); const __dirname = ''; const __filename = ''; globalThis.__dinou_require__ = require;",
+    },
     alias: {
       "@": path.resolve(projectRoot, "src"),
       dinou: dinouDir,

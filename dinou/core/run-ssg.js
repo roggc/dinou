@@ -1,5 +1,6 @@
 // dinou/core/run-ssg.js
 // Standalone Static Site Generation (SSG) runner for Dinou.
+process.env.NODE_ENV = process.env.NODE_ENV || "production";
 const { pathToFileURL } = require("url");
 const path = require("path");
 const { register } = require("node:module");
