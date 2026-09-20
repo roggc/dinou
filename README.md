@@ -39,7 +39,7 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [Hybrid Rendering Engine](#hybrid-rendering-engine)
   - [Incremental Static Regeneration (ISR)](#incremental-static-regeneration-isr)
   - [Client Components](#client-components)
-- [Server Functions (`"use server"`) & Enhanced Suspense](#server-functions-use-server--enhanced-suspense)
+- [Server Functions (`"use server"`) & Suspense](#server-functions-use-server--suspense)
   - [Usage in Client Components (Reactive)](#usage-in-client-components-reactive)
   - [Usage in Server Components (Streaming)](#usage-in-server-components-streaming)
   - [Server Actions (Form Mutations)](#server-actions-form-mutations)
@@ -72,7 +72,7 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [1. Link the Stylesheet](#1-link-the-stylesheet)
   - [2. Full Example (Layout + Global CSS + Modules)](#2-full-example-layout--global-css--modules)
 - [🖼️ Assets & Media](#️-assets--media)
-- [🏷️ TypeScript & Import Aliases (`@/`)](#️-typescript--import-aliases-)](#️-typescript--import-aliases-)
+- [🏷️ TypeScript & Import Aliases (`@/`)](#️-typescript--import-aliases-)
 - [⚡ Bundlers & Running the App](#-bundlers--running-the-app)
   - [Development](#development)
   - [Production Build & SSG](#production-build--ssg)
@@ -444,9 +444,9 @@ export default function Counter() {
 }
 ```
 
-## Server Functions (`"use server"`) & Enhanced Suspense
+## Server Functions (`"use server"`) & Suspense
 
-Dinou supports **Server Functions**, allowing you to call server-side logic directly from your Client Components like a Remote Procedure Call (RPC). A unique feature of Dinou is that Server Functions can return **rendered Components** (both Server or Client Components), not just JSON data.
+Dinou supports **Server Functions**, allowing you to call server-side logic directly from your components like a type-safe Remote Procedure Call (RPC). A standout feature of Dinou is that Server Functions can return **rendered React components** (Server or Client Components), not just JSON data.
 
 1. Define a function with `"use server"` at the top of the file.
 2. Import and call it from any component.
@@ -460,52 +460,68 @@ import Post from "@/components/post.jsx";
 export async function getPost(postId) {
   const data = await db.query("SELECT * FROM posts WHERE id = ?", [postId]);
 
+  // Returns pre-rendered JSX directly from Node/Edge over Flight RPC
   return <Post post={data} />;
 }
 ```
 
-### Usage in Client Components (Reactive)
-
-When used in a Client Component, you can use `react-enhanced-suspense` to automatically re-fetch the Server Function when a key changes.
-
-```jsx
-// src/[id]/page.jsx
-"use client";
-import { getPost } from "@/server-functions/get-post";
-import Suspense from "react-enhanced-suspense";
-
-export default function Page({ params: { id } }) {
-  return (
-    <Suspense fallback="Loading post..." resourceId={`get-post-${id}`}>
-      {() => getPost(id)}
-    </Suspense>
-  );
-}
-```
-
-**How `react-enhanced-suspense` works:**
-
-- **Standard Mode:** If only `children` (as React Nodes) and `fallback` are passed, it behaves exactly like React's native `<Suspense>`.
-- **Enhanced Mode:** If you provide a `resourceId` prop and `children` is a **function**, the promise returned by that function is automatically re-evaluated whenever `resourceId` changes. This is perfect for handling data dependencies without `useEffect`.
-
 ### Usage in Server Components (Streaming)
 
-In Server Components, you can simply wrap the async call to stream the result to the client as soon as it is ready.
+In Server Components, you can stream the result directly to the browser as soon as the database operation completes using React's native `<Suspense>`:
 
 ```jsx
-// src/[id]/page.jsx
+// src/[id]/page.jsx (Server Component)
+import { Suspense } from "react";
 import { getPost } from "@/server-functions/get-post";
-import Suspense from "react-enhanced-suspense";
 
 export default async function Page({ params: { id } }) {
   return (
     <div>
-      {/* Behaves like native Suspense (Streaming) */}
-      <Suspense fallback="Loading post...">{getPost(id)}</Suspense>
+      <Suspense fallback={<p>Loading post from server...</p>}>
+        {getPost(id)}
+      </Suspense>
     </div>
   );
 }
 ```
+
+### Usage in Client Components (Reactive with React 19)
+
+In Client Components (`"use client"`), Server Functions return a standard JavaScript Promise. You can resolve and stream them using pure React 19 primitives: **`<Suspense>`** and the **`use()`** hook.
+
+```tsx
+// src/[id]/page.tsx (Client Component)
+"use client";
+
+import { Suspense, use, useState, type ReactNode } from "react";
+import { getPost } from "@/server-functions/get-post";
+
+// Helper component that unwraps the Server Function promise
+function PostStream({ promise }: { promise: Promise<ReactNode> }) {
+  const content = use(promise);
+  return <>{content}</>;
+}
+
+export default function Page({ params: { id } }: { params: { id: string } }) {
+  // Hold the promise in React state to re-evaluate on demand
+  const [postPromise, setPostPromise] = useState<Promise<ReactNode>>(() => getPost(id));
+
+  return (
+    <div>
+      <button onClick={() => setPostPromise(getPost(id))}>
+        Refresh Post
+      </button>
+
+      {/* Streams the Server Component output as it arrives over Flight RPC */}
+      <Suspense fallback={<p>Streaming post...</p>}>
+        <PostStream promise={postPromise} />
+      </Suspense>
+    </div>
+  );
+}
+```
+
+> **Granular Mutations & Invalidation:** For managing mutations that atomically update global state and re-fetch dependent data queries with zero external dependencies, see [The "Dinou Pattern"](#advanced-patterns-the-dinou-pattern).
 
 ### Server Actions (Form Mutations)
 
