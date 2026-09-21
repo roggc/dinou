@@ -1,22 +1,25 @@
 // dinou/core/client-redirect.jsx
 "use client";
 
+import { useEffect } from "react";
 import { useRouter } from "./navigation.js";
 
 export function ClientRedirect({ to }) {
   const router = useRouter();
 
-  if (typeof window !== "undefined") {
-    Promise.resolve().then(() => {
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      document.body.setAttribute("data-hydrated", "true");
       if (window.__DINOU_ROUTER_NAVIGATE__) {
         window.__DINOU_ROUTER_NAVIGATE__(to, { replace: true });
-      } else {
+      } else if (router && router.replace) {
         router.replace(to);
+      } else {
+        window.location.href = to;
       }
-    });
-    // Suspend to prevent React from committing this intermediate page
-    throw new Promise(() => {});
-  }
+    }
+  }, [to, router]);
 
   return null;
 }
+

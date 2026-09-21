@@ -88,13 +88,16 @@ class CloudflareKVStorage extends StorageAdapter {
   }
 
   _cleanKey(key) {
-    return key.replace(/^\/+/, "").replace(/\\/g, "/");
+    return String(key).replace(/^\/+/, "").replace(/\\/g, "/").replace(/\/+$/, "");
   }
 
   async get(key) {
     if (!this.kv) return null;
     const cleanKey = this._cleanKey(key);
-    const res = await this.kv.getWithMetadata(cleanKey, "text");
+    let res = await this.kv.getWithMetadata(cleanKey, "text");
+    if ((!res || res.value === null) && !cleanKey.includes(".")) {
+      res = await this.kv.getWithMetadata(cleanKey ? `${cleanKey}/index.html` : "index.html", "text");
+    }
     if (!res || res.value === null) return null;
     return {
       content: res.value,
@@ -107,6 +110,10 @@ class CloudflareKVStorage extends StorageAdapter {
     const cleanKey = this._cleanKey(key);
     const options = metadata ? { metadata } : undefined;
     await this.kv.put(cleanKey, content, options);
+    if (cleanKey.endsWith("/index.html")) {
+      const folderKey = cleanKey.slice(0, -11);
+      await this.kv.put(folderKey, content, options);
+    }
   }
 
   async has(key) {
@@ -132,22 +139,42 @@ class MemoryStorage extends StorageAdapter {
     this.store = new Map();
   }
 
+  _cleanKey(key) {
+    return String(key).replace(/^\/+/, "").replace(/\\/g, "/").replace(/\/+$/, "");
+  }
+
   async get(key) {
-    const item = this.store.get(key);
+    const cleanKey = this._cleanKey(key);
+    let item = this.store.get(cleanKey);
+    if (!item && !cleanKey.includes(".")) {
+      item = this.store.get(cleanKey ? `${cleanKey}/index.html` : "index.html");
+    }
     if (!item) return null;
     return { content: item.content, metadata: item.metadata };
   }
 
   async set(key, content, metadata = null) {
-    this.store.set(key, { content, metadata });
+    const cleanKey = this._cleanKey(key);
+    this.store.set(cleanKey, { content, metadata });
+    if (cleanKey.endsWith("/index.html")) {
+      const folderKey = cleanKey.slice(0, -11);
+      this.store.set(folderKey, { content, metadata });
+    }
   }
 
   async has(key) {
-    return this.store.has(key);
+    const cleanKey = this._cleanKey(key);
+    return this.store.has(cleanKey) || this.store.has(cleanKey ? `${cleanKey}/index.html` : "index.html");
   }
 
   async delete(key) {
-    this.store.delete(key);
+    const cleanKey = this._cleanKey(key);
+    this.store.delete(cleanKey);
+    this.store.delete(cleanKey ? `${cleanKey}/index.html` : "index.html");
+  }
+
+  keys() {
+    return Array.from(this.store.keys());
   }
 }
 
@@ -255,7 +282,26 @@ let activeStorageAdapter = null;
 
 function getStorageAdapter() {
   if (!activeStorageAdapter) {
-    activeStorageAdapter = new FileSystemStorage();
+    const runtime =
+      (typeof globalThis !== "undefined" && globalThis.__DINOU_RUNTIME__) ||
+      (typeof process !== "undefined" && process.env && process.env.DINOU_RUNTIME) ||
+      "";
+
+    const isEdge =
+      runtime === "edge" ||
+      runtime === "deno-edge" ||
+      (typeof runtime === "string" && runtime.includes("edge")) ||
+      (typeof Deno !== "undefined" && !runtime.includes("node"));
+
+    if (isEdge) {
+      if (typeof Deno !== "undefined" && typeof Deno.openKv === "function") {
+        activeStorageAdapter = new DenoKVStorage();
+      } else {
+        activeStorageAdapter = new MemoryStorage();
+      }
+    } else {
+      activeStorageAdapter = new FileSystemStorage();
+    }
   }
   return activeStorageAdapter;
 }

@@ -13,4 +13,5 @@ module.exports = {
   redirect: redirectModule.redirect,
   ClientRedirect: clientRedirectModule.ClientRedirect,
   Link: linkModule.Link,
+  setCurrentContext: contextModule.setCurrentContext,
 };

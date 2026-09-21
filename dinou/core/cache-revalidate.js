@@ -9,6 +9,8 @@ const { updateStatus } = require("./status-manifest");
 
 const { getContext } = require("./request-context");
 const { resolveRelativeUrl } = require("./url-resolver");
+const { getStorageAdapter } = require("./storage-adapter");
+const { isEdgeRuntime } = require("./rsc-renderer");
 
 async function walkMetadataFiles(dir, fileList = []) {
   try {
@@ -52,6 +54,37 @@ async function revalidatePath(reqPath) {
   }
   if (cleanPath !== "/" && cleanPath.endsWith("/")) {
     cleanPath = cleanPath.slice(0, -1);
+  }
+
+  if (isEdgeRuntime()) {
+    const storage = getStorageAdapter();
+    const cleanPathKey = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
+    const htmlKey = cleanPathKey ? `${cleanPathKey}/index.html` : "index.html";
+    const metaKey = cleanPathKey ? `${cleanPathKey}/metadata.json` : "metadata.json";
+
+    let cached = await storage.get(htmlKey);
+    let currentMeta = (cached && cached.metadata) || {};
+    try {
+      const metaItem = await storage.get(metaKey);
+      if (metaItem && metaItem.content) {
+        currentMeta = JSON.parse(metaItem.content);
+      }
+    } catch (e) {}
+
+    const newGenTime = Date.now();
+    currentMeta.generatedAt = newGenTime;
+
+    let newHtml = cached ? cached.content : "";
+    if (newHtml) {
+      newHtml = newHtml.replace(
+        /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g,
+        new Date(newGenTime).toISOString()
+      );
+    }
+    await storage.set(htmlKey, newHtml, currentMeta);
+    await storage.set(metaKey, JSON.stringify(currentMeta));
+    console.log(`✅ [Edge Revalidate] Successfully revalidated ${cleanPath} (generatedAt: ${newGenTime})`);
+    return;
   }
 
   const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
@@ -113,6 +146,32 @@ async function revalidatePath(reqPath) {
 
 async function revalidateTag(tag) {
   console.log(`[Revalidate] Starting on-demand revalidation for tag: "${tag}"...`);
+
+  if (isEdgeRuntime()) {
+    const storage = getStorageAdapter();
+    if (typeof storage.keys === "function") {
+      const revalidatePromises = [];
+      for (const key of storage.keys()) {
+        if (key.endsWith("metadata.json")) {
+          try {
+            const item = await storage.get(key);
+            let meta = item?.metadata;
+            if (!meta && item?.content) {
+              meta = JSON.parse(item.content);
+            }
+            if (meta && Array.isArray(meta.tags) && meta.tags.includes(tag)) {
+              const cleanKey = key.replace(/\/metadata\.json$/, "").replace(/^metadata\.json$/, "");
+              const reqPath = "/" + cleanKey;
+              revalidatePromises.push(revalidatePath(reqPath));
+            }
+          } catch (e) {}
+        }
+      }
+      await Promise.all(revalidatePromises);
+    }
+    return;
+  }
+
   const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
   if (!existsSync(dist2Folder)) return;
 

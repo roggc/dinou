@@ -19,57 +19,7 @@ function safeDecode(val) {
   }
 }
 
-/**
- * Creates a spy that detects access to properties and marks the page as dynamic.
- * @param {Object} target - The real object (cookies, headers, query...)
- * @param {string} label - Name for the log (e.g., "Headers", "Cookies")
- * @param {Function} onBailout - Callback to execute when access is detected
- */
-function createBailoutProxy(target, label, onBailout) {
-  // If there is no target, use an empty object to avoid crashes,
-  // but ideally pass whatever you have.
-  const safeTarget = target || {};
-
-  return new Proxy(safeTarget, {
-    get(t, prop, receiver) {
-      // Ignore internal Node/Console symbols
-      if (
-        typeof prop === "symbol" ||
-        prop === "inspect" ||
-        prop === "valueOf" ||
-        prop === "toString" // Sometimes useful to ignore
-      ) {
-        return Reflect.get(t, prop, receiver);
-      }
-
-      // 🚨 ALARM: Access detected
-      console.log(
-        `[StaticBailout] Access to ${label} detected: "${String(prop)}".`,
-      );
-
-      // Execute logic to mark as dynamic
-      onBailout();
-
-      // IMPORTANT: Return the real value of the original object
-      return Reflect.get(t, prop, receiver);
-    },
-
-    ownKeys(t) {
-      console.log(`[StaticBailout] Iteration of ${label} detected.`);
-      onBailout();
-      return Reflect.ownKeys(t);
-    },
-
-    // Optional: Detect if they try to ask "prop in headers"
-    has(t, prop) {
-      console.log(
-        `[StaticBailout] Existence check (IN) in ${label}: "${String(prop)}".`,
-      );
-      onBailout();
-      return Reflect.has(t, prop);
-    },
-  });
-}
+const { createBailoutProxy } = require("./bailout-proxy.js");
 
 /**
  * Compiles all static pages in the application.

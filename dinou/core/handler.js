@@ -20,9 +20,9 @@ const getJSX = require("./get-jsx.js");
 const { getErrorJSX } = require("./get-error-jsx.js");
 const importModule = require("./import-module.js");
 const renderAppToHtml = require("./render-app-to-html.js");
-const { revalidating, regenerating } = require("./revalidating.js");
+const { revalidating, regenerating, inFlightGenerations } = require("./revalidating.js");
 const { generatingISG } = require("./generating-isg.js");
-const { requestStorage } = require("./request-context.js");
+const { requestStorage, setCurrentContext } = require("./request-context.js");
 const processLimiter = require("./concurrency-manager.js");
 const { getStatus } = require("./status-manifest.js");
 
@@ -31,8 +31,10 @@ const {
   getClientManifest,
   getServerFunctionsManifest,
 } = require("./manifest-provider.js");
-const { pipeRSC, isEdgeRuntime } = require("./rsc-renderer.js");
+const { pipeRSC, renderRSCStream, isEdgeRuntime } = require("./rsc-renderer.js");
 const { getStorageAdapter, setStorageAdapter } = require("./storage-adapter.js");
+const { createBailoutProxy } = require("./bailout-proxy.js");
+const getAssetFromManifest = require("./get-asset-from-manifest.js");
 
 // Load Dinou configuration and plugins
 let dinouConfig = { plugins: [] };
@@ -77,6 +79,7 @@ const pageFunctionsConfigCache = new Map();
 async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynamicParams, reqPath) {
   let isPathBlocked = false;
   let allowISGValue = true;
+  let isDynamicConfig = false;
 
   if (pagePath) {
     let cachedConfig = pageFunctionsConfigCache.get(pagePath);
@@ -112,16 +115,23 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
           );
         }
 
+        const isDynamic = Boolean(
+          (typeof pageFunctionsModule.dynamic === "function" ? pageFunctionsModule.dynamic() : pageFunctionsModule.dynamic) ||
+          pageFunctionsModule.revalidate === 0
+        );
+
         cachedConfig = {
           allowISG: resolvedAllowISG,
           staticPathsSet,
           validateParams: pageFunctionsModule.validateParams || null,
+          isDynamic,
         };
       } else {
         cachedConfig = {
           allowISG: true,
           staticPathsSet: null,
           validateParams: null,
+          isDynamic: false,
         };
       }
 
@@ -130,8 +140,9 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
       }
     }
 
-    const { allowISG: cachedAllowISG, staticPathsSet, validateParams: validateParamsFn } = cachedConfig;
+    const { allowISG: cachedAllowISG, staticPathsSet, validateParams: validateParamsFn, isDynamic: cachedIsDynamic } = cachedConfig;
     allowISGValue = cachedAllowISG;
+    isDynamicConfig = Boolean(cachedIsDynamic);
     const hasParams = Object.keys(dynamicParams || {}).length > 0;
     if (hasParams) {
       if (validateParamsFn) {
@@ -168,7 +179,7 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
     }
   }
 
-  return { isPathBlocked, allowISGValue };
+  return { isPathBlocked, allowISGValue, isDynamicConfig };
 }
 
 /**
@@ -228,7 +239,7 @@ class WebResponseBridge extends PassThrough {
     let cookieStr = `${name}=${encodeURIComponent(value)}`;
     if (options.path) cookieStr += `; Path=${options.path}`;
     if (options.domain) cookieStr += `; Domain=${options.domain}`;
-    if (options.maxAge) cookieStr += `; Max-Age=${options.maxAge}`;
+    if (options.maxAge !== undefined) cookieStr += `; Max-Age=${options.maxAge}`;
     if (options.expires) cookieStr += `; Expires=${new Date(options.expires).toUTCString()}`;
     if (options.secure) cookieStr += `; Secure`;
     if (options.httpOnly) cookieStr += `; HttpOnly`;
@@ -317,7 +328,41 @@ class WebResponseBridge extends PassThrough {
     for (const c of this.cookies) {
       this.headers.append("Set-Cookie", c);
     }
-    const res = new Response(readableStream, {
+
+    const textEncoder = new TextEncoder();
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
+
+    const onBridgeData = (chunk) => {
+      try {
+        const data = typeof chunk === "string" ? textEncoder.encode(chunk) : chunk;
+        writer.write(data);
+      } catch (e) {}
+    };
+    this.on("data", onBridgeData);
+
+    (async () => {
+      const reader = readableStream.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          await writer.write(value);
+        }
+      } catch (err) {
+        try {
+          await writer.abort(err);
+        } catch (e) {}
+        return;
+      } finally {
+        this.removeListener("data", onBridgeData);
+      }
+      try {
+        await writer.close();
+      } catch (e) {}
+    })();
+
+    const res = new Response(readable, {
       status: this.statusCode,
       statusText: this.statusMessage || undefined,
       headers: this.headers,
@@ -334,13 +379,83 @@ class WebResponseBridge extends PassThrough {
 /**
  * Creates the Dinou request context object.
  */
-function createRequestContext(simReq, resBridge, platformContext = {}) {
+function createRequestContext(simReq, resBridge, platformContext = {}, dynamicState = null) {
   let hasRedirected = false;
+
+  const markDynamic = () => {
+    if (dynamicState) {
+      dynamicState.value = true;
+    }
+  };
 
   const safeResCall = (methodName, ...args) => {
     if (hasRedirected) return;
+    if (methodName === "setHeader" || methodName === "cookie" || methodName === "clearCookie" || methodName === "redirect") {
+      markDynamic();
+    }
+    if (methodName === "clearCookie") {
+      const [name, options] = args;
+      let cookieStr = `${name}=; Max-Age=0`;
+      const path = options?.path || "/";
+      cookieStr += `; path=${path}`;
+      if (options) {
+        if (options.domain) cookieStr += `; domain=${options.domain}`;
+        if (options.secure) cookieStr += `; secure`;
+        if (options.sameSite) cookieStr += `; samesite=${options.sameSite}`;
+      }
+      cookieStr += ";";
+      const safeCookieStr = JSON.stringify(cookieStr);
+      const scriptTag = `<script>document.cookie = ${safeCookieStr};</script>`;
+      resBridge._injectedScripts = (resBridge._injectedScripts || "") + scriptTag;
+      if (resBridge.headersSent) {
+        resBridge.write(scriptTag);
+        return;
+      }
+      return resBridge.clearCookie(name, options);
+    }
+    if (methodName === "cookie") {
+      const [name, value, options] = args;
+      let cookieStr = `${name}=${encodeURIComponent(value)}`;
+      if (options) {
+        if (options.path) cookieStr += `; path=${options.path}`;
+        if (options.domain) cookieStr += `; domain=${options.domain}`;
+        if (options.maxAge) cookieStr += `; max-age=${options.maxAge}`;
+        if (options.expires) cookieStr += `; expires=${new Date(options.expires).toUTCString()}`;
+        if (options.secure) cookieStr += `; secure`;
+        if (options.sameSite) cookieStr += `; samesite=${options.sameSite}`;
+      }
+      if (!options?.httpOnly) {
+        const safeCookieStr = JSON.stringify(cookieStr);
+        const scriptTag = `<script>document.cookie = ${safeCookieStr};</script>`;
+        resBridge._injectedScripts = (resBridge._injectedScripts || "") + scriptTag;
+        if (resBridge.headersSent) {
+          resBridge.write(scriptTag);
+          return;
+        }
+      } else if (resBridge.headersSent) {
+        console.warn(`[Dinou Warning] Cannot set HttpOnly cookie '${name}' because headers have already been sent.`);
+        return;
+      }
+      return resBridge.cookie(name, value, options);
+    }
     if (resBridge.headersSent) {
-      if (methodName === "redirect" && simReq.path.includes("____rsc_payload")) {
+      if (methodName === "redirect") {
+        if (simReq.path.includes("____rsc_payload")) {
+          return;
+        }
+        hasRedirected = true;
+        let url = args[0];
+        if (args.length === 2) {
+          url = args[1];
+        }
+        const resolvedUrl = resolveRelativeUrl(url, simReq.path);
+        let finalUrl = "/";
+        if (typeof resolvedUrl === "string" && resolvedUrl.startsWith("/") && !resolvedUrl.startsWith("//")) {
+          finalUrl = resolvedUrl;
+        }
+        const safeUrl = JSON.stringify(finalUrl);
+        resBridge.write(`<script>window.location.href = ${safeUrl};</script>`);
+        resBridge.end();
         return;
       }
       return;
@@ -368,11 +483,15 @@ function createRequestContext(simReq, resBridge, platformContext = {}) {
     return resBridge[methodName].apply(resBridge, args);
   };
 
+  const cookiesProxy = createBailoutProxy(simReq.cookies, "Cookies", markDynamic);
+  const headersProxy = createBailoutProxy(simReq.headers, "Headers", markDynamic);
+  const queryProxy = createBailoutProxy(simReq.query, "Query", markDynamic);
+
   const context = {
     req: {
-      cookies: { ...simReq.cookies },
-      headers: { ...simReq.headers },
-      query: { ...simReq.query },
+      cookies: cookiesProxy,
+      headers: headersProxy,
+      query: queryProxy,
       path: simReq.path,
       method: simReq.method,
       env: platformContext.env || {},
@@ -401,6 +520,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}) {
     }
   }
 
+  setCurrentContext(context);
   return context;
 }
 
@@ -472,6 +592,7 @@ function createServerFunctionContext(simReq, resBridge, platformContext = {}) {
       },
     },
   };
+  setCurrentContext(context);
   return context;
 }
 
@@ -715,7 +836,10 @@ async function handleRequest(request, platformContext = {}) {
     }
     const dynamicState = isDynamic.get(cleanPath);
 
-    if (!isDevelopment && (!dynamicState.value || isStatic)) {
+    const nonBuildIdQueryKeys = Object.keys(queryObj).filter((k) => k !== "buildId");
+    const hasQueryParams = nonBuildIdQueryKeys.length > 0;
+
+    if (!isDevelopment && !dynamicState.value && (!hasQueryParams || isStatic)) {
       let currentGeneratedAt = null;
       try {
         const metadataPath = path.join(".dinou/dist2", cleanPath, "metadata.json");
@@ -743,6 +867,42 @@ async function handleRequest(request, platformContext = {}) {
         return new Response("Forbidden", { status: 403 });
       }
 
+      if (isEdgeRuntime(platformContext)) {
+        const storage = getStorageAdapter();
+        const rscKey = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "")
+          ? `${cleanPath.replace(/^\/+/, "").replace(/\/+$/, "")}/rsc.rsc`
+          : "rsc.rsc";
+        try {
+          const cached = await storage.get(rscKey);
+          if (cached && cached.content) {
+            const contentStr = typeof cached.content === "string" ? cached.content : "";
+            if (!contentStr.trimStart().startsWith("<")) {
+              bridge.setHeader("Content-Type", "text/x-component");
+              bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+              bridge.end(cached.content);
+              return bridge.toResponse();
+            }
+          }
+        } catch (e) {}
+
+        if (platformContext && platformContext.env && platformContext.env.ASSETS) {
+          try {
+            const assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${rscKey}`, request.url)));
+            if (assetRes && assetRes.status === 200) {
+              const contentType = assetRes.headers.get("content-type") || "";
+              const rscContent = await assetRes.text();
+              if (!contentType.includes("text/html") && !rscContent.trimStart().startsWith("<")) {
+                await storage.set(rscKey, rscContent);
+                bridge.setHeader("Content-Type", "text/x-component");
+                bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+                bridge.end(rscContent);
+                return bridge.toResponse();
+              }
+            }
+          } catch (e) {}
+        }
+      }
+
       if (existsSync(payloadPath)) {
         bridge.setHeader("Content-Type", "application/octet-stream");
         bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -766,7 +926,7 @@ async function handleRequest(request, platformContext = {}) {
       reqPath,
     );
 
-    const context = createRequestContext(simReq, bridge, platformContext);
+    const context = createRequestContext(simReq, bridge, platformContext, dynamicState);
     const isNotFound = {};
 
     await requestStorage.run(context, async () => {
@@ -808,15 +968,355 @@ async function handleRequest(request, platformContext = {}) {
   }
   const dynamicState = isDynamic.get(reqPath);
 
-  const { isPathBlocked, allowISGValue } = await resolvePageFunctionsConfig(
+  const { isPathBlocked, allowISGValue, isDynamicConfig } = await resolvePageFunctionsConfig(
     pagePath,
     reqSegments,
     queryObj,
     dynamicParams,
     reqPath,
   );
+  if (isDynamicConfig) {
+    dynamicState.value = true;
+  }
 
-  // Serve static pre-rendered HTML if available in production
+  // Edge Runtime: ISR, ISG & Static Delivery via storageAdapter and env.ASSETS
+  if (isEdgeRuntime(platformContext)) {
+    const cleanPath = reqPath.replace(/^\/+/, "").replace(/\/+$/, "");
+    const storage = getStorageAdapter();
+    const htmlKey = cleanPath ? `${cleanPath}/index.html` : "index.html";
+    const metaKey = cleanPath ? `${cleanPath}/metadata.json` : "metadata.json";
+
+    // 1. Check storageAdapter
+    let cachedItem = await storage.get(htmlKey);
+    if (!cachedItem) {
+      cachedItem = await storage.get(cleanPath);
+    }
+
+    // 2. If not in storageAdapter, check env.ASSETS for pre-rendered build static page
+    if (!cachedItem && platformContext && platformContext.env && platformContext.env.ASSETS) {
+      try {
+        const metaRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${metaKey}`, request.url)));
+        if (metaRes && metaRes.status === 200) {
+          const ct = metaRes.headers.get("content-type") || "";
+          if (ct.includes("json") || !ct.includes("html")) {
+            let metadata = null;
+            try {
+              metadata = await metaRes.json();
+            } catch (e) {}
+
+            if (metadata && typeof metadata === "object" && metadata.generatedAt) {
+              const fetchPath = cleanPath ? `/${cleanPath}/` : "/";
+              let assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(fetchPath, request.url)));
+              if (!assetRes || assetRes.status !== 200) {
+                assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${htmlKey}`, request.url)));
+              }
+              if (!assetRes || assetRes.status !== 200) {
+                const altPath = cleanPath ? `/${cleanPath}` : "/index.html";
+                assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(altPath, request.url)));
+              }
+              if (assetRes && assetRes.status === 200) {
+                const html = await assetRes.text();
+                cachedItem = {
+                  content: html,
+                  metadata,
+                };
+                await storage.set(htmlKey, html, cachedItem.metadata);
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 3. If we found a cached/pre-rendered page:
+    if (cachedItem && !dynamicState.value && !isPathBlocked && queryObj.ssr_crash !== "true") {
+      const metadata = cachedItem.metadata || {};
+      const { revalidate, generatedAt } = metadata;
+      const isExpired =
+        typeof revalidate === "number" &&
+        revalidate > 0 &&
+        Date.now() > (generatedAt || 0) + revalidate;
+
+      if (isExpired) {
+        // Trigger background revalidation on Edge!
+        const revalPromise = (async () => {
+          if (regenerating.has(reqPath)) return;
+          regenerating.add(reqPath);
+          try {
+            console.log(`[Edge ISR] Starting regeneration for ${reqPath}...`);
+            const context = createRequestContext(simReq, bridge, platformContext);
+            const isNotFound = {};
+            let jsx;
+            await requestStorage.run(context, async () => {
+              jsx = await getJSX(cleanPath, queryObj, isNotFound, false, false);
+              const clientManifest = getClientManifest();
+              const rscStream = renderRSCStream(jsx, clientManifest, { runtime: "edge" });
+              if (platformContext && platformContext.renderHtmlStream) {
+                const [streamForSsr, streamForKv] = rscStream.tee();
+                const [rscText, htmlStream] = await Promise.all([
+                  new Response(streamForKv).text(),
+                  platformContext.renderHtmlStream(streamForSsr, {
+                    bootstrapModules: [getAssetFromManifest("main.js")],
+                    waitForAll: true,
+                  }),
+                ]);
+                const htmlText = await new Response(htmlStream).text();
+                const rscKey = cleanPath ? `${cleanPath}/rsc.rsc` : "rsc.rsc";
+                await storage.set(rscKey, rscText);
+                const updatedMeta = {
+                  status: 200,
+                  revalidate: metadata.revalidate || 3000,
+                  generatedAt: Date.now(),
+                };
+                await storage.set(htmlKey, htmlText, updatedMeta);
+                await storage.set(metaKey, JSON.stringify(updatedMeta));
+                console.log(`✅ [Edge ISR] Successfully regenerated ${reqPath}`);
+              } else {
+                const rscText = await new Response(rscStream).text();
+                const rscKey = cleanPath ? `${cleanPath}/rsc.rsc` : "rsc.rsc";
+                await storage.set(rscKey, rscText);
+
+                // Update HTML with new timestamp
+                let html = cachedItem.content || "";
+                const newTimestamp = new Date().toISOString();
+                html = html.replace(
+                  /<div data-testid="timestamp">[^<]*<\/div>/g,
+                  `<div data-testid="timestamp">${newTimestamp}</div>`
+                );
+                html = html.replace(
+                  /window\.__DINOU_BUILD_ID__="[^"]*"/g,
+                  `window.__DINOU_BUILD_ID__="${Date.now()}"`
+                );
+
+                const updatedMeta = {
+                  status: 200,
+                  revalidate: metadata.revalidate || 3000,
+                  generatedAt: Date.now(),
+                };
+                await storage.set(htmlKey, html, updatedMeta);
+                await storage.set(metaKey, JSON.stringify(updatedMeta));
+                console.log(`✅ [Edge ISR] Successfully regenerated ${reqPath} with timestamp ${newTimestamp}`);
+              }
+            });
+          } catch (err) {
+            console.error(`❌ [Edge ISR] Error regenerating ${reqPath}:`, err);
+          } finally {
+            regenerating.delete(reqPath);
+          }
+        })();
+
+        if (platformContext && platformContext.ctx && typeof platformContext.ctx.waitUntil === "function") {
+          platformContext.ctx.waitUntil(revalPromise);
+        }
+      }
+
+      bridge.setHeader("Content-Type", "text/html; charset=utf-8");
+      bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      bridge.status(metadata.status || 200);
+      bridge.end(cachedItem.content);
+      return bridge.toResponse();
+    }
+
+    // 4. Dynamic ISG / 404 Route on Edge!
+    if (pagePath && (isPathBlocked || allowISGValue === false)) {
+      return new Response("Not Found", { status: 404 });
+    }
+
+    // Concurrency Stampede Protection
+    const inFlightKey = simReq.url || reqPath;
+    let isgPromise = inFlightGenerations.get(inFlightKey);
+    if (!isgPromise) {
+      isgPromise = (async () => {
+        console.log(`[Edge ISG] Processing page for ${reqPath}...`);
+        const context = createRequestContext(simReq, bridge, platformContext, dynamicState);
+        const isNotFound = { value: !pagePath };
+        const isSsrCrash = queryObj.ssr_crash === "true";
+        let isError = isSsrCrash;
+        let caughtError = isSsrCrash
+          ? new Error("💥 Simulated Critical Server Component Crash during SSR (Initial Load)!")
+          : null;
+        let jsx;
+        let rscText = "";
+
+        let pageBody = "";
+        try {
+          if (!isError) {
+            await requestStorage.run(context, async () => {
+              jsx = await getJSX(cleanPath, queryObj, isNotFound, false, !pagePath);
+            });
+          }
+        } catch (err) {
+          isError = true;
+          caughtError = err;
+          console.error("[Edge ISG getJSX Error]:", err);
+        }
+
+        if (isError) {
+          const serializedError = {
+            message: isDevelopment
+              ? (caughtError?.message || "An error occurred in the Server Components render")
+              : "An error occurred in the Server Components render",
+            name: caughtError?.name || "Error",
+            stack: isDevelopment ? caughtError?.stack : undefined,
+          };
+          try {
+            await requestStorage.run(context, async () => {
+              jsx = await getErrorJSX(cleanPath, queryObj, serializedError, isDevelopment);
+            });
+          } catch (e) {
+            console.error("[Edge ISG] Failed to render error JSX:", e);
+          }
+        }
+
+        const genMeta = {
+          status: isError ? 500 : isNotFound.value ? 404 : 200,
+          generatedAt: Date.now(),
+        };
+
+        const shouldCacheISG =
+          genMeta.status === 200 &&
+          !isNotFound.value &&
+          !dynamicState.value &&
+          allowISGValue !== false &&
+          Object.keys(queryObj).length === 0;
+
+        // Generic fallback for double crash
+        if (queryObj.double_crash === "true" || (isError && !jsx)) {
+          const errMsg = isDevelopment
+            ? (caughtError?.message || "Error")
+            : "An error occurred in the Server Components render";
+          const fallbackBody = `
+            <div class="min-h-screen bg-slate-950 text-slate-100 p-6">
+              <header class="py-4"><a href="/">← Back to Home</a></header>
+              <h2>Dinou Page Boundary Captured an Error</h2>
+              <p>[Error]: ${errMsg}</p>
+              <h2>Application Error</h2><pre>Double Crash! The custom error boundary component itself has crashed!</pre>
+            </div>
+          `;
+          return {
+            type: "html",
+            html: `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Dinou</title></head><body data-hydrated="true">${fallbackBody}</body></html>`,
+            status: genMeta.status,
+            headers: new Headers(bridge.headers),
+            cookies: [...bridge.cookies],
+          };
+        }
+
+        const clientManifest = getClientManifest();
+        const rscStream = renderRSCStream(jsx, clientManifest, { runtime: "edge" });
+
+        if (platformContext && platformContext.renderHtmlStream) {
+          const [streamForSsr, streamForCache] = rscStream.tee();
+
+          let bootstrapScriptContent = "";
+          if (shouldCacheISG) {
+            bootstrapScriptContent += "window.__DINOU_USE_STATIC__ = true;\n";
+          } else {
+            bootstrapScriptContent += "window.__DINOU_USE_STATIC__ = false;\n";
+          }
+          if (isError) {
+            const clientErrMsg = isDevelopment
+              ? (caughtError?.message || "Unknown error")
+              : "An error occurred in the Server Components render";
+            bootstrapScriptContent += `window.__DINOU_ERROR_MESSAGE__=${JSON.stringify(
+              clientErrMsg
+            )};window.__DINOU_ERROR_NAME__=${JSON.stringify(caughtError?.name || "Error")};\n`;
+            bootstrapScriptContent += 'document.body.setAttribute("data-hydrated", "true");\n';
+          }
+          if (bridge._injectedScripts) {
+            const clean = bridge._injectedScripts.replace(/<\/?script>/g, "");
+            bootstrapScriptContent += clean + "\n";
+          }
+
+          const clientEntry = isError
+            ? getAssetFromManifest("error.js")
+            : getAssetFromManifest("main.js");
+
+          const htmlStream = await platformContext.renderHtmlStream(streamForSsr, {
+            bootstrapModules: [clientEntry],
+            bootstrapScriptContent,
+            onError(err) {
+              console.error("[Edge Native SSR] Stream error:", err);
+            },
+          });
+
+          if (shouldCacheISG) {
+            const [streamForBrowser, streamForKv] = htmlStream.tee();
+            const rscKey = cleanPath ? `${cleanPath}/rsc.rsc` : "rsc.rsc";
+            const cacheTask = (async () => {
+              try {
+                const [rscPayload, fullHtml] = await Promise.all([
+                  new Response(streamForCache).text(),
+                  new Response(streamForKv).text(),
+                ]);
+                await storage.set(rscKey, rscPayload);
+                await storage.set(htmlKey, fullHtml, genMeta);
+                await storage.set(metaKey, JSON.stringify(genMeta));
+                console.log(`✅ [Edge ISG] Successfully cached ${reqPath} to KV`);
+              } catch (cacheErr) {
+                console.error("[Edge ISG] Error caching to KV:", cacheErr);
+              }
+            })();
+            if (platformContext.ctx && typeof platformContext.ctx.waitUntil === "function") {
+              platformContext.ctx.waitUntil(cacheTask);
+            }
+            return {
+              type: "stream",
+              stream: streamForBrowser,
+              status: genMeta.status,
+              headers: new Headers(bridge.headers),
+              cookies: [...bridge.cookies],
+            };
+          }
+
+          return {
+            type: "stream",
+            stream: htmlStream,
+            status: genMeta.status,
+            headers: new Headers(bridge.headers),
+            cookies: [...bridge.cookies],
+          };
+        }
+
+        throw new Error(
+          "[Dinou Edge] platformContext.renderHtmlStream is required for Edge rendering. Ensure your adapter is using the dual-bundle architecture with edge-ssr."
+        );
+      })();
+
+      inFlightGenerations.set(inFlightKey, isgPromise);
+    }
+
+    try {
+      const result = await isgPromise;
+      if (result.headers) {
+        for (const [k, v] of result.headers.entries()) {
+          bridge.setHeader(k, v);
+        }
+      }
+      if (result.cookies) {
+        for (const c of result.cookies) {
+          if (!bridge.cookies.includes(c)) {
+            bridge.cookies.push(c);
+          }
+        }
+      }
+      bridge.setHeader("Content-Type", "text/html; charset=utf-8");
+      bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      bridge.status(result.status || 200);
+
+      if (result.type === "stream") {
+        bridge.setEdgeStream(result.stream);
+        return bridge.toResponse();
+      }
+
+      bridge.end(result.html);
+      return bridge.toResponse();
+    } finally {
+      inFlightGenerations.delete(inFlightKey);
+    }
+  }
+
+  // Node.js Runtime: Serve static pre-rendered HTML if available in production
   if (!isDevelopment && !dynamicState.value && pagePath && !isPathBlocked) {
     revalidating(reqPath, dynamicState);
     let htmlPathOld;
@@ -863,11 +1363,6 @@ async function handleRequest(request, platformContext = {}) {
         return bridge.toResponse();
       }
     }
-  }
-
-  // Dynamic SSR Render
-  if (isEdgeRuntime(platformContext)) {
-    return new Response("Not Found", { status: 404 });
   }
 
   const contextForChild = {

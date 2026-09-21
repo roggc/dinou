@@ -6,8 +6,13 @@ const { pathToFileURL } = require("url");
 const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 
 function isEdgeRuntime(options = {}) {
-  if (options.runtime === "edge") return true;
-  if (typeof globalThis !== "undefined" && globalThis.__DINOU_RUNTIME__ === "edge") return true;
+  const rt =
+    (options && options.runtime) ||
+    (typeof globalThis !== "undefined" && globalThis.__DINOU_RUNTIME__) ||
+    (typeof process !== "undefined" && process.env && process.env.DINOU_RUNTIME);
+  if (typeof rt === "string" && (rt === "edge" || rt === "deno-edge" || rt.includes("edge"))) {
+    return true;
+  }
   return false;
 }
 

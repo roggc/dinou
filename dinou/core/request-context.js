@@ -12,15 +12,11 @@ if (typeof window === "undefined") {
 
   if (!AsyncLocalStorageClass) {
     try {
-      const reqFn =
-        typeof globalThis.__dinou_require__ === "function"
-          ? globalThis.__dinou_require__
-          : typeof require === "function"
-            ? require
-            : null;
-      if (typeof reqFn === "function") {
-        const asyncHooks = reqFn("node:async_hooks") || reqFn("async_hooks");
-        AsyncLocalStorageClass = asyncHooks?.AsyncLocalStorage;
+      if (typeof globalThis.__dinou_require__ === "function") {
+        AsyncLocalStorageClass = globalThis.__dinou_require__("node:async_hooks")?.AsyncLocalStorage;
+      } else if (typeof process !== "undefined" && process.versions && process.versions.node) {
+        const nodeRequire = (0, eval)("require");
+        AsyncLocalStorageClass = nodeRequire("node:async_hooks")?.AsyncLocalStorage;
       }
     } catch (e) {}
   }
@@ -43,6 +39,19 @@ if (typeof window === "undefined") {
   };
 }
 
+function setCurrentContext(ctx) {
+  if (typeof globalThis !== "undefined") {
+    globalThis[Symbol.for("dinou.request.context.current")] = ctx;
+  }
+}
+
+function getCurrentContext() {
+  if (typeof globalThis !== "undefined") {
+    return globalThis[Symbol.for("dinou.request.context.current")];
+  }
+  return undefined;
+}
+
 function getContext() {
   if (typeof window !== "undefined") {
     console.error(
@@ -50,12 +59,13 @@ function getContext() {
     );
     return {};
   }
-  if (!requestStorage) return undefined;
-  const store = requestStorage.getStore();
-  return store;
+  const store = requestStorage?.getStore();
+  return store || getCurrentContext() || {};
 }
 
 module.exports = {
   requestStorage,
   getContext,
+  setCurrentContext,
+  getCurrentContext,
 };

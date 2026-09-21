@@ -91,4 +91,6 @@ function revalidating(reqPath, isDynamicFromServer) {
     }).catch((err) => { });
 }
 
-module.exports = { revalidating, regenerating };
+const inFlightGenerations = new Map();
+
+module.exports = { revalidating, regenerating, inFlightGenerations };

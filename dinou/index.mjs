@@ -1,4 +1,4 @@
-import { getContext } from "./core/request-context.js";
+import { getContext, setCurrentContext } from "./core/request-context.js";
 import {
   usePathname,
   useSearchParams,
@@ -11,6 +11,7 @@ import { Link } from "./core/link.jsx";
 
 const dinou = {
   getContext,
+  setCurrentContext,
   usePathname,
   useSearchParams,
   useRouter,
@@ -22,6 +23,7 @@ const dinou = {
 
 export {
   getContext,
+  setCurrentContext,
   usePathname,
   useSearchParams,
   useRouter,

@@ -17,6 +17,12 @@ const Module = require("module");
 const originalResolveFilename = Module._resolveFilename;
 const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 globalThis.__dinou_require__ = require;
+try {
+  const { AsyncLocalStorage } = require("node:async_hooks");
+  if (typeof globalThis.AsyncLocalStorage === "undefined") {
+    globalThis.AsyncLocalStorage = AsyncLocalStorage;
+  }
+} catch (e) {}
 
 let reactServerPath, reactDomServerPath, reactJsxRuntimePath, reactJsxDevRuntimePath;
 let roggcServerNodePath, webpackServerNodePath;
