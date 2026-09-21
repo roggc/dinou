@@ -228,34 +228,58 @@ function generateAllUrlVariants(absPath) {
   return Array.from(urls);
 }
 
+const isWebpackBuild = process.env.DINOU_BUILD_TOOL === "webpack";
+
 let linkChunkId = null;
 let redirectChunkId = null;
+let linkEntry = null;
+let redirectEntry = null;
 
 for (const [k, v] of Object.entries(parsedClientManifest)) {
   if (k.includes("/core/link.jsx") || k.includes("dinouLink")) {
-    if (v && v.id) linkChunkId = v.id;
+    if (v && v.id) {
+      linkChunkId = v.id;
+      linkEntry = v;
+    }
   }
   if (k.includes("/core/client-redirect.jsx") || k.includes("dinouClientRedirect")) {
-    if (v && v.id) redirectChunkId = v.id;
+    if (v && v.id) {
+      redirectChunkId = v.id;
+      redirectEntry = v;
+    }
   }
 }
 
 if (linkChunkId) {
+  const linkChunks = isWebpackBuild
+    ? (linkEntry?.chunks || [linkChunkId])
+    : "Link";
+  const linkDefaultChunks = isWebpackBuild
+    ? (linkEntry?.chunks || [linkChunkId])
+    : "default";
+
   for (const lp of candidateLinkPaths) {
     for (const url of generateAllUrlVariants(lp)) {
-      normalizedManifest[`${url}#Link`] = { id: linkChunkId, chunks: "Link", name: "Link" };
-      normalizedManifest[`${url}#default`] = { id: linkChunkId, chunks: "default", name: "default" };
-      normalizedManifest[url] = { id: linkChunkId, chunks: "default", name: "default" };
+      normalizedManifest[`${url}#Link`] = { id: linkChunkId, chunks: linkChunks, name: "Link" };
+      normalizedManifest[`${url}#default`] = { id: linkChunkId, chunks: linkDefaultChunks, name: "default" };
+      normalizedManifest[url] = { id: linkChunkId, chunks: linkDefaultChunks, name: "default" };
     }
   }
 }
 
 if (redirectChunkId) {
+  const redirectChunks = isWebpackBuild
+    ? (redirectEntry?.chunks || [redirectChunkId])
+    : "ClientRedirect";
+  const redirectDefaultChunks = isWebpackBuild
+    ? (redirectEntry?.chunks || [redirectChunkId])
+    : "default";
+
   for (const rp of candidateRedirectPaths) {
     for (const url of generateAllUrlVariants(rp)) {
-      normalizedManifest[`${url}#ClientRedirect`] = { id: redirectChunkId, chunks: "ClientRedirect", name: "ClientRedirect" };
-      normalizedManifest[`${url}#default`] = { id: redirectChunkId, chunks: "default", name: "default" };
-      normalizedManifest[url] = { id: redirectChunkId, chunks: "default", name: "default" };
+      normalizedManifest[`${url}#ClientRedirect`] = { id: redirectChunkId, chunks: redirectChunks, name: "ClientRedirect" };
+      normalizedManifest[`${url}#default`] = { id: redirectChunkId, chunks: redirectDefaultChunks, name: "default" };
+      normalizedManifest[url] = { id: redirectChunkId, chunks: redirectDefaultChunks, name: "default" };
     }
   }
 }
@@ -270,18 +294,34 @@ for (const comp of clientComponents) {
 
   if (!normalizedManifest[fileUrlLower]) {
     if (isCoreLink && linkChunkId) {
-      normalizedManifest[fileUrlLower] = { id: linkChunkId, chunks: "default", name: "default" };
+      normalizedManifest[fileUrlLower] = {
+        id: linkChunkId,
+        chunks: isWebpackBuild ? (linkEntry?.chunks || [linkChunkId]) : "default",
+        name: "default",
+      };
     } else if (isCoreRedirect && redirectChunkId) {
-      normalizedManifest[fileUrlLower] = { id: redirectChunkId, chunks: "default", name: "default" };
+      normalizedManifest[fileUrlLower] = {
+        id: redirectChunkId,
+        chunks: isWebpackBuild ? (redirectEntry?.chunks || [redirectChunkId]) : "default",
+        name: "default",
+      };
     } else {
       normalizedManifest[fileUrlLower] = { id: fileUrlLower, chunks: [], name: "*" };
     }
   }
   if (!normalizedManifest[fileUrlUpper]) {
     if (isCoreLink && linkChunkId) {
-      normalizedManifest[fileUrlUpper] = { id: linkChunkId, chunks: "default", name: "default" };
+      normalizedManifest[fileUrlUpper] = {
+        id: linkChunkId,
+        chunks: isWebpackBuild ? (linkEntry?.chunks || [linkChunkId]) : "default",
+        name: "default",
+      };
     } else if (isCoreRedirect && redirectChunkId) {
-      normalizedManifest[fileUrlUpper] = { id: redirectChunkId, chunks: "default", name: "default" };
+      normalizedManifest[fileUrlUpper] = {
+        id: redirectChunkId,
+        chunks: isWebpackBuild ? (redirectEntry?.chunks || [redirectChunkId]) : "default",
+        name: "default",
+      };
     } else {
       normalizedManifest[fileUrlUpper] = { id: fileUrlLower, chunks: [], name: "*" };
     }
@@ -306,7 +346,6 @@ if (assetManifestPath && fs.existsSync(assetManifestPath)) {
 }
 
 let importMapHtml = "";
-const isWebpackBuild = process.env.DINOU_BUILD_TOOL === "webpack";
 if (!isWebpackBuild && Object.keys(parsedClientManifest).length > 0) {
   const imports = {};
   const moduleBasePath = pathToFileURL(projectRoot).href + "/";
@@ -935,6 +974,7 @@ try {
     define: {
       "process.env.NODE_ENV": '"production"',
       "process.env.DINOU_RUNTIME": '"edge"',
+      "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
     },
     logLevel: "warning",
   });
@@ -958,6 +998,7 @@ try {
     define: {
       "process.env.NODE_ENV": '"production"',
       "process.env.DINOU_RUNTIME": '"edge"',
+      "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
     },
     logLevel: "warning",
   });
@@ -980,6 +1021,7 @@ try {
     define: {
       "process.env.NODE_ENV": '"production"',
       "process.env.DINOU_RUNTIME": '"edge"',
+      "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
     },
     logLevel: "warning",
   });
