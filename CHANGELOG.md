@@ -5,31 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [7.0.0] - 2026-09-20
-
+## [7.0.0] - 2026-09-21
 ### Added
 - **Universal Web Standards Request Handler (`dinou/core/handler.js`)**: Completely decoupled Dinou's core runtime from Node.js and Express. SSR, RSC streaming, Server Functions, routing, and static asset serving are now driven by a pure `(Request) => Promise<Response>` handler built exclusively on Web Standards (`Request`, `Response`, `ReadableStream`, `Headers`).
+- **Edge Dual-Bundle Architecture (3-Pass Compilation for Cloudflare & Deno)**: Solved the fundamental module condition collision between RSC (`react-server`) and SSR (`browser`) in Edge runtimes:
+  * **Pass A (RSC Engine)**: Bundles Server Components and Server Functions under `conditions: ["react-server"]` using `@roggc/react-server-dom-esm` with client references converted to proxies.
+  * **Pass B (SSR Engine)**: Bundles client components and `react-dom/server.edge` under `conditions: ["browser"]` for true, native HTML streaming.
+  * **Pass C (Worker Orchestrator)**: Merges both isolated engines into a self-contained, high-performance worker entrypoint (`.dinou/cloudflare/worker.js` and `.dinou/deno/main.js`).
+- **Native React 19 HTML Streaming on Edge**: Full support for progressive HTML streaming on Cloudflare Workers and Deno via official React 19 `renderToReadableStream` from `react-dom/server.edge`. Suspense boundaries and asynchronous Server Components now stream progressive HTML directly from the edge to the browser.
+- **Semantic Client Module Validation (`isSupportedClientModule`)**: Content-based module validator in Cloudflare and Deno builders:
+  * Guarantees zero false positives for user components located in `src/` (e.g. `src/system/`, `src/design-system/`).
+  * Semantically detects and rejects incompatible non-ESM distribution formats in `node_modules` (such as SystemJS `System.register` or UMD wrapper bundles lacking ESM exports).
 - **Build-Time Static Generation (`dinou/core/run-ssg.js`)**: Static pre-rendering (SSG) now executes directly during the build step (`build:esbuild`, `build:rollup`, `build:webpack`) rather than at server startup. All static HTML and RSC payload files are generated into `.dinou/dist2` at compile time, eliminating server cold-start latency and enabling instant static exports.
 - **Zero-Dependency Native Runtime Adapters**:
   * **Bun Adapter (`dinou/adapters/bun.js`)**: High-performance Bun native server utilizing zero-copy `Bun.file()` for `.dinou/dist3` production asset serving and streaming RSC/SSR.
   * **Deno & Deno Deploy Adapter (`dinou/adapters/deno.js`)**: Native `Deno.serve()` integration with built-in asset streaming and automatic edge detection.
-  * **Cloudflare Workers Adapter (`dinou/adapters/cloudflare.js`)**: Full edge worker integration supporting Workerd runtime, asset fetching, and streaming responses.
+  * **Cloudflare Workers Adapter (`dinou/adapters/cloudflare.js`)**: Full edge worker integration supporting Workerd runtime, asset fetching, ISR via Cloudflare KV, and streaming responses.
   * **Netlify Functions Adapter (`dinou/adapters/netlify.js`)**: Standard edge/serverless handler ready for Netlify Functions.
   * **Node / Express Adapter (`dinou/core/http-adapter.js`)**: Bi-directional bridge converting Node.js `IncomingMessage` and `ServerResponse` to Web Standard `Request` and `Response`, making the Express server a lightweight consumer of `handleRequest`.
 - **Pluggable Storage System & Edge ISR (`dinou/core/storage-adapter.js`)**: Decoupled SSG/ISR cache and revalidation from Node's filesystem.
-  * Added `StorageAdapter` interface with `FSStorageAdapter` (Node/Bun filesystem), `MemoryStorageAdapter` (ephemeral/testing), and `DenoKVStorage` (distributed Edge KV).
-  * **Distributed Edge ISR on Deno Deploy**: Automated fallback to `Deno.openKv()` when running on Deno Edge, enabling Incremental Static Regeneration without a persistent local disk.
-  * Exported `setStorageAdapter`, `getStorageAdapter`, `StorageAdapter`, `FSStorageAdapter`, `MemoryStorageAdapter`, and `DenoKVStorage` from `dinou/server`.
+  * Added `StorageAdapter` interface with `FSStorageAdapter` (Node/Bun filesystem), `MemoryStorageAdapter` (ephemeral/testing), `DenoKVStorage` (distributed Edge KV), and `CloudflareKVStorage` (Cloudflare KV via `env.DINOU_CACHE`).
+  * **Distributed Edge ISR on Deno Deploy & Cloudflare**: Automated fallback to global edge key-value databases, enabling Incremental Static Regeneration without a persistent local disk.
+  * Exported `setStorageAdapter`, `getStorageAdapter`, `StorageAdapter`, `FSStorageAdapter`, `MemoryStorageAdapter`, `DenoKVStorage`, and `CloudflareKVStorage` from `dinou/server`.
 - **Edge Linkers & Static Route Generators**:
   * **Cloudflare Linker (`dinou/cloudflare/build.mjs`)**: Prepares and bundles self-contained worker entries using multi-bundler manifest inlining and Esbuild edge bundling.
   * **Deno Linker (`dinou/deno/build.mjs`)**: Bundles complete edge applications targeting Deno Deploy (`deployctl`).
-  * **Multi-Bundler Manifest Support**: Edge linkers automatically detect client and server function manifests whether generated by Esbuild, Rollup, or Webpack.
+  * **Multi-Bundler Manifest Support**: Edge linkers automatically detect client and server function manifests whether generated by Esbuild, Rollup, or Webpack, with cross-platform path normalization for Windows and Linux.
 - **Standalone Static Export (`dinou/core/export-static.mjs`)**: Added `export-static` command (with Esbuild, Rollup, and Webpack variants) to export pre-rendered static HTML and assets into an `out/` directory, ready for zero-configuration deployment to Surge.sh, GitHub Pages, Cloudflare Pages, Netlify, and S3.
 - **CLI & Eject Commands**:
   * Added CLI and `package.json` scripts: `start:bun`, `start:deno`, `build:cloudflare`, `build:deno`, `export-static` (and bundler-specific sub-commands for Rollup and Webpack).
   * Added `./adapters/bun`, `./adapters/deno`, `./adapters/cloudflare`, and `./adapters/netlify` subpath exports in root `package.json`.
-
 ### Changed
+- **Webpack 5 Dev Server & Safe Context Resolution**: Hardened `AsyncLocalStorage` and request context resolution in `dinou/core/request-context.js` and loader registries to compile cleanly under Webpack 5 without triggering strict Node built-in module bundling errors.
 - **Build-Time SSG Pipeline**: Production builds across Esbuild, Rollup, and Webpack now automatically invoke the SSG pipeline at build completion, ensuring all edge runtimes and static hosts have pre-rendered assets immediately available upon deployment.
 - **Renamed Asset Convention from `favicons/` to `public/`**:
   * Semantically renamed the root asset directory convention to `public/` across all bundlers (Esbuild, Rollup, Webpack).
