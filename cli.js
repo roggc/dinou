@@ -25,9 +25,8 @@ program
   .description("Start development server with Esbuild")
   .action(() => {
     console.log("Starting development server with Esbuild...");
-    const startExpress = `node --conditions react-server --import ${
-      pathToFileURL(path.join(corePath, "register-loader.mjs")).href
-    } ${path.join(corePath, "server.js")}`;
+    const startExpress = `node --conditions react-server --import ${pathToFileURL(path.join(corePath, "register-loader.mjs")).href
+      } ${path.join(corePath, "server.js")}`;
     const startDevServer = `node ${path.join(dinouPath, "esbuild/dev.mjs")}`;
     runCommand(`npx concurrently "${startExpress}" "${startDevServer}"`);
   });
@@ -37,9 +36,8 @@ program
   .description("Start development server with Esbuild")
   .action(() => {
     console.log("Starting development server with Esbuild...");
-    const startExpress = `node --conditions react-server --import ${
-      pathToFileURL(path.join(corePath, "register-loader.mjs")).href
-    } ${path.join(corePath, "server.js")}`;
+    const startExpress = `node --conditions react-server --import ${pathToFileURL(path.join(corePath, "register-loader.mjs")).href
+      } ${path.join(corePath, "server.js")}`;
     const startDevServer = `node ${path.join(dinouPath, "esbuild/dev.mjs")}`;
     runCommand(`npx concurrently "${startExpress}" "${startDevServer}"`);
   });
@@ -49,9 +47,8 @@ program
   .description("Start development server with Rollup")
   .action(() => {
     console.log("Starting development server with Rollup...");
-    const startExpress = `node --conditions react-server --import ${
-      pathToFileURL(path.join(corePath, "register-loader.mjs")).href
-    } ${path.join(corePath, "server.js")}`;
+    const startExpress = `node --conditions react-server --import ${pathToFileURL(path.join(corePath, "register-loader.mjs")).href
+      } ${path.join(corePath, "server.js")}`;
     const startDevServer = `rollup -c ${path.join(
       dinouPath,
       "rollup/rollup.config.js"
@@ -64,9 +61,8 @@ program
   .description("Start development server with Webpack")
   .action(() => {
     console.log("Starting development server with Webpack...");
-    const startExpress = `cross-env DINOU_BUILD_TOOL=webpack node --conditions react-server --import ${
-      pathToFileURL(path.join(corePath, "register-loader.mjs")).href
-    } ${path.join(corePath, "server.js")}`;
+    const startExpress = `cross-env DINOU_BUILD_TOOL=webpack node --conditions react-server --import ${pathToFileURL(path.join(corePath, "register-loader.mjs")).href
+      } ${path.join(corePath, "server.js")}`;
     const startDevServer = `webpack serve --config ${path.join(
       dinouPath,
       "webpack/webpack.config.js"
@@ -201,6 +197,17 @@ program
   });
 
 program
+  .command("build:cloudflare:esbuild")
+  .description("Build the app for Cloudflare Workers with Esbuild")
+  .action(() => {
+    console.log("Building the app for Cloudflare Workers with Esbuild...");
+    const esbuildPath = path.join(dinouPath, "esbuild/build.mjs");
+    runCommand(`cross-env NODE_ENV=production node ${esbuildPath}`);
+    const cfPath = path.join(dinouPath, "cloudflare/build.mjs");
+    runCommand(`node ${cfPath}`);
+  });
+
+program
   .command("build:cloudflare:webpack")
   .description("Build the app for Cloudflare Workers with Webpack")
   .action(() => {
@@ -208,7 +215,7 @@ program
     const configPath = path.join(dinouPath, "webpack/webpack.config.js");
     runCommand(`cross-env NODE_ENV=production npx webpack --config ${configPath}`);
     const cfPath = path.join(dinouPath, "cloudflare/build.mjs");
-    runCommand(`node ${cfPath}`);
+    runCommand(`cross-env DINOU_BUILD_TOOL=webpack node ${cfPath}`);
   });
 
 // --- BUILD (DENO DEPLOY / EDGE) ---
@@ -236,6 +243,17 @@ program
   });
 
 program
+  .command("build:deno:esbuild")
+  .description("Build the app for Deno Deploy / Edge with Esbuild")
+  .action(() => {
+    console.log("Building the app for Deno Deploy with Esbuild...");
+    const esbuildPath = path.join(dinouPath, "esbuild/build.mjs");
+    runCommand(`cross-env NODE_ENV=production node ${esbuildPath}`);
+    const denoPath = path.join(dinouPath, "deno/build.mjs");
+    runCommand(`node ${denoPath}`);
+  });
+
+program
   .command("build:deno:webpack")
   .description("Build the app for Deno Deploy / Edge with Webpack")
   .action(() => {
@@ -243,7 +261,7 @@ program
     const configPath = path.join(dinouPath, "webpack/webpack.config.js");
     runCommand(`cross-env NODE_ENV=production npx webpack --config ${configPath}`);
     const denoPath = path.join(dinouPath, "deno/build.mjs");
-    runCommand(`node ${denoPath}`);
+    runCommand(`cross-env DINOU_BUILD_TOOL=webpack node ${denoPath}`);
   });
 
 // --- EXPORT STATIC ---
