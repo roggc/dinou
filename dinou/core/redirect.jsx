@@ -15,7 +15,10 @@ export function redirect(destination) {
       if (storage && typeof storage.getStore === "function") {
         ctx = storage.getStore();
       }
-    } catch (e) {}
+      if (!ctx && typeof globalThis !== "undefined") {
+        ctx = globalThis[Symbol.for("dinou.request.context.current")];
+      }
+    } catch (e) { }
 
     // 2. If we are on the server and headers have NOT been sent yet...
     // We can do a real HTTP redirect (Status 307 or x-rsc-redirect).
@@ -30,3 +33,5 @@ export function redirect(destination) {
   // We return the component that will force the redirection in the browser.
   return <ClientRedirect to={destination} />;
 }
+
+export default redirect;

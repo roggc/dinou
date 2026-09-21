@@ -23,3 +23,5 @@ export function ClientRedirect({ to }) {
   return null;
 }
 
+export default ClientRedirect;
+

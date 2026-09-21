@@ -932,6 +932,9 @@ async function handleRequest(request, platformContext = {}) {
     await requestStorage.run(context, async () => {
       try {
         const jsx = await getJSX(cleanPath, queryObj, isNotFound, isDevelopment, isPathBlocked);
+        if (bridge.headers.has("x-rsc-redirect") || bridge.headers.has("Location")) {
+          return;
+        }
         if (isNotFound.value) {
           bridge.status(404);
         }
@@ -1151,6 +1154,15 @@ async function handleRequest(request, platformContext = {}) {
           console.error("[Edge ISG getJSX Error]:", err);
         }
 
+        if (bridge.headers.has("Location") || (bridge.statusCode >= 300 && bridge.statusCode < 400)) {
+          return {
+            type: "redirect",
+            status: bridge.statusCode || 302,
+            headers: new Headers(bridge.headers),
+            cookies: [...bridge.cookies],
+          };
+        }
+
         if (isError) {
           const serializedError = {
             message: isDevelopment
@@ -1240,6 +1252,15 @@ async function handleRequest(request, platformContext = {}) {
             },
           });
 
+          if (bridge.headers.has("Location") || (bridge.statusCode >= 300 && bridge.statusCode < 400)) {
+            return {
+              type: "redirect",
+              status: bridge.statusCode || 302,
+              headers: new Headers(bridge.headers),
+              cookies: [...bridge.cookies],
+            };
+          }
+
           if (shouldCacheISG) {
             const [streamForBrowser, streamForKv] = htmlStream.tee();
             const rscKey = cleanPath ? `${cleanPath}/rsc.rsc` : "rsc.rsc";
@@ -1288,6 +1309,24 @@ async function handleRequest(request, platformContext = {}) {
 
     try {
       const result = await isgPromise;
+      if (result.type === "redirect") {
+        bridge.status(result.status || 302);
+        if (result.headers) {
+          for (const [k, v] of result.headers.entries()) {
+            bridge.setHeader(k, v);
+          }
+        }
+        if (result.cookies) {
+          for (const c of result.cookies) {
+            if (!bridge.cookies.includes(c)) {
+              bridge.cookies.push(c);
+            }
+          }
+        }
+        bridge.end();
+        return bridge.toResponse();
+      }
+
       if (result.headers) {
         for (const [k, v] of result.headers.entries()) {
           bridge.setHeader(k, v);

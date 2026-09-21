@@ -26,6 +26,22 @@ const dinouDir = fs.existsSync(path.resolve(projectRoot, "dinou"))
   : path.resolve(__dirname, "..");
 const dinouDirSlash = dinouDir.replace(/\\/g, "/");
 
+const candidateDinouRoots = [
+  dinouDir,
+  path.resolve(projectRoot, "dinou"),
+  path.resolve(projectRoot, "node_modules/dinou/dinou"),
+  path.resolve(projectRoot, "node_modules/dinou"),
+  path.resolve(__dirname, ".."),
+];
+
+const candidateLinkPaths = new Set();
+const candidateRedirectPaths = new Set();
+
+for (const r of candidateDinouRoots) {
+  candidateLinkPaths.add(path.resolve(r, "core/link.jsx"));
+  candidateRedirectPaths.add(path.resolve(r, "core/client-redirect.jsx"));
+}
+
 function copyRecursive(src, dest) {
   if (!fs.existsSync(src)) return 0;
   let count = 0;
@@ -147,8 +163,8 @@ function findClientComponents() {
   walk(srcDir);
 
   const coreCandidates = [
-    path.resolve(dinouDir, "core/client-redirect.jsx"),
-    path.resolve(dinouDir, "core/link.jsx"),
+    ...Array.from(candidateLinkPaths),
+    ...Array.from(candidateRedirectPaths),
   ];
   for (const f of coreCandidates) {
     if (fs.existsSync(f)) {
@@ -201,15 +217,74 @@ for (const [k, v] of Object.entries(parsedClientManifest)) {
   }
 }
 
+function generateAllUrlVariants(absPath) {
+  const norm = absPath.replace(/\\/g, "/");
+  const fileUrl = pathToFileURL(absPath).href;
+  const urls = new Set([fileUrl]);
+  urls.add(fileUrl.replace(/file:\/\/\/([a-zA-Z]):/, (m, d) => 'file:///' + d.toLowerCase() + ':'));
+  urls.add(fileUrl.replace(/file:\/\/\/([a-zA-Z]):/, (m, d) => 'file:///' + d.toUpperCase() + ':'));
+  urls.add("file:///" + norm);
+  urls.add("file://" + norm);
+  return Array.from(urls);
+}
+
+let linkChunkId = null;
+let redirectChunkId = null;
+
+for (const [k, v] of Object.entries(parsedClientManifest)) {
+  if (k.includes("/core/link.jsx") || k.includes("dinouLink")) {
+    if (v && v.id) linkChunkId = v.id;
+  }
+  if (k.includes("/core/client-redirect.jsx") || k.includes("dinouClientRedirect")) {
+    if (v && v.id) redirectChunkId = v.id;
+  }
+}
+
+if (linkChunkId) {
+  for (const lp of candidateLinkPaths) {
+    for (const url of generateAllUrlVariants(lp)) {
+      normalizedManifest[`${url}#Link`] = { id: linkChunkId, chunks: "Link", name: "Link" };
+      normalizedManifest[`${url}#default`] = { id: linkChunkId, chunks: "default", name: "default" };
+      normalizedManifest[url] = { id: linkChunkId, chunks: "default", name: "default" };
+    }
+  }
+}
+
+if (redirectChunkId) {
+  for (const rp of candidateRedirectPaths) {
+    for (const url of generateAllUrlVariants(rp)) {
+      normalizedManifest[`${url}#ClientRedirect`] = { id: redirectChunkId, chunks: "ClientRedirect", name: "ClientRedirect" };
+      normalizedManifest[`${url}#default`] = { id: redirectChunkId, chunks: "default", name: "default" };
+      normalizedManifest[url] = { id: redirectChunkId, chunks: "default", name: "default" };
+    }
+  }
+}
+
 for (const comp of clientComponents) {
   const fileUrl = pathToFileURL(comp).href;
   const fileUrlLower = fileUrl.replace(/file:\/\/\/([a-zA-Z]):/, (m, d) => 'file:///' + d.toLowerCase() + ':');
   const fileUrlUpper = fileUrl.replace(/file:\/\/\/([a-zA-Z]):/, (m, d) => 'file:///' + d.toUpperCase() + ':');
+  const compResolved = path.resolve(comp);
+  const isCoreLink = candidateLinkPaths.has(compResolved);
+  const isCoreRedirect = candidateRedirectPaths.has(compResolved);
+
   if (!normalizedManifest[fileUrlLower]) {
-    normalizedManifest[fileUrlLower] = { id: fileUrlLower, chunks: [], name: "*" };
+    if (isCoreLink && linkChunkId) {
+      normalizedManifest[fileUrlLower] = { id: linkChunkId, chunks: "default", name: "default" };
+    } else if (isCoreRedirect && redirectChunkId) {
+      normalizedManifest[fileUrlLower] = { id: redirectChunkId, chunks: "default", name: "default" };
+    } else {
+      normalizedManifest[fileUrlLower] = { id: fileUrlLower, chunks: [], name: "*" };
+    }
   }
   if (!normalizedManifest[fileUrlUpper]) {
-    normalizedManifest[fileUrlUpper] = { id: fileUrlLower, chunks: [], name: "*" };
+    if (isCoreLink && linkChunkId) {
+      normalizedManifest[fileUrlUpper] = { id: linkChunkId, chunks: "default", name: "default" };
+    } else if (isCoreRedirect && redirectChunkId) {
+      normalizedManifest[fileUrlUpper] = { id: redirectChunkId, chunks: "default", name: "default" };
+    } else {
+      normalizedManifest[fileUrlUpper] = { id: fileUrlLower, chunks: [], name: "*" };
+    }
   }
 }
 
@@ -254,12 +329,35 @@ if (!isWebpackBuild && Object.keys(parsedClientManifest).length > 0) {
       imports["/" + srcRel] = val.id;
       imports["./" + srcRel] = val.id;
     }
-    const dinouIdx = key.indexOf("/dinou/");
+    const dinouIdx = key.lastIndexOf("/dinou/");
     if (dinouIdx !== -1) {
       const dinouRel = "dinou/" + key.slice(dinouIdx + 7).split("#")[0];
       imports[dinouRel] = val.id;
       imports["/" + dinouRel] = val.id;
       imports["./" + dinouRel] = val.id;
+    }
+  }
+
+  if (linkChunkId) {
+    imports["dinou/core/link.jsx"] = linkChunkId;
+    imports["dinou/core/link"] = linkChunkId;
+    imports["/dinou/core/link.jsx"] = linkChunkId;
+    imports["./dinou/core/link.jsx"] = linkChunkId;
+    for (const lp of candidateLinkPaths) {
+      for (const u of generateAllUrlVariants(lp)) {
+        imports[u] = linkChunkId;
+      }
+    }
+  }
+  if (redirectChunkId) {
+    imports["dinou/core/client-redirect.jsx"] = redirectChunkId;
+    imports["dinou/core/client-redirect"] = redirectChunkId;
+    imports["/dinou/core/client-redirect.jsx"] = redirectChunkId;
+    imports["./dinou/core/client-redirect.jsx"] = redirectChunkId;
+    for (const rp of candidateRedirectPaths) {
+      for (const u of generateAllUrlVariants(rp)) {
+        imports[u] = redirectChunkId;
+      }
     }
   }
 
@@ -325,12 +423,20 @@ serverFunctionFiles.forEach((relPath, index) => {
 });
 
 ssrManifestCode += `\nexport const clientModules = {\n`;
+const emittedClientModules = new Set();
+function addClientModule(key, valueExpr) {
+  if (!emittedClientModules.has(key)) {
+    emittedClientModules.add(key);
+    ssrManifestCode += `  ${JSON.stringify(key)}: ${valueExpr},\n`;
+  }
+}
+
 clientComponents.forEach((compPath, index) => {
   const fileUrl = pathToFileURL(compPath).href;
   const altFileUrl = fileUrl.replace(/file:\/\/\/([a-zA-Z]):/, (m, d) => 'file:///' + (d === d.toLowerCase() ? d.toUpperCase() : d.toLowerCase()) + ':');
-  ssrManifestCode += `  ${JSON.stringify(fileUrl)}: mod_${index},\n`;
+  addClientModule(fileUrl, `mod_${index}`);
   if (altFileUrl !== fileUrl) {
-    ssrManifestCode += `  ${JSON.stringify(altFileUrl)}: mod_${index},\n`;
+    addClientModule(altFileUrl, `mod_${index}`);
   }
 });
 
@@ -346,7 +452,30 @@ for (const [k, v] of Object.entries(parsedClientManifest)) {
     (c) => pathToFileURL(c).href === fileUrl || pathToFileURL(c).href.toLowerCase() === fileUrl.toLowerCase()
   );
   if (compIndex !== -1 && v && v.id) {
-    ssrManifestCode += `  ${JSON.stringify(v.id)}: mod_${compIndex},\n`;
+    addClientModule(v.id, `mod_${compIndex}`);
+  }
+}
+
+if (linkChunkId) {
+  const linkCompIndex = clientComponents.findIndex((c) => candidateLinkPaths.has(path.resolve(c)));
+  if (linkCompIndex !== -1) {
+    addClientModule(linkChunkId, `mod_${linkCompIndex}`);
+    for (const lp of candidateLinkPaths) {
+      for (const u of generateAllUrlVariants(lp)) {
+        addClientModule(u, `mod_${linkCompIndex}`);
+      }
+    }
+  }
+}
+if (redirectChunkId) {
+  const redirectCompIndex = clientComponents.findIndex((c) => candidateRedirectPaths.has(path.resolve(c)));
+  if (redirectCompIndex !== -1) {
+    addClientModule(redirectChunkId, `mod_${redirectCompIndex}`);
+    for (const rp of candidateRedirectPaths) {
+      for (const u of generateAllUrlVariants(rp)) {
+        addClientModule(u, `mod_${redirectCompIndex}`);
+      }
+    }
   }
 }
 
@@ -357,21 +486,29 @@ serverFunctionFiles.forEach((relPath, index) => {
   const fullFileUrl = pathToFileURL(absPath).href;
   const altFullFileUrl = fullFileUrl.replace(/file:\/\/\/([a-zA-Z]):/, (m, d) => 'file:///' + (d === d.toLowerCase() ? d.toUpperCase() : d.toLowerCase()) + ':');
 
-  ssrManifestCode += `  ${JSON.stringify(relFileUrl)}: sf_${index},\n`;
-  ssrManifestCode += `  ${JSON.stringify(fullFileUrl)}: sf_${index},\n`;
+  addClientModule(relFileUrl, `sf_${index}`);
+  addClientModule(fullFileUrl, `sf_${index}`);
   if (altFullFileUrl !== fullFileUrl) {
-    ssrManifestCode += `  ${JSON.stringify(altFullFileUrl)}: sf_${index},\n`;
+    addClientModule(altFullFileUrl, `sf_${index}`);
   }
 });
 ssrManifestCode += `};\n\n`;
 
 ssrManifestCode += `export const ssrConsumerManifest = {\n  moduleMap: {\n`;
+const emittedModuleMap = new Set();
+function addModuleMap(key, valueObjStr) {
+  if (!emittedModuleMap.has(key)) {
+    emittedModuleMap.add(key);
+    ssrManifestCode += `    ${JSON.stringify(key)}: ${valueObjStr},\n`;
+  }
+}
+
 clientComponents.forEach((compPath) => {
   const fileUrl = pathToFileURL(compPath).href;
   const altFileUrl = fileUrl.replace(/file:\/\/\/([a-zA-Z]):/, (m, d) => 'file:///' + (d === d.toLowerCase() ? d.toUpperCase() : d.toLowerCase()) + ':');
-  ssrManifestCode += `    ${JSON.stringify(fileUrl)}: { "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } },\n`;
+  addModuleMap(fileUrl, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
   if (altFileUrl !== fileUrl) {
-    ssrManifestCode += `    ${JSON.stringify(altFileUrl)}: { "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } },\n`;
+    addModuleMap(altFileUrl, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
   }
 });
 
@@ -384,10 +521,43 @@ for (const [k, v] of Object.entries(parsedClientManifest)) {
     } catch (e) {}
   }
   if (v && v.id) {
-    ssrManifestCode += `    ${JSON.stringify(v.id)}: { "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } },\n`;
+    addModuleMap(v.id, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
+  }
+}
+
+if (linkChunkId) {
+  const linkCompIndex = clientComponents.findIndex((c) => candidateLinkPaths.has(path.resolve(c)));
+  if (linkCompIndex !== -1) {
+    const fileUrl = pathToFileURL(clientComponents[linkCompIndex]).href;
+    addModuleMap(linkChunkId, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
+    for (const lp of candidateLinkPaths) {
+      for (const u of generateAllUrlVariants(lp)) {
+        addModuleMap(u, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
+      }
+    }
+  }
+}
+if (redirectChunkId) {
+  const redirectCompIndex = clientComponents.findIndex((c) => candidateRedirectPaths.has(path.resolve(c)));
+  if (redirectCompIndex !== -1) {
+    const fileUrl = pathToFileURL(clientComponents[redirectCompIndex]).href;
+    addModuleMap(redirectChunkId, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
+    for (const rp of candidateRedirectPaths) {
+      for (const u of generateAllUrlVariants(rp)) {
+        addModuleMap(u, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
+      }
+    }
   }
 }
 ssrManifestCode += `  },\n  serverModuleMap: {\n`;
+
+const emittedServerModuleMap = new Set();
+function addServerModuleMap(key, valueObjStr) {
+  if (!emittedServerModuleMap.has(key)) {
+    emittedServerModuleMap.add(key);
+    ssrManifestCode += `    ${JSON.stringify(key)}: ${valueObjStr},\n`;
+  }
+}
 
 serverFunctionFiles.forEach((relPath) => {
   const normRel = relPath.replace(/\\/g, "/");
@@ -396,18 +566,18 @@ serverFunctionFiles.forEach((relPath) => {
   const fullFileUrl = pathToFileURL(absPath).href;
   const altFullFileUrl = fullFileUrl.replace(/file:\/\/\/([a-zA-Z]):/, (m, d) => 'file:///' + (d === d.toLowerCase() ? d.toUpperCase() : d.toLowerCase()) + ':');
 
-  ssrManifestCode += `    ${JSON.stringify(relFileUrl)}: { id: ${JSON.stringify(relFileUrl)}, chunks: [], name: "*" },\n`;
-  ssrManifestCode += `    ${JSON.stringify(fullFileUrl)}: { id: ${JSON.stringify(relFileUrl)}, chunks: [], name: "*" },\n`;
+  addServerModuleMap(relFileUrl, `{ id: ${JSON.stringify(relFileUrl)}, chunks: [], name: "*" }`);
+  addServerModuleMap(fullFileUrl, `{ id: ${JSON.stringify(relFileUrl)}, chunks: [], name: "*" }`);
   if (altFullFileUrl !== fullFileUrl) {
-    ssrManifestCode += `    ${JSON.stringify(altFullFileUrl)}: { id: ${JSON.stringify(relFileUrl)}, chunks: [], name: "*" },\n`;
+    addServerModuleMap(altFullFileUrl, `{ id: ${JSON.stringify(relFileUrl)}, chunks: [], name: "*" }`);
   }
 
   const fns = parsedServerFunctionsManifest[relPath] || [];
   for (const fn of fns) {
-    ssrManifestCode += `    ${JSON.stringify(relFileUrl + "#" + fn)}: { id: ${JSON.stringify(relFileUrl)}, chunks: [], name: ${JSON.stringify(fn)} },\n`;
-    ssrManifestCode += `    ${JSON.stringify(fullFileUrl + "#" + fn)}: { id: ${JSON.stringify(relFileUrl)}, chunks: [], name: ${JSON.stringify(fn)} },\n`;
+    addServerModuleMap(relFileUrl + "#" + fn, `{ id: ${JSON.stringify(relFileUrl)}, chunks: [], name: ${JSON.stringify(fn)} }`);
+    addServerModuleMap(fullFileUrl + "#" + fn, `{ id: ${JSON.stringify(relFileUrl)}, chunks: [], name: ${JSON.stringify(fn)} }`);
     if (altFullFileUrl !== fullFileUrl) {
-      ssrManifestCode += `    ${JSON.stringify(altFullFileUrl + "#" + fn)}: { id: ${JSON.stringify(relFileUrl)}, chunks: [], name: ${JSON.stringify(fn)} },\n`;
+      addServerModuleMap(altFullFileUrl + "#" + fn, `{ id: ${JSON.stringify(relFileUrl)}, chunks: [], name: ${JSON.stringify(fn)} }`);
     }
   }
 });
@@ -761,6 +931,7 @@ try {
     plugins: [clientReferencesPlugin, serverReferencesPlugin],
     alias: commonAlias,
     loader: commonLoader,
+    jsx: "automatic",
     define: {
       "process.env.NODE_ENV": '"production"',
       "process.env.DINOU_RUNTIME": '"edge"',
@@ -783,6 +954,7 @@ try {
     plugins: [serverReferencesPluginSsr],
     alias: commonAlias,
     loader: commonLoader,
+    jsx: "automatic",
     define: {
       "process.env.NODE_ENV": '"production"',
       "process.env.DINOU_RUNTIME": '"edge"',

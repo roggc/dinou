@@ -175,7 +175,7 @@ function getImportMapHtml() {
         imports["/" + srcRel] = val.id;
         imports["./" + srcRel] = val.id;
       }
-      const dinouIdx = key.indexOf("/dinou/");
+      const dinouIdx = key.lastIndexOf("/dinou/");
       if (dinouIdx !== -1) {
         const dinouRel = "dinou/" + key.slice(dinouIdx + 7).split("#")[0];
         imports[dinouRel] = val.id;
