@@ -75,12 +75,20 @@ const routeModulesPath = path.join(denoDir, "route-modules.js");
 fs.writeFileSync(routeModulesPath, routeModulesCode, "utf8");
 
 // Check manifests from build (supports Esbuild, Rollup, and Webpack output locations)
+const isWebpackBuild = process.env.DINOU_BUILD_TOOL === "webpack";
+
 function findManifest(filename, fallbackFolder) {
-  const candidates = [
-    path.resolve(projectRoot, ".dinou", fallbackFolder, filename),
-    path.resolve(projectRoot, ".dinou/dist3", filename),
-    path.resolve(projectRoot, ".dinou/public", filename),
-  ];
+  const candidates = isWebpackBuild
+    ? [
+        path.resolve(projectRoot, ".dinou/dist3", filename),
+        path.resolve(projectRoot, ".dinou/public", filename),
+        path.resolve(projectRoot, ".dinou", fallbackFolder, filename),
+      ]
+    : [
+        path.resolve(projectRoot, ".dinou", fallbackFolder, filename),
+        path.resolve(projectRoot, ".dinou/dist3", filename),
+        path.resolve(projectRoot, ".dinou/public", filename),
+      ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
   }
@@ -227,7 +235,6 @@ function generateAllUrlVariants(absPath) {
   return Array.from(urls);
 }
 
-const isWebpackBuild = process.env.DINOU_BUILD_TOOL === "webpack";
 
 let linkChunkId = null;
 let redirectChunkId = null;

@@ -55,16 +55,18 @@ pkg.scripts["start:deno"] =
 
 pkg.scripts["build:cloudflare"] =
   "npm run build && node ./dinou/cloudflare/build.mjs";
+pkg.scripts["build:cloudflare:esbuild"] = "npm run build:cloudflare";
 pkg.scripts["build:cloudflare:rollup"] =
   "npm run build:rollup && node ./dinou/cloudflare/build.mjs";
 pkg.scripts["build:cloudflare:webpack"] =
-  "npm run build:webpack && node ./dinou/cloudflare/build.mjs";
+  "npm run build:webpack && cross-env DINOU_BUILD_TOOL=webpack node ./dinou/cloudflare/build.mjs";
 
 pkg.scripts["build:deno"] = "npm run build && node ./dinou/deno/build.mjs";
+pkg.scripts["build:deno:esbuild"] = "npm run build:deno";
 pkg.scripts["build:deno:rollup"] =
   "npm run build:rollup && node ./dinou/deno/build.mjs";
 pkg.scripts["build:deno:webpack"] =
-  "npm run build:webpack && node ./dinou/deno/build.mjs";
+  "npm run build:webpack && cross-env DINOU_BUILD_TOOL=webpack node ./dinou/deno/build.mjs";
 
 pkg.scripts["export-static"] = "npm run export-static:esbuild";
 pkg.scripts["export-static:esbuild"] =
