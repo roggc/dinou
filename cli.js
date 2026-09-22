@@ -168,7 +168,7 @@ program
   .action(() => {
     console.log("Starting the app with Deno...");
     runCommand(
-      `deno run --allow-net --allow-read --allow-env ${path.join(dinouPath, "adapters/deno.js")}`
+      `deno run --allow-net --allow-read --allow-env --allow-sys ${path.join(dinouPath, "adapters/deno.js")}`
     );
   });
 
