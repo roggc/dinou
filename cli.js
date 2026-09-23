@@ -168,7 +168,7 @@ program
   .action(() => {
     console.log("Starting the app with Deno...");
     runCommand(
-      `deno run --allow-net --allow-read --allow-env --allow-sys ${path.join(dinouPath, "adapters/deno.js")}`
+      `deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env --allow-sys ${path.join(dinouPath, "adapters/deno.js")}`
     );
   });
 
@@ -229,6 +229,8 @@ program
     runCommand(`cross-env NODE_ENV=production node ${esbuildPath}`);
     const denoPath = path.join(dinouPath, "deno/build.mjs");
     runCommand(`node ${denoPath}`);
+    const seedPath = path.join(dinouPath, "deno/seed-kv.js");
+    runCommand(`deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env ${seedPath}`);
   });
 
 program
@@ -240,6 +242,8 @@ program
     runCommand(`cross-env NODE_ENV=production npx rollup -c ${configPath}`);
     const denoPath = path.join(dinouPath, "deno/build.mjs");
     runCommand(`node ${denoPath}`);
+    const seedPath = path.join(dinouPath, "deno/seed-kv.js");
+    runCommand(`deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env ${seedPath}`);
   });
 
 program
@@ -251,6 +255,8 @@ program
     runCommand(`cross-env NODE_ENV=production node ${esbuildPath}`);
     const denoPath = path.join(dinouPath, "deno/build.mjs");
     runCommand(`node ${denoPath}`);
+    const seedPath = path.join(dinouPath, "deno/seed-kv.js");
+    runCommand(`deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env ${seedPath}`);
   });
 
 program
@@ -262,6 +268,8 @@ program
     runCommand(`cross-env NODE_ENV=production npx webpack --config ${configPath}`);
     const denoPath = path.join(dinouPath, "deno/build.mjs");
     runCommand(`cross-env DINOU_BUILD_TOOL=webpack node ${denoPath}`);
+    const seedPath = path.join(dinouPath, "deno/seed-kv.js");
+    runCommand(`deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env ${seedPath}`);
   });
 
 // --- EXPORT STATIC ---
