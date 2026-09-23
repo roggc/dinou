@@ -36,8 +36,13 @@ async function revalidatePath(reqPath) {
     const ctx = getContext();
     let currentPathname = "/";
     if (ctx && ctx.req) {
+      const headerPath =
+        ctx.req.headers?.["x-dinou-current-path"] ||
+        ctx.req.headers?.["X-Dinou-Current-Path"];
       const referer = ctx.req.headers?.referer;
-      if (referer) {
+      if (headerPath) {
+        currentPathname = headerPath;
+      } else if (referer) {
         try {
           currentPathname = new URL(referer).pathname;
         } catch (e) { }
@@ -61,8 +66,12 @@ async function revalidatePath(reqPath) {
     const cleanPathKey = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
     const htmlKey = cleanPathKey ? `${cleanPathKey}/index.html` : "index.html";
     const metaKey = cleanPathKey ? `${cleanPathKey}/metadata.json` : "metadata.json";
+    const rscKey = cleanPathKey ? `${cleanPathKey}/rsc.rsc` : "rsc.rsc";
 
     let cached = await storage.get(htmlKey);
+    if (!cached && cleanPathKey) {
+      cached = await storage.get(cleanPathKey);
+    }
     let currentMeta = (cached && cached.metadata) || {};
     try {
       const metaItem = await storage.get(metaKey);
@@ -71,7 +80,9 @@ async function revalidatePath(reqPath) {
       }
     } catch (e) {}
 
-    const newGenTime = Date.now();
+    const prevGenTime = (currentMeta && currentMeta.generatedAt) || 0;
+    const now = Date.now();
+    const newGenTime = now <= prevGenTime ? prevGenTime + 100 : now;
     currentMeta.generatedAt = newGenTime;
 
     let newHtml = cached ? cached.content : "";
@@ -82,7 +93,22 @@ async function revalidatePath(reqPath) {
       );
     }
     await storage.set(htmlKey, newHtml, currentMeta);
+    if (cleanPathKey) {
+      await storage.set(cleanPathKey, newHtml, currentMeta);
+    }
     await storage.set(metaKey, JSON.stringify(currentMeta));
+
+    try {
+      let cachedRsc = await storage.get(rscKey);
+      if (cachedRsc && cachedRsc.content) {
+        const newRsc = cachedRsc.content.replace(
+          /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g,
+          new Date(newGenTime).toISOString()
+        );
+        await storage.set(rscKey, newRsc);
+      }
+    } catch (e) {}
+
     console.log(`✅ [Edge Revalidate] Successfully revalidated ${cleanPath} (generatedAt: ${newGenTime})`);
     return;
   }
@@ -150,24 +176,33 @@ async function revalidateTag(tag) {
   if (isEdgeRuntime()) {
     const storage = getStorageAdapter();
     if (typeof storage.keys === "function") {
-      const revalidatePromises = [];
-      for (const key of storage.keys()) {
+      const allKeys = await storage.keys();
+      const targetPaths = new Set();
+      for (const key of allKeys) {
         if (key.endsWith("metadata.json")) {
           try {
             const item = await storage.get(key);
             let meta = item?.metadata;
             if (!meta && item?.content) {
-              meta = JSON.parse(item.content);
+              try { meta = JSON.parse(item.content); } catch (e) {}
             }
             if (meta && Array.isArray(meta.tags) && meta.tags.includes(tag)) {
               const cleanKey = key.replace(/\/metadata\.json$/, "").replace(/^metadata\.json$/, "");
-              const reqPath = "/" + cleanKey;
-              revalidatePromises.push(revalidatePath(reqPath));
+              targetPaths.add("/" + cleanKey);
+            }
+          } catch (e) {}
+        } else if (key.endsWith("index.html")) {
+          try {
+            const item = await storage.get(key);
+            const meta = item?.metadata;
+            if (meta && Array.isArray(meta.tags) && meta.tags.includes(tag)) {
+              const cleanKey = key.replace(/\/index\.html$/, "").replace(/^index\.html$/, "");
+              targetPaths.add("/" + cleanKey);
             }
           } catch (e) {}
         }
       }
-      await Promise.all(revalidatePromises);
+      await Promise.all(Array.from(targetPaths).map((p) => revalidatePath(p)));
     }
     return;
   }

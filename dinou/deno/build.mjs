@@ -448,6 +448,20 @@ function walkVfs(dir) {
 walkVfs(srcDir);
 
 const envSetupContent = `// Auto-generated environment setup
+if (typeof globalThis.__webpack_require__ === 'undefined') {
+  globalThis.__webpack_require__ = function(id) {
+    if (globalThis.__webpack_modules__ && globalThis.__webpack_modules__[id]) {
+      return globalThis.__webpack_modules__[id];
+    }
+    return {};
+  };
+}
+if (typeof globalThis.__webpack_require__.u === 'undefined') {
+  globalThis.__webpack_require__.u = function(chunkId) { return '' + chunkId + '.js'; };
+}
+if (typeof globalThis.__webpack_chunk_load__ === 'undefined') {
+  globalThis.__webpack_chunk_load__ = () => Promise.resolve();
+}
 ${manifestInlines}
 globalThis.__DINOU_VFS__ = ${JSON.stringify(vfsSnapshot)};
 `;
@@ -660,6 +674,7 @@ globalThis.__webpack_require__ = (id) => {
   console.error("[SSR Engine] Module not found in __webpack_require__:", id);
   return {};
 };
+globalThis.__webpack_require__.u = (chunkId) => "" + chunkId + ".js";
 globalThis.__webpack_chunk_load__ = () => Promise.resolve();
 
 export async function renderHtml(rscStream, options = {}) {
@@ -692,7 +707,18 @@ export async function fetch(req) {
   if (!storageInitialized) {
     if (typeof Deno !== "undefined" && typeof Deno.openKv === "function") {
       try {
-        setStorageAdapter(new DenoKVStorage());
+        const kvUrl = Deno.env.get("DENO_KV_URL");
+        let kvInstance;
+        if (kvUrl) {
+          kvInstance = await Deno.openKv(kvUrl);
+        } else if (Deno.env.get("DENO_DEPLOYMENT_ID")) {
+          kvInstance = await Deno.openKv();
+        } else {
+          const cwd = typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
+          const kvPath = Deno.env.get("DENO_KV_PATH") || path.resolve(cwd, ".dinou/kv.db");
+          kvInstance = await Deno.openKv(kvPath);
+        }
+        setStorageAdapter(new DenoKVStorage(kvInstance));
       } catch (e) {
         setStorageAdapter(new MemoryStorage());
       }
@@ -735,7 +761,7 @@ export async function fetch(req) {
 }
 
 if (typeof Deno !== "undefined" && typeof Deno.serve === "function" && import.meta.main) {
-  const port = Number(Deno.env.get("PORT") || 8000);
+  const port = Number(Deno.env.get("PORT") || 3000);
   Deno.serve({ port }, fetch);
 }
 
@@ -794,7 +820,33 @@ const __filename = '';
 globalThis.__dinou_require__ = require;
 if (typeof globalThis.AsyncLocalStorage === 'undefined' && typeof ___AsyncLocalStorage !== 'undefined') {
   globalThis.AsyncLocalStorage = ___AsyncLocalStorage;
-}`,
+}
+if (typeof globalThis.__webpack_require__ === 'undefined') {
+  globalThis.__webpack_require__ = function(id) {
+    if (globalThis.__webpack_modules__ && globalThis.__webpack_modules__[id]) {
+      return globalThis.__webpack_modules__[id];
+    }
+    return {};
+  };
+}
+if (typeof globalThis.__webpack_require__.u === 'undefined') {
+  globalThis.__webpack_require__.u = function(chunkId) { return '' + chunkId + '.js'; };
+}
+if (typeof globalThis.__webpack_chunk_load__ === 'undefined') {
+  globalThis.__webpack_chunk_load__ = () => Promise.resolve();
+}
+var __webpack_require__ = function(id) {
+  return globalThis.__webpack_require__ ? globalThis.__webpack_require__(id) : {};
+};
+__webpack_require__.u = function(chunkId) {
+  return (globalThis.__webpack_require__ && globalThis.__webpack_require__.u)
+    ? globalThis.__webpack_require__.u(chunkId)
+    : '' + chunkId + '.js';
+};
+var __webpack_chunk_load__ = function(chunkId) {
+  return globalThis.__webpack_chunk_load__ ? globalThis.__webpack_chunk_load__(chunkId) : Promise.resolve();
+};
+`,
 };
 
 // Plugins for RSC Engine
