@@ -31,12 +31,25 @@ class FileSystemStorage extends StorageAdapter {
   }
 
   _resolve(key) {
-    const cleanKey = key.replace(/^\/+/, "");
+    let cleanKey = String(key || "")
+      .replace(/^\/+/, "")
+      .replace(/\\/g, "/")
+      .replace(/\/+$/, "");
+    if (!cleanKey) {
+      return path.join(this.baseDir, "index.html");
+    }
+    const ext = path.extname(cleanKey);
+    if (!ext) {
+      return path.join(this.baseDir, cleanKey, "index.html");
+    }
     return path.join(this.baseDir, cleanKey);
   }
 
   async get(key) {
-    const targetPath = this._resolve(key);
+    let targetPath = this._resolve(key);
+    if (fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()) {
+      targetPath = path.join(targetPath, "index.html");
+    }
     if (!fs.existsSync(targetPath)) return null;
     const content = fs.readFileSync(targetPath, "utf8");
 
@@ -52,7 +65,10 @@ class FileSystemStorage extends StorageAdapter {
   }
 
   async set(key, content, metadata = null) {
-    const targetPath = this._resolve(key);
+    let targetPath = this._resolve(key);
+    if (fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()) {
+      targetPath = path.join(targetPath, "index.html");
+    }
     const dir = path.dirname(targetPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -66,15 +82,38 @@ class FileSystemStorage extends StorageAdapter {
   }
 
   async has(key) {
-    const targetPath = this._resolve(key);
+    let targetPath = this._resolve(key);
+    if (fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()) {
+      targetPath = path.join(targetPath, "index.html");
+    }
     return fs.existsSync(targetPath);
   }
 
   async delete(key) {
-    const targetPath = this._resolve(key);
+    let targetPath = this._resolve(key);
     if (fs.existsSync(targetPath)) {
-      fs.rmSync(targetPath, { force: true });
+      fs.rmSync(targetPath, { force: true, recursive: true });
     }
+  }
+
+  async keys(prefix = "") {
+    if (!fs.existsSync(this.baseDir)) return [];
+    const results = [];
+    const walk = (dir, rel = "") => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const entryRel = rel ? `${rel}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+          walk(path.join(dir, entry.name), entryRel);
+        } else {
+          if (!prefix || entryRel.startsWith(prefix)) {
+            results.push(entryRel);
+          }
+        }
+      }
+    };
+    walk(this.baseDir);
+    return results;
   }
 }
 

@@ -1,12 +1,31 @@
 const path = require("path");
 const fs = require("fs").promises;
 const { existsSync, copyFileSync } = require("fs");
-const generateStaticPage = require("./generate-static-page");
-const { buildStaticPage } = require("./build-static-pages");
-const generateStaticRSC = require("./generate-static-rsc");
-const { safeRename } = require("./safe-rename");
-const { updateStatus } = require("./status-manifest");
-
+let _generateStaticPage = null;
+function getGenerateStaticPage() {
+  if (!_generateStaticPage) _generateStaticPage = require("./generate-static-page");
+  return _generateStaticPage;
+}
+let _buildStaticPage = null;
+function getBuildStaticPage() {
+  if (!_buildStaticPage) _buildStaticPage = require("./build-static-pages").buildStaticPage;
+  return _buildStaticPage;
+}
+let _generateStaticRSC = null;
+function getGenerateStaticRSC() {
+  if (!_generateStaticRSC) _generateStaticRSC = require("./generate-static-rsc");
+  return _generateStaticRSC;
+}
+let _safeRename = null;
+function getSafeRename() {
+  if (!_safeRename) _safeRename = require("./safe-rename").safeRename;
+  return _safeRename;
+}
+let _updateStatus = null;
+function getUpdateStatus() {
+  if (!_updateStatus) _updateStatus = require("./status-manifest").updateStatus;
+  return _updateStatus;
+}
 const { getContext } = require("./request-context");
 const { resolveRelativeUrl } = require("./url-resolver");
 const { getStorageAdapter } = require("./storage-adapter");
@@ -137,13 +156,13 @@ async function revalidatePath(reqPath) {
   console.log(`[Revalidate] Starting on-demand revalidation for ${cleanPath}...`);
   try {
     const isDynamic = {};
-    await buildStaticPage(cleanPath, isDynamic);
+    await getBuildStaticPage()(cleanPath, isDynamic);
     if (isDynamic.value) {
       console.log(`[Revalidate] Bailout detected for ${cleanPath}. Switching to dynamic (skipping static write).`);
       return;
     }
 
-    const rscResult = await generateStaticRSC(cleanPath);
+    const rscResult = await getGenerateStaticRSC()(cleanPath);
     if (!rscResult.success) {
       console.warn(`⚠️ [Revalidate] RSC generation failed for ${cleanPath}.`);
       if (rscResult.tempPath && existsSync(rscResult.tempPath)) {
@@ -152,12 +171,12 @@ async function revalidatePath(reqPath) {
       return;
     }
 
-    await safeRename(rscResult.tempPath, rscResult.finalPath);
+    await getSafeRename()(rscResult.tempPath, rscResult.finalPath);
 
-    const pageResult = await generateStaticPage(cleanPath);
+    const pageResult = await getGenerateStaticPage()(cleanPath);
     if (pageResult.success) {
-      await safeRename(pageResult.tempPath, pageResult.finalPath);
-      updateStatus(cleanPath, pageResult.status);
+      await getSafeRename()(pageResult.tempPath, pageResult.finalPath);
+      getUpdateStatus()(cleanPath, pageResult.status);
       console.log(`✅ [Revalidate] Successfully revalidated ${cleanPath} (Status: ${pageResult.status})`);
     } else {
       console.warn(`⚠️ [Revalidate] HTML generation failed for ${cleanPath}.`);

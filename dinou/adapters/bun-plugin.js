@@ -146,6 +146,21 @@ plugin({
       const clientModPath = isProd
         ? "./cjs/react.production.js"
         : "./cjs/react.development.js";
+
+      // Dynamically discover all exports from installed React package
+      let dynamicExports = "";
+      try {
+        const reactPkg = require.resolve("react/package.json");
+        const reactDir = path.dirname(reactPkg);
+        const serverMod = require(path.join(reactDir, modPath));
+        const clientMod = require(path.join(reactDir, clientModPath));
+        const allKeys = Array.from(new Set([...Object.keys(serverMod), ...Object.keys(clientMod)]));
+        dynamicExports = allKeys
+          .filter((k) => k !== "default" && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(k))
+          .map((k) => `export const ${k} = mod.${k} !== undefined ? mod.${k} : clientMod.${k};`)
+          .join("\n");
+      } catch (e) {}
+
       return {
         contents: `
 import { createRequire } from "node:module";
@@ -153,73 +168,12 @@ const require = createRequire(import.meta.url);
 const mod = require(${JSON.stringify(modPath)});
 const clientMod = require(${JSON.stringify(clientModPath)});
 
-export const Activity = mod.Activity || clientMod.Activity;
-export const Children = mod.Children || clientMod.Children;
-export const Component = mod.Component || clientMod.Component;
-export const Fragment = mod.Fragment || clientMod.Fragment;
-export const Profiler = mod.Profiler || clientMod.Profiler;
-export const PureComponent = mod.PureComponent || clientMod.PureComponent;
-export const StrictMode = mod.StrictMode || clientMod.StrictMode;
-export const Suspense = mod.Suspense || clientMod.Suspense;
-export const ViewTransition = mod.ViewTransition || clientMod.ViewTransition;
-export const act = mod.act || clientMod.act;
-export const cache = mod.cache || clientMod.cache;
-export const cloneElement = mod.cloneElement || clientMod.cloneElement;
-export const createContext = mod.createContext || clientMod.createContext;
-export const createElement = mod.createElement || clientMod.createElement;
-export const createRef = mod.createRef || clientMod.createRef;
-export const forwardRef = mod.forwardRef || clientMod.forwardRef;
-export const isValidElement = mod.isValidElement || clientMod.isValidElement;
-export const lazy = mod.lazy || clientMod.lazy;
-export const memo = mod.memo || clientMod.memo;
-export const startTransition = mod.startTransition || clientMod.startTransition;
-export const use = mod.use || clientMod.use;
-export const useActionState = mod.useActionState || clientMod.useActionState;
-export const useCallback = mod.useCallback || clientMod.useCallback;
-export const useContext = mod.useContext || clientMod.useContext;
-export const useDebugValue = mod.useDebugValue || clientMod.useDebugValue;
-export const useDeferredValue = mod.useDeferredValue || clientMod.useDeferredValue;
-export const useEffect = mod.useEffect || clientMod.useEffect;
-export const useEffectEvent = mod.useEffectEvent || clientMod.useEffectEvent;
-export const useId = mod.useId || clientMod.useId;
-export const useImperativeHandle = mod.useImperativeHandle || clientMod.useImperativeHandle;
-export const useInsertionEffect = mod.useInsertionEffect || clientMod.useInsertionEffect;
-export const useLayoutEffect = mod.useLayoutEffect || clientMod.useLayoutEffect;
-export const useMemo = mod.useMemo || clientMod.useMemo;
-export const useOptimistic = mod.useOptimistic || clientMod.useOptimistic;
-export const useReducer = mod.useReducer || clientMod.useReducer;
-export const useRef = mod.useRef || clientMod.useRef;
-export const useState = mod.useState || clientMod.useState;
-export const useSyncExternalStore = mod.useSyncExternalStore || clientMod.useSyncExternalStore;
-export const useTransition = mod.useTransition || clientMod.useTransition;
-export const version = mod.version || clientMod.version;
-export const __SERVER_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE = mod.__SERVER_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE || clientMod.__SERVER_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
-export const __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE = mod.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE || clientMod.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
-export const __COMPILER_RUNTIME = mod.__COMPILER_RUNTIME || clientMod.__COMPILER_RUNTIME;
+${dynamicExports}
 
-const defaultExport = {
+export default {
   ...clientMod,
   ...mod,
-  __SERVER_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE: mod.__SERVER_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE || clientMod.__SERVER_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE,
-  __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE: mod.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE || clientMod.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE,
-  __COMPILER_RUNTIME: mod.__COMPILER_RUNTIME || clientMod.__COMPILER_RUNTIME,
-  Component: mod.Component || clientMod.Component,
-  PureComponent: mod.PureComponent || clientMod.PureComponent,
-  useState: mod.useState || clientMod.useState,
-  useReducer: mod.useReducer || clientMod.useReducer,
-  useRef: mod.useRef || clientMod.useRef,
-  useSyncExternalStore: mod.useSyncExternalStore || clientMod.useSyncExternalStore,
-  useTransition: mod.useTransition || clientMod.useTransition,
-  startTransition: mod.startTransition || clientMod.startTransition,
-  useContext: mod.useContext || clientMod.useContext,
-  createContext: mod.createContext || clientMod.createContext,
-  useImperativeHandle: mod.useImperativeHandle || clientMod.useImperativeHandle,
-  useInsertionEffect: mod.useInsertionEffect || clientMod.useInsertionEffect,
-  useLayoutEffect: mod.useLayoutEffect || clientMod.useLayoutEffect,
-  useActionState: mod.useActionState || clientMod.useActionState,
-  useOptimistic: mod.useOptimistic || clientMod.useOptimistic,
 };
-export default defaultExport;
 `,
         loader: "js",
       };

@@ -1,48 +1,39 @@
 // dinou/adapters/bun.js
-// Native Bun Adapter for Dinou v7.
-// Ultra-fast zero-copy static file streaming with Bun.file() and Web Standards fetch.
+// Native Bun Adapter for Dinou v7 (Pre-bundled AOT).
+// Serves the standalone pre-bundled server from .dinou/bun/server.js.
 
-import "./bun-plugin.js";
-import path from "node:path";
-import fs from "node:fs";
+import * as path from "node:path";
+import * as fs from "node:fs";
 import { pathToFileURL } from "node:url";
-import { handleRequest } from "../core/handler.js";
 
-// Ensure global runtime flag
-if (typeof globalThis !== "undefined") {
-  globalThis.__DINOU_RUNTIME__ = "bun";
-}
-process.env.NODE_ENV = process.env.NODE_ENV || "production";
+const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
+const bundlePath = path.resolve(cwd, ".dinou/bun/server.js");
 
-// 1. Load in-memory route modules if generated
-const routeModulesPath = path.resolve(process.cwd(), ".dinou/route-modules.js");
-if (fs.existsSync(routeModulesPath)) {
+let bundleModule = null;
+if (fs.existsSync(bundlePath)) {
   try {
-    await import(pathToFileURL(routeModulesPath).href);
+    bundleModule = await import(pathToFileURL(bundlePath).href);
   } catch (e) {
-    console.warn("[Dinou Bun] Route modules load warning:", e.message);
+    console.error("[Dinou Bun Adapter] Failed to load .dinou/bun/server.js:", e);
   }
 }
 
 const PORT = Number(process.env.PORT || 3000);
-const cwd = process.cwd();
-const dist3Dir = path.resolve(cwd, ".dinou/dist3");
 
 export async function fetch(req) {
-  const url = new URL(req.url);
-  const pathname = url.pathname;
-
-  // Static assets delivery (Zero-copy with Bun.file)
-  if (pathname !== "/") {
-    const filePath = path.join(dist3Dir, pathname);
-    const file = Bun.file(filePath);
-    if (await file.exists()) {
-      return new Response(file);
-    }
+  if (bundleModule && typeof bundleModule.fetch === "function") {
+    return bundleModule.fetch(req);
   }
-
-  // Dinou Universal Handler
-  return handleRequest(req, { runtime: "bun" });
+  if (bundleModule && bundleModule.default && typeof bundleModule.default.fetch === "function") {
+    return bundleModule.default.fetch(req);
+  }
+  return new Response(
+    "Dinou Bun bundle not found. Please run 'npm run build:bun' first.",
+    {
+      status: 500,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    }
+  );
 }
 
 export default {

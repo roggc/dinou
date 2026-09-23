@@ -1,9 +1,21 @@
 const path = require("path");
 const fs = require("fs").promises;
 const { existsSync, copyFileSync } = require("fs");
-const generateStaticPage = require("./generate-static-page");
-const { buildStaticPage } = require("./build-static-pages");
-const generateStaticRSC = require("./generate-static-rsc");
+let _generateStaticPage = null;
+function getGenerateStaticPage() {
+  if (!_generateStaticPage) _generateStaticPage = require("./generate-static-page");
+  return _generateStaticPage;
+}
+let _buildStaticPage = null;
+function getBuildStaticPage() {
+  if (!_buildStaticPage) _buildStaticPage = require("./build-static-pages").buildStaticPage;
+  return _buildStaticPage;
+}
+let _generateStaticRSC = null;
+function getGenerateStaticRSC() {
+  if (!_generateStaticRSC) _generateStaticRSC = require("./generate-static-rsc");
+  return _generateStaticRSC;
+}
 const { safeRename } = require("./safe-rename");
 const { updateStatus } = require("./status-manifest");
 
@@ -47,7 +59,7 @@ function revalidating(reqPath, isDynamicFromServer) {
           try {
             console.log(`[ISR] Starting regeneration for ${reqPath}...`);
             const isDynamic = {};
-            await buildStaticPage(reqPath, isDynamic);
+            await getBuildStaticPage()(reqPath, isDynamic);
             if (isDynamic.value) {
               isDynamicFromServer.value = true;
               console.log(
@@ -57,7 +69,7 @@ function revalidating(reqPath, isDynamicFromServer) {
               return;
             }
 
-            const rscResult = await generateStaticRSC(reqPath);
+            const rscResult = await getGenerateStaticRSC()(reqPath);
             if (!rscResult.success) {
               console.warn(`⚠️ [ISR] RSC generation failed for ${reqPath}. Aborting.`);
               await fs.unlink(rscResult.tempPath).catch(() => { });
@@ -67,7 +79,7 @@ function revalidating(reqPath, isDynamicFromServer) {
             // Commit the RSC payload immediately so that generateStaticPage can read it
             await safeRename(rscResult.tempPath, rscResult.finalPath);
 
-            const pageResult = await generateStaticPage(reqPath);
+            const pageResult = await getGenerateStaticPage()(reqPath);
             if (pageResult.success) {
               await safeRename(pageResult.tempPath, pageResult.finalPath);
               updateStatus(reqPath, pageResult.status);

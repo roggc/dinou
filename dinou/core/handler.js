@@ -19,7 +19,13 @@ const { getFilePathAndDynamicParams } = require("./get-file-path-and-dynamic-par
 const getJSX = require("./get-jsx.js");
 const { getErrorJSX } = require("./get-error-jsx.js");
 const importModule = require("./import-module.js");
-const renderAppToHtml = require("./render-app-to-html.js");
+let _renderAppToHtml = null;
+function getRenderAppToHtml() {
+  if (!_renderAppToHtml) {
+    _renderAppToHtml = require("./render-app-to-html.js");
+  }
+  return _renderAppToHtml;
+}
 const { revalidating, regenerating, inFlightGenerations } = require("./revalidating.js");
 const { generatingISG } = require("./generating-isg.js");
 const { requestStorage, setCurrentContext } = require("./request-context.js");
@@ -1468,7 +1474,7 @@ async function handleRequest(request, platformContext = {}) {
   processLimiter
     .run(async () => {
       try {
-        const appHtmlStream = renderAppToHtml(
+        const appHtmlStream = getRenderAppToHtml()(
           reqPath,
           JSON.stringify(queryObj),
           contextForChild,
@@ -1482,7 +1488,7 @@ async function handleRequest(request, platformContext = {}) {
         appHtmlStream.pipe(bridge);
 
         await new Promise((resolve) => {
-          appHtmlStream.on("end", () => {
+          const onDone = () => {
             if (
               !isDevelopment &&
               bridge.statusCode === 200 &&
@@ -1494,8 +1500,14 @@ async function handleRequest(request, platformContext = {}) {
             ) {
               generatingISG(reqPath, dynamicState);
             }
+            if (!bridge.headersSent) {
+              bridge.status(500).send("Internal Server Error");
+            }
             resolve();
-          });
+          };
+
+          appHtmlStream.on("end", onDone);
+          appHtmlStream.on("close", onDone);
           appHtmlStream.on("error", (error) => {
             console.error("[Dinou] Stream error:", error);
             if (!bridge.headersSent) bridge.status(500).send("Internal Server Error");
