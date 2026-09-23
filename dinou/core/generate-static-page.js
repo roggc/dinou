@@ -111,8 +111,9 @@ async function generateStaticPage(reqPath) {
       );
     }
 
+    const stats = await fs.stat(tempHtmlPath).catch(() => ({ size: 0 }));
     const status = capturedStatus.value || 200;
-    const success = status !== 500;
+    const success = status !== 500 && stats.size > 0;
 
     return {
       success,

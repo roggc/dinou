@@ -218,6 +218,7 @@ class WebResponseBridge extends PassThrough {
     this._responsePromise = new Promise((resolve) => {
       this._resolveResponse = resolve;
     });
+    this.on("error", () => {});
   }
 
   status(code) {

@@ -185,6 +185,7 @@ function renderAppToHtml(
       isDynamic ? "true" : "false",
     ],
     {
+      execPath: process.env.NODE_BINARY || (typeof process.versions.bun !== "undefined" ? "node" : undefined),
       execArgv: childExecArgv,
       stdio: ["ignore", "pipe", "pipe", "ipc", "pipe"], // fd 4 is the RSC stream pipe
       env: { ...process.env, DINOU_PROCESS: "ssr-html" },
