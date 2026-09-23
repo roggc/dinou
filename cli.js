@@ -163,6 +163,14 @@ program
   });
 
 program
+  .command("start:bun:webpack")
+  .description("Start the app in production mode with Bun (Webpack build)")
+  .action(() => {
+    console.log("Starting the app with Bun (Webpack)...");
+    runCommand(`cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack bun --conditions=react-server ${path.join(dinouPath, "adapters/bun.js")}`);
+  });
+
+program
   .command("start:deno")
   .description("Start the app in production mode with Deno")
   .action(() => {
@@ -329,4 +337,6 @@ program
   });
 
 program.parse(process.argv);
+
+
 
