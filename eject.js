@@ -49,7 +49,7 @@ pkg.scripts["start:webpack"] =
   "cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack node ./dinou/core/server.js";
 pkg.scripts.start = "npm run start:esbuild";
 
-pkg.scripts["start:bun"] = "bun dinou/adapters/bun.js";
+pkg.scripts["start:bun"] = "cross-env NODE_ENV=production bun --conditions=react-server dinou/adapters/bun.js";
 pkg.scripts["start:deno"] =
   "deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env --allow-sys dinou/adapters/deno.js";
 
@@ -124,3 +124,4 @@ try {
 console.log(
   "🎉 Eject completed successfully! Dinou is now running from local source.",
 );
+

@@ -11,6 +11,7 @@ import { handleRequest } from "../core/handler.js";
 if (typeof globalThis !== "undefined") {
   globalThis.__DINOU_RUNTIME__ = "bun";
 }
+process.env.NODE_ENV = process.env.NODE_ENV || "production";
 
 // 1. Load in-memory route modules if generated
 const routeModulesPath = path.resolve(process.cwd(), ".dinou/route-modules.js");
@@ -47,3 +48,4 @@ export default {
   port: PORT,
   fetch,
 };
+

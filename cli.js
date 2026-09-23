@@ -159,7 +159,7 @@ program
   .description("Start the app in production mode with Bun")
   .action(() => {
     console.log("Starting the app with Bun...");
-    runCommand(`bun ${path.join(dinouPath, "adapters/bun.js")}`);
+    runCommand(`cross-env NODE_ENV=production bun --conditions=react-server ${path.join(dinouPath, "adapters/bun.js")}`);
   });
 
 program
@@ -329,3 +329,4 @@ program
   });
 
 program.parse(process.argv);
+
