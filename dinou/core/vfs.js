@@ -1,7 +1,10 @@
 const fs = require("fs");
 const path = require("path");
 
-const isDevelopment = process.env.NODE_ENV !== "production";
+const isDevelopment =
+  process.env.DINOU_DEV === "true" ||
+  (typeof globalThis !== "undefined" && Boolean(globalThis.__DINOU_DEV__)) ||
+  process.env.NODE_ENV !== "production";
 const localVfs = {};
 
 function getVfs() {

@@ -8,9 +8,16 @@ const fs = require("fs");
 let cachedClientManifest = null;
 let cachedServerFunctionsManifest = null;
 
+function isDevMode() {
+  return (
+    process.env.DINOU_DEV === "true" ||
+    (typeof globalThis !== "undefined" && Boolean(globalThis.__DINOU_DEV__)) ||
+    process.env.NODE_ENV !== "production"
+  );
+}
+
 function getOutputFolder() {
-  const isDevelopment = process.env.NODE_ENV !== "production";
-  return isDevelopment ? ".dinou/public" : ".dinou/dist3";
+  return isDevMode() ? ".dinou/public" : ".dinou/dist3";
 }
 
 function getClientManifestPath() {
@@ -51,7 +58,7 @@ function getClientManifest() {
   if (typeof globalThis !== "undefined" && globalThis.__DINOU_CLIENT_MANIFEST__) {
     return globalThis.__DINOU_CLIENT_MANIFEST__;
   }
-  const isDevelopment = process.env.NODE_ENV !== "production";
+  const isDevelopment = isDevMode();
   if (!isDevelopment && cachedClientManifest) {
     return cachedClientManifest;
   }
@@ -84,7 +91,7 @@ function getServerFunctionsManifest() {
     return parsed;
   }
 
-  const isDevelopment = process.env.NODE_ENV !== "production";
+  const isDevelopment = isDevMode();
   const p = getServerFunctionsManifestPath();
 
   if (isDevelopment) {

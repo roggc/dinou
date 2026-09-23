@@ -10,7 +10,10 @@ const FormData = globalThis.FormData;
 const Blob = globalThis.Blob;
 
 const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
-const isDevelopment = process.env.NODE_ENV !== "production";
+const isDevelopment =
+  process.env.DINOU_DEV === "true" ||
+  (typeof globalThis !== "undefined" && Boolean(globalThis.__DINOU_DEV__)) ||
+  process.env.NODE_ENV !== "production";
 const outputFolder = isDevelopment ? ".dinou/public" : ".dinou/dist3";
 
 const { normalizePathCase } = require("./path-utils.js");
@@ -1031,14 +1034,17 @@ async function handleRequest(request, platformContext = {}) {
     const htmlKey = cleanPath ? `${cleanPath}/index.html` : "index.html";
     const metaKey = cleanPath ? `${cleanPath}/metadata.json` : "metadata.json";
 
-    // 1. Check storageAdapter
-    let cachedItem = await storage.get(htmlKey);
-    if (!cachedItem) {
-      cachedItem = await storage.get(cleanPath);
+    // 1. Check storageAdapter (production only)
+    let cachedItem = null;
+    if (!isDevelopment) {
+      cachedItem = await storage.get(htmlKey);
+      if (!cachedItem) {
+        cachedItem = await storage.get(cleanPath);
+      }
     }
 
     // 2. If not in storageAdapter, check env.ASSETS for pre-rendered build static page
-    if (!cachedItem && platformContext && platformContext.env && platformContext.env.ASSETS) {
+    if (!isDevelopment && !cachedItem && platformContext && platformContext.env && platformContext.env.ASSETS) {
       try {
         const metaRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${metaKey}`, request.url)));
         if (metaRes && metaRes.status === 200) {
@@ -1074,7 +1080,7 @@ async function handleRequest(request, platformContext = {}) {
     }
 
     // 3. If we found a cached/pre-rendered page:
-    if (cachedItem && !dynamicState.value && !isPathBlocked && queryObj.ssr_crash !== "true") {
+    if (!isDevelopment && cachedItem && !dynamicState.value && !isPathBlocked && queryObj.ssr_crash !== "true") {
       const metadata = cachedItem.metadata || {};
       const { revalidate, generatedAt } = metadata;
       const isExpired =
@@ -1163,7 +1169,7 @@ async function handleRequest(request, platformContext = {}) {
     }
 
     // 4. Dynamic ISG / 404 Route on Edge!
-    if (pagePath && (isPathBlocked || allowISGValue === false)) {
+    if (pagePath && isPathBlocked) {
       return new Response("Not Found", { status: 404 });
     }
 
@@ -1228,6 +1234,7 @@ async function handleRequest(request, platformContext = {}) {
         };
 
         const shouldCacheISG =
+          !isDevelopment &&
           genMeta.status === 200 &&
           !isNotFound.value &&
           !dynamicState.value &&
@@ -1286,15 +1293,91 @@ async function handleRequest(request, platformContext = {}) {
             ? getAssetFromManifest("error.js")
             : getAssetFromManifest("main.js");
 
-          const htmlStream = await platformContext.renderHtmlStream(streamForSsr, {
-            bootstrapModules: [clientEntry],
-            bootstrapScriptContent,
-            onError(err) {
-              console.error("[Edge Native SSR] Stream error:", err);
-            },
-          });
+          const bootstrapModules = isDevelopment
+            ? [
+                clientEntry,
+                isWebpack ? undefined : getAssetFromManifest("runtime.js"),
+              ].filter(Boolean)
+            : [clientEntry];
 
-          if (bridge.headers.has("Location") || (bridge.statusCode >= 300 && bridge.statusCode < 400)) {
+          if (isDevelopment && !isWebpack) {
+            bootstrapScriptContent += `window.HMR_WEBSOCKET_URL="ws://localhost:3001";\n`;
+          }
+
+          let htmlStream;
+          try {
+            htmlStream = await platformContext.renderHtmlStream(streamForSsr, {
+              bootstrapModules,
+              bootstrapScriptContent,
+              onError(err) {
+                console.error("[Edge Native SSR] Stream error:", err);
+              },
+            });
+          } catch (ssrErr) {
+            console.error("[Edge Native SSR] SSR render threw error, falling back to getErrorJSX:", ssrErr.message);
+            isError = true;
+            caughtError = ssrErr;
+            bridge.status(500);
+            genMeta.status = 500;
+
+            const serializedError = {
+              message: isDevelopment
+                ? (ssrErr?.message || "An error occurred in the Server Components render")
+                : "An error occurred in the Server Components render",
+              name: ssrErr?.name || "Error",
+              stack: isDevelopment ? ssrErr?.stack : undefined,
+            };
+
+            let errorJsx;
+            try {
+              await requestStorage.run(context, async () => {
+                errorJsx = await getErrorJSX(cleanPath, queryObj, serializedError, isDevelopment);
+              });
+            } catch (errJsxErr) {
+              console.error("[Edge Native SSR] Failed to get error JSX:", errJsxErr);
+            }
+
+            if (!errorJsx) {
+              const errMsg = isDevelopment
+                ? (ssrErr?.message || "Error")
+                : "An error occurred in the Server Components render";
+              return {
+                type: "html",
+                html: `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Dinou</title></head><body data-hydrated="true"><div class="min-h-screen bg-slate-950 text-slate-100 p-6"><h2>Application Error</h2><p>${errMsg}</p></div></body></html>`,
+                status: 500,
+                headers: new Headers(bridge.headers),
+                cookies: [...bridge.cookies],
+              };
+            }
+
+            const errorRscStream = renderRSCStream(errorJsx, clientManifest, { runtime: "edge" });
+            const errorClientEntry = getAssetFromManifest("error.js");
+            const errorBootstrapModules = isDevelopment
+              ? [
+                  errorClientEntry,
+                  isWebpack ? undefined : getAssetFromManifest("runtime.js"),
+                ].filter(Boolean)
+              : [errorClientEntry];
+
+            let errorBootstrapScript = "";
+            errorBootstrapScript += `window.__DINOU_ERROR_MESSAGE__=${JSON.stringify(
+              serializedError.message
+            )};window.__DINOU_ERROR_NAME__=${JSON.stringify(serializedError.name)};\n`;
+            errorBootstrapScript += 'document.body.setAttribute("data-hydrated", "true");\n';
+            if (isDevelopment && !isWebpack) {
+              errorBootstrapScript += `window.HMR_WEBSOCKET_URL="ws://localhost:3001";\n`;
+            }
+
+            htmlStream = await platformContext.renderHtmlStream(errorRscStream, {
+              bootstrapModules: errorBootstrapModules,
+              bootstrapScriptContent: errorBootstrapScript,
+              onError(err) {
+                console.error("[Edge Native SSR Error Page] Stream error:", err);
+              },
+            });
+          }
+
+          if (!bridge.headersSent && (bridge.headers.has("Location") || (bridge.statusCode >= 300 && bridge.statusCode < 400))) {
             return {
               type: "redirect",
               status: bridge.statusCode || 302,
