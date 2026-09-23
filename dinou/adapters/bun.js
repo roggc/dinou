@@ -2,6 +2,7 @@
 // Native Bun Adapter for Dinou v7.
 // Ultra-fast zero-copy static file streaming with Bun.file() and Web Standards fetch.
 
+import "./bun-plugin.js";
 import path from "node:path";
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -48,4 +49,3 @@ export default {
   port: PORT,
   fetch,
 };
-
