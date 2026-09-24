@@ -8,8 +8,9 @@ function parseExports(code) {
   });
 
   const exports = new Set();
+  const traverseFn = typeof traverse === "function" ? traverse : (traverse.default || traverse);
 
-  traverse.default(ast, {
+  traverseFn(ast, {
     ExportDefaultDeclaration() {
       exports.add("default");
     },

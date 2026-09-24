@@ -129,4 +129,5 @@ try {
   });
 } catch (err) {
   console.error("Error in build:", err);
+  process.exit(1);
 }

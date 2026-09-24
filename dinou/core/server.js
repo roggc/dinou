@@ -316,8 +316,16 @@ app.use(express.json());
 app.use(express.static(path.resolve(process.cwd(), outputFolder)));
 
 const { nodeToWebRequest, sendWebResponseToNode } = require("./http-adapter.js");
+const { setStorageAdapter, FileSystemStorage, MemoryStorage } = require("./storage-adapter.js");
+try {
+  const dist2Dir = path.resolve(process.cwd(), ".dinou/dist2");
+  setStorageAdapter(new FileSystemStorage(dist2Dir));
+} catch (e) {
+  setStorageAdapter(new MemoryStorage());
+}
 
 let handleRequestFn = null;
+let ssrRenderHtmlFn = null;
 
 function extractHandleRequest(mod) {
   if (typeof mod?.handleRequest === "function") return mod.handleRequest;
@@ -347,12 +355,32 @@ async function getHandleRequest() {
   return handleRequestFn;
 }
 
+async function getSsrRenderHtml() {
+  if (ssrRenderHtmlFn) return ssrRenderHtmlFn;
+  const ssrEnginePath = path.resolve(process.cwd(), ".dinou/node/ssr-engine.mjs");
+  if (existsSync(ssrEnginePath)) {
+    try {
+      const ssrMod = await import(pathToFileURL(ssrEnginePath).href);
+      if (typeof ssrMod.renderHtml === "function") {
+        ssrRenderHtmlFn = ssrMod.renderHtml;
+      }
+    } catch (e) {
+      console.warn("⚠️ [Dinou Server] Could not load ssr-engine:", e.message);
+    }
+  }
+  return ssrRenderHtmlFn;
+}
+
 // 2. Dynamic requests: delegated to the universal WHATWG handler
 app.use(async (req, res, next) => {
   try {
     const handleRequest = await getHandleRequest();
+    const renderHtml = await getSsrRenderHtml();
     const webRequest = nodeToWebRequest(req);
-    const webResponse = await handleRequest(webRequest);
+    const platformContext = renderHtml
+      ? { runtime: "node-bundle", renderHtmlStream: renderHtml }
+      : {};
+    const webResponse = await handleRequest(webRequest, platformContext);
     await sendWebResponseToNode(webResponse, res);
   } catch (err) {
     next(err);

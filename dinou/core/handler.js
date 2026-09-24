@@ -89,9 +89,10 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
   let isPathBlocked = false;
   let allowISGValue = true;
   let isDynamicConfig = false;
+  let cachedConfig = null;
 
   if (pagePath) {
-    let cachedConfig = pageFunctionsConfigCache.get(pagePath);
+    cachedConfig = pageFunctionsConfigCache.get(pagePath);
     if (!cachedConfig) {
       const pageFolder = path.dirname(pagePath);
       const [pageFunctionsPath] = getFilePathAndDynamicParams(
@@ -129,11 +130,21 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
           pageFunctionsModule.revalidate === 0
         );
 
+        let revalidateVal = typeof pageFunctionsModule.revalidate === "function"
+          ? await pageFunctionsModule.revalidate()
+          : pageFunctionsModule.revalidate;
+        const getTagsFn = pageFunctionsModule.getCacheTags || pageFunctionsModule.cacheTags;
+        let tagsVal = typeof getTagsFn === "function"
+          ? await getTagsFn()
+          : (pageFunctionsModule.tags || pageFunctionsModule.cacheTags || pageFunctionsModule.getCacheTags || []);
+
         cachedConfig = {
           allowISG: resolvedAllowISG,
           staticPathsSet,
           validateParams: pageFunctionsModule.validateParams || null,
           isDynamic,
+          revalidate: revalidateVal,
+          tags: tagsVal,
         };
       } else {
         cachedConfig = {
@@ -141,6 +152,8 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
           staticPathsSet: null,
           validateParams: null,
           isDynamic: false,
+          revalidate: undefined,
+          tags: [],
         };
       }
 
@@ -188,7 +201,13 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
     }
   }
 
-  return { isPathBlocked, allowISGValue, isDynamicConfig };
+  return {
+    isPathBlocked,
+    allowISGValue,
+    isDynamicConfig,
+    revalidate: cachedConfig?.revalidate,
+    tags: cachedConfig?.tags || [],
+  };
 }
 
 /**
@@ -1016,7 +1035,7 @@ async function handleRequest(request, platformContext = {}) {
   }
   const dynamicState = isDynamic.get(reqPath);
 
-  const { isPathBlocked, allowISGValue, isDynamicConfig } = await resolvePageFunctionsConfig(
+  const { isPathBlocked, allowISGValue, isDynamicConfig, revalidate, tags } = await resolvePageFunctionsConfig(
     pagePath,
     reqSegments,
     queryObj,
@@ -1231,15 +1250,22 @@ async function handleRequest(request, platformContext = {}) {
         const genMeta = {
           status: isError ? 500 : isNotFound.value ? 404 : 200,
           generatedAt: Date.now(),
+          revalidate,
+          tags: tags || [],
+          effects: {
+            redirect: bridge.headers.get("Location") || null,
+            cookies: [...bridge.cookies],
+          },
         };
 
         const shouldCacheISG =
-          !isDevelopment &&
-          genMeta.status === 200 &&
-          !isNotFound.value &&
-          !dynamicState.value &&
-          allowISGValue !== false &&
-          Object.keys(queryObj).length === 0;
+          (!isDevelopment &&
+            genMeta.status === 200 &&
+            !isNotFound.value &&
+            !dynamicState.value &&
+            allowISGValue !== false &&
+            Object.keys(queryObj).length === 0) ||
+          platformContext.isSSG === true;
 
         // Generic fallback for double crash
         if (queryObj.double_crash === "true" || (isError && !jsx)) {
@@ -1377,7 +1403,7 @@ async function handleRequest(request, platformContext = {}) {
             });
           }
 
-          if (!bridge.headersSent && (bridge.headers.has("Location") || (bridge.statusCode >= 300 && bridge.statusCode < 400))) {
+          if (bridge.headers.has("Location") || (bridge.statusCode >= 300 && bridge.statusCode < 400)) {
             return {
               type: "redirect",
               status: bridge.statusCode || 302,
@@ -1402,7 +1428,7 @@ async function handleRequest(request, platformContext = {}) {
             }
 
             if (fullHtml) {
-              if (!dynamicState.value) {
+              if (!dynamicState.value || platformContext.isSSG === true) {
                 try {
                   await storage.set(rscKey, rscPayload);
                   await storage.set(htmlKey, fullHtml, genMeta);

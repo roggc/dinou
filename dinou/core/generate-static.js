@@ -1,9 +1,11 @@
+// dinou/core/generate-static.js
+// Unified Static Site Generation runner using the in-memory Dual-Bundle Engine.
+// Guarantees 100% parity with runtime Incremental Static Generation (ISG).
+
 const path = require("path");
-const { existsSync, rmSync, writeFileSync, mkdirSync } = require("fs");
-const generateStaticRSCs = require("./generate-static-rscs");
-const generateStaticPages = require("./generate-static-pages");
-const { buildStaticPages, getStaticPaths } = require("./build-static-pages");
-const { generateRouteModulesCode } = require("./route-generator.js");
+const { existsSync, rmSync } = require("fs");
+const { pathToFileURL } = require("url");
+const { setStorageAdapter, FileSystemStorage } = require("./storage-adapter.js");
 
 async function generateStatic() {
   const distFolder2 = path.resolve(process.cwd(), ".dinou/dist2");
@@ -13,25 +15,50 @@ async function generateStatic() {
     console.log("Deleted existing .dinou/dist2 folder");
   }
 
-  // ⚡ Generate route modules for in-memory route loading in production
-  try {
-    const routeModulesCode = generateRouteModulesCode(process.cwd(), "..");
-    const dinouDir = path.resolve(process.cwd(), ".dinou");
-    if (!existsSync(dinouDir)) {
-      mkdirSync(dinouDir, { recursive: true });
+  // 1. Compile or ensure Dual-Bundle engines (Pass A & Pass B)
+  console.log("⚡ [SSG] Compiling in-memory Dual-Engine for static generation...");
+  const { bundleDualEngine } = await import("../node/bundle-dual-engine.mjs");
+  const { rscEnginePath, ssrEnginePath } = await bundleDualEngine({
+    isDev: false,
+    projectRoot: process.cwd(),
+    outDir: ".dinou/node",
+  });
+
+  // 2. Initialize FileSystemStorage for writing .dinou/dist2
+  setStorageAdapter(new FileSystemStorage(distFolder2));
+
+  // 3. Load compiled engines
+  const rscModule = await import(pathToFileURL(rscEnginePath).href);
+  const ssrModule = await import(pathToFileURL(ssrEnginePath).href);
+
+  // 4. Discover static routes
+  console.log("🔍 [SSG] Discovering static routes...");
+  await rscModule.buildStaticPages();
+  const routes = rscModule.getStaticPaths();
+  console.log(`⚡ [SSG] Discovered ${routes.length} static path(s) to pre-render.`);
+
+  // 5. Pre-render all routes using identical Dual-Bundle ISG engine
+  let renderedCount = 0;
+  for (const route of routes) {
+    const reqPath = route.startsWith("/") ? route : "/" + route;
+    try {
+      const webReq = new Request(`http://localhost${reqPath}`);
+      const res = await rscModule.handleRequest(webReq, {
+        runtime: "node-bundle",
+        renderHtmlStream: ssrModule.renderHtml,
+        isSSG: true,
+      });
+      if (res.status === 200) {
+        renderedCount++;
+      } else {
+        console.warn(`⚠️ [SSG] Route ${reqPath} returned status ${res.status}`);
+      }
+    } catch (err) {
+      console.error(`❌ [SSG] Error pre-rendering ${reqPath}:`, err);
     }
-    const routeModulesPath = path.join(dinouDir, "route-modules.js");
-    writeFileSync(routeModulesPath, routeModulesCode, "utf8");
-    console.log("⚡ [Dinou Build] Generated in-memory route modules at .dinou/route-modules.js");
-  } catch (err) {
-    console.warn("⚠️ [Dinou Build] Could not generate route modules:", err.message);
   }
 
-  await buildStaticPages();
-  const routes = getStaticPaths();
-  console.log("Static paths:", routes);
-  await generateStaticRSCs(routes);
-  await generateStaticPages(routes);
+  console.log(`\n🎉 [SSG] Successfully pre-rendered ${renderedCount} static page(s) and RSC payload(s) to .dinou/dist2.`);
 }
 
 module.exports = generateStatic;

@@ -49,7 +49,8 @@ export default async function getEsbuildEntries({
     const csss = new Set();
 
     const importNodes = [];
-    traverse.default(ast, {
+    const traverseFn = typeof traverse === "function" ? traverse : (traverse.default || traverse);
+    traverseFn(ast, {
       ImportDeclaration(nodePath) {
         importNodes.push(nodePath);
       },

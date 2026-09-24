@@ -43,7 +43,8 @@ async function getCSSEntries({
     const csss = new Set();
 
     const importNodes = [];
-    traverse.default(ast, {
+    const traverseFn = typeof traverse === "function" ? traverse : (traverse.default || traverse);
+    traverseFn(ast, {
       ImportDeclaration(nodePath) {
         importNodes.push(nodePath);
       },
