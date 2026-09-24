@@ -124,7 +124,8 @@ module.exports = async () => {
     },
     output: {
       path: path.resolve(process.cwd(), outputDirectory),
-      filename: "[name]-[contenthash].js",
+      filename: isDevelopment ? "[name].js" : "[name]-[contenthash].js",
+      chunkFilename: isDevelopment ? "[name].js" : "[name]-[contenthash].js",
       publicPath: "/",
       clean: isDevelopment,
       library: {
@@ -225,6 +226,31 @@ module.exports = async () => {
     },
     plugins: [
       new ReactServerWebpackPlugin({ isServer: false }),
+      isDevelopment && {
+        apply(compiler) {
+          compiler.hooks.thisCompilation.tap(
+            "DinouReactServerWatchPlugin",
+            (compilation) => {
+              const hooks = webpack.NormalModule.getCompilationHooks(compilation);
+              hooks.needBuild.tap("DinouReactServerWatchPlugin", (module) => {
+                if (
+                  module.resource &&
+                  (module.resource.includes("client.browser") ||
+                    module.resource.includes("client-webpack"))
+                ) {
+                  return true;
+                }
+              });
+            }
+          );
+          compiler.hooks.afterCompile.tap("DinouWatchSrcPlugin", (compilation) => {
+            const srcDir = path.resolve(process.cwd(), "src");
+            if (fs.existsSync(srcDir)) {
+              compilation.contextDependencies.add(srcDir);
+            }
+          });
+        },
+      },
       new CopyWebpackPlugin({
         patterns: [
           {
@@ -336,6 +362,9 @@ module.exports = async () => {
             index: false,
             writeToDisk: true,
           },
+          watchFiles: [
+            path.resolve(process.cwd(), "src/**/*"),
+          ],
           proxy: [
             {
               context: () => true,

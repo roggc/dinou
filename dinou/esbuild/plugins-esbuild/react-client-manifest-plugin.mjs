@@ -43,6 +43,9 @@ export default function reactClientManifestPlugin({
                 if (manifest[manifestKey]) {
                   manifest[manifestKey].id = outUrl;
                 }
+                if (expName === "default" && manifest[`${baseFileUrl}#default`]) {
+                  manifest[`${baseFileUrl}#default`].id = outUrl;
+                }
               }
             }
           }

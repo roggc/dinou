@@ -17,6 +17,7 @@ class ManifestGeneratorPlugin {
           stage: Compilation.PROCESS_ASSETS_STAGE_ANALYSE,
         },
         (assets) => {
+          this.manifestData = {};
           // Traverse chunks to generate manifest
           for (const chunk of compilation.chunks) {
             if (!chunk.name) continue; // only chunks with a name

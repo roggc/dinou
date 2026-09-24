@@ -54,9 +54,99 @@ function isManifestReady() {
   }
 }
 
+function createDevClientManifestProxy(target) {
+  if (!target || typeof target !== "object") return target;
+  if (target.__isDinouDevProxy) return target;
+
+  return new Proxy(target, {
+    get(obj, prop, receiver) {
+      if (prop === "__isDinouDevProxy") return true;
+      if (typeof prop !== "string") {
+        return Reflect.get(obj, prop, receiver);
+      }
+      if (prop in obj) {
+        return obj[prop];
+      }
+
+      // 1. Try drive-letter / url casing variations
+      let altProp = null;
+      if (prop.startsWith("file:///c:/")) {
+        altProp = "file:///C:/" + prop.slice(11);
+      } else if (prop.startsWith("file:///C:/")) {
+        altProp = "file:///c:/" + prop.slice(11);
+      }
+      if (altProp && altProp in obj) {
+        return obj[altProp];
+      }
+
+      // 2. Check if disk manifest has been updated
+      const hashIdx = prop.lastIndexOf("#");
+      const baseUri = hashIdx !== -1 ? prop.slice(0, hashIdx) : prop;
+      const expName = hashIdx !== -1 ? prop.slice(hashIdx + 1) : "default";
+
+      let altBaseUri = null;
+      if (baseUri.startsWith("file:///c:/")) {
+        altBaseUri = "file:///C:/" + baseUri.slice(11);
+      } else if (baseUri.startsWith("file:///C:/")) {
+        altBaseUri = "file:///c:/" + baseUri.slice(11);
+      }
+
+      try {
+        const p = getClientManifestPath();
+        if (fs.existsSync(p)) {
+          const fresh = JSON.parse(fs.readFileSync(p, "utf8"));
+          if (fresh[prop]) {
+            const entry = { ...fresh[prop] };
+            if (hashIdx !== -1) entry.name = expName;
+            obj[prop] = entry;
+            return entry;
+          }
+          if (altProp && fresh[altProp]) {
+            const entry = { ...fresh[altProp] };
+            if (hashIdx !== -1) entry.name = expName;
+            obj[prop] = entry;
+            return entry;
+          }
+          if (hashIdx !== -1) {
+            const baseEntry = fresh[baseUri] || (altBaseUri && fresh[altBaseUri]);
+            if (baseEntry) {
+              const entry = { ...baseEntry, name: expName };
+              obj[prop] = entry;
+              return entry;
+            }
+          }
+        }
+      } catch (e) {}
+
+      // 3. Fallback for client files in src/ during hot edits
+      if (baseUri.startsWith("file:///")) {
+        try {
+          const { fileURLToPath } = require("url");
+          const localPath = fileURLToPath(baseUri);
+          if (fs.existsSync(localPath)) {
+            const fallbackEntry = { id: baseUri, chunks: [], name: expName };
+            obj[prop] = fallbackEntry;
+            if (!obj[baseUri]) {
+              obj[baseUri] = { id: baseUri, chunks: [], name: "*" };
+            }
+            return fallbackEntry;
+          }
+        } catch (e) {}
+      }
+
+      return Reflect.get(obj, prop, receiver);
+    },
+  });
+}
+
 function getClientManifest() {
   if (typeof globalThis !== "undefined" && globalThis.__DINOU_CLIENT_MANIFEST__) {
-    return globalThis.__DINOU_CLIENT_MANIFEST__;
+    const manifest = globalThis.__DINOU_CLIENT_MANIFEST__;
+    if (isDevMode() && !manifest.__isDinouDevProxy) {
+      globalThis.__DINOU_CLIENT_MANIFEST__ = createDevClientManifestProxy(manifest);
+      return globalThis.__DINOU_CLIENT_MANIFEST__;
+    }
+    return manifest;
   }
   const isDevelopment = isDevMode();
   if (!isDevelopment && cachedClientManifest) {
@@ -67,16 +157,18 @@ function getClientManifest() {
     if (fs.existsSync(p)) {
       const parsed = JSON.parse(fs.readFileSync(p, "utf8"));
       if (!isDevelopment) cachedClientManifest = parsed;
-      return parsed;
+      return isDevelopment ? createDevClientManifestProxy(parsed) : parsed;
     }
   } catch (e) {}
-  return cachedClientManifest || {};
+  return cachedClientManifest || (isDevelopment ? createDevClientManifestProxy({}) : {});
 }
 
 function setClientManifest(manifest) {
   cachedClientManifest = manifest;
   if (typeof globalThis !== "undefined") {
-    globalThis.__DINOU_CLIENT_MANIFEST__ = manifest;
+    globalThis.__DINOU_CLIENT_MANIFEST__ = isDevMode()
+      ? createDevClientManifestProxy(manifest)
+      : manifest;
   }
 }
 

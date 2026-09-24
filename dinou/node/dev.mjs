@@ -170,6 +170,8 @@ let parsedClientManifest = {};
 let parsedServerFunctionsManifest = {};
 let parsedAssetManifest = {};
 let clientComponents = [];
+const knownClientFiles = new Set();
+const knownServerFiles = new Set();
 
 function updateManifestsState() {
   const cPath = findManifest("react-client-manifest.json", "react_client_manifest");
@@ -198,6 +200,30 @@ function updateManifestsState() {
       normalized["file:///C:/" + k.slice(11)] = v;
     } else if (k.startsWith("file:///C:/")) {
       normalized["file:///c:/" + k.slice(11)] = v;
+    }
+    const hashIdx = k.indexOf("#");
+    if (hashIdx === -1) {
+      const defKey = k + "#default";
+      const defEntry = { ...v, name: "default" };
+      normalized[defKey] = defEntry;
+      if (k.startsWith("file:///c:/")) {
+        normalized["file:///C:/" + k.slice(11) + "#default"] = defEntry;
+      } else if (k.startsWith("file:///C:/")) {
+        normalized["file:///c:/" + k.slice(11) + "#default"] = defEntry;
+      }
+    } else {
+      const expName = k.slice(hashIdx + 1);
+      const expEntry = { ...v, name: expName };
+      normalized[k] = expEntry;
+      const baseKey = k.slice(0, hashIdx);
+      if (!normalized[baseKey]) normalized[baseKey] = v;
+      if (baseKey.startsWith("file:///c:/")) {
+        normalized["file:///C:/" + baseKey.slice(11)] = v;
+        normalized["file:///C:/" + baseKey.slice(11) + "#" + expName] = expEntry;
+      } else if (baseKey.startsWith("file:///C:/")) {
+        normalized["file:///c:/" + baseKey.slice(11)] = v;
+        normalized["file:///c:/" + baseKey.slice(11) + "#" + expName] = expEntry;
+      }
     }
   }
 
@@ -239,16 +265,45 @@ function updateManifestsState() {
   }
 
   clientComponents = findClientComponents(parsedClientManifest);
+  knownClientFiles.clear();
   for (const comp of clientComponents) {
-    const fileUrl = pathToFileURL(comp).href;
-    const fileUrlLower = fileUrl.replace(/file:\/\/\/([a-zA-Z]):/, (m, d) => 'file:///' + d.toLowerCase() + ':');
-    const fileUrlUpper = fileUrl.replace(/file:\/\/\/([a-zA-Z]):/, (m, d) => 'file:///' + d.toUpperCase() + ':');
-    if (!normalized[fileUrlLower]) {
-      normalized[fileUrlLower] = { id: fileUrlLower, chunks: [], name: "*" };
+    knownClientFiles.add(path.resolve(comp));
+    const urlVariants = generateAllUrlVariants(comp);
+    let fileExports = [];
+    try {
+      const content = fs.readFileSync(comp, "utf8");
+      fileExports = parseExports(content);
+    } catch (e) {}
+    if (!fileExports.includes("default")) {
+      fileExports.push("default");
     }
-    if (!normalized[fileUrlUpper]) {
-      normalized[fileUrlUpper] = { id: fileUrlLower, chunks: [], name: "*" };
+
+    // Check if parsedClientManifest already has an entry for this component
+    let matchedEntry = null;
+    for (const u of urlVariants) {
+      if (parsedClientManifest[u]) { matchedEntry = parsedClientManifest[u]; break; }
+      if (parsedClientManifest[`${u}#default`]) { matchedEntry = parsedClientManifest[`${u}#default`]; break; }
     }
+
+    const compId = matchedEntry?.id || pathToFileURL(comp).href;
+    const compChunks = matchedEntry?.chunks || [];
+
+    for (const u of urlVariants) {
+      if (!normalized[u]) {
+        normalized[u] = { id: compId, chunks: compChunks, name: "*" };
+      }
+      for (const exp of fileExports) {
+        const hashKey = `${u}#${exp}`;
+        if (!normalized[hashKey] || normalized[hashKey].name === "*") {
+          normalized[hashKey] = { id: compId, chunks: compChunks, name: exp };
+        }
+      }
+    }
+  }
+
+  knownServerFiles.clear();
+  for (const f of Object.keys(parsedServerFunctionsManifest)) {
+    knownServerFiles.add(path.resolve(projectRoot, f));
   }
 
   if (Object.keys(normalized).length > 0) {
@@ -495,14 +550,28 @@ export { handleRequest } from "${dinouDirSlash}/core/handler.js";
 import { renderRscStreamToHtmlStream } from "${dinouDirSlash}/core/edge-ssr.js";
 import { clientModules, ssrConsumerManifest } from "./ssr-client-manifest.mjs";
 
+const wrapModule = (mod) => {
+  if (!mod || typeof mod !== "object") return mod;
+  if (mod.__esModule) return mod;
+  return new Proxy(mod, {
+    get(target, prop, receiver) {
+      if (prop === "__esModule") return true;
+      return Reflect.get(target, prop, receiver);
+    }
+  });
+};
+
 globalThis.__webpack_require__ = (id) => {
-  if (clientModules[id]) return clientModules[id];
-  const alt = id.startsWith("file:///c:/")
-    ? id.replace("file:///c:/", "file:///C:/")
-    : id.startsWith("file:///C:/")
-    ? id.replace("file:///C:/", "file:///c:/")
-    : id;
-  if (clientModules[alt]) return clientModules[alt];
+  let mod = clientModules[id];
+  if (!mod) {
+    const alt = id.startsWith("file:///c:/")
+      ? id.replace("file:///c:/", "file:///C:/")
+      : id.startsWith("file:///C:/")
+      ? id.replace("file:///C:/", "file:///c:/")
+      : id;
+    mod = clientModules[alt];
+  }
+  if (mod) return wrapModule(mod);
   console.error("[SSR Engine Dev] Module not found in __webpack_require__:", id);
   return {};
 };
@@ -771,16 +840,27 @@ async function triggerRebuild(filePath = "", eventType = "change") {
     const t0 = Date.now();
     try {
       const isStructureChange = eventType === "add" || eventType === "unlink";
+      const absFilePath = filePath ? path.resolve(filePath) : "";
       let isClientFile = false;
+      let isServerFile = false;
 
-      if (filePath) {
+      if (absFilePath && fs.existsSync(absFilePath)) {
         try {
-          const content = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf8") : "";
+          const content = fs.readFileSync(absFilePath, "utf8");
           isClientFile = useClientRegex.test(content.trim());
+          isServerFile = useServerRegex.test(content.trim());
         } catch (e) {}
       }
 
-      if (isStructureChange) {
+      const wasClientFile = absFilePath ? knownClientFiles.has(absFilePath) : false;
+      const clientDirectiveChanged = isClientFile !== wasClientFile;
+
+      const wasServerFile = absFilePath ? knownServerFiles.has(absFilePath) : false;
+      const serverDirectiveChanged = isServerFile !== wasServerFile;
+
+      const needsStructureRebuild = isStructureChange || clientDirectiveChanged || serverDirectiveChanged;
+
+      if (needsStructureRebuild) {
         updateManifestsState();
         generateEntryFiles();
         await Promise.all([ctxA.rebuild(), ctxB.rebuild()]);
@@ -793,7 +873,7 @@ async function triggerRebuild(filePath = "", eventType = "change") {
       engineVersion = Date.now();
       const v = "?v=" + engineVersion;
       rscModule = await import(pathToFileURL(rscOutfile).href + v);
-      if (isStructureChange || isClientFile) {
+      if (needsStructureRebuild || isClientFile) {
         ssrModule = await import(pathToFileURL(ssrOutfile).href + v);
       }
       console.log(`⚡ [Dinou Dev] Rebuild finished in ${Date.now() - t0}ms (${eventType} ${path.basename(filePath) || "source"})`);
@@ -844,21 +924,33 @@ if (checkClientFilesPresent()) {
   clientManifestReady = true;
 }
 
+let manifestSyncPromise = null;
+
 async function onManifestUpdated() {
-  try {
-    console.log("⚡ [Dinou Dev] Client manifest change detected. Synchronizing Dual-Bundle engine...");
-    updateManifestsState();
-    generateEntryFiles();
-    await Promise.all([ctxA.rebuild(), ctxB.rebuild()]);
-    engineVersion = Date.now();
-    const v = "?v=" + engineVersion;
-    rscModule = await import(pathToFileURL(rscOutfile).href + v);
-    ssrModule = await import(pathToFileURL(ssrOutfile).href + v);
-    clientManifestReady = true;
-    console.log("✅ [Dinou Dev] Dual-Bundle engine successfully synchronized with client build!");
-  } catch (err) {
-    console.error("❌ [Dinou Dev] Error synchronizing with client manifest:", err);
+  if (manifestSyncPromise) {
+    try { await manifestSyncPromise; } catch (e) {}
   }
+
+  manifestSyncPromise = (async () => {
+    try {
+      console.log("⚡ [Dinou Dev] Client manifest change detected. Synchronizing Dual-Bundle engine...");
+      updateManifestsState();
+      generateEntryFiles();
+      await Promise.all([ctxA.rebuild(), ctxB.rebuild()]);
+      engineVersion = Date.now();
+      const v = "?v=" + engineVersion;
+      rscModule = await import(pathToFileURL(rscOutfile).href + v);
+      ssrModule = await import(pathToFileURL(ssrOutfile).href + v);
+      clientManifestReady = true;
+      console.log("✅ [Dinou Dev] Dual-Bundle engine successfully synchronized with client build!");
+    } catch (err) {
+      console.error("❌ [Dinou Dev] Error synchronizing with client manifest:", err);
+    } finally {
+      manifestSyncPromise = null;
+    }
+  })();
+
+  return manifestSyncPromise;
 }
 
 let manifestDebounce = null;
@@ -873,11 +965,16 @@ const manifestWatcher = chokidar.watch(dotDinouDir, {
 });
 
 manifestWatcher.on("all", (event, fullPath) => {
-  if (fullPath.endsWith(".json")) {
+  if (
+    fullPath.endsWith("react-client-manifest.json") ||
+    fullPath.endsWith("server-functions-manifest.json") ||
+    fullPath.endsWith("manifest.json")
+  ) {
     if (manifestDebounce) clearTimeout(manifestDebounce);
     manifestDebounce = setTimeout(() => {
+      manifestDebounce = null;
       onManifestUpdated();
-    }, 60);
+    }, 80);
   }
 });
 
@@ -913,6 +1010,14 @@ const server = http.createServer(async (req, res) => {
   try {
     if (activeRebuildPromise) {
       await activeRebuildPromise;
+    }
+    if (manifestDebounce) {
+      clearTimeout(manifestDebounce);
+      manifestDebounce = null;
+      await onManifestUpdated();
+    }
+    if (manifestSyncPromise) {
+      await manifestSyncPromise;
     }
 
     const host = req.headers["x-forwarded-host"] || req.headers.host || "localhost";
