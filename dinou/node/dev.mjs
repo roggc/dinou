@@ -889,14 +889,20 @@ async function triggerRebuild(filePath = "", eventType = "change") {
 
 // Watch src/ with chokidar
 let srcDebounce = null;
+let pendingSrcPath = "";
+let pendingSrcEvent = "";
+
 const srcWatcher = chokidar.watch(srcDir, {
   ignoreInitial: true,
   ignored: [/node_modules/, /\.git/],
 });
 
 srcWatcher.on("all", (event, fullPath) => {
+  pendingSrcPath = fullPath;
+  pendingSrcEvent = event;
   if (srcDebounce) clearTimeout(srcDebounce);
   srcDebounce = setTimeout(() => {
+    srcDebounce = null;
     triggerRebuild(fullPath, event);
   }, 40);
 });
@@ -974,7 +980,7 @@ manifestWatcher.on("all", (event, fullPath) => {
     manifestDebounce = setTimeout(() => {
       manifestDebounce = null;
       onManifestUpdated();
-    }, 80);
+    }, 40);
   }
 });
 
@@ -1008,6 +1014,14 @@ const PORT = Number(process.env.PORT || 3000);
 
 const server = http.createServer(async (req, res) => {
   try {
+    if (activeRebuildPromise) {
+      await activeRebuildPromise;
+    }
+    if (srcDebounce) {
+      clearTimeout(srcDebounce);
+      srcDebounce = null;
+      await triggerRebuild(pendingSrcPath, pendingSrcEvent);
+    }
     if (activeRebuildPromise) {
       await activeRebuildPromise;
     }

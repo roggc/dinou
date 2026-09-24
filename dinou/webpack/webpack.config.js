@@ -358,6 +358,11 @@ module.exports = async () => {
         devServer: {
           port: 3001,
           hot: false,
+          liveReload: true,
+          client: {
+            webSocketURL: "ws://localhost:3001/ws",
+            overlay: false,
+          },
           devMiddleware: {
             index: false,
             writeToDisk: true,
@@ -372,7 +377,6 @@ module.exports = async () => {
               changeOrigin: true,
             },
           ],
-          client: false,
         },
       }
       : {}),
