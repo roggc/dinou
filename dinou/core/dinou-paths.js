@@ -17,7 +17,7 @@ function getDinouCoreDir() {
   // 2. Modo librería sin empaquetar: dinou-paths.js ya está en dinou/core
   if (typeof __dirname !== "undefined") {
     try {
-      if (fs.existsSync && fs.existsSync(path.join(__dirname, "register-loader.mjs"))) {
+      if (fs.existsSync && fs.existsSync(path.join(__dirname, "handler.js"))) {
         return __dirname;
       }
     } catch (e) {}

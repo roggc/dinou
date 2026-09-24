@@ -17,6 +17,7 @@
       "import": "./server.mjs",
       "require": "./server.js"
     },
+    "./adapters/node": "./adapters/node.mjs",
     "./adapters/bun": "./adapters/bun.js",
     "./adapters/deno": "./adapters/deno.js",
     "./adapters/cloudflare": "./adapters/cloudflare.js",

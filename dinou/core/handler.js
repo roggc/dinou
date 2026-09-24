@@ -22,17 +22,9 @@ const { getFilePathAndDynamicParams } = require("./get-file-path-and-dynamic-par
 const getJSX = require("./get-jsx.js");
 const { getErrorJSX } = require("./get-error-jsx.js");
 const importModule = require("./import-module.js");
-let _renderAppToHtml = null;
-function getRenderAppToHtml() {
-  if (!_renderAppToHtml) {
-    _renderAppToHtml = require("./render-app-to-html.js");
-  }
-  return _renderAppToHtml;
-}
 const { revalidating, regenerating, inFlightGenerations } = require("./revalidating.js");
 const { generatingISG } = require("./generating-isg.js");
 const { requestStorage, setCurrentContext } = require("./request-context.js");
-const processLimiter = require("./concurrency-manager.js");
 const { getStatus } = require("./status-manifest.js");
 
 const {
@@ -775,7 +767,12 @@ async function handleRequest(request, platformContext = {}) {
       if (isRelativeSrc) {
         relativePath = fileUrl.replace(/^file:\/\/\/?/, "").trim();
       } else {
-        const resolvedPath = fileURLToPath(fileUrl);
+        let resolvedPath;
+        try {
+          resolvedPath = fileURLToPath(fileUrl);
+        } catch (e) {
+          return Response.json({ error: "Invalid file URL format" }, { status: 400 });
+        }
         const normalizedCwd = normalizePathCase(process.cwd());
         const normalizedResolved = normalizePathCase(resolvedPath);
         if (normalizedResolved.startsWith(normalizedCwd)) {
@@ -785,8 +782,8 @@ async function handleRequest(request, platformContext = {}) {
         }
       }
 
-      const normalizedRelativePath = relativePath.replace(/\\/g, "/");
-      if (!normalizedRelativePath.startsWith("src/")) {
+      const normalizedRelativePath = path.normalize(relativePath).replace(/\\/g, "/");
+      if (!normalizedRelativePath.startsWith("src/") && normalizedRelativePath !== "src") {
         return Response.json({ error: "Forbidden access" }, { status: 403 });
       }
 
@@ -1567,74 +1564,9 @@ async function handleRequest(request, platformContext = {}) {
     }
   }
 
-  const contextForChild = {
-    req: {
-      query: { ...queryObj },
-      cookies: { ...cookiesObj },
-      headers: { ...headersObj },
-      path: pathname,
-      method: request.method,
-    },
-  };
-
-  const isDynamicSSR = true;
-  const capturedStatus = null;
-
-  processLimiter
-    .run(async () => {
-      try {
-        const appHtmlStream = getRenderAppToHtml()(
-          reqPath,
-          JSON.stringify(queryObj),
-          contextForChild,
-          bridge,
-          capturedStatus,
-          isDynamicSSR,
-          isPathBlocked,
-        );
-
-        bridge.setHeader("Content-Type", "text/html; charset=utf-8");
-        appHtmlStream.pipe(bridge);
-
-        await new Promise((resolve) => {
-          const onDone = () => {
-            if (
-              !isDevelopment &&
-              bridge.statusCode === 200 &&
-              request.method === "GET" &&
-              pagePath &&
-              !isPathBlocked &&
-              allowISGValue !== false &&
-              Object.keys(queryObj).length === 0
-            ) {
-              generatingISG(reqPath, dynamicState);
-            }
-            if (!bridge.headersSent) {
-              bridge.status(500).send("Internal Server Error");
-            }
-            resolve();
-          };
-
-          appHtmlStream.on("end", onDone);
-          appHtmlStream.on("close", onDone);
-          appHtmlStream.on("error", (error) => {
-            console.error("[Dinou] Stream error:", error);
-            if (!bridge.headersSent) bridge.status(500).send("Internal Server Error");
-            resolve();
-          });
-        });
-      } catch (err) {
-        console.error("[Dinou] Error in dynamic SSR:", err);
-        if (!bridge.headersSent) {
-          bridge.status(500).send("Internal Server Error");
-        }
-      }
-    })
-    .catch((err) => {
-      console.error("[Dinou] Error in limited SSR:", err);
-      if (!bridge.headersSent) bridge.status(500).send("Server Busy or Error");
-    });
-
+  if (!bridge.headersSent) {
+    bridge.status(500).send("Internal Server Error: No renderer available");
+  }
   return bridge.toResponse();
 }
 
