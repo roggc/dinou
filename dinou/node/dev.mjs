@@ -918,6 +918,25 @@ await doInitialBuild();
 let clientBundlerHandle = null;
 let clientBundlerPromise = null;
 
+let activeClientBuildPromise = null;
+let activeClientBuildResolve = null;
+
+function notifyClientBuildStart() {
+  if (!activeClientBuildPromise) {
+    activeClientBuildPromise = new Promise((resolve) => {
+      activeClientBuildResolve = resolve;
+    });
+  }
+}
+
+function notifyClientBuildEnd() {
+  if (activeClientBuildResolve) {
+    activeClientBuildResolve();
+    activeClientBuildResolve = null;
+  }
+  activeClientBuildPromise = null;
+}
+
 async function broadcastToClients(msg) {
   try {
     const handle = clientBundlerHandle || (await clientBundlerPromise);
@@ -954,6 +973,13 @@ async function triggerRebuild(filePath = "", eventType = "change") {
       const wasServerFile = absFilePath ? knownServerFiles.has(absFilePath) : false;
       const serverDirectiveChanged = isServerFile !== wasServerFile;
 
+      if (clientDirectiveChanged && clientBundlerHandle?.restart) {
+        console.log(`⚡ [Dinou Dev] Client directive change detected in ${path.basename(filePath) || "source"}. Recreating client bundle...`);
+        await clientBundlerHandle.restart();
+        await broadcastToClients({ type: "reload" });
+        return;
+      }
+
       const needsStructureRebuild = isStructureChange || clientDirectiveChanged || serverDirectiveChanged;
 
       if (needsStructureRebuild) {
@@ -973,6 +999,9 @@ async function triggerRebuild(filePath = "", eventType = "change") {
         ssrModule = await dynamicImportWithRetry(pathToFileURL(ssrOutfile).href + v);
       }
       console.log(`⚡ [Dinou Dev] Rebuild finished in ${Date.now() - t0}ms (${eventType} ${path.basename(filePath) || "source"})`);
+      if (activeClientBuildPromise) {
+        await activeClientBuildPromise;
+      }
       if (!isClientFile && !isCssFile) {
         await broadcastToClients({ type: "reload" });
       }
@@ -1030,32 +1059,29 @@ if (checkClientFilesPresent()) {
 }
 
 let manifestSyncPromise = null;
-
-let lastManifestSyncTime = 0;
+let pendingManifestSync = false;
 
 async function onManifestUpdated() {
-  const now = Date.now();
-  if (now - lastManifestSyncTime < 150) {
-    return manifestSyncPromise;
-  }
-  lastManifestSyncTime = now;
-
   if (manifestSyncPromise) {
-    try { await manifestSyncPromise; } catch (e) {}
+    pendingManifestSync = true;
+    return manifestSyncPromise;
   }
 
   manifestSyncPromise = (async () => {
     try {
-      console.log("⚡ [Dinou Dev] Client manifest change detected. Synchronizing Dual-Bundle engine...");
-      updateManifestsState();
-      generateEntryFiles();
-      await Promise.all([ctxA.rebuild(), ctxB.rebuild()]);
-      engineVersion = Date.now();
-      const v = "?v=" + engineVersion;
-      rscModule = await dynamicImportWithRetry(pathToFileURL(rscOutfile).href + v);
-      ssrModule = await dynamicImportWithRetry(pathToFileURL(ssrOutfile).href + v);
-      clientManifestReady = true;
-      console.log("✅ [Dinou Dev] Dual-Bundle engine successfully synchronized with client build!");
+      do {
+        pendingManifestSync = false;
+        console.log("⚡ [Dinou Dev] Client manifest change detected. Synchronizing Dual-Bundle engine...");
+        updateManifestsState();
+        generateEntryFiles();
+        await Promise.all([ctxA.rebuild(), ctxB.rebuild()]);
+        engineVersion = Date.now();
+        const v = "?v=" + engineVersion;
+        rscModule = await dynamicImportWithRetry(pathToFileURL(rscOutfile).href + v);
+        ssrModule = await dynamicImportWithRetry(pathToFileURL(ssrOutfile).href + v);
+        clientManifestReady = true;
+        console.log("✅ [Dinou Dev] Dual-Bundle engine successfully synchronized with client build!");
+      } while (pendingManifestSync);
     } catch (err) {
       console.error("❌ [Dinou Dev] Error synchronizing with client manifest:", err);
     } finally {
@@ -1066,34 +1092,10 @@ async function onManifestUpdated() {
   return manifestSyncPromise;
 }
 
-let manifestDebounce = null;
 const dotDinouDir = path.resolve(projectRoot, ".dinou");
 if (!fs.existsSync(dotDinouDir)) {
   fs.mkdirSync(dotDinouDir, { recursive: true });
 }
-const manifestWatcher = chokidar.watch(dotDinouDir, {
-  ignoreInitial: true,
-  ignored: [/node_modules/, /[\\/]\.dinou[\\/](public|dist|dist2|node-dev|dev-)/],
-  depth: 3,
-});
-
-manifestWatcher.on("all", (event, fullPath) => {
-  if (isWebpackBuild) {
-    // In Webpack mode, compiler.hooks.done handles manifest synchronization cleanly
-    return;
-  }
-  if (
-    fullPath.endsWith("react-client-manifest.json") ||
-    fullPath.endsWith("server-functions-manifest.json") ||
-    fullPath.endsWith("manifest.json")
-  ) {
-    if (manifestDebounce) clearTimeout(manifestDebounce);
-    manifestDebounce = setTimeout(() => {
-      manifestDebounce = null;
-      onManifestUpdated();
-    }, 40);
-  }
-});
 
 const MIME_TYPES = {
   ".js": "application/javascript; charset=utf-8",
@@ -1130,55 +1132,72 @@ async function startClientBundler(tool) {
     );
     return await startEsbuildDev({
       onRebuilt: () => onManifestUpdated(),
+      onBuildStart: notifyClientBuildStart,
+      onBuildEnd: notifyClientBuildEnd,
     });
   }
 
   if (normTool === "rollup") {
     const { watch } = require("rollup");
     const getRollupConfig = require(path.resolve(dinouDir, "rollup/rollup.config.js"));
-    const { getHmrEngine } = require(path.resolve(dinouDir, "rollup/react-refresh/rollup-plugin-esm-hmr.js"));
-    const rollupConfig = await getRollupConfig();
-    const watcher = watch(rollupConfig);
+    const { getHmrEngine, closeHmrServer } = require(path.resolve(dinouDir, "rollup/react-refresh/rollup-plugin-esm-hmr.js"));
+    const reactClientManifestPlugin = require(path.resolve(dinouDir, "rollup/rollup-plugins/rollup-plugin-react-client-manifest.js"));
+    reactClientManifestPlugin.setOnManifestUpdated?.(() => onManifestUpdated());
 
-    return new Promise((resolve) => {
-      let initialResolved = false;
-      watcher.on("event", (event) => {
-        if (event.code === "BUNDLE_START") {
-          console.log("⚡ [Rollup Dev] Bundling client...");
-        } else if (event.code === "BUNDLE_END") {
-          console.log(`✓ [Rollup Dev] Client bundle completed in ${event.duration}ms`);
-          if (!initialResolved) {
-            onManifestUpdated();
-            initialResolved = true;
-            resolve({
-              broadcast: (msg) => {
-                getHmrEngine()?.broadcastMessage?.(msg);
-              },
-              close: async () => {
-                try {
-                  await watcher.close();
-                } catch (e) {}
-              },
-            });
+    let currentWatcher = null;
+
+    async function startRollupWatcher() {
+      if (currentWatcher) {
+        try { await currentWatcher.close(); } catch (e) {}
+        currentWatcher = null;
+      }
+      const rollupConfig = await getRollupConfig();
+      currentWatcher = watch(rollupConfig);
+
+      return new Promise((resolve) => {
+        let initialResolved = false;
+        currentWatcher.on("event", (event) => {
+          if (event.code === "BUNDLE_START") {
+            console.log("⚡ [Rollup Dev] Bundling client...");
+            notifyClientBuildStart();
+          } else if (event.code === "BUNDLE_END") {
+            console.log(`✓ [Rollup Dev] Client bundle completed in ${event.duration}ms`);
+            notifyClientBuildEnd();
+            if (!initialResolved) {
+              onManifestUpdated();
+              initialResolved = true;
+              resolve();
+            }
+          } else if (event.code === "ERROR") {
+            console.error("❌ [Rollup Dev Error]:", event.error);
+            notifyClientBuildEnd();
+            if (!initialResolved) {
+              initialResolved = true;
+              resolve();
+            }
           }
-        } else if (event.code === "ERROR") {
-          console.error("❌ [Rollup Dev Error]:", event.error);
-          if (!initialResolved) {
-            initialResolved = true;
-            resolve({
-              broadcast: (msg) => {
-                getHmrEngine()?.broadcastMessage?.(msg);
-              },
-              close: async () => {
-                try {
-                  await watcher.close();
-                } catch (e) {}
-              },
-            });
-          }
-        }
+        });
       });
-    });
+    }
+
+    await startRollupWatcher();
+
+    return {
+      broadcast: (msg) => {
+        getHmrEngine()?.broadcastMessage?.(msg);
+      },
+      restart: async () => {
+        console.log("⚡ [Rollup Dev] Recreating client bundle due to directive change...");
+        await startRollupWatcher();
+        await onManifestUpdated();
+      },
+      close: async () => {
+        try {
+          if (currentWatcher) await currentWatcher.close();
+          closeHmrServer?.();
+        } catch (e) {}
+      },
+    };
   }
 
   if (normTool === "webpack") {
@@ -1188,15 +1207,66 @@ async function startClientBundler(tool) {
     const webpackConfig = await getWebpackConfig();
     const compiler = webpack(webpackConfig);
 
+    let devServer = null;
+    let buildWaitPromise = null;
+    let buildWaitResolve = null;
+
+    function startBuildWait() {
+      notifyClientBuildStart();
+      if (!buildWaitPromise) {
+        buildWaitPromise = new Promise((resolve) => {
+          buildWaitResolve = resolve;
+        });
+      }
+    }
+
+    function endBuildWait() {
+      notifyClientBuildEnd();
+      if (buildWaitResolve) {
+        const resolve = buildWaitResolve;
+        buildWaitResolve = null;
+        buildWaitPromise = null;
+        resolve();
+      }
+    }
+
+    compiler.hooks.invalid.tap("DinouBuildStart", () => {
+      startBuildWait();
+    });
+
+    compiler.hooks.watchRun.tap("DinouBuildStart", () => {
+      startBuildWait();
+    });
+
     return new Promise((resolve, reject) => {
       let initialResolved = false;
-      let devServer = null;
 
-      compiler.hooks.done.tap("DinouClientSync", (stats) => {
-        onManifestUpdated();
+      compiler.hooks.done.tapPromise("DinouClientSync", async (stats) => {
+        try {
+          await onManifestUpdated();
+        } finally {
+          endBuildWait();
+        }
         if (!initialResolved) {
           initialResolved = true;
           resolve({
+            broadcast: (msg) => {
+              if (devServer?.sendMessage && devServer?.sockets) {
+                devServer.sendMessage(devServer.sockets, "ok");
+              }
+            },
+            restart: async () => {
+              console.log("⚡ [Webpack Dev] Waiting for client bundle compilation due to directive change...");
+              for (let i = 0; i < 10 && !buildWaitPromise && !activeClientBuildPromise; i++) {
+                await new Promise((r) => setTimeout(r, 25));
+              }
+              if (buildWaitPromise) {
+                await buildWaitPromise;
+              } else if (activeClientBuildPromise) {
+                await activeClientBuildPromise;
+              }
+              await onManifestUpdated();
+            },
             close: async () => {
               if (devServer) {
                 try {
@@ -1230,6 +1300,9 @@ const server = http.createServer(async (req, res) => {
     if (clientBundlerPromise) {
       await clientBundlerPromise;
     }
+    if (activeClientBuildPromise) {
+      await activeClientBuildPromise;
+    }
     if (activeRebuildPromise) {
       await activeRebuildPromise;
     }
@@ -1240,11 +1313,6 @@ const server = http.createServer(async (req, res) => {
     }
     if (activeRebuildPromise) {
       await activeRebuildPromise;
-    }
-    if (manifestDebounce) {
-      clearTimeout(manifestDebounce);
-      manifestDebounce = null;
-      await onManifestUpdated();
     }
     if (manifestSyncPromise) {
       await manifestSyncPromise;
@@ -1418,7 +1486,6 @@ async function cleanup() {
   isCleaningUp = true;
   try {
     srcWatcher.close();
-    manifestWatcher.close();
     if (clientBundlerHandle?.close) {
       await clientBundlerHandle.close();
     }

@@ -290,7 +290,16 @@ function reactClientManifestPlugin({
       updateManifestForModule(id, code, isClientModule);
 
       if (isClientModule) {
-        clientModules.add(normalizedId);
+        if (!clientModules.has(normalizedId)) {
+          clientModules.add(normalizedId);
+          try {
+            this.emitFile({
+              type: "chunk",
+              id: id,
+              name: path.basename(id, path.extname(id)),
+            });
+          } catch (e) {}
+        }
         serverModules.delete(normalizedId);
         this.addWatchFile(id);
       } else {
@@ -377,9 +386,16 @@ function reactClientManifestPlugin({
       if (!existsSync(manifestPath) || readFileSync(manifestPath, "utf8") !== serialized) {
         mkdirSync(dirname(manifestPath), { recursive: true });
         writeFileSync(manifestPath, serialized);
+        manifestUpdatedCallback?.();
       }
     },
   };
 }
+
+let manifestUpdatedCallback = null;
+function setOnManifestUpdated(cb) {
+  manifestUpdatedCallback = cb;
+}
+reactClientManifestPlugin.setOnManifestUpdated = setOnManifestUpdated;
 
 module.exports = reactClientManifestPlugin;

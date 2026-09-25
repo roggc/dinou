@@ -15,6 +15,8 @@ const __dirname = path.dirname(__filename);
 
 export async function startEsbuildDev(options = {}) {
   const onRebuilt = options.onRebuilt || (() => {});
+  const onBuildStart = options.onBuildStart || (() => {});
+  const onBuildEnd = options.onBuildEnd || (() => {});
   const outdir = ".dinou/public";
   await fs.rm(outdir, { recursive: true, force: true });
   await fs.rm(".dinou/react_client_manifest", { recursive: true, force: true });
@@ -24,6 +26,8 @@ export async function startEsbuildDev(options = {}) {
   let debounceTimer = null; // For debouncing recreations
   let resolveInitial = null;
   const readyPromise = new Promise((res) => { resolveInitial = res; });
+  let activeBuildResolve = null;
+  let isRestarting = false;
   let clientComponentsPaths = [];
   let currentServerFiles = new Set();
   const absPathToClientRedirect = path.resolve(
@@ -116,10 +120,18 @@ export async function startEsbuildDev(options = {}) {
   }
 
   // Function to (re)create esbuild context with current entries
-  async function createEsbuildContext() {
+  async function createEsbuildContext(waitForBuild = false) {
     try {
       if (currentCtx) {
         await currentCtx.dispose();
+        currentCtx = null;
+      }
+
+      let buildPromise = null;
+      if (waitForBuild) {
+        buildPromise = new Promise((res) => {
+          activeBuildResolve = res;
+        });
       }
 
       currentCtx = await esbuild.context(
@@ -128,36 +140,59 @@ export async function startEsbuildDev(options = {}) {
           manifest,
           changedIds,
           hmrEngine,
+          onManifestUpdated: async () => {
+            if (resolveInitial) {
+              resolveInitial();
+              resolveInitial = null;
+            }
+            await onRebuilt();
+          },
+          onBuildStart: () => {
+            onBuildStart();
+          },
+          onBuildEnd: async (result) => {
+            await onBuildEnd(result);
+            if (activeBuildResolve) {
+              const res = activeBuildResolve;
+              activeBuildResolve = null;
+              res();
+            }
+          },
         })
       );
 
       await currentCtx.watch();
-      onRebuilt();
+      if (buildPromise) {
+        await buildPromise;
+      }
     } catch (err) {
       console.error("Error recreating context:", err);
+      if (activeBuildResolve) {
+        const res = activeBuildResolve;
+        activeBuildResolve = null;
+        res();
+      }
     }
   }
 
   // Initial setup on ready
   watcher.on("ready", async () => {
     await updateEntriesAndComponents();
-    await createEsbuildContext();
-    if (resolveInitial) resolveInitial();
+    await createEsbuildContext(true);
   });
 
   const debounceRecreate = () => {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(async () => {
-      await createEsbuildContext();
+      await createEsbuildContext(true);
     }, 50);
   };
 
   const debounceRecreateAndReload = () => {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(async () => {
-      await createEsbuildContext();
+      await createEsbuildContext(true);
       hmrEngine.value?.broadcastMessage?.({ type: "reload" });
-      onRebuilt();
     }, 50);
   };
 
@@ -168,7 +203,6 @@ export async function startEsbuildDev(options = {}) {
       if (hmrEngine.value) {
         hmrEngine.value.broadcastMessage({ type: "reload" });
       }
-      onRebuilt();
     }, 40);
   };
 
@@ -217,6 +251,7 @@ export async function startEsbuildDev(options = {}) {
   }
 
   watcher.on("change", async (file) => {
+    if (isRestarting) return;
     const resolvedFile = normalizePath(path.resolve(file));
     const oldManifest = { ...manifest };
     const oldEntryKeys = JSON.stringify(Object.keys(entryPoints).sort());
@@ -259,6 +294,24 @@ export async function startEsbuildDev(options = {}) {
   return {
     broadcast: (msg) => {
       hmrEngine.value?.broadcastMessage?.(msg);
+    },
+    restart: async () => {
+      isRestarting = true;
+      try {
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+          debounceTimer = null;
+        }
+        if (reloadTimer) {
+          clearTimeout(reloadTimer);
+          reloadTimer = null;
+        }
+        console.log("⚡ [Esbuild Dev] Recreating client bundle due to directive change...");
+        await updateEntriesAndComponents();
+        await createEsbuildContext(true);
+      } finally {
+        isRestarting = false;
+      }
     },
     close: async () => {
       try {

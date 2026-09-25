@@ -11,33 +11,31 @@ function normalizePath(p) {
   return path.resolve(p).replace(/\\/g, "/").toLowerCase();
 }
 
+let activeServer = null;
 let activeHmrEngine = null;
 
 function esmHmrPlugin() {
-  let hmrEngine;
-  let server = null;
-  let serverStarted = false;
+  let hmrEngine = activeHmrEngine;
 
   return {
     name: "esm-hmr",
 
     buildStart() {
-      if (!serverStarted) {
-        server = createServer();
-        server.on("error", (err) => {
+      if (!activeHmrEngine) {
+        activeServer = createServer();
+        activeServer.on("error", (err) => {
           if (err.code === "EADDRINUSE") {
             console.warn("⚠️ [Rollup HMR] Port 3001 already in use, reusing existing listener.");
           } else {
             console.error("❌ [Rollup HMR Server Error]:", err);
           }
         });
-        hmrEngine = new EsmHmrEngine({ server });
-        activeHmrEngine = hmrEngine;
-        server.listen(3001, () => {
+        activeHmrEngine = new EsmHmrEngine({ server: activeServer });
+        activeServer.listen(3001, () => {
           // console.log("[esm-hmr] WebSocket server listening on port 3001");
         });
-        serverStarted = true;
       }
+      hmrEngine = activeHmrEngine;
     },
 
     renderChunk(code, chunk) {
@@ -134,9 +132,7 @@ function esmHmrPlugin() {
     },
 
     closeWatcher() {
-      if (server) {
-        try { server.close(); } catch (e) {}
-      }
+      // Shared server stays open across restarts
     },
   };
 }
@@ -144,5 +140,13 @@ function esmHmrPlugin() {
 module.exports = {
   esmHmrPlugin,
   getHmrEngine: () => activeHmrEngine,
+  closeHmrServer: () => {
+    if (activeServer) {
+      try { activeServer.close(); } catch (e) {}
+      activeServer = null;
+      activeHmrEngine = null;
+    }
+  },
 };
+
 

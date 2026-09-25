@@ -15,16 +15,43 @@ export default function getConfigEsbuild({
   manifest = {},
   changedIds,
   hmrEngine,
+  onManifestUpdated,
+  onBuildStart,
+  onBuildEnd,
 }) {
   let plugins = [
+    ...(onBuildStart
+      ? [
+          {
+            name: "build-start-notifier",
+            setup(build) {
+              build.onStart(() => {
+                onBuildStart();
+              });
+            },
+          },
+        ]
+      : []),
     skipMissingEntryPointsPlugin(),
     TsconfigPathsPlugin({}),
     cssProcessorPlugin({ outdir, hmrEngine }),
-    reactClientManifestPlugin({ manifest }),
+    reactClientManifestPlugin({ manifest, onManifestUpdated }),
     assetsPlugin(),
     stableChunkNamesAndMapsPlugin(),
     serverFunctionsPlugin(),
     esmHmrPlugin({ entryNames: ["main", "error"], changedIds, hmrEngine }),
+    ...(onBuildEnd
+      ? [
+          {
+            name: "build-end-notifier",
+            setup(build) {
+              build.onEnd(async (result) => {
+                await onBuildEnd(result);
+              });
+            },
+          },
+        ]
+      : []),
   ];
 
   const staticDir = existsSync("public") ? "public" : (existsSync("favicons") ? "favicons" : null);

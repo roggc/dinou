@@ -9,6 +9,7 @@ import { useClientRegex } from "../../constants.js";
 export default function reactClientManifestPlugin({
   manifestPath = ".dinou/react_client_manifest/react-client-manifest.json",
   manifest = {},
+  onManifestUpdated,
 } = {}) {
   return {
     name: "react-client-manifest",
@@ -54,11 +55,16 @@ export default function reactClientManifestPlugin({
           await fs.mkdir(path.dirname(manifestPath), { recursive: true });
 
           // Write merged manifest
+          const serialized = JSON.stringify(manifest, null, 2);
           await fs.writeFile(
             manifestPath,
-            JSON.stringify(manifest, null, 2),
+            serialized,
             "utf8"
           );
+
+          if (onManifestUpdated) {
+            await onManifestUpdated();
+          }
         } catch (err) {
           console.warn("[react-client-manifest] onEnd error:", err.message);
         }
