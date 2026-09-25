@@ -1147,8 +1147,8 @@ async function startClientBundler(tool) {
           console.log("⚡ [Rollup Dev] Bundling client...");
         } else if (event.code === "BUNDLE_END") {
           console.log(`✓ [Rollup Dev] Client bundle completed in ${event.duration}ms`);
-          onManifestUpdated();
           if (!initialResolved) {
+            onManifestUpdated();
             initialResolved = true;
             resolve({
               broadcast: (msg) => {

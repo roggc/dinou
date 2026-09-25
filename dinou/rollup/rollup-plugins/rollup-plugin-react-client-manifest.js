@@ -374,8 +374,10 @@ function reactClientManifestPlugin({
         }
       }
       const serialized = JSON.stringify(manifest, null, 2);
-      mkdirSync(dirname(manifestPath), { recursive: true });
-      writeFileSync(manifestPath, serialized);
+      if (!existsSync(manifestPath) || readFileSync(manifestPath, "utf8") !== serialized) {
+        mkdirSync(dirname(manifestPath), { recursive: true });
+        writeFileSync(manifestPath, serialized);
+      }
     },
   };
 }

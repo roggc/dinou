@@ -87,17 +87,25 @@ function esmHmrPlugin() {
     writeBundle(_options, bundle) {
       if (changedIds.size === 0) return;
 
-      let hasCssUpdate = false;
+      const hasCssUpdate = Array.from(changedIds).some((id) => {
+        return id.endsWith(".css") || id.endsWith(".scss");
+      });
+
       for (const [fileName, chunkInfo] of Object.entries(bundle)) {
-        const isChanged = Object.keys(chunkInfo.modules ?? {}).some((modPath) => {
-          return changedIds.has(normalizePath(modPath));
+        if (fileName.endsWith(".css")) {
+          continue;
+        }
+
+        // Only consider a chunk changed if a non-CSS (JS/TS) module inside it changed!
+        const isChangedByJs = Object.keys(chunkInfo.modules ?? {}).some((modPath) => {
+          const norm = normalizePath(modPath);
+          if (norm.endsWith(".css") || norm.endsWith(".scss")) {
+            return false;
+          }
+          return changedIds.has(norm);
         });
 
-        if (isChanged) {
-          if (fileName.endsWith(".css")) {
-            hasCssUpdate = true;
-            continue;
-          }
+        if (isChangedByJs) {
           const urlId = "/" + fileName;
           const entry = hmrEngine?.getEntry(urlId) || hmrEngine?.getEntry(fileName);
           if (entry?.isHmrAccepted) {
