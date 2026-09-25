@@ -1,3 +1,8 @@
+// dinou/core/client-error.jsx
+if (typeof window !== "undefined") {
+  if (!window.$RefreshReg$) window.$RefreshReg$ = () => {};
+  if (!window.$RefreshSig$) window.$RefreshSig$ = () => (type) => type;
+}
 import {
   use,
   useState,

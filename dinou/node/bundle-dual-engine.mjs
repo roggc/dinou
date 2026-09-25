@@ -14,6 +14,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { generateRouteModulesCode } = require("../core/route-generator.js");
 const parseExports = require("../core/parse-exports.js");
 const { useClientRegex, useServerRegex } = require("../constants.js");
+const createScopedName = require("../core/createScopedName.js");
+const { regex: assetRegex } = require("../core/asset-extensions.js");
 
 export async function bundleDualEngine(options = {}) {
   const isDev = Boolean(options.isDev);
@@ -672,9 +674,36 @@ export async function renderHtml(rscStream, options = {}) {
   };
   const commonLoader = {
     ".js": "jsx", ".jsx": "jsx", ".ts": "ts", ".tsx": "tsx",
-    ".json": "json", ".css": "empty", ".svg": "dataurl",
-    ".png": "dataurl", ".jpg": "dataurl", ".jpeg": "dataurl",
-    ".webp": "dataurl", ".ico": "dataurl",
+    ".json": "json", ".css": "empty",
+  };
+
+  const serverAssetPlugin = {
+    name: "dinou-server-asset-plugin",
+    setup(build) {
+      build.onResolve({ filter: assetRegex }, (args) => {
+        let resolvedPath;
+        if (args.path.startsWith("@/")) {
+          resolvedPath = path.resolve(projectRoot, "src", args.path.slice(2));
+        } else if (path.isAbsolute(args.path)) {
+          resolvedPath = args.path;
+        } else {
+          resolvedPath = path.resolve(args.resolveDir, args.path);
+        }
+        return { path: resolvedPath, namespace: "dinou-server-asset" };
+      });
+
+      build.onLoad({ filter: /.*/, namespace: "dinou-server-asset" }, (args) => {
+        const ext = path.extname(args.path);
+        const base = path.basename(args.path, ext);
+        const scoped = createScopedName(base, args.path);
+        const assetUrl = `/assets/${scoped}${ext}`;
+
+        return {
+          contents: `export default ${JSON.stringify(assetUrl)};`,
+          loader: "js",
+        };
+      });
+    },
   };
 
   const banner = {
@@ -861,7 +890,7 @@ var __webpack_chunk_load__ = function(chunkId) {
     conditions: ["node", "worker", "react-server"],
     external: externalList,
     banner,
-    plugins: [clientReferencesPlugin, serverReferencesPlugin],
+    plugins: [clientReferencesPlugin, serverReferencesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
@@ -885,7 +914,7 @@ var __webpack_chunk_load__ = function(chunkId) {
     conditions: ["node", "worker", "browser"],
     external: externalList,
     banner,
-    plugins: [serverReferencesPluginSsr],
+    plugins: [serverReferencesPluginSsr, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",

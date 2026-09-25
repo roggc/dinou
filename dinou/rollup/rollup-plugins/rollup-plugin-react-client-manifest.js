@@ -210,6 +210,7 @@ function reactClientManifestPlugin({
         if (isClientModule) {
           clientModules.add(normalizedPath);
           updateManifestForModule(absPath, code, true);
+          this.addWatchFile(absPath);
           this.emitFile({
             type: "chunk",
             id: absPath,

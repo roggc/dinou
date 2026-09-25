@@ -29,7 +29,15 @@ export default function esmHmrPlugin({
 
       if (!serverStarted) {
         const server = createServer();
+        server.on("error", (err) => {
+          if (err.code === "EADDRINUSE") {
+            // Port already in use, keep quiet or warn
+          } else {
+            console.error("❌ [esm-hmr] Server error:", err);
+          }
+        });
         hmrEngine.value = new EsmHmrEngine({ server });
+        hmrEngine.value.server = server;
         server.listen(3001, () => {
           // console.log("[esm-hmr] WebSocket server listening on port 3001");
         });
@@ -168,6 +176,17 @@ export default function esmHmrPlugin({
             "react-refresh-entry.js",
           ];
           if (frameworkEntries.some((e) => e === outfile_basename)) continue;
+
+          // Only wrap user component chunks that contain actual app code (not third-party libraries/vendor)
+          const outputInfo = result.metafile.outputs[bF];
+          const inputFiles = Object.keys(outputInfo?.inputs || {});
+          const hasUserCode = inputFiles.some(
+            (f) =>
+              !f.includes("node_modules") &&
+              !f.includes("dinou")
+          );
+          if (!hasUserCode) continue;
+
           const source = new TextDecoder().decode(outputFile.contents);
 
           const imports = Array.from(
@@ -180,7 +199,8 @@ export default function esmHmrPlugin({
           let prevRefreshReg = window.$RefreshReg$;
           let prevRefreshSig = window.$RefreshSig$;
           window.$RefreshReg$ = (type, id) => {
-            RefreshRuntime.register(type, ${safeId} + '#' + id);
+            const fullId = (id && id.includes('#')) ? id : (${safeId} + '#' + id);
+            RefreshRuntime.register(type, fullId);
           };
           window.$RefreshSig$ = RefreshRuntime?.createSignatureFunctionForTransform;
           if (!import.meta.hot) import.meta.hot = window.__hotContext?.(${safeId});

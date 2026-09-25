@@ -41,6 +41,8 @@ const projectRoot = process.cwd();
 const outputDirs = [
   path.resolve(projectRoot, ".dinou/public"),
   path.resolve(projectRoot, ".dinou/dist3"),
+  path.resolve(projectRoot, "out"),
+  path.resolve(projectRoot, "dist"),
 ];
 
 function cleanDir(dir) {
@@ -225,7 +227,17 @@ module.exports = async () => {
       ],
     },
     plugins: [
-      new ReactServerWebpackPlugin({ isServer: false }),
+      new ReactServerWebpackPlugin({
+        isServer: false,
+        clientReferences: [
+          {
+            directory: ".",
+            recursive: true,
+            include: /\.(js|ts|jsx|tsx)$/,
+            exclude: /[\\/](?:out|dist|\.dinou|tests|__tests__|docs)[\\/]/,
+          },
+        ],
+      }),
       isDevelopment && {
         apply(compiler) {
           compiler.hooks.thisCompilation.tap(
@@ -347,7 +359,13 @@ module.exports = async () => {
       },
     },
     watchOptions: {
-      ignored: outputDirs.map((dir) => `${dir}/**`),
+      ignored: [
+        "**/node_modules/**",
+        "**/.git/**",
+        "**/.dinou/node-dev/**",
+        "**/.dinou/dist2/**",
+        ...outputDirs.map((dir) => `${dir}/**`),
+      ],
     },
     stats: "normal", // or 'verbose' in dev
     infrastructureLogging: {

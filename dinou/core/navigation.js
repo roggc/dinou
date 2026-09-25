@@ -98,7 +98,8 @@ export function usePathname() {
   if (typeof window === "undefined") {
     try {
       const storage = globalThis[DINOU_CONTEXT_KEY];
-      const ctx = storage && typeof storage.getStore === "function" ? storage.getStore() : null;
+      const ctx = (storage && typeof storage.getStore === "function" ? storage.getStore() : null)
+        || globalThis[Symbol.for("dinou.request.context.current")];
       if (ctx && ctx.req) {
         return normalizePath(ctx.req.path);
       }

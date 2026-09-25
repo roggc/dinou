@@ -10,6 +10,7 @@ const createScopedName = require("../core/createScopedName.js");
 const replace = require("@rollup/plugin-replace");
 const json = require("@rollup/plugin-json");
 const reactRefreshWrapModules = require("./react-refresh/react-refresh-wrap-modules.js");
+const reactRefreshScopedId = require("./react-refresh/babel-plugin-react-refresh-scoped-id.js");
 const { esmHmrPlugin } = require("./react-refresh/rollup-plugin-esm-hmr.js");
 const dinouAssetPlugin = require("./rollup-plugins/dinou-asset-plugin.js");
 const tsconfigPaths = require("rollup-plugin-tsconfig-paths");
@@ -129,8 +130,9 @@ module.exports = async function () {
           "@babel/preset-typescript",
         ],
         plugins: [
-          "babel-plugin-react-compiler",
+          !isDevelopment && "babel-plugin-react-compiler",
           isDevelopment && require.resolve("react-refresh/babel"),
+          isDevelopment && reactRefreshScopedId,
           "@babel/plugin-syntax-import-meta",
         ].filter(Boolean),
         exclude: /node_modules[\\/](?!dinou|react-refresh)/,
@@ -172,9 +174,11 @@ module.exports = async function () {
     ].filter(Boolean),
     watch: {
       exclude: [
-        ".dinou/public/**",
-        ".dinou/react_client_manifest/**",
-        ".dinou/server_functions_manifest/**",
+        "**/node_modules/**",
+        "**/.git/**",
+        "**/.dinou/**",
+        "**/test-results/**",
+        "**/playwright-report/**",
       ],
     },
     onwarn(warning, warn) {

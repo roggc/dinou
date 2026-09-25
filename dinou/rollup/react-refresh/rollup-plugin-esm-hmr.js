@@ -6,8 +6,16 @@ const { createServer } = require("node:http");
 const changedIds = new Set();
 const pendingUpdateUrls = new Set();
 let needsFullReload = false;
+
+function normalizePath(p) {
+  return path.resolve(p).replace(/\\/g, "/").toLowerCase();
+}
+
+let activeHmrEngine = null;
+
 function esmHmrPlugin() {
   let hmrEngine;
+  let server = null;
   let serverStarted = false;
 
   return {
@@ -15,8 +23,16 @@ function esmHmrPlugin() {
 
     buildStart() {
       if (!serverStarted) {
-        const server = createServer();
+        server = createServer();
+        server.on("error", (err) => {
+          if (err.code === "EADDRINUSE") {
+            console.warn("⚠️ [Rollup HMR] Port 3001 already in use, reusing existing listener.");
+          } else {
+            console.error("❌ [Rollup HMR Server Error]:", err);
+          }
+        });
         hmrEngine = new EsmHmrEngine({ server });
+        activeHmrEngine = hmrEngine;
         server.listen(3001, () => {
           // console.log("[esm-hmr] WebSocket server listening on port 3001");
         });
@@ -34,40 +50,29 @@ function esmHmrPlugin() {
         return null;
       }
 
-      const acceptsHmr = code.includes("import.meta.hot.accept");
       const imports = Array.from(code.matchAll(/import\s+["'](.+?)["']/g)).map(
         (m) => m[1]
       );
       const normalizedId = chunk.fileName;
-      hmrEngine.setEntry(normalizedId, imports, true);
+      const urlId = "/" + chunk.fileName;
+      hmrEngine?.setEntry(urlId, imports, true);
+      hmrEngine?.setEntry(normalizedId, imports, true);
 
       const isClientEntry = normalizedId === "main.js";
 
-      let injectCode = "";
-
-      // 🔥 Inject client HMR runtime if it's the entry
+      // Inject client HMR runtime if it's the entry
       if (isClientEntry && !code.includes("/__hmr_client__.js")) {
-        injectCode += `import { createHotContext } from "/__hmr_client__.js";window.__hotContext = createHotContext;\n`;
+        return {
+          code: `import { createHotContext } from "/__hmr_client__.js";window.__hotContext = createHotContext;\n` + code,
+          map: null,
+        };
       }
 
-      // 🔥 Inject import.meta.hot definition if user accepts HMR
-      if (acceptsHmr) {
-        const safeId = JSON.stringify(normalizedId);
-        injectCode += `if (!import.meta.hot) import.meta.hot = window.__hotContext?.(${safeId});\n`;
-      }
-
-      if (injectCode) {
-        code = injectCode + code;
-      }
-
-      return {
-        code,
-        map: null,
-      };
+      return null;
     },
 
     watchChange(id) {
-      changedIds.add(id);
+      changedIds.add(normalizePath(id));
     },
 
     generateBundle(options, bundle) {
@@ -78,30 +83,31 @@ function esmHmrPlugin() {
         source: fs.readFileSync(clientPath, "utf-8"),
       });
     },
+
     writeBundle(_options, bundle) {
+      if (changedIds.size === 0) return;
+
       for (const [fileName, chunkInfo] of Object.entries(bundle)) {
-        for (const modulePath of Object.keys(chunkInfo.modules ?? {})) {
-          if (changedIds.has(path.resolve(modulePath))) {
-            const entry = hmrEngine.getEntry(fileName);
-            if (entry?.isHmrAccepted) {
-              pendingUpdateUrls.add(fileName);
-            } else {
-              needsFullReload = true;
-            }
+        const isChanged = Object.keys(chunkInfo.modules ?? {}).some((modPath) => {
+          return changedIds.has(normalizePath(modPath));
+        });
+
+        if (isChanged) {
+          const urlId = "/" + fileName;
+          const entry = hmrEngine?.getEntry(urlId) || hmrEngine?.getEntry(fileName);
+          if (entry?.isHmrAccepted) {
+            pendingUpdateUrls.add(urlId);
+          } else {
+            needsFullReload = true;
           }
         }
       }
-    },
-    closeBundle() {
-      if (changedIds.size === 0) return;
 
       if (needsFullReload || pendingUpdateUrls.size === 0) {
-        // console.log("[HMR] Full reload");
-        hmrEngine.broadcastMessage({ type: "reload" });
+        hmrEngine?.broadcastMessage({ type: "reload" });
       } else {
         for (const url of pendingUpdateUrls) {
-          // console.log("[HMR] Broadcasting update for", url);
-          hmrEngine.broadcastMessage({ type: "update", url });
+          hmrEngine?.broadcastMessage({ type: "update", url });
         }
       }
 
@@ -109,9 +115,17 @@ function esmHmrPlugin() {
       pendingUpdateUrls.clear();
       needsFullReload = false;
     },
+
+    closeWatcher() {
+      if (server) {
+        try { server.close(); } catch (e) {}
+      }
+    },
   };
 }
 
 module.exports = {
   esmHmrPlugin,
+  getHmrEngine: () => activeHmrEngine,
 };
+
