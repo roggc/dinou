@@ -1111,7 +1111,8 @@ async function handleRequest(request, platformContext = {}) {
           regenerating.add(reqPath);
           try {
             console.log(`[Edge ISR] Starting regeneration for ${reqPath}...`);
-            const context = createRequestContext(simReq, bridge, platformContext);
+            const revalBridge = new WebResponseBridge();
+            const context = createRequestContext(simReq, revalBridge, platformContext);
             const isNotFound = {};
             let jsx;
             await requestStorage.run(context, async () => {
