@@ -12,9 +12,6 @@ export function isReactRefreshBoundary(RefreshRuntime, moduleExports) {
     if (key === "__esModule") continue;
 
     hasExports = true;
-    const desc = Object.getOwnPropertyDescriptor(moduleExports, key);
-    if (desc && desc.get) return false;
-
     const exportValue = moduleExports[key];
     if (!RefreshRuntime.isLikelyComponentType(exportValue)) {
       areAllExportsComponents = false;

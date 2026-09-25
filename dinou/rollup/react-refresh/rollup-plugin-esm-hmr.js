@@ -86,7 +86,8 @@ function esmHmrPlugin() {
       if (changedIds.size === 0) return;
 
       const hasCssUpdate = Array.from(changedIds).some((id) => {
-        return id.endsWith(".css") || id.endsWith(".scss");
+        const lower = id.toLowerCase();
+        return lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less");
       });
 
       for (const [fileName, chunkInfo] of Object.entries(bundle)) {
@@ -97,7 +98,11 @@ function esmHmrPlugin() {
         // Only consider a chunk changed if a non-CSS (JS/TS) module inside it changed!
         const isChangedByJs = Object.keys(chunkInfo.modules ?? {}).some((modPath) => {
           const norm = normalizePath(modPath);
-          if (norm.endsWith(".css") || norm.endsWith(".scss")) {
+          const lower = norm.toLowerCase();
+          if (
+            (lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less")) &&
+            !lower.endsWith(".module.css")
+          ) {
             return false;
           }
           return changedIds.has(norm);

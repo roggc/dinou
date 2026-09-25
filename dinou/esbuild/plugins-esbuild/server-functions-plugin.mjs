@@ -3,7 +3,14 @@ import fs from "node:fs/promises";
 import parseExports from "../../core/parse-exports.js";
 import { useServerRegex } from "../../constants.js";
 
-export default function serverFunctionsPlugin(manifestData = {}) {
+export default function serverFunctionsPlugin(manifestData = {}, options = {}) {
+  const opts =
+    typeof manifestData === "object" && manifestData !== null && "onManifestUpdated" in manifestData
+      ? manifestData
+      : options;
+  const manifestMap = opts.manifestData || (manifestData.onManifestUpdated ? {} : manifestData) || {};
+  const onManifestUpdated = opts.onManifestUpdated;
+
   return {
     name: "server-functions-proxy",
     setup(build) {
@@ -54,7 +61,7 @@ export default function serverFunctionsPlugin(manifestData = {}) {
       build.onEnd(async (result) => {
         const hashedProxy =
           "/" +
-          (manifestData["serverFunctionProxy.js"] || "serverFunctionProxy.js");
+          (manifestMap["serverFunctionProxy.js"] || "serverFunctionProxy.js");
 
         for (const outputFile of Object.values(result.outputFiles)) {
           const fileCode = new TextDecoder().decode(outputFile.contents);
@@ -82,9 +89,10 @@ export default function serverFunctionsPlugin(manifestData = {}) {
         );
         await fs.mkdir(path.dirname(manifestPath), { recursive: true });
         await fs.writeFile(manifestPath, JSON.stringify(manifestObj, null, 2));
-        // console.log(
-        //   `[server-functions-proxy] Generated manifest at ${manifestPath}`
-        // );
+        
+        if (onManifestUpdated) {
+          await onManifestUpdated();
+        }
       });
     },
   };

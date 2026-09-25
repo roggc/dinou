@@ -19,6 +19,7 @@ if (fs.existsSync(bundlePath)) {
 }
 
 const PORT = Number(process.env.PORT || 3000);
+const IDLE_TIMEOUT = Number(process.env.IDLE_TIMEOUT || 120);
 
 export async function fetch(req) {
   if (bundleModule && typeof bundleModule.fetch === "function") {
@@ -39,4 +40,5 @@ export async function fetch(req) {
 export default {
   port: PORT,
   fetch,
+  idleTimeout: IDLE_TIMEOUT,
 };

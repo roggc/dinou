@@ -142,6 +142,7 @@ module.exports = async () => {
       rules: [
         {
           test: /\.[jt]sx?$/,
+          type: "javascript/auto",
           exclude: [/[\\/]node_modules[\\/](?!dinou)/, ...outputDirs],
           use: [
             {

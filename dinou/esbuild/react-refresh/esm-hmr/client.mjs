@@ -95,18 +95,21 @@ class HotModuleState {
 }
 
 export function createHotContext(id) {
-  const existing = REGISTERED_MODULES[id];
+  const normId = id.startsWith("/") ? id : "/" + id;
+  const existing = REGISTERED_MODULES[normId] || REGISTERED_MODULES[id];
   if (existing) {
-    existing.lock();
+    existing.isLocked = false;
     return existing;
   }
-  const state = new HotModuleState(id);
+  const state = new HotModuleState(normId);
+  REGISTERED_MODULES[normId] = state;
   REGISTERED_MODULES[id] = state;
   return state;
 }
 
 async function applyUpdate(id) {
-  const state = REGISTERED_MODULES[id];
+  const normId = id.startsWith("/") ? id : "/" + id;
+  const state = REGISTERED_MODULES[normId] || REGISTERED_MODULES[id];
   if (!state || state.isDeclined) {
     return false;
   }
@@ -120,10 +123,12 @@ async function applyUpdate(id) {
 
   const updateID = Date.now();
   for (const { deps, callback: acceptCallback } of acceptCallbacks) {
-    const url = `/${id.replace(/^\/+/, "")}?mtime=${updateID}`;
     const [module, ...depModules] = await Promise.all([
-      import(url),
-      ...deps.map((d) => import(`/${d.replace(/^\/+/, "")}?mtime=${updateID}`)),
+      import(normId + `?mtime=${updateID}`),
+      ...deps.map((d) => {
+        const depId = d.startsWith("/") ? d : "/" + d;
+        return import(depId + `?mtime=${updateID}`);
+      }),
     ]);
     acceptCallback({ module, deps: depModules });
   }

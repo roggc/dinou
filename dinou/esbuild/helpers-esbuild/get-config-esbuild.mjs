@@ -35,10 +35,10 @@ export default function getConfigEsbuild({
     skipMissingEntryPointsPlugin(),
     TsconfigPathsPlugin({}),
     cssProcessorPlugin({ outdir, hmrEngine }),
+    serverFunctionsPlugin({ onManifestUpdated }),
     reactClientManifestPlugin({ manifest, onManifestUpdated }),
     assetsPlugin(),
     stableChunkNamesAndMapsPlugin(),
-    serverFunctionsPlugin(),
     esmHmrPlugin({ entryNames: ["main", "error"], changedIds, hmrEngine }),
     ...(onBuildEnd
       ? [

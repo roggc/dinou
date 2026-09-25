@@ -9,6 +9,18 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Readable } from "node:stream";
+import {
+  startSpinner,
+  updateSpinner,
+  stopSpinner,
+  logSuccess,
+  logInfo,
+  showIdleStatus,
+  printReadyBanner,
+} from "./terminal-status.mjs";
+
+const devStartTime = Date.now();
+startSpinner("Initializing Incremental Dual-Bundle Engine (No fork)...");
 
 const projectRoot = process.cwd();
 const require = createRequire(path.resolve(projectRoot, "package.json"));
@@ -846,7 +858,7 @@ var __webpack_chunk_load__ = function(chunkId) {
 };
 
 // Create esbuild contexts
-console.log("⚡ [Dinou Dev] Initializing Incremental Dual-Bundle Engine (No fork)...");
+updateSpinner("Initializing Incremental Dual-Bundle Engine (No fork)...");
 const rscOutfile = path.join(devDir, "rsc-engine.mjs");
 const ssrOutfile = path.join(devDir, "ssr-engine.mjs");
 
@@ -909,7 +921,7 @@ async function doInitialBuild() {
   const v = "?v=" + engineVersion;
   rscModule = await dynamicImportWithRetry(pathToFileURL(rscOutfile).href + v);
   ssrModule = await dynamicImportWithRetry(pathToFileURL(ssrOutfile).href + v);
-  console.log(`✅ [Dinou Dev] Initial build completed in ${Date.now() - t0}ms`);
+  updateSpinner("Dual-Bundle engine compiled. Starting client bundler...");
 }
 
 await doInitialBuild();
@@ -955,7 +967,14 @@ async function triggerRebuild(filePath = "", eventType = "change") {
     try {
       const isStructureChange = eventType === "add" || eventType === "unlink";
       const absFilePath = filePath ? path.resolve(filePath) : "";
-      const isCssFile = absFilePath.endsWith(".css") || absFilePath.endsWith(".scss");
+      const baseName = absFilePath ? path.basename(absFilePath) : "source";
+      startSpinner(`Recompiling changes in ${baseName}...`);
+
+      if (clientBundlerHandle?.notifyFileChanged && absFilePath) {
+        clientBundlerHandle.notifyFileChanged(absFilePath);
+      }
+      const normLower = absFilePath.toLowerCase();
+      const isCssFile = normLower.endsWith(".css") || normLower.endsWith(".scss") || normLower.endsWith(".less");
       let isClientFile = false;
       let isServerFile = false;
 
@@ -973,10 +992,13 @@ async function triggerRebuild(filePath = "", eventType = "change") {
       const wasServerFile = absFilePath ? knownServerFiles.has(absFilePath) : false;
       const serverDirectiveChanged = isServerFile !== wasServerFile;
 
-      if (clientDirectiveChanged && clientBundlerHandle?.restart) {
-        console.log(`⚡ [Dinou Dev] Client directive change detected in ${path.basename(filePath) || "source"}. Recreating client bundle...`);
+      const needsClientBundlerRestart = clientDirectiveChanged || (isStructureChange && isCssFile);
+
+      if (needsClientBundlerRestart && clientBundlerHandle?.restart) {
+        updateSpinner(`${clientDirectiveChanged ? "Directive change" : "CSS change"} in ${baseName}. Recreating bundle...`);
         await clientBundlerHandle.restart();
         await broadcastToClients({ type: "reload" });
+        logSuccess(`Recreated bundle for ${baseName} in ${Date.now() - t0}ms`);
         return;
       }
 
@@ -998,7 +1020,7 @@ async function triggerRebuild(filePath = "", eventType = "change") {
       if (needsStructureRebuild || isClientFile) {
         ssrModule = await dynamicImportWithRetry(pathToFileURL(ssrOutfile).href + v);
       }
-      console.log(`⚡ [Dinou Dev] Rebuild finished in ${Date.now() - t0}ms (${eventType} ${path.basename(filePath) || "source"})`);
+      logSuccess(`Rebuilt in ${Date.now() - t0}ms (${eventType} ${baseName})`);
       if (activeClientBuildPromise) {
         await activeClientBuildPromise;
       }
@@ -1006,7 +1028,9 @@ async function triggerRebuild(filePath = "", eventType = "change") {
         await broadcastToClients({ type: "reload" });
       }
     } catch (err) {
+      stopSpinner();
       console.error("❌ [Dinou Dev] Rebuild error:", err);
+      showIdleStatus();
     } finally {
       activeRebuildPromise = null;
     }
@@ -1028,6 +1052,9 @@ const srcWatcher = chokidar.watch(srcDir, {
 srcWatcher.on("all", (event, fullPath) => {
   pendingSrcPath = fullPath;
   pendingSrcEvent = event;
+  if (clientBundlerHandle?.notifyFileChanged && fullPath) {
+    clientBundlerHandle.notifyFileChanged(fullPath);
+  }
   if (srcDebounce) clearTimeout(srcDebounce);
   srcDebounce = setTimeout(() => {
     srcDebounce = null;
@@ -1071,7 +1098,7 @@ async function onManifestUpdated() {
     try {
       do {
         pendingManifestSync = false;
-        console.log("⚡ [Dinou Dev] Client manifest change detected. Synchronizing Dual-Bundle engine...");
+        updateSpinner("Synchronizing Dual-Bundle engine with client build...");
         updateManifestsState();
         generateEntryFiles();
         await Promise.all([ctxA.rebuild(), ctxB.rebuild()]);
@@ -1080,7 +1107,6 @@ async function onManifestUpdated() {
         rscModule = await dynamicImportWithRetry(pathToFileURL(rscOutfile).href + v);
         ssrModule = await dynamicImportWithRetry(pathToFileURL(ssrOutfile).href + v);
         clientManifestReady = true;
-        console.log("✅ [Dinou Dev] Dual-Bundle engine successfully synchronized with client build!");
       } while (pendingManifestSync);
     } catch (err) {
       console.error("❌ [Dinou Dev] Error synchronizing with client manifest:", err);
@@ -1124,7 +1150,7 @@ function isManifestReady() {
 
 async function startClientBundler(tool) {
   const normTool = (tool || "esbuild").toLowerCase();
-  console.log(`📦 [Dinou Dev] Starting in-process client bundler (${normTool})...`);
+  updateSpinner(`Starting in-process client bundler (${normTool})...`);
 
   if (normTool === "esbuild") {
     const { startEsbuildDev } = await import(
@@ -1158,10 +1184,10 @@ async function startClientBundler(tool) {
         let initialResolved = false;
         currentWatcher.on("event", (event) => {
           if (event.code === "BUNDLE_START") {
-            console.log("⚡ [Rollup Dev] Bundling client...");
+            updateSpinner("Bundling client with Rollup...");
             notifyClientBuildStart();
           } else if (event.code === "BUNDLE_END") {
-            console.log(`✓ [Rollup Dev] Client bundle completed in ${event.duration}ms`);
+            logSuccess(`Client bundle completed in ${event.duration}ms`);
             notifyClientBuildEnd();
             if (!initialResolved) {
               onManifestUpdated();
@@ -1459,23 +1485,33 @@ server.on("error", (err) => {
 });
 
 server.listen(PORT, async () => {
-  console.log(`\n🚀 Dinou Development Server (Dual-Bundle, 0 fork) ready on http://localhost:${PORT}`);
-  console.log(`   Tool: ${isWebpackBuild ? "Webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")}`);
-  console.log(`   Mode: Development`);
-  if (isWebpackBuild) {
-    console.log(`   Webpack Dev Server proxy: http://localhost:3001`);
-  }
+  const buildTool = isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild");
 
   if (process.env.DINOU_STANDALONE_SERVER !== "true") {
-    const buildTool = process.env.DINOU_BUILD_TOOL || "esbuild";
+    updateSpinner(`Bundling client with ${buildTool}...`);
     try {
       clientBundlerPromise = startClientBundler(buildTool);
       clientBundlerHandle = await clientBundlerPromise;
+      if (manifestSyncPromise) {
+        await manifestSyncPromise;
+      }
+      printReadyBanner({
+        port: PORT,
+        tool: isWebpackBuild ? "Webpack" : buildTool,
+        durationMs: Date.now() - devStartTime,
+      });
     } catch (err) {
+      stopSpinner();
       console.error("❌ [Dinou Dev] Failed to start client bundler:", err);
     } finally {
       clientBundlerPromise = null;
     }
+  } else {
+    printReadyBanner({
+      port: PORT,
+      tool: isWebpackBuild ? "Webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild"),
+      durationMs: Date.now() - devStartTime,
+    });
   }
 });
 
@@ -1484,6 +1520,7 @@ let isCleaningUp = false;
 async function cleanup() {
   if (isCleaningUp) return;
   isCleaningUp = true;
+  stopSpinner();
   try {
     srcWatcher.close();
     if (clientBundlerHandle?.close) {

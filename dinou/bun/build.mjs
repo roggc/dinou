@@ -688,6 +688,7 @@ function initStorage() {
 }
 
 const PORT = Number(process.env.PORT || 3000);
+const IDLE_TIMEOUT = Number(process.env.IDLE_TIMEOUT || 120);
 const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
 const dist3Dir = path.resolve(cwd, ".dinou/dist3");
 
@@ -715,6 +716,7 @@ export async function fetch(req) {
 export default {
   port: PORT,
   fetch,
+  idleTimeout: IDLE_TIMEOUT,
 };
 `;
 const bunEntryPath = path.join(bunDir, "bun-entry.js");

@@ -9,6 +9,14 @@ import write from "../helpers-esbuild/write.mjs";
 import normalizePath from "../helpers-esbuild/normalize-path.mjs";
 
 const norm = (p) => path.resolve(p).replace(/\\/g, "/");
+const normKey = (p) => {
+  if (!p) return "";
+  let s = path.resolve(p).replace(/\\/g, "/");
+  if (process.platform === "win32") {
+    s = s.replace(/^([a-zA-Z]):/, (_, d) => d.toLowerCase() + ":");
+  }
+  return s;
+};
 let serverStarted = false;
 
 export default function esmHmrPlugin({
@@ -20,6 +28,7 @@ export default function esmHmrPlugin({
     name: "esm-hmr",
 
     setup(build) {
+      let isInitialBuild = true;
       const outdir = build.initialOptions.outdir || ".dinou/public";
       const entryPoints = build.initialOptions.entryPoints;
 
@@ -183,7 +192,8 @@ export default function esmHmrPlugin({
           const hasUserCode = inputFiles.some(
             (f) =>
               !f.includes("node_modules") &&
-              !f.includes("dinou")
+              !f.includes("dinou") &&
+              /\.(jsx?|tsx?)$/.test(f)
           );
           if (!hasUserCode) continue;
 
@@ -194,6 +204,8 @@ export default function esmHmrPlugin({
           ).map((m) => m[1]);
 
           hmrEngine.value.setEntry(urlId, imports, true);
+          const acceptedEntry = hmrEngine.value.getEntry(urlId, true);
+          acceptedEntry.isHmrAccepted = true;
           const wrappedCode = `
           const RefreshRuntime = window.__reactRefreshRuntime;
           let prevRefreshReg = window.$RefreshReg$;
@@ -227,40 +239,90 @@ export default function esmHmrPlugin({
       build.onEnd(write);
 
       build.onEnd(async (result) => {
+        if (isInitialBuild) {
+          isInitialBuild = false;
+          changedIds?.clear();
+          return;
+        }
+
         if (!result.metafile) {
-          // console.warn(
-          //   "[hmr-plugin] Metafile is missing. Enable 'metafile: true'"
-          // );
           return;
         }
 
         if (changedIds.size === 0) return;
+
+        // If only CSS files were modified, styles are updated via style-update in cssProcessorPlugin.
+        // Do NOT trigger full reload or JS component updates.
+        const isCssOnly = Array.from(changedIds).every((id) => {
+          const lower = id.toLowerCase();
+          return (
+            (lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less")) &&
+            !lower.endsWith(".module.css")
+          );
+        });
+        if (isCssOnly) {
+          changedIds.clear();
+          return;
+        }
+
         const bundleFiles = Object.keys(result.metafile.outputs);
         const pendingUpdateUrls = new Set();
         let needsFullReload = false;
+
+        const frameworkEntries = new Set([
+          "main.js",
+          "error.js",
+          "serverFunctionProxy.js",
+          "runtime.js",
+          "react-refresh-entry.js",
+        ]);
+
         for (const fileName of bundleFiles) {
+          // Only inspect actual JavaScript output chunks (skip sourcemaps, css, images, etc.)
+          if (!fileName.endsWith(".js") || fileName.endsWith(".js.map")) {
+            continue;
+          }
+          const baseName = path.basename(fileName);
+          if (frameworkEntries.has(baseName)) {
+            continue;
+          }
+
           const chunk = result.metafile.outputs[fileName];
           const modules = Object.keys(chunk?.inputs ?? {});
 
-          for (const modulePath of modules) {
-            if (changedIds.has(normalizePath(path.resolve(modulePath)))) {
-              const url = "/" + path.relative(outdir, fileName);
-              const entry = hmrEngine.value.getEntry(url);
-              if (entry?.isHmrAccepted) {
-                pendingUpdateUrls.add(url);
-              } else {
-                needsFullReload = true;
-              }
+          const isChangedByModule = modules.some((modulePath) => {
+            const cleanPath = modulePath.replace(/^[a-zA-Z0-9_-]+:/, "");
+            const norm = normKey(cleanPath);
+            const lower = norm.toLowerCase();
+            if (
+              (lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less")) &&
+              !lower.endsWith(".module.css")
+            ) {
+              return false;
+            }
+            return changedIds.has(norm);
+          });
+
+          if (isChangedByModule) {
+            const url = "/" + path.relative(outdir, fileName).replace(/\\/g, "/");
+            const baseNameUrl = "/" + baseName;
+            const entry = hmrEngine.value.getEntry(url) || hmrEngine.value.getEntry(baseNameUrl);
+            if (entry?.isHmrAccepted) {
+              pendingUpdateUrls.add(baseNameUrl);
+            } else {
+              needsFullReload = true;
             }
           }
         }
 
-        if (needsFullReload || pendingUpdateUrls.size === 0) {
-          hmrEngine.value.broadcastMessage({ type: "reload" });
-        } else {
+        if (pendingUpdateUrls.size > 0 && !needsFullReload) {
           for (const url of pendingUpdateUrls) {
+            console.log(`⚡ [HMR Dev] Updating client component: ${url}`);
             hmrEngine.value.broadcastMessage({ type: "update", url });
           }
+        } else if (needsFullReload || pendingUpdateUrls.size === 0) {
+          console.log(`⚡ [HMR Dev] Full reload triggered (needsFullReload: ${needsFullReload}, pendingUpdateUrls: ${Array.from(pendingUpdateUrls)})`);
+          hmrEngine.value.broadcastMessage({ type: "reload" });
         }
         changedIds.clear();
       });
