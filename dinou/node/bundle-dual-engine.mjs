@@ -16,6 +16,10 @@ const parseExports = require("../core/parse-exports.js");
 const { useClientRegex, useServerRegex } = require("../constants.js");
 const createScopedName = require("../core/createScopedName.js");
 const { regex: assetRegex } = require("../core/asset-extensions.js");
+const {
+  isSupportedClientModule,
+  scanProjectDependenciesForClientComponents,
+} = require("../core/scan-dependency-components.js");
 
 export async function bundleDualEngine(options = {}) {
   const isDev = Boolean(options.isDev);
@@ -90,21 +94,6 @@ export async function bundleDualEngine(options = {}) {
   // 3. Client components discovery
   const srcDir = path.resolve(projectRoot, "src");
 
-  function isSupportedClientModule(filePath, content) {
-    const norm = filePath.replace(/\\/g, "/");
-    if (!norm.includes("node_modules")) return true;
-    if (content === undefined && fs.existsSync(filePath)) {
-      try {
-        content = fs.readFileSync(filePath, "utf8");
-      } catch (e) {
-        return false;
-      }
-    }
-    if (typeof content !== "string") return false;
-    if (content.includes("System.register(") || content.includes("System.registerDynamic(")) return false;
-    if (content.includes("define.amd") && !content.includes("export ") && !content.includes("module.exports")) return false;
-    return true;
-  }
 
   function findClientComponents() {
     const clientFiles = new Set();
@@ -146,17 +135,7 @@ export async function bundleDualEngine(options = {}) {
       }
     }
 
-    try {
-      const pkg = JSON.parse(fs.readFileSync(path.resolve(projectRoot, "package.json"), "utf8"));
-      const deps = Object.keys(pkg.dependencies || {});
-      for (const dep of deps) {
-        if (dep === "react" || dep === "react-dom" || dep === "dinou") continue;
-        const depDir = path.resolve(projectRoot, "node_modules", dep);
-        if (fs.existsSync(depDir)) {
-          walk(depDir);
-        }
-      }
-    } catch (e) {}
+    scanProjectDependenciesForClientComponents(projectRoot, clientFiles, useClientRegex);
 
     for (const k of Object.keys(parsedClientManifest)) {
       const fileUrl = k.split("#")[0];

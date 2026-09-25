@@ -72,6 +72,10 @@ const { nodeToWebRequest, sendWebResponseToNode } = require(path.join(dinouDir, 
 const { setStorageAdapter, FileSystemStorage, MemoryStorage } = require(path.join(dinouDir, "core/storage-adapter.js"));
 const createScopedName = require(path.join(dinouDir, "core/createScopedName.js"));
 const { regex: assetRegex } = require(path.join(dinouDir, "core/asset-extensions.js"));
+const {
+  isSupportedClientModule,
+  scanProjectDependenciesForClientComponents,
+} = require(path.join(dinouDir, "core/scan-dependency-components.js"));
 
 // Initialize Dinou Storage
 try {
@@ -108,17 +112,6 @@ function generateAllUrlVariants(absPath) {
 
 const srcDir = path.resolve(projectRoot, "src");
 
-function isSupportedClientModule(filePath, content) {
-  const norm = filePath.replace(/\\/g, "/");
-  if (!norm.includes("node_modules")) return true;
-  if (content === undefined && fs.existsSync(filePath)) {
-    try { content = fs.readFileSync(filePath, "utf8"); } catch (e) { return false; }
-  }
-  if (typeof content !== "string") return false;
-  if (content.includes("System.register(") || content.includes("System.registerDynamic(")) return false;
-  if (content.includes("define.amd") && !content.includes("export ") && !content.includes("module.exports")) return false;
-  return true;
-}
 
 function findClientComponents(parsedClientManifest = {}) {
   const clientFiles = new Set();
@@ -146,14 +139,7 @@ function findClientComponents(parsedClientManifest = {}) {
     if (fs.existsSync(f)) clientFiles.add(path.resolve(f));
   }
 
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.resolve(projectRoot, "package.json"), "utf8"));
-    for (const dep of Object.keys(pkg.dependencies || {})) {
-      if (dep === "react" || dep === "react-dom" || dep === "dinou") continue;
-      const depDir = path.resolve(projectRoot, "node_modules", dep);
-      if (fs.existsSync(depDir)) walk(depDir);
-    }
-  } catch (e) {}
+  scanProjectDependenciesForClientComponents(projectRoot, clientFiles, useClientRegex);
 
   for (const k of Object.keys(parsedClientManifest)) {
     const fileUrl = k.split("#")[0];

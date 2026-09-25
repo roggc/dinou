@@ -15,6 +15,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { generateRouteModulesCode } = require("../core/route-generator.js");
 const parseExports = require("../core/parse-exports.js");
 const { useClientRegex, useServerRegex } = require("../constants.js");
+const {
+  isSupportedClientModule,
+  scanProjectDependenciesForClientComponents,
+} = require("../core/scan-dependency-components.js");
 
 const projectRoot = process.cwd();
 const bunDir = path.resolve(projectRoot, ".dinou/bun");
@@ -91,35 +95,6 @@ if (sfManifestPath && fs.existsSync(sfManifestPath)) {
 console.log("🔍 [Dinou Bun] Discovering client components for SSR Engine...");
 const srcDir = path.resolve(projectRoot, "src");
 
-function isSupportedClientModule(filePath, content) {
-  const norm = filePath.replace(/\\/g, "/");
-  // User code and Dinou framework code outside node_modules are always supported
-  if (!norm.includes("node_modules")) {
-    return true;
-  }
-
-  if (content === undefined && fs.existsSync(filePath)) {
-    try {
-      content = fs.readFileSync(filePath, "utf8");
-    } catch (e) {
-      return false;
-    }
-  }
-
-  if (typeof content !== "string") return false;
-
-  // SystemJS bundles (contain System.register) cannot run in ESM environments without the System loader
-  if (content.includes("System.register(") || content.includes("System.registerDynamic(")) {
-    return false;
-  }
-
-  // Legacy UMD/AMD wrappers lacking ES module or CommonJS exports
-  if (content.includes("define.amd") && !content.includes("export ") && !content.includes("module.exports")) {
-    return false;
-  }
-
-  return true;
-}
 
 function findClientComponents() {
   const clientFiles = new Set();
@@ -153,17 +128,7 @@ function findClientComponents() {
     }
   }
 
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.resolve(projectRoot, "package.json"), "utf8"));
-    const deps = Object.keys(pkg.dependencies || {});
-    for (const dep of deps) {
-      if (dep === "react" || dep === "react-dom" || dep === "dinou") continue;
-      const depDir = path.resolve(projectRoot, "node_modules", dep);
-      if (fs.existsSync(depDir)) {
-        walk(depDir);
-      }
-    }
-  } catch (e) {}
+  scanProjectDependenciesForClientComponents(projectRoot, clientFiles, useClientRegex);
 
   for (const k of Object.keys(parsedClientManifest)) {
     const fileUrl = k.split("#")[0];
