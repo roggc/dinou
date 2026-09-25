@@ -87,12 +87,17 @@ function esmHmrPlugin() {
     writeBundle(_options, bundle) {
       if (changedIds.size === 0) return;
 
+      let hasCssUpdate = false;
       for (const [fileName, chunkInfo] of Object.entries(bundle)) {
         const isChanged = Object.keys(chunkInfo.modules ?? {}).some((modPath) => {
           return changedIds.has(normalizePath(modPath));
         });
 
         if (isChanged) {
+          if (fileName.endsWith(".css")) {
+            hasCssUpdate = true;
+            continue;
+          }
           const urlId = "/" + fileName;
           const entry = hmrEngine?.getEntry(urlId) || hmrEngine?.getEntry(fileName);
           if (entry?.isHmrAccepted) {
@@ -103,7 +108,11 @@ function esmHmrPlugin() {
         }
       }
 
-      if (needsFullReload || pendingUpdateUrls.size === 0) {
+      if (hasCssUpdate) {
+        hmrEngine?.broadcastMessage({ type: "style-update", url: "/styles.css" });
+      }
+
+      if (needsFullReload) {
         hmrEngine?.broadcastMessage({ type: "reload" });
       } else {
         for (const url of pendingUpdateUrls) {

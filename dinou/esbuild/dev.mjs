@@ -244,8 +244,11 @@ export async function startEsbuildDev(options = {}) {
       return;
     }
 
-    if (entryPointsChanged || file.endsWith(".css") || file.endsWith(".scss")) {
+    if (entryPointsChanged) {
       debounceRecreateAndReload();
+    } else if (file.endsWith(".css") || file.endsWith(".scss")) {
+      // Rebuild and hot update of styles.css are handled automatically by esbuild.context.watch() and cssProcessorPlugin
+      return;
     } else if (isClientModule) {
       debounceReload();
     }

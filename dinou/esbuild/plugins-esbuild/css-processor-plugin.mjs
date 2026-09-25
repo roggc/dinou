@@ -11,15 +11,23 @@ import { pathToFileURL } from "node:url";
 import resolve from "resolve";
 import createPostCSSExtractPlugin from "../plugins-postcss/postcss-extract-plugin.js";
 
-export default function cssProcessorPlugin({ outdir = ".dinou/public" } = {}) {
+export default function cssProcessorPlugin({ outdir = ".dinou/public", hmrEngine } = {}) {
   const { finalize, plugin: extractor } = createPostCSSExtractPlugin({
     outputFile: `${outdir}/styles.css`,
   });
 
+  let isInitial = true;
+  let hasCssChange = false;
+
   return {
     name: "css-processor",
     setup(build) {
+      build.onStart(() => {
+        hasCssChange = false;
+      });
+
       build.onLoad({ filter: /\.css$/ }, async (args) => {
+        hasCssChange = true;
         const filePath = args.path;
         const source = await fs.readFile(filePath, "utf8");
 
@@ -76,6 +84,11 @@ export default function cssProcessorPlugin({ outdir = ".dinou/public" } = {}) {
       });
       build.onEnd(() => {
         finalize();
+        if (!isInitial && hasCssChange && hmrEngine?.value?.broadcastMessage) {
+          hmrEngine.value.broadcastMessage({ type: "style-update", url: "/styles.css" });
+        }
+        isInitial = false;
+        hasCssChange = false;
       });
     },
   };

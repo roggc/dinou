@@ -148,6 +148,25 @@ socket.addEventListener("message", ({ data: _data }) => {
     return;
   }
 
+  if (
+    data.type === "style-update" ||
+    (data.type === "update" && data.url && (data.url.endsWith(".css") || data.url.includes("styles.css")))
+  ) {
+    const targetUrl = data.url ? data.url.split("?")[0] : "";
+    const links = document.querySelectorAll('link[rel="stylesheet"]');
+    for (const link of links) {
+      const rawHref = link.getAttribute("href");
+      if (!rawHref) continue;
+      const cleanHref = rawHref.split("?")[0];
+      if (!targetUrl || cleanHref.endsWith(targetUrl) || targetUrl.endsWith(cleanHref) || cleanHref.includes("styles.css")) {
+        const nextUrl = new URL(link.href, window.location.origin);
+        nextUrl.searchParams.set("t", String(Date.now()));
+        link.href = nextUrl.href;
+      }
+    }
+    return;
+  }
+
   if (data.type !== "update") {
     return;
   }

@@ -19,7 +19,7 @@ export default function getConfigEsbuild({
   let plugins = [
     skipMissingEntryPointsPlugin(),
     TsconfigPathsPlugin({}),
-    cssProcessorPlugin(),
+    cssProcessorPlugin({ outdir, hmrEngine }),
     reactClientManifestPlugin({ manifest }),
     assetsPlugin(),
     stableChunkNamesAndMapsPlugin(),

@@ -936,6 +936,7 @@ async function triggerRebuild(filePath = "", eventType = "change") {
     try {
       const isStructureChange = eventType === "add" || eventType === "unlink";
       const absFilePath = filePath ? path.resolve(filePath) : "";
+      const isCssFile = absFilePath.endsWith(".css") || absFilePath.endsWith(".scss");
       let isClientFile = false;
       let isServerFile = false;
 
@@ -972,7 +973,7 @@ async function triggerRebuild(filePath = "", eventType = "change") {
         ssrModule = await dynamicImportWithRetry(pathToFileURL(ssrOutfile).href + v);
       }
       console.log(`⚡ [Dinou Dev] Rebuild finished in ${Date.now() - t0}ms (${eventType} ${path.basename(filePath) || "source"})`);
-      if (!isClientFile) {
+      if (!isClientFile && !isCssFile) {
         await broadcastToClients({ type: "reload" });
       }
     } catch (err) {
@@ -1350,7 +1351,7 @@ const server = http.createServer(async (req, res) => {
             res.statusCode = 200;
             res.setHeader("content-type", contentType);
             res.setHeader("content-length", String(buf.length));
-            res.setHeader("cache-control", "no-cache");
+            res.setHeader("cache-control", "no-store, no-cache, must-revalidate");
             res.end(buf);
             return;
           }
