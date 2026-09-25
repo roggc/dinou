@@ -25,63 +25,28 @@ program
   .command("dev")
   .description("Start development server with Esbuild")
   .action(() => {
-    runCommand(`npx concurrently "node ${p("node/dev.mjs")}" "node ${p("esbuild/dev.mjs")}"`);
+    runCommand(`cross-env DINOU_BUILD_TOOL=esbuild node ${p("node/dev.mjs")}`);
   });
 
 program
   .command("dev:esbuild")
   .description("Start development server with Esbuild")
   .action(() => {
-    runCommand(`npx concurrently "node ${p("node/dev.mjs")}" "node ${p("esbuild/dev.mjs")}"`);
+    runCommand(`cross-env DINOU_BUILD_TOOL=esbuild node ${p("node/dev.mjs")}`);
   });
 
 program
   .command("dev:rollup")
   .description("Start development server with Rollup")
   .action(() => {
-    runCommand(`npx concurrently "node ${p("node/dev.mjs")}" "npx rollup -c ${p("rollup/rollup.config.js")} -w"`);
+    runCommand(`cross-env DINOU_BUILD_TOOL=rollup node ${p("node/dev.mjs")}`);
   });
 
 program
   .command("dev:webpack")
   .description("Start development server with Webpack")
   .action(() => {
-    runCommand(`npx concurrently "cross-env DINOU_BUILD_TOOL=webpack node ${p("node/dev.mjs")}" "npx webpack serve --config ${p("webpack/webpack.config.js")}"`);
-  });
-
-program
-  .command("dev:server")
-  .description("Start development server standalone")
-  .action(() => {
-    runCommand(`node ${p("node/dev.mjs")}`);
-  });
-
-program
-  .command("dev:server:webpack")
-  .description("Start development server standalone with Webpack mode")
-  .action(() => {
     runCommand(`cross-env DINOU_BUILD_TOOL=webpack node ${p("node/dev.mjs")}`);
-  });
-
-program
-  .command("dev_esbuild")
-  .description("Start esbuild client bundler in watch mode")
-  .action(() => {
-    runCommand(`node ${p("esbuild/dev.mjs")}`);
-  });
-
-program
-  .command("dev_rollup")
-  .description("Start rollup client bundler in watch mode")
-  .action(() => {
-    runCommand(`npx rollup -c ${p("rollup/rollup.config.js")} -w`);
-  });
-
-program
-  .command("dev_webpack")
-  .description("Start webpack dev server")
-  .action(() => {
-    runCommand(`npx webpack serve --config ${p("webpack/webpack.config.js")}`);
   });
 
 // --- CLIENT BUNDLERS (BUILD) ---
