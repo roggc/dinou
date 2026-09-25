@@ -10,8 +10,11 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
 
 ## Key Features
 
-- **React Server Components:** Native integration of React 19 Server Components, streaming HTML/RSC payloads progressively using `renderToPipeableStream` and Suspense.
-- **Server Functions:** Functions marked with `"use server"` that execute on the server and can be called from client components. Supports returning rendered React components (Server or Client) directly to the client.
+- **React Server Components & Progressive Streaming:** Native React 19 RSC architecture streaming HTML and RSC payloads progressively via Web Streams (`renderToReadableStream`) on Edge/Bun and Node.js with instant shell flushing.
+- **0-Fork Single-Process Dev Server:** Zero-fork dev engine eliminating `concurrently`, port race conditions, and zombie processes, featuring a live interactive Braille activity spinner and clean serialized logs.
+- **Hardened State-Preserving Fast Refresh:** Near-instant component hot-reloading in development powered by Rust (`@swc/core`) in Esbuild and scoped ESM HMR in Rollup that preserves component and form state across edits.
+- **Standalone Native Binary Compilation:** Compiles your entire application into a single, self-contained executable binary server via `bun build --compile` and `deno compile` with zero runtime dependencies.
+- **Server Functions:** Functions marked with `"use server"` that execute on the server and can be called from client components. Supports returning rendered React components (Server or Client) directly to the client with dynamic header and cookie mutation support.
 - **Automatic Static Bailout:** Static by default (SSG). Bypasses static files and evaluates dynamically at request time if the request accesses headers, cookies, or query parameters.
 - **Client Router:** Client-side soft navigation (`push`, `replace`, `back`, `forward`, `refresh`) with a `useNavigationLoading` hook to track transition loading states.
 - **Generation Strategies:** Support for background Incremental Static Regeneration (ISR) and on-demand Incremental Static Generation (ISG) which generates and caches pages on their very first request.
@@ -69,10 +72,9 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [2. Utilities (`dinou`)](#2-utilities-dinou)
   - [3. Client Hooks (`dinou` - Client Components Only)](#3-client-hooks-dinou---client-components-only)
   - [4. Server-Only Utilities (`dinou` & `dinou/server`)](#4-server-only-utilities)
-  - [5. Pluggable Storage & Edge ISR (`dinou/server`)](#5-pluggable-storage--edge-isr-dinouserver)
-  - [6. Runtime Adapters (`dinou/adapters/*`)](#6-runtime-adapters-dinouadapters)
-  - [7. Page Configuration (`page_functions.ts`)](#7-page-configuration-page_functionsts)
-  - [8. File Conventions Cheatsheet](#8-file-conventions-cheatsheet)
+  - [5. Runtime Adapters (`dinou/adapters/*`)](#5-runtime-adapters-dinouadapters)
+  - [6. Page Configuration (`page_functions.ts`)](#6-page-configuration-page_functionsts)
+  - [7. File Conventions Cheatsheet](#7-file-conventions-cheatsheet)
 - [📁 Static Assets & Public Folder (`public/`)](#-static-assets--public-folder-public)
 - [🔐 Environment Variables (`.env`)](#-environment-variables-env)
 - [🎨 Styles (Tailwind, CSS Modules, & Global CSS)](#-styles-tailwind-css-modules--global-css)
@@ -85,6 +87,7 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [Production Build & SSG](#production-build--ssg)
   - [Start Production Server (Node, Bun, Deno)](#start-production-server-node-bun-deno)
   - [Edge Application Bundling (Cloudflare & Deno Deploy)](#edge-application-bundling-cloudflare--deno-deploy)
+  - [Standalone Native Binary Compilation](#standalone-native-binary-compilation-zero-node-deployment)
   - [Standalone Static Export](#standalone-static-export)
 - [📦 Eject Dinou](#-eject-dinou)
 - [🚀 Deployment Guide](#-deployment-guide)
@@ -1266,9 +1269,9 @@ Dinou uses a sophisticated hybrid strategy to balance **Developer Experience (DX
 
 | Bundler     |     Development     | Production | Status                                                                                                                           |
 | :---------- | :-----------------: | :--------: | :------------------------------------------------------------------------------------------------------------------------------- |
-| **Webpack** |     ✅ Enabled      | ✅ Enabled | Full optimization.                                                                                                               |
-| **Rollup**  |     ✅ Enabled      | ✅ Enabled | Full optimization.                                                                                                               |
-| **Esbuild** | ⚡ **Native Speed** | ✅ Enabled | **Hybrid Mode:** Dev prioritizes instant HMR (Hot Module Replacement), while Prod injects the compiler for maximum optimization. |
+| **Webpack** | ✅ Enabled  | ✅ Enabled | Full optimization in both environments. |
+| **Rollup**  | ❌ Disabled | ✅ Enabled | **Fast Refresh Priority:** Disabled in Dev to preserve component state during HMR; fully enabled in Prod for maximum AOT optimization. |
+| **Esbuild** | ❌ Disabled | ✅ Enabled | **Speed & Fast Refresh:** Disabled in Dev for sub-millisecond Rust SWC Fast Refresh; injected in Prod for maximum AOT optimization. |
 
 ### Code Example
 
@@ -1529,49 +1532,24 @@ export default function Page() {
 }
 ```
 
----
 
 ---
 
-### 5. Pluggable Storage & Edge ISR (`dinou/server`)
-
-Dinou v7 features a decoupled, pluggable storage architecture. Incremental Static Regeneration (ISR) and static page caching are managed via a uniform storage interface rather than hardcoded local filesystem operations.
-
-#### `setStorageAdapter(adapter)`
-Sets the global storage adapter for Dinou runtime caching and ISR invalidation.
-
-```typescript
-import { setStorageAdapter, MemoryStorageAdapter } from "dinou/server";
-
-// Configure in-memory storage (useful for unit tests or ephemeral environments)
-setStorageAdapter(new MemoryStorageAdapter());
-```
-
-#### `getStorageAdapter()`
-Returns the currently active storage adapter instance.
-
-#### Built-in Storage Adapters:
-| Adapter Class | Platform Target | Persistence Strategy |
-| :--- | :--- | :--- |
-| **`FSStorageAdapter`** (Default) | Node.js, Bun, Docker, VPS | Writes static pages and RSC payloads to `.dinou/dist2/`. |
-| **`MemoryStorageAdapter`** | Ephemeral, Automated Testing | Fast in-memory `Map` store. Resets on process exit. |
-| **`DenoKVStorage`** | Deno Deploy & Edge | Uses native `Deno.openKv()` for global multi-region Edge ISR. |
-| **`StorageAdapter`** | Custom backends | Abstract base class to implement custom stores (Redis, Cloudflare KV, Upstash, S3). |
-
----
-
-### 6. Runtime Adapters (`dinou/adapters/*`)
+### 5. Runtime Adapters (`dinou/adapters/*`)
 
 Dinou provides dedicated, zero-dependency adapters that map native platform requests into Dinou's universal Web Standards request handler (`(Request) => Promise<Response>`):
 
 ```javascript
+// Node.js (AOT Dual-Bundle)
+import server from "dinou/adapters/node";
+
 // Cloudflare Workers
 import worker from "dinou/adapters/cloudflare";
 export default worker;
 
-// Bun
-import { fetch } from "dinou/adapters/bun";
-export default { fetch };
+// Bun (High-throughput & Streaming)
+import server from "dinou/adapters/bun";
+export default server;
 
 // Deno
 import { fetch } from "dinou/adapters/deno";
@@ -1581,7 +1559,7 @@ Deno.serve(fetch);
 export { default, config } from "dinou/adapters/netlify";
 ```
 
-### 7. Page Configuration (`page_functions.ts`)
+### 6. Page Configuration (`page_functions.ts`)
 
 Export these functions from `page_functions.{ts,js}` to configure the associated `page.tsx`.
 
@@ -1675,7 +1653,7 @@ export function getCacheTags(params) {
 
 ---
 
-### 8. File Conventions Cheatsheet
+### 7. File Conventions Cheatsheet
 
 Dinou recognizes specific filenames to build the routing hierarchy.
 
@@ -1913,38 +1891,52 @@ Dinou is flexible and bundler-agnostic, integrating with three major compilers: 
 
 ### Development
 
-Starts the development server with hot module reloading:
+Starts the development server with hot module reloading. In Dinou v7, development runs as a **unified single process (0-forks)** without `concurrently`, eliminating port race conditions, zombie processes, and providing clean serialized logs alongside a live non-intrusive Unicode Braille activity spinner:
 
 | Command               | Bundler     | Description                |
 | :-------------------- | :---------- | :------------------------- |
-| `npm run dev`         | **esbuild** | Default. Fastest startup.  |
+| `npm run dev`         | **esbuild** | Default. Fastest startup with Rust-powered SWC Fast Refresh. |
 | `npm run dev:esbuild` | **esbuild** | Explicit esbuild command.  |
-| `npm run dev:rollup`  | **Rollup**  | Uses Rollup for bundling.  |
-| `npm run dev:webpack` | **Webpack** | Uses Webpack for bundling. |
+| `npm run dev:rollup`  | **Rollup**  | Uses Rollup with state-preserving ESM HMR. |
+| `npm run dev:webpack` | **Webpack** | Uses Webpack with Webpack Dev Server. |
 
 ### Production Build & SSG
 
 Compiles client/server bundles into `.dinou/dist3` and **automatically pre-renders all static pages (SSG) into `.dinou/dist2`** at build time:
 
-| Command                 | Bundler                | Description                                       |
+| Command                 | Bundler / Runtime      | Description                                       |
 | :---------------------- | :--------------------- | :------------------------------------------------ |
-| `npm run build`         | **esbuild** (Default)  | Fast production bundle & pre-rendering.           |
-| `npm run build:esbuild` | **esbuild** (Explicit) | Explicit esbuild build script.                    |
+| `npm run build`         | **Node.js** (Default)  | Builds production bundle & pre-renders SSG pages. |
+| `npm run build:node`    | **Node.js**            | Explicit Node.js AOT Dual-Bundle build.           |
+| `npm run build:bun`     | **Bun**                | Generates standalone Bun AOT bundle (`.dinou/bun/server.js`). |
+| `npm run build:bun:pure`| **Bun (Pure)**         | Pure Bun-native build pipeline (no Node.js required). |
+| `npm run build:esbuild` | **esbuild**            | Compiles client and server bundles via esbuild.   |
 | `npm run build:rollup`  | **Rollup**             | Full tree-shaking production build.               |
 | `npm run build:webpack` | **Webpack**            | Enterprise Webpack production build.              |
 
 ### Start Production Server (Node, Bun, Deno)
 
-Runs the production server. In Dinou v7, Node.js production start is completely clean and flagless:
+Runs the production server. In Dinou v7, Node.js production start uses the clean AOT pre-bundled server:
 
 | Command                 | Runtime            | Description                                                |
 | :---------------------- | :----------------- | :--------------------------------------------------------- |
-| `npm start`             | **Node.js**        | Runs production server (`cross-env NODE_ENV=production node ./dinou/core/server.js`). |
-| `npm run start:esbuild` | **Node.js**        | Explicit start for esbuild build.                          |
-| `npm run start:rollup`  | **Node.js**        | Explicit start for Rollup build.                           |
-| `npm run start:webpack` | **Node.js**        | Start with Webpack runtime flag.                           |
-| `npm run start:bun`     | **Bun**            | High-performance Bun native server with zero-copy assets.  |
+| `npm start`             | **Node.js**        | Runs production AOT server (`npm run start:node`).         |
+| `npm run start:node`    | **Node.js**        | Starts standalone `.dinou/node/server.mjs`.                |
+| `npm run start:bun`     | **Bun**            | High-performance Bun server with zero-copy assets and configurable `IDLE_TIMEOUT`. |
 | `npm run start:deno`    | **Deno**           | Deno standalone server with explicit sandbox permissions.  |
+
+### Standalone Native Binary Compilation (Zero-Node Deployment)
+
+Compiles your entire Dinou application into a single, self-contained native executable binary with zero runtime dependencies on the target host:
+
+| Command                           | Engine   | Output Binary                | Target Platform       |
+| :-------------------------------- | :------- | :--------------------------- | :-------------------- |
+| `npm run build:bun:compile`       | **Bun**  | `dist/server`                | Current Host OS       |
+| `npm run build:bun:compile:linux` | **Bun**  | `dist/server-linux`          | Linux x64             |
+| `npm run build:bun:compile:win`   | **Bun**  | `dist/server-win.exe`        | Windows x64           |
+| `npm run build:deno:compile`      | **Deno** | `dist/deno-server`           | Current Host OS       |
+| `npm run build:deno:compile:linux`| **Deno** | `dist/deno-server-linux`     | Linux x64             |
+| `npm run build:deno:compile:win`  | **Deno** | `dist/deno-server-win.exe`   | Windows x64           |
 
 ### Edge Application Bundling (Cloudflare & Deno Deploy)
 
@@ -2019,15 +2011,19 @@ CMD ["npm", "start"]
 
 Bun delivers ultra-fast startup times and high-throughput static asset serving via zero-copy `Bun.file()`:
 
-1. Build your application:
+1. Build your application for Bun:
    ```bash
-   npm run build
+   npm run build:bun
+   # or in a 100% Bun environment without Node.js:
+   npm run build:bun:pure
    ```
 2. Start with Bun:
    ```bash
    npm run start:bun
    ```
    *(Configurable via `PORT` environment variable, defaults to `3000`)*.
+
+> **Streaming & AI Timeout Protection:** Dinou pre-configures Bun with a safe `idleTimeout` of 120 seconds (overriding Bun's default 10s cutoff) to protect streaming SSR, async Server Functions, and AI LLM completions. You can customize this by setting the `IDLE_TIMEOUT` environment variable (e.g. `IDLE_TIMEOUT=60`).
 
 ---
 
