@@ -27,6 +27,7 @@ export default async function getEsbuildEntries({
   const detectedCSSEntries = new Set();
   const detectedAssetEntries = new Set();
   const serverModules = new Set();
+  const serverFunctions = new Set();
 
   // ---------- Helpers (ported mostly verbatim) ----------
   async function getImportsAndAssetsAndCsss(
@@ -89,10 +90,17 @@ export default async function getEsbuildEntries({
         if (isImportedFileClient) {
           continue; // Do not recursively process client components
         }
+
+        const isImportedFileServer = useServerRegex.test(importedCode.trim());
+        if (isImportedFileServer) {
+          serverFunctions.add(normalizePath(absImportPathWithExt));
+          continue;
+        }
       } else {
         const isImportedFileServer = useServerRegex.test(importedCode.trim());
 
         if (isImportedFileServer) {
+          serverFunctions.add(normalizePath(absImportPathWithExt));
           continue;
         }
       }
@@ -161,7 +169,12 @@ export default async function getEsbuildEntries({
   for (const absPath of files) {
     const code = readFileSync(absPath, "utf8");
     const isClientModule = useClientRegex.test(code.trim());
+    const isServerFunction = useServerRegex.test(code.trim());
     const normalizedPath = normalizePath(absPath);
+
+    if (isServerFunction) {
+      serverFunctions.add(normalizedPath);
+    }
 
     if (isClientModule) {
       const name = path.basename(absPath, path.extname(absPath));
@@ -274,6 +287,6 @@ export default async function getEsbuildEntries({
     detectedClientEntries,
     detectedCSSEntries,
     detectedAssetEntries,
-    Array.from(serverModules),
+    Array.from(serverFunctions),
   ];
 }

@@ -11,6 +11,16 @@ export default function serverFunctionsPlugin(manifestData = {}, options = {}) {
   const manifestMap = opts.manifestData || (manifestData.onManifestUpdated ? {} : manifestData) || {};
   const onManifestUpdated = opts.onManifestUpdated;
   const serverFiles = opts.serverFiles || manifestData.serverFiles || options.serverFiles || null;
+  const normalizeNormPath = (p) => {
+    let s = path.resolve(p).replace(/\\/g, "/");
+    if (process.platform === "win32") {
+      s = s.replace(/^([a-zA-Z]):/, (_, d) => d.toLowerCase() + ":");
+    }
+    return s;
+  };
+  const serverFilesSet = serverFiles
+    ? new Set(Array.from(serverFiles).map((f) => normalizeNormPath(f)))
+    : null;
 
   return {
     name: "server-functions-proxy",
@@ -30,6 +40,13 @@ export default function serverFunctionsPlugin(manifestData = {}, options = {}) {
       build.onLoad({ filter: /\.[jt]sx?$/ }, async (args) => {
         const normPath = args.path.replace(/\\/g, "/");
         if (normPath.includes("/node_modules/") || normPath.includes("/.dinou/")) return null;
+
+        if (serverFilesSet) {
+          const absNorm = normalizeNormPath(args.path);
+          if (!serverFilesSet.has(absNorm)) {
+            return null;
+          }
+        }
 
         const t0 = Date.now();
         try {
@@ -111,6 +128,9 @@ export default function serverFunctionsPlugin(manifestData = {}, options = {}) {
         const tEnd0 = Date.now();
         try {
           if (serverFunctions.size === 0) {
+            if (typeof globalThis !== "undefined") {
+              globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__ = {};
+            }
             return;
           }
           const hashedProxy =
@@ -159,13 +179,22 @@ export default function serverFunctionsPlugin(manifestData = {}, options = {}) {
             manifestObj[path] = Array.from(exportsSet);
           }
 
-          // Write the server functions manifest JSON file to the output directory
-          const manifestPath = path.join(
-            ".dinou/server_functions_manifest",
-            "server-functions-manifest.json"
-          );
-          await fs.mkdir(path.dirname(manifestPath), { recursive: true });
-          await fs.writeFile(manifestPath, JSON.stringify(manifestObj, null, 2));
+          if (typeof globalThis !== "undefined") {
+            globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__ = manifestObj;
+          }
+
+          const isDev = process.env.DINOU_DEV === "true" || process.env.NODE_ENV === "development";
+          const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDev;
+
+          if (shouldWriteToDisk) {
+            // Write the server functions manifest JSON file to the output directory
+            const manifestPath = path.join(
+              ".dinou/server_functions_manifest",
+              "server-functions-manifest.json"
+            );
+            await fs.mkdir(path.dirname(manifestPath), { recursive: true });
+            await fs.writeFile(manifestPath, JSON.stringify(manifestObj, null, 2));
+          }
         } finally {
           globalThis.__DINOU_SF_END_TIME__ = Date.now() - tEnd0;
         }

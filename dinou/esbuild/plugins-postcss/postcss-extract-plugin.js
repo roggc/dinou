@@ -35,6 +35,12 @@ const createPostCSSExtractPlugin = (options = {}) => {
 
     fs.writeFileSync(outputFile, extractedCSS);
 
+    if (typeof globalThis !== "undefined" && globalThis.__DINOU_MEM_FILES__) {
+      const buf = Buffer.from(extractedCSS);
+      globalThis.__DINOU_MEM_FILES__.set("styles.css", buf);
+      globalThis.__DINOU_MEM_FILES__.set("/styles.css", buf);
+    }
+
     extractedCSS = "";
   };
 

@@ -206,7 +206,7 @@ function updateManifestsState() {
   const sfPath = findManifest("server-functions-manifest.json", "server_functions_manifest");
   const aPath = findManifest("manifest.json", "public");
 
-  const rawClient = readJsonSafe(cPath);
+  const rawClient = globalThis.__DINOU_RAW_CLIENT_MANIFEST__ || readJsonSafe(cPath);
   if (rawClient) {
     const cleanClient = {};
     for (const [k, v] of Object.entries(rawClient)) {
@@ -227,7 +227,7 @@ function updateManifestsState() {
     parsedClientManifest = cleanClient;
   }
 
-  const rawSf = readJsonSafe(sfPath);
+  const rawSf = globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__ || readJsonSafe(sfPath);
   if (rawSf) {
     parsedServerFunctionsManifest = rawSf;
   }
@@ -1161,8 +1161,11 @@ const manifestFolder = isWebpackBuild
 let clientManifestReady = false;
 
 function checkClientFilesPresent() {
+  if (globalThis.__DINOU_MEM_FILES__ && globalThis.__DINOU_MEM_FILES__.has("main.js")) {
+    return true;
+  }
   const cPath = findManifest("react-client-manifest.json", "react_client_manifest");
-  if (!readJsonSafe(cPath)) return false;
+  if (!globalThis.__DINOU_RAW_CLIENT_MANIFEST__ && !readJsonSafe(cPath)) return false;
   if (isWebpackBuild) {
     const mPath = path.resolve(projectRoot, ".dinou/public/manifest.json");
     return fs.existsSync(mPath);
@@ -1477,11 +1480,30 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // 2. Static files delivery from .dinou/public or public/
+    // 2. Static files delivery from memory, .dinou/public, or public/
     if (pathname !== "/") {
       const cleanPath = pathname.startsWith("/") ? pathname.slice(1) : pathname;
       const mappedPath = (parsedAssetManifest && parsedAssetManifest[cleanPath]) || cleanPath;
       const ext = path.extname(cleanPath).toLowerCase();
+
+      // 2.a In-memory fast path for client bundles and assets generated in dev
+      if (globalThis.__DINOU_MEM_FILES__) {
+        const memBuf =
+          globalThis.__DINOU_MEM_FILES__.get(cleanPath) ||
+          globalThis.__DINOU_MEM_FILES__.get(mappedPath) ||
+          globalThis.__DINOU_MEM_FILES__.get("/" + cleanPath);
+        if (memBuf) {
+          const fileExt = path.extname(cleanPath).toLowerCase();
+          const contentType = MIME_TYPES[fileExt] || "application/octet-stream";
+          logTimeline(`⚡ [MEM CACHE] HTTP served ${pathname} (${memBuf.length} bytes)`);
+          res.statusCode = 200;
+          res.setHeader("content-type", contentType);
+          res.setHeader("content-length", String(memBuf.length));
+          res.setHeader("cache-control", "no-store, no-cache, must-revalidate");
+          res.end(memBuf);
+          return;
+        }
+      }
 
       let foundFilePath = null;
       for (const baseDir of candidateStaticDirs) {

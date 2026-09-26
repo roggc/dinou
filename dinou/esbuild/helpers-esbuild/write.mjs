@@ -59,6 +59,42 @@ export default async function write(result) {
       }
     }
   }
+  // 1. Populate in-memory files cache for zero-disk latency serving
+  globalThis.__DINOU_MEM_FILES__ = globalThis.__DINOU_MEM_FILES__ || new Map();
+  const publicDir = path.resolve(process.cwd(), ".dinou/public");
+  for (const file of result.outputFiles) {
+    const fileRelPath = normalizeRel(path.relative(process.cwd(), file.path));
+    if (skipSet.has(fileRelPath)) continue;
+    const cleanPublicRel = normalizeRel(path.relative(publicDir, file.path));
+    const buf = Buffer.isBuffer(file.contents) ? file.contents : Buffer.from(file.contents);
+    globalThis.__DINOU_MEM_FILES__.set(cleanPublicRel, buf);
+    globalThis.__DINOU_MEM_FILES__.set("/" + cleanPublicRel, buf);
+    const base = path.basename(cleanPublicRel);
+    if (!globalThis.__DINOU_MEM_FILES__.has(base)) {
+      globalThis.__DINOU_MEM_FILES__.set(base, buf);
+    }
+  }
+
+  const isDebug =
+    process.env.DINOU_DEBUG === "true" ||
+    process.env.DINOU_DEBUG === "1" ||
+    process.env.DEBUG === "true" ||
+    process.env.DEBUG === "1";
+  const timelineTime = () => new Date().toTimeString().slice(0, 8) + "." + String(Date.now() % 1000).padStart(3, "0");
+  const timelineRel = () => globalThis.__TIMELINE_T0__ ? `[+${Date.now() - globalThis.__TIMELINE_T0__}ms]` : ``;
+
+  const isDev = process.env.DINOU_DEV === "true" || process.env.NODE_ENV === "development";
+  const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDev;
+
+  if (!shouldWriteToDisk) {
+    globalThis.__DINOU_WRITE_TIME__ = 0;
+    if (isDebug) {
+      console.log(`⏱️ [TIMELINE ${timelineTime()}] ${timelineRel()} write.mjs: in-memory cache ready (${result.outputFiles.length} file(s)), disk write skipped (0ms)`);
+    }
+    console.log(`✓ Build completed`);
+    return;
+  }
+
   const filesToWrite = [];
   for (const file of result.outputFiles) {
     const fileRelPath = normalizeRel(path.relative(process.cwd(), file.path));
@@ -71,14 +107,6 @@ export default async function write(result) {
     }
     filesToWrite.push(file);
   }
-
-  const isDebug =
-    process.env.DINOU_DEBUG === "true" ||
-    process.env.DINOU_DEBUG === "1" ||
-    process.env.DEBUG === "true" ||
-    process.env.DEBUG === "1";
-  const timelineTime = () => new Date().toTimeString().slice(0, 8) + "." + String(Date.now() % 1000).padStart(3, "0");
-  const timelineRel = () => globalThis.__TIMELINE_T0__ ? `[+${Date.now() - globalThis.__TIMELINE_T0__}ms]` : ``;
 
   if (filesToWrite.length === 0) {
     if (isDebug) {

@@ -14,6 +14,7 @@ export default function reactClientManifestPlugin({
   return {
     name: "react-client-manifest",
     setup(build) {
+      let lastSerialized = "";
       build.onEnd(async (result) => {
         const tRcm0 = Date.now();
         let manifestChanged = false;
@@ -51,19 +52,22 @@ export default function reactClientManifestPlugin({
             }
           }
 
-          // Ensure directory exists
-          await fs.mkdir(path.dirname(manifestPath), { recursive: true });
-
           // Write merged manifest only if changed
           const serialized = JSON.stringify(manifest, null, 2);
-          try {
-            const old = await fs.readFile(manifestPath, "utf8");
-            if (old !== serialized) manifestChanged = true;
-          } catch (e) {
-            manifestChanged = true;
+          if (typeof globalThis !== "undefined") {
+            globalThis.__DINOU_RAW_CLIENT_MANIFEST__ = { ...manifest };
           }
 
-          if (manifestChanged) {
+          const isDev = process.env.DINOU_DEV === "true" || process.env.NODE_ENV === "development";
+          const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDev;
+
+          if (lastSerialized !== serialized) {
+            manifestChanged = true;
+            lastSerialized = serialized;
+          }
+
+          if (shouldWriteToDisk && manifestChanged) {
+            await fs.mkdir(path.dirname(manifestPath), { recursive: true });
             await fs.writeFile(
               manifestPath,
               serialized,

@@ -156,7 +156,13 @@ export function printReadyBanner({ port, tool, durationMs, timings }) {
       if (timings.sf) subParts.push(`Server Actions: ${timings.sf}ms (${timings.sfCount || 0} files)`);
       if (timings.rcm) subParts.push(`Client Manifest: ${timings.rcm}ms`);
       if (timings.stable) subParts.push(`Stable Chunks: ${timings.stable}ms`);
-      if (timings.writeDisk) subParts.push(`Disk Write: ${timings.writeDisk}ms`);
+      if (timings.writeDisk != null) {
+        if (timings.writeDisk === 0) {
+          subParts.push("Memory: 0ms (disk skipped)");
+        } else {
+          subParts.push(`Disk Write: ${timings.writeDisk}ms`);
+        }
+      }
       if (subParts.length > 0) {
         console.log(`    ${C_DIM}│  └─ [${subParts.join(" | ")}]${C_RESET}`);
       }
