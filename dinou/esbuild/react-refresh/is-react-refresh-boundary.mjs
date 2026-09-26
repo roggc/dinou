@@ -9,7 +9,24 @@ export function isReactRefreshBoundary(RefreshRuntime, moduleExports) {
   let hasExports = false;
   let areAllExportsComponents = true;
   for (const key in moduleExports) {
-    if (key === "__esModule") continue;
+    if (
+      key === "__esModule" ||
+      key === "metadata" ||
+      key === "revalidate" ||
+      key === "dynamic" ||
+      key === "dynamicParams" ||
+      key === "fetchCache" ||
+      key === "preferredRegion" ||
+      key === "runtime" ||
+      key === "maxDuration" ||
+      key === "generateStaticParams" ||
+      key === "generateMetadata" ||
+      key === "frontmatter" ||
+      key === "toc" ||
+      key === "headings"
+    ) {
+      continue;
+    }
 
     hasExports = true;
     const exportValue = moduleExports[key];

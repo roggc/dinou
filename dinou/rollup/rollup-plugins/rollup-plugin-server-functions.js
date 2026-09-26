@@ -12,7 +12,8 @@ function serverFunctionsPlugin() {
   return {
     name: "server-functions-proxy",
     transform(code, id) {
-      if (!useServerRegex.test(code.trim())) return null;
+      if (id.includes("node_modules") || id.includes("\0")) return null;
+      if (!useServerRegex.test(code)) return null;
 
       const exports = parseExports(code);
       if (exports.length === 0) return null;

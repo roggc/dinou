@@ -103,15 +103,6 @@ export async function bundleDualEngine(options = {}) {
       for (const entry of entries) {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
-          if (
-            entry.name === "node_modules" ||
-            entry.name === ".git" ||
-            entry.name === "tests" ||
-            entry.name === "test" ||
-            entry.name === "__tests__" ||
-            entry.name === "docs"
-          )
-            continue;
           walk(full);
         } else if (/\.[jt]sx?$/.test(entry.name)) {
           try {
@@ -453,8 +444,9 @@ globalThis.__DINOU_VFS__ = ${JSON.stringify(vfsSnapshot)};
     const compIndex = clientComponents.findIndex(
       (c) => pathToFileURL(c).href === fileUrl || pathToFileURL(c).href.toLowerCase() === fileUrl.toLowerCase()
     );
-    if (compIndex !== -1 && v && v.id) {
-      addClientModule(v.id, `mod_${compIndex}`);
+    if (compIndex !== -1) {
+      if (v && v.id) addClientModule(v.id, `mod_${compIndex}`);
+      addClientModule(fileUrl, `mod_${compIndex}`);
     }
   }
 
@@ -613,14 +605,16 @@ export { buildStaticPages, getStaticPaths } from "${dinouDirSlash}/core/build-st
 import { renderRscStreamToHtmlStream } from "${dinouDirSlash}/core/edge-ssr.js";
 import { clientModules, ssrConsumerManifest } from "./ssr-client-manifest.mjs";
 
+const lowerMap = new Map();
 globalThis.__webpack_require__ = (id) => {
   if (clientModules[id]) return clientModules[id];
-  const alt = id.startsWith("file:///c:/")
-    ? id.replace("file:///c:/", "file:///C:/")
-    : id.startsWith("file:///C:/")
-    ? id.replace("file:///C:/", "file:///c:/")
-    : id;
-  if (clientModules[alt]) return clientModules[alt];
+  if (typeof id === "string") {
+    if (lowerMap.size === 0) {
+      for (const k of Object.keys(clientModules)) lowerMap.set(k.toLowerCase(), clientModules[k]);
+    }
+    const lowerVal = lowerMap.get(id.toLowerCase());
+    if (lowerVal) return lowerVal;
+  }
   console.error("[SSR Engine] Module not found in __webpack_require__:", id);
   return {};
 };

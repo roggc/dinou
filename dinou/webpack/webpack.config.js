@@ -11,6 +11,10 @@ const ServerFunctionsPlugin = require("./plugins/server-functions-plugin");
 const webpack = require("webpack");
 const { regex } = require("../core/asset-extensions");
 const getCSSEntries = require("./helpers/get-webpack-entries");
+const {
+  scanProjectDependenciesForClientComponents,
+} = require("../core/scan-dependency-components.js");
+const { useClientRegex } = require("../constants.js");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
@@ -68,6 +72,13 @@ module.exports = async () => {
   cleanDir(outputDir);
   const [cssEntries] = await getCSSEntries();
 
+  const dependencyClientFiles = new Set();
+  scanProjectDependenciesForClientComponents(
+    process.cwd(),
+    dependencyClientFiles,
+    useClientRegex
+  );
+
   let clientDone = false;
   let serverDone = false;
   let ssgExecuted = false;
@@ -97,6 +108,9 @@ module.exports = async () => {
     },
     cache: false,
     mode: isDevelopment ? "development" : "production",
+    ignoreWarnings: [
+      /from "autoprefixer" plugin/,
+    ],
     entry: {
       main: [path.resolve(__dirname, "../core/client-webpack.jsx")].filter(
         Boolean,
@@ -232,11 +246,16 @@ module.exports = async () => {
         isServer: false,
         clientReferences: [
           {
-            directory: ".",
+            directory: "./src",
             recursive: true,
             include: /\.(js|ts|jsx|tsx)$/,
-            exclude: /[\\/](?:out|dist|\.dinou|tests|__tests__|docs)[\\/]/,
           },
+          {
+            directory: path.resolve(__dirname, "../core"),
+            recursive: false,
+            include: /\.(js|ts|jsx|tsx)$/,
+          },
+          ...Array.from(dependencyClientFiles),
         ],
       }),
       isDevelopment && {

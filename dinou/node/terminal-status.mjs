@@ -115,7 +115,7 @@ export function showIdleStatus() {
   startSpinner(`${C_DIM}watching for file changes...${C_RESET}`);
 }
 
-export function printReadyBanner({ port, tool, durationMs }) {
+export function printReadyBanner({ port, tool, durationMs, timings }) {
   stopSpinner();
   isWatching = true;
 
@@ -127,9 +127,46 @@ export function printReadyBanner({ port, tool, durationMs }) {
   console.log("");
   console.log(`  ${C_GREEN}➜${C_RESET}  ${C_BOLD}Local:${C_RESET}   ${C_CYAN}http://localhost:${port}/${C_RESET}`);
   console.log(`  ${C_GREEN}➜${C_RESET}  ${C_BOLD}Bundler:${C_RESET} ${tool}`);
-  console.log(`  ${C_GREEN}➜${C_RESET}  ${C_BOLD}Mode:${C_RESET}    development`);
-  console.log("");
+  const isDebug =
+    process.env.DINOU_DEBUG === "true" ||
+    process.env.DINOU_DEBUG === "1" ||
+    process.env.DEBUG === "true" ||
+    process.env.DEBUG === "1";
 
+  if (timings && isDebug) {
+    console.log("");
+    console.log(`  ${C_BOLD}⚡ Startup Breakdown:${C_RESET}`);
+    if (timings.discovery != null) {
+      console.log(`    ${C_DIM}├─ Discovery & Routing:${C_RESET}       ${C_CYAN}${timings.discovery}ms${C_RESET}`);
+    }
+    if (timings.engineBuild != null) {
+      console.log(`    ${C_DIM}├─ Dual-Engine (RSC+SSR):${C_RESET}     ${C_CYAN}${timings.engineBuild}ms${C_RESET}`);
+    }
+    if (timings.engineImport != null) {
+      console.log(`    ${C_DIM}├─ Engine V8 Evaluation:${C_RESET}     ${C_CYAN}${timings.engineImport}ms${C_RESET}`);
+    }
+    if (timings.clientEntriesBabel != null) {
+      console.log(`    ${C_DIM}├─ Client Babel AST Scan:${C_RESET}    ${C_CYAN}${timings.clientEntriesBabel}ms${C_RESET}`);
+    }
+    if (timings.clientBuild != null) {
+      console.log(`    ${C_DIM}├─ Client Bundling (esbuild):${C_RESET} ${C_CYAN}${timings.clientBuild}ms${C_RESET}`);
+      const subParts = [];
+      if (timings.postCss) subParts.push(`PostCSS: ${timings.postCss}ms (${timings.postCssCount || 0} css)`);
+      if (timings.swc) subParts.push(`SWC Refresh: ${timings.swc}ms (${timings.swcCount || 0} files)`);
+      if (timings.sf) subParts.push(`Server Actions: ${timings.sf}ms (${timings.sfCount || 0} files)`);
+      if (timings.rcm) subParts.push(`Client Manifest: ${timings.rcm}ms`);
+      if (timings.stable) subParts.push(`Stable Chunks: ${timings.stable}ms`);
+      if (timings.writeDisk) subParts.push(`Disk Write: ${timings.writeDisk}ms`);
+      if (subParts.length > 0) {
+        console.log(`    ${C_DIM}│  └─ [${subParts.join(" | ")}]${C_RESET}`);
+      }
+    } else if (timings.clientBundlerTotal != null) {
+      console.log(`    ${C_DIM}├─ Client Bundler Total:${C_RESET}     ${C_CYAN}${timings.clientBundlerTotal}ms${C_RESET}`);
+    }
+    console.log(`    ${C_DIM}└─ Total Startup Time:${C_RESET}       ${C_GREEN}${C_BOLD}${durationMs}ms${C_RESET}`);
+  }
+
+  console.log("");
   showIdleStatus();
 }
 

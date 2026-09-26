@@ -126,6 +126,7 @@ export async function startEsbuildDev(options = {}) {
           manifest,
           changedIds,
           hmrEngine,
+          serverFiles: currentServerFiles,
           onManifestUpdated: async () => {
             await onRebuilt();
           },
@@ -167,8 +168,13 @@ export async function startEsbuildDev(options = {}) {
   };
 
   // Initial build
+  const tBabel0 = Date.now();
   await updateEntriesAndComponents();
+  const clientEntriesBabel = Date.now() - tBabel0;
+
+  const tClientBuild0 = Date.now();
   await createEsbuildContext(true);
+  const clientBuild = Date.now() - tClientBuild0;
 
   return {
     broadcast: (msg) => {
@@ -177,6 +183,9 @@ export async function startEsbuildDev(options = {}) {
     notifyFileChanged: (filePath) => {
       if (filePath) {
         changedIds.add(normKey(filePath));
+        if (currentCtx) {
+          currentCtx.rebuild().catch(() => {});
+        }
       }
     },
     restart: async () => {
@@ -191,6 +200,19 @@ export async function startEsbuildDev(options = {}) {
           try { hmrEngine.value.server.close(); } catch (e) {}
         }
       } catch (e) {}
+    },
+    timings: {
+      clientEntriesBabel,
+      clientBuild,
+      postCss: globalThis.__DINOU_POSTCSS_TIME__ || 0,
+      postCssCount: globalThis.__DINOU_POSTCSS_COUNT__ || 0,
+      swc: globalThis.__DINOU_SWC_TIME__ || 0,
+      swcCount: globalThis.__DINOU_SWC_COUNT__ || 0,
+      sf: globalThis.__DINOU_SF_TIME__ || 0,
+      sfCount: globalThis.__DINOU_SF_COUNT__ || 0,
+      rcm: globalThis.__DINOU_RCM_TIME__ || 0,
+      stable: globalThis.__DINOU_STABLE_TIME__ || 0,
+      writeDisk: globalThis.__DINOU_WRITE_TIME__ || 0,
     },
   };
 }

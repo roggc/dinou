@@ -1,4 +1,3 @@
-import { TsconfigPathsPlugin } from "@esbuild-plugins/tsconfig-paths";
 import reactClientManifestPlugin from "../plugins-esbuild/react-client-manifest-plugin.mjs";
 import serverFunctionsPlugin from "../plugins-esbuild/server-functions-plugin.mjs";
 import cssProcessorPlugin from "../plugins-esbuild/css-processor-plugin.mjs";
@@ -6,8 +5,8 @@ import esmHmrPlugin from "../react-refresh/esm-hmr-plugin.mjs";
 import stableChunkNamesAndMapsPlugin from "../plugins-esbuild/stable-chunk-names-and-maps-plugin.mjs";
 import assetsPlugin from "../plugins-esbuild/assets-plugin.mjs";
 import skipMissingEntryPointsPlugin from "../plugins-esbuild/skip-missing-entry-points-plugin.mjs";
-import copyStaticFiles from "esbuild-copy-static-files";
-import { existsSync } from "node:fs";
+import fs from "node:fs";
+import path from "node:path";
 
 export default function getConfigEsbuild({
   entryPoints,
@@ -15,6 +14,7 @@ export default function getConfigEsbuild({
   manifest = {},
   changedIds,
   hmrEngine,
+  serverFiles,
   onManifestUpdated,
   onBuildStart,
   onBuildEnd,
@@ -33,12 +33,11 @@ export default function getConfigEsbuild({
         ]
       : []),
     skipMissingEntryPointsPlugin(),
-    TsconfigPathsPlugin({}),
     cssProcessorPlugin({ outdir, hmrEngine }),
-    serverFunctionsPlugin({ onManifestUpdated }),
+    serverFunctionsPlugin({ serverFiles }),
     reactClientManifestPlugin({ manifest, onManifestUpdated }),
-    assetsPlugin(),
-    stableChunkNamesAndMapsPlugin(),
+    assetsPlugin({ changedIds }),
+    stableChunkNamesAndMapsPlugin({ changedIds }),
     esmHmrPlugin({ entryNames: ["main", "error"], changedIds, hmrEngine }),
     ...(onBuildEnd
       ? [
@@ -54,16 +53,27 @@ export default function getConfigEsbuild({
       : []),
   ];
 
-  const staticDir = existsSync("public") ? "public" : (existsSync("favicons") ? "favicons" : null);
+  const staticDir = fs.existsSync("public") ? "public" : (fs.existsSync("favicons") ? "favicons" : null);
   if (staticDir) {
+    let staticCopied = false;
     plugins = [
-      copyStaticFiles({
-        src: staticDir,
-        dest: outdir,
-      }),
+      {
+        name: "copy-static-files-once",
+        setup(build) {
+          build.onEnd(() => {
+            if (staticCopied) return;
+            staticCopied = true;
+            try {
+              fs.cpSync(staticDir, outdir, { recursive: true, force: true });
+            } catch (e) {}
+          });
+        },
+      },
       ...plugins,
     ];
   }
+
+  const tsconfigPath = fs.existsSync("tsconfig.json") ? path.resolve("tsconfig.json") : undefined;
 
   return {
     entryPoints,
@@ -72,6 +82,7 @@ export default function getConfigEsbuild({
     bundle: true,
     splitting: true,
     sourcemap: true,
+    tsconfig: tsconfigPath,
     jsx: "automatic",
     target: "es2022",
     write: false,

@@ -7,7 +7,19 @@ import { pathToFileURL } from "node:url";
 
 const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-export default function assetsPlugin({ include = regex } = {}) {
+const normKey = (p) => {
+  if (!p) return "";
+  let s = path.resolve(p).replace(/\\/g, "/");
+  if (process.platform === "win32") {
+    s = s.replace(/^([a-zA-Z]):/, (_, d) => d.toLowerCase() + ":");
+  }
+  return s;
+};
+
+export default function assetsPlugin({ include = regex, changedIds } = {}) {
+  let isInitial = true;
+  let cachedRenames = new Map();
+
   return {
     name: "assets-plugin",
     setup(build) {
@@ -20,7 +32,6 @@ export default function assetsPlugin({ include = regex } = {}) {
 
       // Handle asset loading with different namespaces
       build.onResolve({ filter: include }, (args) => {
-        // console.log("[assets-plugin] onResolve", args);
         const resolvedAlias =
           args.kind === "entry-point"
             ? args.path
@@ -28,7 +39,6 @@ export default function assetsPlugin({ include = regex } = {}) {
                 parentURL: pathToFileURL(args.importer).href,
               });
 
-        // CRUCIAL: Different namespace for entry points
         if (args.kind === "entry-point") {
           return {
             path: resolvedAlias,
@@ -58,183 +68,194 @@ export default function assetsPlugin({ include = regex } = {}) {
       );
 
       build.onEnd(async (result) => {
-        if (!result.metafile || !result.outputFiles?.length) return;
+        const tAssets0 = Date.now();
+        try {
+          if (!result.metafile || !result.outputFiles?.length) return;
 
-        const renames = new Map();
-        const normalizeRel = (p) => p.replace(/\\/g, "/");
-        const processedSourceFiles = new Set();
+          const normalizeRel = (p) => p.replace(/\\/g, "/");
+          const isIncremental = !isInitial && changedIds && changedIds.size > 0;
+          const hasAssetChanged = isIncremental && Array.from(changedIds).some((id) => include.test(id));
 
-        // First pass: normal assets (individual files)
-        for (const [oldRelPath, info] of Object.entries(
-          result.metafile.outputs
-        )) {
-          if (info.entryPoint || Object.keys(info.inputs).length !== 1)
-            continue;
+          let renames = cachedRenames;
 
-          const inputPath = Object.keys(info.inputs)[0];
-          const sourceFile = inputPath
-            .replace(/^dinou-asset:/, "")
-            .replace(/^dinou-asset-entry:/, "");
-          if (!include.test(sourceFile)) continue;
+          // Only re-scan all asset outputs on initial build or if an asset file actually changed
+          if (isInitial || hasAssetChanged) {
+            renames = new Map();
+            const processedSourceFiles = new Set();
 
-          const ext = path.extname(sourceFile);
-          if (!oldRelPath.endsWith(ext)) continue;
-          const base = path.basename(sourceFile, ext);
-          const scoped = createScopedName(base, sourceFile);
-          const newLocal = `assets/${scoped}${ext}`;
-          const oldLocal = normalizeRel(path.relative(outdir, oldRelPath));
+            // First pass: normal assets (individual files)
+            for (const [oldRelPath, info] of Object.entries(
+              result.metafile.outputs
+            )) {
+              if (info.entryPoint || Object.keys(info.inputs).length !== 1)
+                continue;
 
-          renames.set(oldLocal, newLocal);
-          processedSourceFiles.add(sourceFile);
-        }
+              const inputPath = Object.keys(info.inputs)[0];
+              const sourceFile = inputPath
+                .replace(/^dinou-asset:/, "")
+                .replace(/^dinou-asset-entry:/, "");
+              if (!include.test(sourceFile)) continue;
 
-        // Second pass: find assets that are inside chunks
-        for (const [outputPath, info] of Object.entries(
-          result.metafile.outputs
-        )) {
-          // Only search in JavaScript chunks
-          if (!outputPath.endsWith(".js") || info.entryPoint) continue;
-
-          for (const inputPath of Object.keys(info.inputs)) {
-            if (!inputPath.startsWith("dinou-asset:")) continue;
-
-            const sourceFile = inputPath.replace(/^dinou-asset:/, "");
-            if (
-              !include.test(sourceFile) ||
-              processedSourceFiles.has(sourceFile)
-            )
-              continue;
-
-            try {
               const ext = path.extname(sourceFile);
+              if (!oldRelPath.endsWith(ext)) continue;
               const base = path.basename(sourceFile, ext);
               const scoped = createScopedName(base, sourceFile);
               const newLocal = `assets/${scoped}${ext}`;
+              const oldLocal = normalizeRel(path.relative(outdir, oldRelPath));
 
-              // Read the original asset
-              const assetContent = await fs.readFile(sourceFile);
-
-              // Create a new output file for this asset
-              const newOutputFile = {
-                path: path.join(outdir, newLocal),
-                contents: assetContent,
-                get text() {
-                  return new TextDecoder().decode(this.contents);
-                },
-              };
-
-              result.outputFiles.push(newOutputFile);
+              renames.set(oldLocal, newLocal);
               processedSourceFiles.add(sourceFile);
+            }
 
-              // console.log(
-              //   `Extracted asset from chunk: ${sourceFile} → ${newLocal}`
-              // );
+            // Pre-index outputFiles for O(1) lookup
+            const outputFilesByRelPath = new Map();
+            for (const f of result.outputFiles) {
+              outputFilesByRelPath.set(normalizeRel(path.relative(process.cwd(), f.path)), f);
+            }
 
-              // Find the chunk that contains this asset
-              const chunkFile = result.outputFiles.find(
-                (f) =>
-                  normalizeRel(path.relative(process.cwd(), f.path)) ===
-                  outputPath
-              );
+            // Second pass: find assets that are inside chunks
+            for (const [outputPath, info] of Object.entries(
+              result.metafile.outputs
+            )) {
+              if (!outputPath.endsWith(".js") || info.entryPoint) continue;
 
-              if (chunkFile) {
-                let chunkContent = new TextDecoder().decode(chunkFile.contents);
+              for (const inputPath of Object.keys(info.inputs)) {
+                if (!inputPath.startsWith("dinou-asset:")) continue;
 
-                // MORE PRECISE APPROACH: Find the specific comment for this asset
-                const assetComment = `// ${inputPath}`;
-                const commentIndex = chunkContent.indexOf(assetComment);
+                const sourceFile = inputPath.replace(/^dinou-asset:/, "");
+                if (
+                  !include.test(sourceFile) ||
+                  processedSourceFiles.has(sourceFile)
+                )
+                  continue;
 
-                if (commentIndex !== -1) {
-                  // Find the next line containing the variable assignment
-                  const nextLineStart =
-                    chunkContent.indexOf("\n", commentIndex) + 1;
-                  const nextLineEnd = chunkContent.indexOf("\n", nextLineStart);
-                  const assignmentLine = chunkContent.substring(
-                    nextLineStart,
-                    nextLineEnd
-                  );
+                try {
+                  const ext = path.extname(sourceFile);
+                  const base = path.basename(sourceFile, ext);
+                  const scoped = createScopedName(base, sourceFile);
+                  const newLocal = `assets/${scoped}${ext}`;
 
-                  // Extract the variable name (e.g., "dinou_default")
-                  const varMatch = assignmentLine.match(
-                    /var (\w+)_default = "([^"]+)"/
-                  );
+                  const assetContent = await fs.readFile(sourceFile);
 
-                  if (varMatch) {
-                    const varName = varMatch[1];
-                    const oldPath = varMatch[2];
+                  const newOutputFile = {
+                    path: path.join(outdir, newLocal),
+                    contents: assetContent,
+                    get text() {
+                      return new TextDecoder().decode(this.contents);
+                    },
+                  };
 
-                    // Replace ONLY this specific assignment
-                    const newAssignmentLine = `var ${varName}_default = "/${newLocal}";`;
-                    chunkContent =
-                      chunkContent.substring(0, nextLineStart) +
-                      newAssignmentLine +
-                      chunkContent.substring(nextLineEnd);
+                  result.outputFiles.push(newOutputFile);
+                  processedSourceFiles.add(sourceFile);
 
-                    // console.log(
-                    //   `Updated reference in chunk: ${oldPath} → /${newLocal}`
-                    // );
+                  const chunkFile = outputFilesByRelPath.get(outputPath);
+
+                  if (chunkFile) {
+                    let chunkContent = new TextDecoder().decode(chunkFile.contents);
+                    const assetComment = `// ${inputPath}`;
+                    const commentIndex = chunkContent.indexOf(assetComment);
+
+                    if (commentIndex !== -1) {
+                      const nextLineStart = chunkContent.indexOf("\n", commentIndex) + 1;
+                      const nextLineEnd = chunkContent.indexOf("\n", nextLineStart);
+                      const assignmentLine = chunkContent.substring(nextLineStart, nextLineEnd);
+                      const varMatch = assignmentLine.match(/var (\w+)_default = "([^"]+)"/);
+
+                      if (varMatch) {
+                        const varName = varMatch[1];
+                        const newAssignmentLine = `var ${varName}_default = "/${newLocal}";`;
+                        chunkContent =
+                          chunkContent.substring(0, nextLineStart) +
+                          newAssignmentLine +
+                          chunkContent.substring(nextLineEnd);
+                      }
+                    } else {
+                      const assetName = path.basename(sourceFile);
+                      const escapedAssetName = escapeRegExp(assetName);
+                      const pattern = new RegExp(
+                        `(var \\w+_default = ")([^"]*${escapedAssetName}[^"]*)(";)`,
+                        "g"
+                      );
+
+                      if (pattern.test(chunkContent)) {
+                        chunkContent = chunkContent.replace(
+                          pattern,
+                          `$1/${newLocal}$3`
+                        );
+                      }
+                    }
+
+                    chunkFile.contents = new TextEncoder().encode(chunkContent);
                   }
-                } else {
-                  // Fallback: search by filename in the path
-                  const assetName = path.basename(sourceFile);
-                  const escapedAssetName = escapeRegExp(assetName);
-                  const pattern = new RegExp(
-                    `(var \\w+_default = ")([^"]*${escapedAssetName}[^"]*)(";)`,
-                    "g"
+                } catch (error) {
+                  console.error(
+                    `Error extracting asset ${sourceFile} from chunk:`,
+                    error
                   );
-
-                  if (pattern.test(chunkContent)) {
-                    chunkContent = chunkContent.replace(
-                      pattern,
-                      `$1/${newLocal}$3`
-                    );
-                  }
                 }
-
-                chunkFile.contents = new TextEncoder().encode(chunkContent);
               }
-            } catch (error) {
-              console.error(
-                `Error extracting asset ${sourceFile} from chunk:`,
-                error
-              );
+            }
+
+            cachedRenames = renames;
+          }
+
+          if (renames.size === 0) return;
+
+          // Update references in JS/CSS files:
+          // On incremental rebuild, only process output files belonging to changed modules!
+          for (const file of result.outputFiles) {
+            const relPath = normalizeRel(path.relative(process.cwd(), file.path));
+            if (!relPath.endsWith(".js") && !relPath.endsWith(".css")) continue;
+
+            if (isIncremental && !hasAssetChanged) {
+              const outputInfo = result.metafile.outputs[relPath];
+              const inputFiles = Object.keys(outputInfo?.inputs || {});
+              const touchesChanged = inputFiles.some((m) => {
+                const clean = m.replace(/^[a-zA-Z0-9_-]+:/, "");
+                return changedIds.has(normKey(clean));
+              });
+              if (!touchesChanged) continue;
+            }
+
+            let content = new TextDecoder().decode(file.contents);
+            let modified = false;
+            for (const [oldLocal, newLocal] of renames) {
+              if (!content.includes(oldLocal)) continue;
+              const patterns = [
+                [`"./${escapeRegExp(oldLocal)}"`, `"/${newLocal}"`],
+                [`"${escapeRegExp(oldLocal)}"`, `"${newLocal}"`],
+                [`'./${escapeRegExp(oldLocal)}'`, `'/${newLocal}'`],
+                [`'${escapeRegExp(oldLocal)}'`, `'${newLocal}'`],
+              ];
+
+              for (const [oldPattern, newPattern] of patterns) {
+                const reg = new RegExp(oldPattern, "g");
+                if (reg.test(content)) {
+                  content = content.replace(reg, newPattern);
+                  modified = true;
+                }
+              }
+            }
+            if (modified) {
+              file.contents = new TextEncoder().encode(content);
             }
           }
-        }
 
-        // Update references in JS/CSS files (existing code)
-        for (const file of result.outputFiles) {
-          const relPath = normalizeRel(path.relative(process.cwd(), file.path));
-          if (!relPath.endsWith(".js") && !relPath.endsWith(".css")) continue;
+          // Update paths in outputFiles
+          if (!isIncremental) {
+            for (const file of result.outputFiles) {
+              const relPath = normalizeRel(path.relative(process.cwd(), file.path));
+              const oldLocal = normalizeRel(path.relative(outdir, relPath));
+              const newLocal = renames.get(oldLocal);
 
-          let content = new TextDecoder().decode(file.contents);
-          for (const [oldLocal, newLocal] of renames) {
-            const patterns = [
-              [`"./${escapeRegExp(oldLocal)}"`, `"/${newLocal}"`],
-              [`"${escapeRegExp(oldLocal)}"`, `"${newLocal}"`],
-              [`'./${escapeRegExp(oldLocal)}'`, `'/${newLocal}'`],
-              [`'${escapeRegExp(oldLocal)}'`, `'${newLocal}'`],
-            ];
-
-            for (const [oldPattern, newPattern] of patterns) {
-              content = content.replace(
-                new RegExp(oldPattern, "g"),
-                newPattern
-              );
+              if (newLocal) {
+                file.path = path.join(outdir, newLocal);
+              }
             }
           }
-          file.contents = new TextEncoder().encode(content);
-        }
-
-        // Update paths (existing code)
-        for (const file of result.outputFiles) {
-          const relPath = normalizeRel(path.relative(process.cwd(), file.path));
-          const oldLocal = normalizeRel(path.relative(outdir, relPath));
-          const newLocal = renames.get(oldLocal);
-
-          if (newLocal) {
-            file.path = path.join(outdir, newLocal);
-          }
+        } finally {
+          isInitial = false;
+          globalThis.__DINOU_ASSETS_TIME__ = Date.now() - tAssets0;
         }
       });
     },

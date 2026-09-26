@@ -23,12 +23,17 @@ export default function esmHmrPlugin({
   entryNames = ["main", "error"],
   changedIds,
   hmrEngine,
+  hmrPort,
 } = {}) {
+  const port = hmrPort || Number(process.env.HMR_PORT || (Number(process.env.PORT || 3000) + 1));
+
   return {
     name: "esm-hmr",
 
     setup(build) {
       let isInitialBuild = true;
+      let swcTotalTime = 0;
+      let swcCount = 0;
       const outdir = build.initialOptions.outdir || ".dinou/public";
       const entryPoints = build.initialOptions.entryPoints;
 
@@ -40,70 +45,86 @@ export default function esmHmrPlugin({
         const server = createServer();
         server.on("error", (err) => {
           if (err.code === "EADDRINUSE") {
-            // Port already in use, keep quiet or warn
+            console.warn(`⚠️ [esm-hmr] Port ${port} already in use. HMR may be affected if another server is running.`);
           } else {
             console.error("❌ [esm-hmr] Server error:", err);
           }
         });
         hmrEngine.value = new EsmHmrEngine({ server });
         hmrEngine.value.server = server;
-        server.listen(3001, () => {
-          // console.log("[esm-hmr] WebSocket server listening on port 3001");
+        server.listen(port, () => {
+          // console.log(`[esm-hmr] WebSocket server listening on port ${port}`);
         });
         serverStarted = true;
       }
 
+      const rootEntryMap = new Map();
+      let entryPointsSet = new Set();
+      const swcCache = new Map();
+
       build.onStart(async () => {
+        swcTotalTime = 0;
+        swcCount = 0;
+        rootEntryMap.clear();
+        entryPointsSet = new Set(
+          Object.values(entryPoints || {}).map((val) => normKey(path.resolve(val)))
+        );
         for (const entryName of entryNames) {
           const entryPath = entryPoints?.[entryName];
-          if (!entryPath) return;
+          if (!entryPath) continue;
 
           const absPath = path.resolve(entryPath);
+          const source = await fs.readFile(absPath, "utf8");
           entryAbsPaths.push(absPath);
-          entrySources.push(await fs.readFile(absPath, "utf8"));
+          entrySources.push(source);
           entryOutputNames.push(entryName + ".js");
+          rootEntryMap.set(normKey(absPath), source);
         }
       });
 
-      build.onLoad({ filter: /.*/ }, async (args) => {
+      build.onLoad({ filter: /(?:src|dinou)[\\/].*\.[jt]sx?$/i }, async (args) => {
         const abs = path.resolve(args.path);
-
-        const absNorm = norm(abs);
+        const absNorm = normKey(abs);
 
         // 1. Check if it is a ROOT Entry (client.jsx or error.tsx)
-        // These are the ones saved in 'entryAbsPaths'
-        const rootIndex = entryAbsPaths.findIndex(
-          (entryPath) => norm(entryPath) === absNorm,
-        );
+        // Must be checked BEFORE filtering node_modules, because non-ejected Dinou lives inside node_modules!
+        const rootSource = rootEntryMap.get(absNorm);
+        if (rootSource) {
+          let injectCode = `import { createHotContext } from "/__hmr_client__.js";\n`;
+          injectCode += `window.__hotContext = createHotContext;\n`;
 
-        // CASE A: It is Main or Error (Roots)
-        if (rootIndex !== -1) {
-          const source = entrySources[rootIndex];
-          if (source) {
-            let injectCode = `import { createHotContext } from "/__hmr_client__.js";\n`;
-            injectCode += `window.__hotContext = createHotContext;\n`;
-
-            // IMPORTANT: We return RAW 'source' + injection.
-            // Without passing through Babel/SWC to prevent $RefreshSig$ from breaking initialization.
-            return {
-              contents: injectCode + source,
-              loader: "jsx",
-            };
-          }
-          return null;
+          // IMPORTANT: We return RAW 'source' + injection.
+          // Without passing through Babel/SWC to prevent $RefreshSig$ from breaking initialization.
+          return {
+            contents: injectCode + rootSource,
+            loader: "jsx",
+            watchFiles: [abs],
+          };
         }
+
+        const normPath = args.path.replace(/\\/g, "/");
+        if (normPath.includes("/node_modules/")) return null;
 
         // 2. Check if it is any OTHER Entry Point from the esbuild configuration
         // (Here are your pages, layouts, components...)
-        const isAnEntryPoint = Object.values(entryPoints).some(
-          (val) => norm(path.resolve(val)) === absNorm,
-        );
+        const isAnEntryPoint = entryPointsSet.has(absNorm);
 
         // CASE B: It is a user page or component
         if (isAnEntryPoint) {
-          // HERE we DO apply SWC transformation to enable React Fast Refresh
-          const source = await fs.readFile(args.path, "utf8");
           try {
+            const stat = await fs.stat(args.path);
+            const cached = swcCache.get(absNorm);
+            if (cached && cached.mtime === stat.mtimeMs) {
+              return {
+                contents: cached.code,
+                loader: "js",
+                watchFiles: [abs],
+              };
+            }
+
+            // HERE we DO apply SWC transformation to enable React Fast Refresh
+            const source = await fs.readFile(args.path, "utf8");
+            const tSwc0 = Date.now();
             const { code } = transformSync(source, {
               filename: abs,
               jsc: {
@@ -122,10 +143,16 @@ export default function esmHmrPlugin({
                 },
               },
             });
+            swcTotalTime += Date.now() - tSwc0;
+            swcCount++;
+            globalThis.__DINOU_SWC_TIME__ = swcTotalTime;
+            globalThis.__DINOU_SWC_COUNT__ = swcCount;
+            swcCache.set(absNorm, { mtime: stat.mtimeMs, code });
 
             return {
               contents: code,
               loader: "js",
+              watchFiles: [abs],
             };
           } catch (e) {
             console.error("SWC Error:", e);
@@ -143,13 +170,23 @@ export default function esmHmrPlugin({
           path.dirname(fileURLToPath(import.meta.url)),
           "./esm-hmr/client.mjs",
         );
-        const clientCode = await fs.readFile(clientPath, "utf8");
+        let clientCode = await fs.readFile(clientPath, "utf8");
+        const isDebug =
+          process.env.DINOU_DEBUG === "true" ||
+          process.env.DINOU_DEBUG === "1" ||
+          process.env.DEBUG === "true" ||
+          process.env.DEBUG === "1";
+        if (isDebug) {
+          clientCode = `window.__DINOU_DEBUG__ = true;\n` + clientCode;
+        }
         const assetPath = path.join(outdir, "__hmr_client__.js");
         result.outputFiles.push({
           path: assetPath,
           contents: new TextEncoder().encode(clientCode),
         });
       });
+
+      const wrappedChunkCache = new Map();
 
       build.onEnd(async (result) => {
         if (!result.metafile) {
@@ -161,15 +198,17 @@ export default function esmHmrPlugin({
         const bundleFiles = Object.keys(result.metafile.outputs);
         const normalizeRel = (p) => p.replace(/\\/g, "/");
 
+        const outputFilesByRelPath = new Map();
+        for (const f of result.outputFiles) {
+          outputFilesByRelPath.set(normalizeRel(path.relative(process.cwd(), f.path)), f);
+        }
+
         for (const bF of bundleFiles) {
           if (!bF.endsWith(".js")) {
             continue;
           }
           const relPath = normalizeRel(bF);
-          const outputFile = result.outputFiles.find(
-            (f) =>
-              normalizeRel(path.relative(process.cwd(), f.path)) === relPath,
-          );
+          const outputFile = outputFilesByRelPath.get(relPath);
           if (!outputFile) continue;
           const baseName = path.basename(bF, ".js");
 
@@ -177,14 +216,14 @@ export default function esmHmrPlugin({
           const outfile_basename = path.basename(outfile);
           const urlId = "/" + outfile_basename;
           const safeId = JSON.stringify(urlId);
-          const frameworkEntries = [
+          const frameworkEntries = new Set([
             "main.js",
             "error.js",
             "serverFunctionProxy.js",
             "runtime.js",
             "react-refresh-entry.js",
-          ];
-          if (frameworkEntries.some((e) => e === outfile_basename)) continue;
+          ]);
+          if (frameworkEntries.has(outfile_basename)) continue;
 
           // Only wrap user component chunks that contain actual app code (not third-party libraries/vendor)
           const outputInfo = result.metafile.outputs[bF];
@@ -197,7 +236,21 @@ export default function esmHmrPlugin({
           );
           if (!hasUserCode) continue;
 
+          const isChangedByModule = !isInitialBuild && inputFiles.some((modulePath) => {
+            const cleanPath = modulePath.replace(/^[a-zA-Z0-9_-]+:/, "");
+            return changedIds.has(normKey(cleanPath));
+          });
+
+          const cachedWrapped = wrappedChunkCache.get(relPath);
+          if (!isInitialBuild && !isChangedByModule && cachedWrapped) {
+            outputFile.contents = cachedWrapped;
+            continue;
+          }
+
           const source = new TextDecoder().decode(outputFile.contents);
+          if (source.includes("__reactRefreshRuntime")) {
+            continue;
+          }
 
           const imports = Array.from(
             source.matchAll(/import\s+["'](.+?)["']/g),
@@ -232,13 +285,17 @@ export default function esmHmrPlugin({
           window.$RefreshReg$ = prevRefreshReg;
           window.$RefreshSig$ = prevRefreshSig;
         `;
-          outputFile.contents = new TextEncoder().encode(wrappedCode);
+          const encodedWrapped = new TextEncoder().encode(wrappedCode);
+          outputFile.contents = encodedWrapped;
+          wrappedChunkCache.set(relPath, encodedWrapped);
         }
       });
 
       build.onEnd(write);
 
       build.onEnd(async (result) => {
+        globalThis.__DINOU_SWC_TIME__ = swcTotalTime;
+        globalThis.__DINOU_SWC_COUNT__ = swcCount;
         if (isInitialBuild) {
           isInitialBuild = false;
           changedIds?.clear();
@@ -315,13 +372,30 @@ export default function esmHmrPlugin({
           }
         }
 
+        const timelineTime = () => new Date().toTimeString().slice(0, 8) + "." + String(Date.now() % 1000).padStart(3, "0");
+        const timelineRel = () => globalThis.__TIMELINE_T0__ ? `[+${Date.now() - globalThis.__TIMELINE_T0__}ms]` : ``;
+
+        const isDebug =
+          process.env.DINOU_DEBUG === "true" ||
+          process.env.DINOU_DEBUG === "1" ||
+          process.env.DEBUG === "true" ||
+          process.env.DEBUG === "1";
+
         if (pendingUpdateUrls.size > 0 && !needsFullReload) {
           for (const url of pendingUpdateUrls) {
-            console.log(`⚡ [HMR Dev] Updating client component: ${url}`);
+            if (isDebug) {
+              console.log(`⏱️ [TIMELINE ${timelineTime()}] ${timelineRel()} ⚡ [HMR Broadcast] Sending update to browser: ${url}`);
+            } else {
+              console.log(`⚡ [HMR] Updating client component: ${url}`);
+            }
             hmrEngine.value.broadcastMessage({ type: "update", url });
           }
         } else if (needsFullReload || pendingUpdateUrls.size === 0) {
-          console.log(`⚡ [HMR Dev] Full reload triggered (needsFullReload: ${needsFullReload}, pendingUpdateUrls: ${Array.from(pendingUpdateUrls)})`);
+          if (isDebug) {
+            console.log(`⏱️ [TIMELINE ${timelineTime()}] ${timelineRel()} ⚡ [HMR Broadcast] Full reload triggered (needsFullReload: ${needsFullReload})`);
+          } else {
+            console.log(`⚡ [HMR] Full reload triggered`);
+          }
           hmrEngine.value.broadcastMessage({ type: "reload" });
         }
         changedIds.clear();

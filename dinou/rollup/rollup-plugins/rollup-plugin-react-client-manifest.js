@@ -47,27 +47,95 @@ function reactClientManifestPlugin({
   const clientModules = new Set();
   const serverModules = new Set();
 
-  function updateManifestForModule(absPath, code, isClientModule) {
-    const fileUrl = pathToFileURL(absPath).href;
-    const relPath =
-      "./" + path.relative(process.cwd(), absPath).replace(/\\/g, "/");
+const urlToManifestKeys = new Map();
+const defaultExportCache = new Map();
 
-    for (const key in manifest) {
-      if (key.startsWith(fileUrl)) {
-        delete manifest[key];
+function normalizeFsPath(p) {
+  return path.resolve(p).replace(/\\/g, "/").toLowerCase();
+}
+
+function getStableChunkName(absPath) {
+  const rel = path.relative(process.cwd(), absPath).replace(/\\/g, "/");
+  const clean = rel
+    .replace(/\.[jt]sx?$/, "")
+    .replace(/^src\//, "")
+    .replace(/[^a-zA-Z0-9_-]/g, "_");
+  return clean || path.basename(absPath, path.extname(absPath));
+}
+
+function normalizeFileUrl(p) {
+  const abs = path.resolve(p);
+  const norm =
+    abs.length > 1 && abs[1] === ":"
+      ? abs[0].toUpperCase() + abs.slice(1)
+      : abs;
+  return pathToFileURL(norm).href;
+}
+
+function setManifestEntry(fileUrl, expName, entry) {
+  const keys = [expName === "default" ? fileUrl : `${fileUrl}#${expName}`];
+  if (process.platform === "win32") {
+    const winMatch = fileUrl.match(/^file:\/\/\/([a-zA-Z]):(\/.*)$/);
+    if (winMatch) {
+      const drive = winMatch[1];
+      const altDrive = drive === drive.toLowerCase() ? drive.toUpperCase() : drive.toLowerCase();
+      const altUrl = `file:///${altDrive}:${winMatch[2]}`;
+      keys.push(expName === "default" ? altUrl : `${altUrl}#${expName}`);
+    }
+  }
+  const fileUrlLower = fileUrl.toLowerCase();
+  let keySet = urlToManifestKeys.get(fileUrlLower);
+  if (!keySet) {
+    keySet = new Set();
+    urlToManifestKeys.set(fileUrlLower, keySet);
+  }
+  for (const k of keys) {
+    manifest[k] = { ...entry };
+    keySet.add(k);
+  }
+}
+
+  function updateManifestForModule(absPath, code, isClientModule) {
+    const fileUrl = normalizeFileUrl(absPath);
+    const fileUrlLower = fileUrl.toLowerCase();
+    const stableChunkName = getStableChunkName(absPath);
+    const stableChunkUrl = "/" + stableChunkName + ".js";
+
+    // Delete previous keys from manifest and determine if an existing chunk ID should be kept
+    const oldKeys = urlToManifestKeys.get(fileUrlLower);
+    let previousChunkId = null;
+    if (oldKeys) {
+      for (const k of oldKeys) {
+        if (!previousChunkId && manifest[k]?.id && manifest[k].id.startsWith("/")) {
+          previousChunkId = manifest[k].id;
+        }
+        delete manifest[k];
+      }
+      oldKeys.clear();
+    } else {
+      for (const key in manifest) {
+        if (key.toLowerCase().startsWith(fileUrlLower)) {
+          if (!previousChunkId && manifest[key]?.id && manifest[key].id.startsWith("/")) {
+            previousChunkId = manifest[key].id;
+          }
+          delete manifest[key];
+        }
       }
     }
 
     if (isClientModule) {
       const exports = parseExports(code);
+      const defaultName = getDefaultExportName(code);
+      if (defaultName) {
+        defaultExportCache.set(path.resolve(absPath), defaultName);
+      }
+      const chunkIdToUse = previousChunkId || stableChunkUrl;
       for (const expName of exports) {
-        const manifestKey =
-          expName === "default" ? fileUrl : `${fileUrl}#${expName}`;
-        manifest[manifestKey] = {
-          id: relPath,
+        setManifestEntry(fileUrl, expName, {
+          id: chunkIdToUse,
           chunks: expName,
           name: expName,
-        };
+        });
       }
     }
   }
@@ -77,12 +145,17 @@ function reactClientManifestPlugin({
     code,
     baseFilePath,
     visited = new Set(),
-    pluginContext
+    pluginContext,
+    sharedCache = null
   ) {
     if (visited.has(baseFilePath)) {
       return { imports: [], assets: [], csss: [] };
     }
     visited.add(baseFilePath);
+
+    if (sharedCache && sharedCache.has(baseFilePath)) {
+      return sharedCache.get(baseFilePath);
+    }
 
     const ast = parser.parse(code, {
       sourceType: "module",
@@ -129,6 +202,11 @@ function reactClientManifestPlugin({
         continue; // Don't recurse for assets
       }
 
+      // Do not recurse into third-party libraries in node_modules for server asset discovery
+      if (absImportPathWithExt.includes("node_modules")) {
+        continue;
+      }
+
       // Otherwise, it's a code import
       imports.add(absImportPathWithExt);
 
@@ -138,7 +216,8 @@ function reactClientManifestPlugin({
           importCode,
           absImportPathWithExt,
           visited,
-          pluginContext
+          pluginContext,
+          sharedCache
         );
         nested.imports.forEach((nestedPath) => imports.add(nestedPath));
         nested.assets.forEach((nestedPath) => assets.add(nestedPath));
@@ -151,11 +230,15 @@ function reactClientManifestPlugin({
       }
     }
 
-    return {
+    const result = {
       imports: Array.from(imports),
       assets: Array.from(assets),
       csss: Array.from(csss),
     };
+    if (sharedCache) {
+      sharedCache.set(baseFilePath, result);
+    }
+    return result;
   }
 
   // New helper to emit a single asset (used in buildStart and watchChange)
@@ -177,10 +260,33 @@ function reactClientManifestPlugin({
     return fileName.startsWith("page.") || fileName.startsWith("layout.");
   }
 
+  let isInitial = true;
+  const knownClientChunks = new Map();
+  const knownCssChunks = new Map();
 
   return {
     name: "react-client-manifest",
     async buildStart(options) {
+      if (!isInitial) {
+        for (const [id, name] of knownClientChunks) {
+          this.emitFile({
+            type: "chunk",
+            id,
+            name,
+          });
+        }
+        for (const [id, name] of knownCssChunks) {
+          this.emitFile({
+            type: "chunk",
+            id,
+            name,
+          });
+        }
+        return;
+      }
+      isInitial = false;
+      const tManifest0 = Date.now();
+
       const srcFiles = await glob(["**/*.{js,jsx,ts,tsx}"], {
         cwd: srcDir,
         absolute: true,
@@ -201,6 +307,9 @@ function reactClientManifestPlugin({
         entryPoints = Object.values(inputOption);
       }
       const uniqueFiles = new Set([...srcFiles, ...entryPoints]);
+      const emittedChunks = new Set();
+      const emittedAssets = new Set();
+      const sharedAstCache = new Map();
 
       for (const absPath of uniqueFiles) {
         const code = readFileSync(absPath, "utf8");
@@ -208,14 +317,19 @@ function reactClientManifestPlugin({
         const isClientModule = useClientRegex.test(code.trim());
 
         if (isClientModule) {
-          clientModules.add(normalizedPath);
+          clientModules.add(normalizeFsPath(absPath));
           updateManifestForModule(absPath, code, true);
           this.addWatchFile(absPath);
-          this.emitFile({
-            type: "chunk",
-            id: absPath,
-            name: path.basename(absPath, path.extname(absPath)),
-          });
+          const chunkName = getStableChunkName(absPath);
+          knownClientChunks.set(absPath, chunkName);
+          if (!emittedChunks.has(absPath)) {
+            emittedChunks.add(absPath);
+            this.emitFile({
+              type: "chunk",
+              id: absPath,
+              name: chunkName,
+            });
+          }
         } else if (isPageOrLayout(absPath)) {
           serverModules.add(normalizedPath);
           this.addWatchFile(absPath);
@@ -223,7 +337,8 @@ function reactClientManifestPlugin({
             code,
             absPath,
             new Set(),
-            this
+            this,
+            sharedAstCache
           );
           // console.log("assets", assets);
           for (const importPath of imports) {
@@ -232,34 +347,52 @@ function reactClientManifestPlugin({
           // Emit assets for server components (replicate dinouAssetPlugin logic)
           for (const assetPath of assets) {
             this.addWatchFile(assetPath);
-            emitAsset(assetPath, this); // Emit assets
+            if (!emittedAssets.has(assetPath)) {
+              emittedAssets.add(assetPath);
+              emitAsset(assetPath, this);
+            }
           }
           for (const cssPath of csss) {
             this.addWatchFile(cssPath);
-            // Emit CSS as a Rollup asset so postcss() processes it
-            this.emitFile({
-              type: "chunk",
-              id: cssPath,
-              name: path.basename(cssPath, path.extname(cssPath)),
-            });
+            const chunkName = path.basename(cssPath, path.extname(cssPath));
+            knownCssChunks.set(cssPath, chunkName);
+            if (!emittedChunks.has(cssPath)) {
+              emittedChunks.add(cssPath);
+              // Emit CSS as a Rollup asset so postcss() processes it
+              this.emitFile({
+                type: "chunk",
+                id: cssPath,
+                name: chunkName,
+              });
+            }
           }
         }
       }
+      globalThis.__DINOU_ROLLUP_MANIFEST_TIME__ = Date.now() - tManifest0;
     },
     async transform(code, id) {
-      if (id.includes("\0") || id.startsWith("commonjsHelpers") || id.includes("node_modules/rollup") || id.includes("react-refresh")) return;
-      const normalizedId = id.split(path.sep).join(path.posix.sep);
-      const isClientModule = useClientRegex.test(code.trim());
+      if (
+        id.includes("\0") ||
+        id.includes("node_modules") ||
+        id.startsWith("commonjsHelpers") ||
+        id.includes("react-refresh")
+      )
+        return;
+      if (!useClientRegex.test(code)) return;
+      const normId = normalizeFsPath(id);
+      const isClientModule = true;
 
       if (isClientModule) {
-        // console.log("👉 [react-client-manifest] Found client module in transform:", normalizedId);
-        if (!clientModules.has(normalizedId)) {
-          clientModules.add(normalizedId);
+        // console.log("👉 [react-client-manifest] Found client module in transform:", normId);
+        if (!clientModules.has(normId)) {
+          clientModules.add(normId);
           updateManifestForModule(id, code, true);
+          const chunkName = getStableChunkName(id);
+          knownClientChunks.set(id, chunkName);
           this.emitFile({
             type: "chunk",
             id: id,
-            name: path.basename(id, path.extname(id)),
+            name: chunkName,
           });
         }
       }
@@ -272,16 +405,18 @@ function reactClientManifestPlugin({
         !id.endsWith(".ts")
       )
         return;
-      const normalizedId = id.split(path.sep).join(path.posix.sep);
+      const normId = normalizeFsPath(id);
       if (!existsSync(id)) {
-        const fileUrl = pathToFileURL(id).href;
+        const fileUrl = normalizeFileUrl(id);
+        const fileUrlLower = fileUrl.toLowerCase();
         for (const key in manifest) {
-          if (key.startsWith(fileUrl)) {
+          if (key.toLowerCase().startsWith(fileUrlLower)) {
             delete manifest[key];
           }
         }
-        clientModules.delete(normalizedId);
-        serverModules.delete(normalizedId);
+        clientModules.delete(normId);
+        serverModules.delete(normId);
+        knownClientChunks.delete(id);
         return;
       }
       const code = readFileSync(id, "utf8");
@@ -290,22 +425,16 @@ function reactClientManifestPlugin({
       updateManifestForModule(id, code, isClientModule);
 
       if (isClientModule) {
-        if (!clientModules.has(normalizedId)) {
-          clientModules.add(normalizedId);
-          try {
-            this.emitFile({
-              type: "chunk",
-              id: id,
-              name: path.basename(id, path.extname(id)),
-            });
-          } catch (e) {}
-        }
-        serverModules.delete(normalizedId);
+        clientModules.add(normId);
+        const chunkName = getStableChunkName(id);
+        knownClientChunks.set(id, chunkName);
+        serverModules.delete(normId);
         this.addWatchFile(id);
       } else {
-        clientModules.delete(normalizedId);
+        clientModules.delete(normId);
+        knownClientChunks.delete(id);
         if (isPageOrLayout(id)) {
-          serverModules.add(normalizedId);
+          serverModules.add(normId);
           this.addWatchFile(id);
           const { imports, assets, csss } = await getImportsAndAssetsAndCsss(
             code,
@@ -323,43 +452,58 @@ function reactClientManifestPlugin({
           }
           for (const cssPath of csss) {
             this.addWatchFile(cssPath);
+            knownCssChunks.set(cssPath, path.basename(cssPath, path.extname(cssPath)));
           }
         } else {
-          serverModules.delete(normalizedId);
+          serverModules.delete(normId);
         }
       }
     },
     generateBundle(outputOptions, bundle) {
+      const normFsPathCache = new Map();
+      function getNormFsPath(p) {
+        let n = normFsPathCache.get(p);
+        if (!n) {
+          n = normalizeFsPath(p);
+          normFsPathCache.set(p, n);
+        }
+        return n;
+      }
+
       for (const [fileName, chunk] of Object.entries(bundle)) {
         if (chunk.type !== "chunk") continue;
+        const chunkUrl = "/" + fileName;
 
         // Process entry point facadeModuleId for default export preservation
         if (chunk.facadeModuleId) {
           const absModulePath = path.resolve(chunk.facadeModuleId);
-          if (!absModulePath.includes("\0") && !absModulePath.startsWith("commonjsHelpers")) {
-            const fileUrl = pathToFileURL(absModulePath).href;
-            manifest[fileUrl] = {
-              id: "/" + fileName,
-              chunks: "default",
-              name: "default",
-            };
-            manifest[fileUrl + "#default"] = {
-              id: "/" + fileName,
-              chunks: "default",
-              name: "default",
-            };
+          if (
+            !absModulePath.includes("\0") &&
+            !absModulePath.startsWith("commonjsHelpers") &&
+            !absModulePath.includes("node_modules")
+          ) {
+            const normPath = getNormFsPath(absModulePath);
+            if (clientModules.has(normPath)) {
+              const fileUrl = normalizeFileUrl(absModulePath);
+              const fileUrlLower = fileUrl.toLowerCase();
+              const keys = urlToManifestKeys.get(fileUrlLower);
+              if (keys) {
+                for (const k of keys) {
+                  if (manifest[k]) manifest[k].id = chunkUrl;
+                }
+              }
+              setManifestEntry(fileUrl, "default", {
+                id: chunkUrl,
+                chunks: "default",
+                name: "default",
+              });
 
-            if (!chunk.exports.includes("default")) {
-              try {
-                const originalCode = readFileSync(absModulePath, "utf8");
-                const defaultName = getDefaultExportName(originalCode);
+              if (!chunk.exports.includes("default")) {
+                const defaultName = defaultExportCache.get(absModulePath);
                 if (defaultName && chunk.exports.includes(defaultName)) {
                   chunk.code += `\nexport { ${defaultName} as default };\n`;
                   chunk.exports.push("default");
-                  // console.log(`👉 [react-client-manifest] Appended default export alias to chunk ${fileName}: export { ${defaultName} as default };`);
                 }
-              } catch (err) {
-                // Ignore errors
               }
             }
           }
@@ -367,25 +511,62 @@ function reactClientManifestPlugin({
 
         // Map all modules in the chunk to this chunk in the manifest (only if they are client modules)
         for (const modulePath of Object.keys(chunk.modules)) {
-          if (modulePath.includes("\0") || modulePath.startsWith("commonjsHelpers")) continue;
-          const absModulePath = path.resolve(modulePath);
-          const normalizedPath = absModulePath.split(path.sep).join(path.posix.sep);
+          if (
+            modulePath.includes("\0") ||
+            modulePath.startsWith("commonjsHelpers") ||
+            modulePath.includes("node_modules")
+          ) {
+            continue;
+          }
+          const normPath = getNormFsPath(modulePath);
 
-          if (clientModules.has(normalizedPath)) {
-            const fileUrl = pathToFileURL(absModulePath).href;
-            // Update the chunk id for all exports of this module
-            for (const key of Object.keys(manifest)) {
-              if (key === fileUrl || key.startsWith(fileUrl + "#")) {
-                manifest[key].id = "/" + fileName;
+          if (clientModules.has(normPath)) {
+            const fileUrl = normalizeFileUrl(modulePath);
+            const fileUrlLower = fileUrl.toLowerCase();
+            const keys = urlToManifestKeys.get(fileUrlLower);
+            if (keys) {
+              for (const k of keys) {
+                if (manifest[k]) manifest[k].id = chunkUrl;
               }
             }
           }
         }
       }
-      const serialized = JSON.stringify(manifest, null, 2);
-      if (!existsSync(manifestPath) || readFileSync(manifestPath, "utf8") !== serialized) {
+
+      function areManifestsSemanticallyEqual(m1, m2) {
+        if (!m1 || !m2) return false;
+        const k1 = Object.keys(m1);
+        const k2 = Object.keys(m2);
+        if (k1.length !== k2.length) return false;
+        for (const k of k1) {
+          const v1 = m1[k];
+          const v2 = m2[k];
+          if (!v2) return false;
+          if (
+            v1.id !== v2.id ||
+            v1.name !== v2.name ||
+            v1.chunks !== v2.chunks
+          ) {
+            return false;
+          }
+        }
+        return true;
+      }
+
+      let existingManifest = null;
+      if (existsSync(manifestPath)) {
+        try {
+          existingManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+        } catch (e) {}
+      }
+
+      if (!existingManifest || !areManifestsSemanticallyEqual(existingManifest, manifest)) {
+        const sortedManifest = {};
+        for (const k of Object.keys(manifest).sort()) {
+          sortedManifest[k] = manifest[k];
+        }
         mkdirSync(dirname(manifestPath), { recursive: true });
-        writeFileSync(manifestPath, serialized);
+        writeFileSync(manifestPath, JSON.stringify(sortedManifest, null, 2));
         manifestUpdatedCallback?.();
       }
     },

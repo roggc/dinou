@@ -168,14 +168,28 @@ socket.addEventListener("message", ({ data: _data }) => {
     return;
   }
 
+  const tRecv = Date.now();
+  const isDebug = typeof window !== "undefined" && Boolean(window.__DINOU_DEBUG__);
+
+  if (isDebug) {
+    console.log(`⏱️ [BROWSER HMR] Received update for ${data.url} at ${new Date().toTimeString().slice(0, 8)}.${String(Date.now() % 1000).padStart(3, '0')}`);
+  }
+
   applyUpdate(data.url)
     .then((ok) => {
       if (!ok) {
+        if (isDebug) console.warn(`⏱️ [BROWSER HMR] applyUpdate returned false, falling back to full reload!`);
         reload();
+      } else {
+        if (isDebug) {
+          console.log(`⏱️ [BROWSER HMR] Fast Refresh finished applying in ${Date.now() - tRecv}ms!`);
+        } else {
+          console.log(`[ESM-HMR] hot updated: ${data.url}`);
+        }
       }
     })
     .catch((err) => {
-      console.error(err);
+      console.error(`[ESM-HMR] applyUpdate error:`, err);
       reload();
     });
 });

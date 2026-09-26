@@ -1325,9 +1325,10 @@ async function handleRequest(request, platformContext = {}) {
             : [clientEntry];
 
           if (isDevelopment && !isWebpack) {
+            const hmrPort = process.env.HMR_PORT || (Number(process.env.PORT || 3000) + 1);
             bootstrapScriptContent += `window.$RefreshReg$ = window.$RefreshReg$ || function() {};\n`;
             bootstrapScriptContent += `window.$RefreshSig$ = window.$RefreshSig$ || function() { return function(type) { return type; }; };\n`;
-            bootstrapScriptContent += `window.HMR_WEBSOCKET_URL="ws://localhost:3001";\n`;
+            bootstrapScriptContent += `window.HMR_WEBSOCKET_URL="ws://localhost:${hmrPort}";\n`;
           }
 
           let htmlStream;
@@ -1393,9 +1394,10 @@ async function handleRequest(request, platformContext = {}) {
             )};window.__DINOU_ERROR_NAME__=${JSON.stringify(serializedError.name)};\n`;
             errorBootstrapScript += 'document.body.setAttribute("data-hydrated", "true");\n';
             if (isDevelopment && !isWebpack) {
+              const hmrPort = process.env.HMR_PORT || (Number(process.env.PORT || 3000) + 1);
               errorBootstrapScript += `window.$RefreshReg$ = window.$RefreshReg$ || function() {};\n`;
               errorBootstrapScript += `window.$RefreshSig$ = window.$RefreshSig$ || function() { return function(type) { return type; }; };\n`;
-              errorBootstrapScript += `window.HMR_WEBSOCKET_URL="ws://localhost:3001";\n`;
+              errorBootstrapScript += `window.HMR_WEBSOCKET_URL="ws://localhost:${hmrPort}";\n`;
             }
 
             await requestStorage.run(context, async () => {
