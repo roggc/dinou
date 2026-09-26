@@ -992,7 +992,7 @@ async function handleRequest(request, platformContext = {}) {
 
     await requestStorage.run(context, async () => {
       try {
-        const jsx = await getJSX(cleanPath, queryObj, isNotFound, isDevelopment, isPathBlocked);
+        const jsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, isPathBlocked);
         if (bridge.headers.has("x-rsc-redirect") || bridge.headers.has("Location")) {
           return;
         }
@@ -1007,7 +1007,7 @@ async function handleRequest(request, platformContext = {}) {
       } catch (err) {
         console.error("[Dinou] Error rendering RSC payload:", err);
         const serializedError = { message: err.message || "Unknown Error", name: err.name };
-        const errJsx = await getErrorJSX(cleanPath, queryObj, serializedError, isDevelopment);
+        const errJsx = await getErrorJSX(reqPath, queryObj, serializedError, isDevelopment);
         bridge.status(500);
         const manifest = getClientManifest();
         pipeRSC(errJsx, bridge, manifest, platformContext);
@@ -1116,7 +1116,7 @@ async function handleRequest(request, platformContext = {}) {
             const isNotFound = {};
             let jsx;
             await requestStorage.run(context, async () => {
-              jsx = await getJSX(cleanPath, queryObj, isNotFound, false, false);
+              jsx = await getJSX(reqPath, queryObj, isNotFound, false, false);
               const clientManifest = getClientManifest();
               const rscStream = renderRSCStream(jsx, clientManifest, { runtime: "edge" });
               if (platformContext && platformContext.renderHtmlStream) {
@@ -1210,7 +1210,7 @@ async function handleRequest(request, platformContext = {}) {
         try {
           if (!isError) {
             await requestStorage.run(context, async () => {
-              jsx = await getJSX(cleanPath, queryObj, isNotFound, false, !pagePath);
+              jsx = await getJSX(reqPath, queryObj, isNotFound, false, !pagePath);
             });
           }
         } catch (err) {
@@ -1238,7 +1238,7 @@ async function handleRequest(request, platformContext = {}) {
           };
           try {
             await requestStorage.run(context, async () => {
-              jsx = await getErrorJSX(cleanPath, queryObj, serializedError, isDevelopment);
+              jsx = await getErrorJSX(reqPath, queryObj, serializedError, isDevelopment);
             });
           } catch (e) {
             console.error("[Edge ISG] Failed to render error JSX:", e);
@@ -1360,7 +1360,7 @@ async function handleRequest(request, platformContext = {}) {
             let errorJsx;
             try {
               await requestStorage.run(context, async () => {
-                errorJsx = await getErrorJSX(cleanPath, queryObj, serializedError, isDevelopment);
+                errorJsx = await getErrorJSX(reqPath, queryObj, serializedError, isDevelopment);
               });
             } catch (errJsxErr) {
               console.error("[Edge Native SSR] Failed to get error JSX:", errJsxErr);

@@ -16,6 +16,8 @@ async function getJSX(
 ) {
   const srcFolder = path.resolve(process.cwd(), "src");
   const reqSegments = reqPath.split("/").filter(Boolean);
+  const normalizedReqPath =
+    "/" + reqSegments.join("/") + (reqSegments.length > 0 ? "/" : "");
   const hasRouterSyntax = reqSegments.some((seg) => {
     const isGroup = seg.startsWith("(") && seg.endsWith(")");
 
@@ -68,7 +70,7 @@ async function getJSX(
       jsx = React.createElement(
         "div",
         null,
-        `Page not found: no "page" file found for "${reqPath}"`,
+        `Page not found: no "page" file found for "${normalizedReqPath}"`,
       );
     } else {
       const pageModule = await importModule(notFoundPath);
