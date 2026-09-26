@@ -8,6 +8,7 @@ const createScopedName = require("../core/createScopedName");
 const TsconfigPathsPlugin = require("tsconfig-paths-webpack-plugin");
 const manifestGeneratorPlugin = require("./plugins/manifest-generator-plugin");
 const ServerFunctionsPlugin = require("./plugins/server-functions-plugin");
+const WebpackMemoryPlugin = require("./plugins/webpack-memory-plugin");
 const webpack = require("webpack");
 const { regex } = require("../core/asset-extensions");
 const getCSSEntries = require("./helpers/get-webpack-entries");
@@ -68,9 +69,14 @@ function cleanDir(dir) {
 module.exports = async () => {
   const outputDir = path.resolve(process.cwd(), outputDirectory);
 
+  const shouldWriteToDisk =
+    process.env.DINOU_WRITE_TO_DISK === "true" || !isDevelopment;
+
   // 🔥 CLEAN HARD
-  cleanDir(outputDir);
-  const [cssEntries] = await getCSSEntries();
+  if (shouldWriteToDisk) {
+    cleanDir(outputDir);
+  }
+  const [cssEntries, , serverFiles] = await getCSSEntries();
 
   const dependencyClientFiles = new Set();
   scanProjectDependenciesForClientComponents(
@@ -143,7 +149,7 @@ module.exports = async () => {
       filename: isDevelopment ? "[name].js" : "[name]-[contenthash].js",
       chunkFilename: isDevelopment ? "[name].js" : "[name]-[contenthash].js",
       publicPath: "/",
-      clean: isDevelopment,
+      clean: shouldWriteToDisk,
       library: {
         type: "module",
       },
@@ -177,6 +183,9 @@ module.exports = async () => {
                 __dirname,
                 "./loaders/server-functions-loader.js",
               ),
+              options: {
+                serverFiles,
+              },
             },
           ],
         },
@@ -311,6 +320,7 @@ module.exports = async () => {
       new ServerFunctionsPlugin({
         manifest: manifestGeneratorPlugin.manifestData,
       }),
+      isDevelopment && new WebpackMemoryPlugin(),
       !isDevelopment && {
         apply(compiler) {
           compiler.hooks.done.tap("PostBuildClient", () => {
@@ -403,7 +413,7 @@ module.exports = async () => {
           },
           devMiddleware: {
             index: false,
-            writeToDisk: true,
+            writeToDisk: process.env.DINOU_WRITE_TO_DISK === "true",
           },
           watchFiles: [
             path.resolve(process.cwd(), "src/**/*"),

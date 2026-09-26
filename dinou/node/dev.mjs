@@ -232,7 +232,7 @@ function updateManifestsState() {
     parsedServerFunctionsManifest = rawSf;
   }
 
-  const rawAsset = readJsonSafe(aPath);
+  const rawAsset = globalThis.__DINOU_RAW_ASSET_MANIFEST__ || readJsonSafe(aPath);
   if (rawAsset) {
     parsedAssetManifest = rawAsset;
   }
@@ -786,13 +786,26 @@ const serverAssetPlugin = {
       const base = path.basename(args.path, ext);
       const scoped = createScopedName(base, args.path);
       const assetUrl = `/assets/${scoped}${ext}`;
+      const assetKey = `assets/${scoped}${ext}`;
 
       try {
-        const outAssetDir = path.resolve(projectRoot, ".dinou/public/assets");
-        const outAssetPath = path.join(outAssetDir, `${scoped}${ext}`);
-        if (!fs.existsSync(outAssetPath)) {
-          fs.mkdirSync(outAssetDir, { recursive: true });
-          fs.copyFileSync(args.path, outAssetPath);
+        const fileBuf = fs.readFileSync(args.path);
+        if (typeof globalThis !== "undefined") {
+          if (!globalThis.__DINOU_MEM_FILES__) {
+            globalThis.__DINOU_MEM_FILES__ = new Map();
+          }
+          globalThis.__DINOU_MEM_FILES__.set(assetKey, fileBuf);
+          globalThis.__DINOU_MEM_FILES__.set("/" + assetKey, fileBuf);
+          globalThis.__DINOU_MEM_FILES__.set(`${scoped}${ext}`, fileBuf);
+        }
+
+        if (process.env.DINOU_WRITE_TO_DISK === "true") {
+          const outAssetDir = path.resolve(projectRoot, ".dinou/public/assets");
+          const outAssetPath = path.join(outAssetDir, `${scoped}${ext}`);
+          if (!fs.existsSync(outAssetPath)) {
+            fs.mkdirSync(outAssetDir, { recursive: true });
+            fs.writeFileSync(outAssetPath, fileBuf);
+          }
         }
       } catch (e) {}
 
@@ -1167,6 +1180,7 @@ function checkClientFilesPresent() {
   const cPath = findManifest("react-client-manifest.json", "react_client_manifest");
   if (!globalThis.__DINOU_RAW_CLIENT_MANIFEST__ && !readJsonSafe(cPath)) return false;
   if (isWebpackBuild) {
+    if (globalThis.__DINOU_RAW_ASSET_MANIFEST__) return true;
     const mPath = path.resolve(projectRoot, ".dinou/public/manifest.json");
     return fs.existsSync(mPath);
   }
@@ -1280,6 +1294,14 @@ async function startClientBundler(tool) {
         try { await currentWatcher.close(); } catch (e) {}
         currentWatcher = null;
       }
+      if (typeof globalThis !== "undefined") {
+        if (globalThis.__DINOU_MEM_FILES__) {
+          globalThis.__DINOU_MEM_FILES__.clear();
+        }
+        delete globalThis.__DINOU_RAW_CLIENT_MANIFEST__;
+        delete globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__;
+        delete globalThis.__DINOU_RAW_ASSET_MANIFEST__;
+      }
       const rollupConfig = await getRollupConfig();
       currentWatcher = watch(rollupConfig);
 
@@ -1350,6 +1372,14 @@ async function startClientBundler(tool) {
   }
 
   if (normTool === "webpack") {
+    if (typeof globalThis !== "undefined") {
+      if (globalThis.__DINOU_MEM_FILES__) {
+        globalThis.__DINOU_MEM_FILES__.clear();
+      }
+      delete globalThis.__DINOU_RAW_CLIENT_MANIFEST__;
+      delete globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__;
+      delete globalThis.__DINOU_RAW_ASSET_MANIFEST__;
+    }
     const webpack = require("webpack");
     const WebpackDevServer = require("webpack-dev-server");
     const getWebpackConfig = require(path.resolve(dinouDir, "webpack/webpack.config.js"));

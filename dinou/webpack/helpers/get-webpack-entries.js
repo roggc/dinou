@@ -145,10 +145,16 @@ async function getCSSEntries({
     absolute: true,
   });
 
+  const serverFiles = new Set();
+
   // Gather client modules and update manifest entries
   for (const absPath of files) {
     const code = readFileSync(absPath, "utf8");
-    const isClientModule = useClientRegex.test(code.trim());
+    const trimmed = code.trim();
+    if (useServerRegex.test(trimmed)) {
+      serverFiles.add(path.resolve(absPath).replace(/\\/g, "/").toLowerCase());
+    }
+    const isClientModule = useClientRegex.test(trimmed);
     const normalizedPath = normalizePath(absPath);
 
     if (isClientModule) {
@@ -206,7 +212,7 @@ async function getCSSEntries({
     dCSSE.outfileName = outfileName;
   }
 
-  return [detectedCSSEntries, detectedClientEntries];
+  return [detectedCSSEntries, detectedClientEntries, serverFiles];
 }
 
 module.exports = getCSSEntries;

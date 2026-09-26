@@ -53,8 +53,9 @@ export default function getConfigEsbuild({
       : []),
   ];
 
+  const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true";
   const staticDir = fs.existsSync("public") ? "public" : (fs.existsSync("favicons") ? "favicons" : null);
-  if (staticDir) {
+  if (staticDir && shouldWriteToDisk) {
     let staticCopied = false;
     plugins = [
       {

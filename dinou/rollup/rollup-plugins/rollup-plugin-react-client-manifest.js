@@ -9,7 +9,7 @@ const traverse = typeof _traverseRaw === "function" ? _traverseRaw : (_traverseR
 const { regex } = require("../../core/asset-extensions.js");
 const createScopedName = require("../../core/createScopedName.js");
 const { getAbsPathWithExt } = require("../../core/get-abs-path-with-ext.js");
-const { useClientRegex } = require("../../constants.js");
+const { useClientRegex, useServerRegex } = require("../../constants.js");
 const parseExports = require("../../core/parse-exports.js");
 
 function getDefaultExportName(code) {
@@ -42,10 +42,12 @@ function reactClientManifestPlugin({
   srcDir = path.resolve("src"),
   manifestPath = ".dinou/react_client_manifest/react-client-manifest.json",
   assetInclude = regex,
+  serverFiles = new Set(),
 } = {}) {
   const manifest = {};
   const clientModules = new Set();
   const serverModules = new Set();
+  let lastManifest = null;
 
 const urlToManifestKeys = new Map();
 const defaultExportCache = new Map();
@@ -315,6 +317,10 @@ function setManifestEntry(fileUrl, expName, entry) {
         const code = readFileSync(absPath, "utf8");
         const normalizedPath = absPath.split(path.sep).join(path.posix.sep);
         const isClientModule = useClientRegex.test(code.trim());
+        const isServerModule = useServerRegex.test(code.trim());
+        if (isServerModule) {
+          serverFiles.add(normalizeFsPath(absPath));
+        }
 
         if (isClientModule) {
           clientModules.add(normalizeFsPath(absPath));
@@ -416,11 +422,18 @@ function setManifestEntry(fileUrl, expName, entry) {
         }
         clientModules.delete(normId);
         serverModules.delete(normId);
+        serverFiles.delete(normId);
         knownClientChunks.delete(id);
         return;
       }
       const code = readFileSync(id, "utf8");
       const isClientModule = useClientRegex.test(code.trim());
+      const isServerModule = useServerRegex.test(code.trim());
+      if (isServerModule) {
+        serverFiles.add(normId);
+      } else {
+        serverFiles.delete(normId);
+      }
 
       updateManifestForModule(id, code, isClientModule);
 
@@ -553,20 +566,30 @@ function setManifestEntry(fileUrl, expName, entry) {
         return true;
       }
 
+      if (typeof globalThis !== "undefined") {
+        globalThis.__DINOU_RAW_CLIENT_MANIFEST__ = { ...manifest };
+      }
+
+      const isDev = process.env.NODE_ENV !== "production" || process.env.DINOU_DEV === "true";
+      const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDev;
+
       let existingManifest = null;
-      if (existsSync(manifestPath)) {
+      if (shouldWriteToDisk && existsSync(manifestPath)) {
         try {
           existingManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
         } catch (e) {}
       }
 
-      if (!existingManifest || !areManifestsSemanticallyEqual(existingManifest, manifest)) {
-        const sortedManifest = {};
-        for (const k of Object.keys(manifest).sort()) {
-          sortedManifest[k] = manifest[k];
+      if (!lastManifest || !areManifestsSemanticallyEqual(lastManifest, manifest)) {
+        lastManifest = JSON.parse(JSON.stringify(manifest));
+        if (shouldWriteToDisk) {
+          const sortedManifest = {};
+          for (const k of Object.keys(manifest).sort()) {
+            sortedManifest[k] = manifest[k];
+          }
+          mkdirSync(dirname(manifestPath), { recursive: true });
+          writeFileSync(manifestPath, JSON.stringify(sortedManifest, null, 2));
         }
-        mkdirSync(dirname(manifestPath), { recursive: true });
-        writeFileSync(manifestPath, JSON.stringify(sortedManifest, null, 2));
         manifestUpdatedCallback?.();
       }
     },

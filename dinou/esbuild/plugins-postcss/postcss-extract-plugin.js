@@ -29,11 +29,13 @@ const createPostCSSExtractPlugin = (options = {}) => {
     if (!extractedCSS) return;
     const outputDir = path.dirname(outputFile);
 
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
+    const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true";
+    if (shouldWriteToDisk) {
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+      fs.writeFileSync(outputFile, extractedCSS);
     }
-
-    fs.writeFileSync(outputFile, extractedCSS);
 
     if (typeof globalThis !== "undefined" && globalThis.__DINOU_MEM_FILES__) {
       const buf = Buffer.from(extractedCSS);

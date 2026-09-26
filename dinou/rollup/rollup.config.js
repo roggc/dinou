@@ -17,6 +17,7 @@ const tsconfigPaths = require("rollup-plugin-tsconfig-paths");
 const serverFunctionsPlugin = require("./rollup-plugins/rollup-plugin-server-functions");
 const { regex } = require("../core/asset-extensions.js");
 const manifestGeneratorPlugin = require("./rollup-plugins/manifest-generator-plugin.js");
+const rollupMemoryPlugin = require("./rollup-plugins/rollup-plugin-memory.js");
 
 const localDinouPath = path.resolve(process.cwd(), "dinou");
 const isEjected = fs.existsSync(localDinouPath);
@@ -30,6 +31,8 @@ console.log(
 module.exports = async function () {
   const isDevelopment = process.env.NODE_ENV !== "production";
   const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
+  const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDevelopment;
+  const serverFiles = new Set();
   const del = (await import("rollup-plugin-delete")).default;
   const clientConfig = {
     input: isDevelopment
@@ -110,15 +113,16 @@ module.exports = async function () {
       "/__SERVER_FUNCTION_PROXY__",
     ],
     plugins: [
-      del({
-        targets: [
-          `${outputDirectory}/*`,
-          ".dinou/react_client_manifest/*",
-          ".dinou/server_functions_manifest/*",
-        ],
-        runOnce: true,
-        hook: "buildStart",
-      }),
+      shouldWriteToDisk &&
+        del({
+          targets: [
+            `${outputDirectory}/*`,
+            ".dinou/react_client_manifest/*",
+            ".dinou/server_functions_manifest/*",
+          ],
+          runOnce: true,
+          hook: "buildStart",
+        }),
       tsconfigPaths(),
       replace({
         preventAssignment: true,
@@ -164,29 +168,32 @@ module.exports = async function () {
           path: path.resolve(__dirname, "postcss.config.js"),
         },
       }),
-      copy({
-        targets: [
-          fs.existsSync("public") && {
-            src: "public/*",
-            dest: outputDirectory,
-          },
-          fs.existsSync("favicons") && {
-            src: "favicons/*",
-            dest: outputDirectory,
-          },
-        ].filter(Boolean),
-        flatten: true,
-      }),
+      shouldWriteToDisk &&
+        copy({
+          targets: [
+            fs.existsSync("public") && {
+              src: "public/*",
+              dest: outputDirectory,
+            },
+            fs.existsSync("favicons") && {
+              src: "favicons/*",
+              dest: outputDirectory,
+            },
+          ].filter(Boolean),
+          flatten: true,
+        }),
       reactClientManifest({
         manifestPath: path.join(
           ".dinou/react_client_manifest",
           "react-client-manifest.json",
         ),
+        serverFiles,
       }),
       isDevelopment && reactRefreshWrapModules(),
       isDevelopment && esmHmrPlugin(),
       !isDevelopment && manifestGeneratorPlugin(),
-      serverFunctionsPlugin(),
+      serverFunctionsPlugin({ serverFiles }),
+      isDevelopment && rollupMemoryPlugin(),
     ].filter(Boolean),
     watch: {
       buildDelay: 100,
