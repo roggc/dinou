@@ -790,6 +790,7 @@ const externalList = [...nodeBuiltins, ...nodeBuiltins.map((b) => "node:" + b)];
 
 const commonAlias = {
   "@": path.resolve(projectRoot, "src"),
+  "dinou/config": path.resolve(dinouDir, "core/config.js"),
   dinou: dinouDir,
 };
 const commonLoader = {
@@ -1023,6 +1024,7 @@ let rscModule = null;
 let ssrModule = null;
 let engineVersion = 1;
 let activeRebuildPromise = null;
+let activeSsrSyncPromise = null;
 
 async function doInitialBuild() {
   const tBuild0 = Date.now();
@@ -1179,6 +1181,18 @@ async function doRebuild(filePath = "", eventType = "change") {
       updateManifestsState();
       generateEntryFiles();
       await Promise.all([ctxA.rebuild(), ctxB.rebuild()]);
+      engineVersion = Date.now();
+      const v = "?v=" + engineVersion;
+      rscModule = await dynamicImportWithRetry(pathToFileURL(rscOutfile).href + v);
+      ssrModule = await dynamicImportWithRetry(pathToFileURL(ssrOutfile).href + v);
+      logTimeline(`SSR module imported into V8 runtime`);
+      logSuccess(`Rebuilt in ${Date.now() - t0}ms (${eventType} ${baseName})`);
+      if (activeClientBuildPromise) {
+        await activeClientBuildPromise;
+      }
+      if (!isCssFile) {
+        await broadcastToClients({ type: "reload" });
+      }
     } else if (isClientFile) {
       if (activeClientBuildPromise) {
         logTimeline(`Prioritizing client HMR broadcast before SSR update...`);
@@ -1189,34 +1203,35 @@ async function doRebuild(filePath = "", eventType = "change") {
           await activeClientBuildPromise;
         }
       }
-      logTimeline(`ctxB (SSR Engine) background rebuild starting...`);
-      const tB = Date.now();
-      await ctxB.rebuild();
-      logTimeline(`ctxB (SSR Engine) rebuilt in ${Date.now() - tB}ms`);
+      logSuccess(`Rebuilt in ${Date.now() - t0}ms (${eventType} ${baseName})`);
+      // Rebuild SSR engine asynchronously in the background so client HMR is instant
+      const ssrSync = (async () => {
+        try {
+          const tB = Date.now();
+          await ctxB.rebuild();
+          logTimeline(`ctxB (SSR Engine) rebuilt in ${Date.now() - tB}ms`);
+          const v = "?v=" + Date.now();
+          ssrModule = await dynamicImportWithRetry(pathToFileURL(ssrOutfile).href + v);
+          logTimeline(`SSR module imported into V8 runtime`);
+        } catch (err) {
+          console.error("❌ [SSR Engine Rebuild Error]:", err);
+        }
+      })();
+      activeSsrSyncPromise = ssrSync;
+      ssrSync.finally(() => {
+        if (activeSsrSyncPromise === ssrSync) activeSsrSyncPromise = null;
+      });
     } else {
       await ctxA.rebuild();
-    }
-
-    engineVersion = Date.now();
-    const v = "?v=" + engineVersion;
-    if (needsStructureRebuild || !isClientFile) {
+      engineVersion = Date.now();
+      const v = "?v=" + engineVersion;
       rscModule = await dynamicImportWithRetry(pathToFileURL(rscOutfile).href + v);
-    }
-    if (needsStructureRebuild || isClientFile) {
-      ssrModule = await dynamicImportWithRetry(pathToFileURL(ssrOutfile).href + v);
-    }
-    logTimeline(`SSR module imported into V8 runtime`);
-    logSuccess(`Rebuilt in ${Date.now() - t0}ms (${eventType} ${baseName})`);
-    if (!isClientFile) {
+      logSuccess(`Rebuilt in ${Date.now() - t0}ms (${eventType} ${baseName})`);
       if (activeClientBuildPromise) {
         await activeClientBuildPromise;
       }
       if (!isCssFile) {
-        if (needsStructureRebuild) {
-          await broadcastToClients({ type: "reload" });
-        } else {
-          await broadcastToClients({ type: "rsc-update", path: absFilePath || filePath });
-        }
+        await broadcastToClients({ type: "rsc-update", path: absFilePath || filePath });
       }
     }
   } catch (err) {
@@ -1595,6 +1610,9 @@ const server = http.createServer(async (req, res) => {
     if (activeClientBuildPromise) {
       await activeClientBuildPromise;
     }
+    if (activeSsrSyncPromise) {
+      await activeSsrSyncPromise;
+    }
     // If a source change is pending debounce, process it
     if (srcDebounce) {
       clearTimeout(srcDebounce);
@@ -1638,7 +1656,6 @@ const server = http.createServer(async (req, res) => {
         if (memBuf) {
           const fileExt = path.extname(cleanPath).toLowerCase();
           const contentType = MIME_TYPES[fileExt] || "application/octet-stream";
-          logTimeline(`⚡ [MEM CACHE] HTTP served ${pathname} (${memBuf.length} bytes)`);
           res.statusCode = 200;
           res.setHeader("content-type", contentType);
           res.setHeader("content-length", String(memBuf.length));
@@ -1719,7 +1736,6 @@ const server = http.createServer(async (req, res) => {
           }
 
           if (buf !== null) {
-            logTimeline(`🌐 HTTP served ${pathname} (${buf.length} bytes)`);
             res.statusCode = 200;
             res.setHeader("content-type", contentType);
             res.setHeader("content-length", String(buf.length));

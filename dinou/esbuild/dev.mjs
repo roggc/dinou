@@ -134,6 +134,7 @@ export async function startEsbuildDev(options = {}) {
           changedIds,
           hmrEngine,
           serverFiles: currentServerFiles,
+          hmrPort: options.hmrPort,
           onManifestUpdated: async () => {
             await onRebuilt();
           },
@@ -151,7 +152,15 @@ export async function startEsbuildDev(options = {}) {
         })
       );
 
-      await currentCtx.watch();
+      const isStandalone =
+        process.argv[1] &&
+        fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+      if (isStandalone) {
+        await currentCtx.watch();
+      } else {
+        await currentCtx.rebuild();
+      }
       if (buildPromise) {
         await buildPromise;
       }

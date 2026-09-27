@@ -18,6 +18,7 @@ export default function getConfigEsbuild({
   onManifestUpdated,
   onBuildStart,
   onBuildEnd,
+  hmrPort,
 }) {
   let plugins = [
     ...(onBuildStart
@@ -38,7 +39,7 @@ export default function getConfigEsbuild({
     reactClientManifestPlugin({ manifest, onManifestUpdated }),
     assetsPlugin({ changedIds }),
     stableChunkNamesAndMapsPlugin({ changedIds }),
-    esmHmrPlugin({ entryNames: ["main", "error"], changedIds, hmrEngine }),
+    esmHmrPlugin({ entryNames: ["main", "error"], changedIds, hmrEngine, hmrPort }),
     ...(onBuildEnd
       ? [
           {

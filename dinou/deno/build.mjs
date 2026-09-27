@@ -760,6 +760,7 @@ const externalList = [
 
 const commonAlias = {
   "@": path.resolve(projectRoot, "src"),
+  "dinou/config": path.resolve(dinouDir, "core/config.js"),
   dinou: dinouDir,
 };
 

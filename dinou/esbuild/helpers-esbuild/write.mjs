@@ -75,6 +75,27 @@ export default async function write(result) {
     }
   }
 
+  // 1.b Also populate aliases for renamed chunks so old/raw names never 404
+  if (globalThis.__DINOU_CHUNK_RENAMES__) {
+    for (const [oldName, newName] of globalThis.__DINOU_CHUNK_RENAMES__.entries()) {
+      const cleanNew = normalizeRel(newName);
+      const newBase = path.basename(cleanNew);
+      const buf =
+        globalThis.__DINOU_MEM_FILES__.get(cleanNew) ||
+        globalThis.__DINOU_MEM_FILES__.get("/" + cleanNew) ||
+        globalThis.__DINOU_MEM_FILES__.get(newBase);
+      if (buf) {
+        const cleanOld = normalizeRel(oldName);
+        const oldBase = path.basename(cleanOld);
+        globalThis.__DINOU_MEM_FILES__.set(cleanOld, buf);
+        globalThis.__DINOU_MEM_FILES__.set("/" + cleanOld, buf);
+        if (!globalThis.__DINOU_MEM_FILES__.has(oldBase)) {
+          globalThis.__DINOU_MEM_FILES__.set(oldBase, buf);
+        }
+      }
+    }
+  }
+
   const isDebug =
     process.env.DINOU_DEBUG === "true" ||
     process.env.DINOU_DEBUG === "1" ||

@@ -105,12 +105,13 @@ export default function esmHmrPlugin({
         const normPath = args.path.replace(/\\/g, "/");
         if (normPath.includes("/node_modules/")) return null;
 
-        // 2. Check if it is any OTHER Entry Point from the esbuild configuration
-        // (Here are your pages, layouts, components...)
-        const isAnEntryPoint = entryPointsSet.has(absNorm);
+        // 2. Check if it is a user component (entry point or any JSX/TSX component in src/)
+        const isUserComponent =
+          entryPointsSet.has(absNorm) ||
+          (normPath.includes("/src/") && /\.[jt]sx?$/i.test(normPath));
 
         // CASE B: It is a user page or component
-        if (isAnEntryPoint) {
+        if (isUserComponent) {
           try {
             const stat = await fs.stat(args.path);
             const cached = swcCache.get(absNorm);

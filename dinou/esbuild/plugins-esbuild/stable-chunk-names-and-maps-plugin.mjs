@@ -73,6 +73,9 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true, changedIds }
           }
 
           if (renames.size === 0) return;
+          if (typeof globalThis !== "undefined") {
+            globalThis.__DINOU_CHUNK_RENAMES__ = renames;
+          }
 
           // Step 3: Update references in importers (imports in .js)
           const outputs = result.metafile.outputs;
@@ -88,15 +91,6 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true, changedIds }
           for (const relPath in outputs) {
             const output = outputs[relPath];
             if (!output.imports || !relPath.endsWith(".js")) continue;
-
-            if (isIncremental) {
-              const inputFiles = Object.keys(output.inputs || {});
-              const touchesChanged = inputFiles.some((m) => {
-                const clean = m.replace(/^[a-zA-Z0-9_-]+:/, "");
-                return changedIds.has(normKey(clean));
-              });
-              if (!touchesChanged) continue;
-            }
 
             // Only decode and regex-replace if this output imports any renamed chunk
             const hasRenamedChunk = output.imports.some((imp) => renames.has(path.basename(imp.path)));
@@ -144,16 +138,6 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true, changedIds }
             );
             const oldLocal = path.basename(oldRelPath);
             if (!renames.has(oldLocal)) continue;
-
-            if (isIncremental) {
-              const output = outputs[oldRelPath];
-              const inputFiles = Object.keys(output?.inputs || {});
-              const touchesChanged = inputFiles.some((m) => {
-                const clean = m.replace(/^[a-zA-Z0-9_-]+:/, "");
-                return changedIds.has(normKey(clean));
-              });
-              if (!touchesChanged) continue;
-            }
 
             const newLocal = renames.get(oldLocal);
             const oldMapLocal = oldLocal.replace(/\.js$/, ".js.map");

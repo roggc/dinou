@@ -42,10 +42,26 @@ let dinouConfig = { plugins: [] };
 let dinouConfigPromise = null;
 
 async function getDinouConfig() {
+  if (typeof globalThis !== "undefined" && globalThis.__DINOU_CONFIG__) {
+    const cfg = globalThis.__DINOU_CONFIG__;
+    if (cfg && cfg.storage) {
+      setStorageAdapter(cfg.storage);
+    }
+    dinouConfig = cfg;
+    return cfg;
+  }
   if (dinouConfigPromise && !isDevelopment) {
     return dinouConfigPromise;
   }
   dinouConfigPromise = (async () => {
+    if (typeof globalThis !== "undefined" && globalThis.__DINOU_CONFIG__) {
+      const cfg = globalThis.__DINOU_CONFIG__;
+      if (cfg && cfg.storage) {
+        setStorageAdapter(cfg.storage);
+      }
+      dinouConfig = cfg;
+      return cfg;
+    }
     const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
     for (const filename of ["dinou.config.js", "dinou.config.mjs", "dinou.config.cjs"]) {
       const p = path.resolve(cwd, filename);
@@ -85,25 +101,33 @@ async function getDinouConfig() {
 }
 
 // Initial sync load attempt for immediate storage adapter setup
-const cwdSync = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : null;
-if (cwdSync) {
-  for (const filename of ["dinou.config.cjs", "dinou.config.js"]) {
-    const syncPath = path.resolve(cwdSync, filename);
-    if (existsSync(syncPath)) {
-      try {
-        const nodeReqSync = (typeof globalThis !== "undefined" && typeof globalThis.__dinou_require__ === "function")
-          ? globalThis.__dinou_require__
-          : (typeof require === "function" ? require : null);
-        if (nodeReqSync) {
-          const loaded = nodeReqSync(syncPath);
-          const cfg = (loaded && loaded.default) ? loaded.default : (loaded || { plugins: [] });
-          if (cfg && cfg.storage) {
-            setStorageAdapter(cfg.storage);
+if (typeof globalThis !== "undefined" && globalThis.__DINOU_CONFIG__) {
+  const cfg = globalThis.__DINOU_CONFIG__;
+  if (cfg && cfg.storage) {
+    setStorageAdapter(cfg.storage);
+  }
+  dinouConfig = cfg;
+} else {
+  const cwdSync = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : null;
+  if (cwdSync) {
+    for (const filename of ["dinou.config.cjs", "dinou.config.js"]) {
+      const syncPath = path.resolve(cwdSync, filename);
+      if (existsSync(syncPath)) {
+        try {
+          const nodeReqSync = (typeof globalThis !== "undefined" && typeof globalThis.__dinou_require__ === "function")
+            ? globalThis.__dinou_require__
+            : (typeof require === "function" ? require : null);
+          if (nodeReqSync) {
+            const loaded = nodeReqSync(syncPath);
+            const cfg = (loaded && loaded.default) ? loaded.default : (loaded || { plugins: [] });
+            if (cfg && cfg.storage) {
+              setStorageAdapter(cfg.storage);
+            }
+            dinouConfig = cfg;
           }
-          dinouConfig = cfg;
-        }
-      } catch (err) {}
-      break;
+        } catch (err) {}
+        break;
+      }
     }
   }
 }

@@ -77,6 +77,41 @@ function scanProjectDependenciesForClientComponents(projectRoot, clientFiles, us
   try {
     const pkgPath = path.resolve(projectRoot, "package.json");
     if (!fs.existsSync(pkgPath)) return;
+
+    // Cache check based on package-lock.json or package.json
+    const cacheDir = path.resolve(projectRoot, ".dinou");
+    const cacheFile = path.join(cacheDir, "deps-client-cache.json");
+
+    const lockPath = path.resolve(projectRoot, "package-lock.json");
+    const targetLock = fs.existsSync(lockPath) ? lockPath : pkgPath;
+    let lockStat;
+    try {
+      lockStat = fs.statSync(targetLock);
+    } catch (e) {}
+
+    const signature = lockStat ? `${lockStat.size}-${Math.round(lockStat.mtimeMs)}` : null;
+
+    if (signature && fs.existsSync(cacheFile)) {
+      try {
+        const cache = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+        if (cache.signature === signature && Array.isArray(cache.clientFiles)) {
+          let allExist = true;
+          for (const f of cache.clientFiles) {
+            if (!fs.existsSync(f)) {
+              allExist = false;
+              break;
+            }
+          }
+          if (allExist) {
+            for (const f of cache.clientFiles) {
+              clientFiles.add(path.resolve(f));
+            }
+            return;
+          }
+        }
+      } catch (e) {}
+    }
+
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     const deps = Object.keys(pkg.dependencies || {});
     for (const dep of deps) {
@@ -85,6 +120,23 @@ function scanProjectDependenciesForClientComponents(projectRoot, clientFiles, us
       if (fs.existsSync(depDir)) {
         scanDependencyForClientComponents(depDir, clientFiles, useClientRegex);
       }
+    }
+
+    // Save discovered files to cache
+    if (signature) {
+      try {
+        if (!fs.existsSync(cacheDir)) {
+          fs.mkdirSync(cacheDir, { recursive: true });
+        }
+        const discovered = [];
+        for (const f of clientFiles) {
+          const norm = f.replace(/\\/g, "/");
+          if (norm.includes("/node_modules/")) {
+            discovered.push(f);
+          }
+        }
+        fs.writeFileSync(cacheFile, JSON.stringify({ signature, clientFiles: discovered }), "utf8");
+      } catch (e) {}
     }
   } catch (e) {}
 }

@@ -184,22 +184,6 @@ export default async function getEsbuildEntries({
         absPath: normalizedPath,
         name,
       });
-      const { imports } = await getImportsAndAssetsAndCsss(
-        code,
-        absPath,
-        new Set(),
-        true,
-      );
-      const clientComponentRegex = /\.(js|jsx|ts|tsx)$/i;
-      imports.forEach((imp) => {
-        if (clientComponentRegex.test(imp) && !imp.includes("node_modules")) {
-          const name = path.basename(imp, path.extname(imp));
-          detectedClientEntries.add({
-            absPath: normalizePath(imp),
-            name,
-          });
-        }
-      });
     } else if (isPageOrLayout(absPath)) {
       serverModules.add(normalizedPath);
       try {

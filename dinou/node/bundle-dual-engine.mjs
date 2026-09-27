@@ -643,6 +643,7 @@ export async function renderHtml(rscStream, options = {}) {
 
   const commonAlias = {
     "@": path.resolve(projectRoot, "src"),
+    "dinou/config": path.resolve(dinouDir, "core/config.js"),
     dinou: dinouDir,
   };
   const commonLoader = {

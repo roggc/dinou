@@ -748,6 +748,7 @@ const shimsDir = path.resolve(__dirname, "shims");
 
 const commonAlias = {
   "@": path.resolve(projectRoot, "src"),
+  "dinou/config": path.resolve(dinouDir, "core/config.js"),
   dinou: dinouDir,
   fs: path.resolve(shimsDir, "fs.js"),
   "node:fs": path.resolve(shimsDir, "fs.js"),
