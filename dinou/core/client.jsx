@@ -10,6 +10,7 @@ import {
   useTransition,
   useLayoutEffect,
   useMemo,
+  useCallback,
   Component,
 } from "react";
 import { createFromFetch } from "@roggc/react-server-dom-esm/client";
@@ -254,6 +255,17 @@ function Router() {
     });
   };
 
+  const back = () => window.history.back();
+  const forward = () => window.history.forward();
+  const refresh = useCallback(() => {
+    const currentPath = window.location.pathname + window.location.search;
+    cache.delete(currentPath);
+    startTransition(() => {
+      setVersion((v) => v + 1);
+      setNavError(null);
+    });
+  }, [startTransition]);
+
   // 🔌 EFFECT 1: Expose Global Prefetch & Navigation
   useEffect(() => {
     window.__DINOU_PREFETCH__ = (url) => {
@@ -263,6 +275,7 @@ function Router() {
     };
 
     window.__DINOU_ROUTER_NAVIGATE__ = navigate;
+    window.__DINOU_ROUTER_REFRESH__ = refresh;
 
     // Hydration
     document.body.setAttribute("data-hydrated", "true");
@@ -271,25 +284,11 @@ function Router() {
       if (window.__DINOU_ROUTER_NAVIGATE__ === navigate) {
         window.__DINOU_ROUTER_NAVIGATE__ = undefined;
       }
+      if (window.__DINOU_ROUTER_REFRESH__ === refresh) {
+        window.__DINOU_ROUTER_REFRESH__ = undefined;
+      }
     };
-  }, [navigate]);
-
-  const back = () => window.history.back();
-  const forward = () => window.history.forward();
-  const refresh = () => {
-    const currentPath = window.location.pathname + window.location.search;
-    // console.log(`[Router] Soft Refreshing: ${currentPath}`);
-
-    // 1. Delete cache to ensure fresh data
-    cache.delete(currentPath);
-
-    // 2. Start transition (to show isPending if you want)
-    startTransition(() => {
-      // 3. Increment version to force re-execution of useMemo
-      setVersion((v) => v + 1);
-      setNavError(null);
-    });
-  };
+  }, [navigate, refresh]);
 
   // 🔌 EFFECT 2: Global Listeners (Click and PopState)
   useEffect(() => {

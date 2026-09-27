@@ -145,6 +145,15 @@ socket.addEventListener("message", ({ data: _data }) => {
     return;
   }
 
+  if (data.type === "rsc-update") {
+    if (typeof window !== "undefined" && typeof window.__DINOU_ROUTER_REFRESH__ === "function") {
+      window.__DINOU_ROUTER_REFRESH__();
+      return;
+    }
+    reload();
+    return;
+  }
+
   if (
     data.type === "style-update" ||
     (data.type === "update" && data.url && (data.url.endsWith(".css") || data.url.includes("styles.css")))

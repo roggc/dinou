@@ -390,7 +390,7 @@ export default function esmHmrPlugin({
             }
             hmrEngine.value.broadcastMessage({ type: "update", url });
           }
-        } else if (needsFullReload || pendingUpdateUrls.size === 0) {
+        } else if (needsFullReload) {
           if (isDebug) {
             console.log(`⏱️ [TIMELINE ${timelineTime()}] ${timelineRel()} ⚡ [HMR Broadcast] Full reload triggered (needsFullReload: ${needsFullReload})`);
           } else {
