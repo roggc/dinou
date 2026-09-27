@@ -6,9 +6,7 @@ process.env.DINOU_RUNTIME = "node-bundle";
 const generateStatic = require("./generate-static.js");
 
 async function runSSG() {
-  console.log("🏗️  [SSG] Pre-rendering static pages and RSC payloads with Dual-Engine...");
   await generateStatic();
-  console.log("✅ [SSG] Static generation finished successfully.");
 }
 
 if (require.main === module) {

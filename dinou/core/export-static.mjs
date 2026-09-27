@@ -10,7 +10,8 @@ const outDir = path.resolve(projectRoot, "out");
 const dist3Dir = path.resolve(projectRoot, ".dinou/dist3");
 const dist2Dir = path.resolve(projectRoot, ".dinou/dist2");
 
-console.log("📦 [Dinou Export] Preparing standalone static export...");
+const bundlerName = process.env.DINOU_BUILD_TOOL || "esbuild";
+console.log(`\n🦖 Dinou v7 (Static Export • ${bundlerName})`);
 
 // 1. Clean output directory
 if (fs.existsSync(outDir)) {
@@ -41,7 +42,7 @@ function copyRecursive(src, dest) {
 let assetCount = 0;
 if (fs.existsSync(dist3Dir)) {
   assetCount = copyRecursive(dist3Dir, outDir);
-  console.log(`   Copied ${assetCount} production asset(s) from .dinou/dist3`);
+  console.log(`  📦 Copied ${assetCount} production asset(s) from .dinou/dist3`);
 } else {
   console.warn("⚠️ [Dinou Export] Warning: .dinou/dist3 not found. Did you run a production build first?");
 }
@@ -50,13 +51,14 @@ if (fs.existsSync(dist3Dir)) {
 let pageCount = 0;
 if (fs.existsSync(dist2Dir)) {
   pageCount = copyRecursive(dist2Dir, outDir);
-  console.log(`   Copied ${pageCount} static page/payload file(s) from .dinou/dist2`);
+  console.log(`  📄 Copied ${pageCount} static page/payload file(s) from .dinou/dist2`);
 } else {
   console.warn("⚠️ [Dinou Export] Warning: .dinou/dist2 not found. Ensure your app has static routes.");
 }
 
-console.log(`\n🎉 [Dinou Export] Static site exported successfully to: ${outDir}`);
-console.log("   Deploy with one of the following:");
-console.log("   - Surge.sh:       npx surge out <tu-dominio>.surge.sh");
-console.log("   - GitHub Pages:   npx gh-pages -d out");
-console.log("   - Cloudflare:     npx wrangler pages deploy out\n");
+const relOut = path.relative(projectRoot, outDir) || "out";
+console.log(`\n✓ Standalone static site exported to: ${relOut}/`);
+console.log("  👉 Deploy with:");
+console.log("     • Surge.sh:       npx surge out <your-domain>.surge.sh");
+console.log("     • GitHub Pages:   npx gh-pages -d out");
+console.log("     • Cloudflare:     npx wrangler pages deploy out\n");

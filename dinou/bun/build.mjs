@@ -46,13 +46,14 @@ for (const r of candidateDinouRoots) {
   candidateRedirectPaths.add(path.resolve(r, "core/client-redirect.jsx"));
 }
 
-console.log("⚡ [Dinou Bun] Generating static route modules...");
+const isWebpackBuild = process.env.DINOU_BUILD_TOOL === "webpack";
+const bundlerName = isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild");
+
+console.log(`\n🦖 Dinou v7 (Bun • ${bundlerName})`);
+console.log("  ⚡ Generating route modules & manifests...");
 const routeModulesCode = generateRouteModulesCode(projectRoot, "../..");
 const routeModulesPath = path.join(bunDir, "route-modules.js");
 fs.writeFileSync(routeModulesPath, routeModulesCode, "utf8");
-
-// Check manifests from build (supports Esbuild, Rollup, and Webpack output locations)
-const isWebpackBuild = process.env.DINOU_BUILD_TOOL === "webpack";
 
 function findManifest(filename, fallbackFolder) {
   const candidates = isWebpackBuild
@@ -92,7 +93,9 @@ if (sfManifestPath && fs.existsSync(sfManifestPath)) {
 // ====================================================================
 // Discovery of Client Components for SSR Engine & RSC Manifest
 // ====================================================================
-console.log("🔍 [Dinou Bun] Discovering client components for SSR Engine...");
+if (process.env.DINOU_DEBUG) {
+  console.log("🔍 [Dinou Bun] Discovering client components for SSR Engine...");
+}
 const srcDir = path.resolve(projectRoot, "src");
 
 
@@ -149,7 +152,9 @@ function findClientComponents() {
 }
 
 const clientComponents = findClientComponents();
-console.log(`   Found ${clientComponents.length} client component(s) for Native SSR.`);
+if (process.env.DINOU_DEBUG) {
+  console.log(`   Found ${clientComponents.length} client component(s) for Native SSR.`);
+}
 
 let manifestInlines = "";
 const normalizedManifest = { ...parsedClientManifest };
@@ -347,7 +352,9 @@ if (!isWebpackBuild && Object.keys(parsedClientManifest).length > 0) {
 
 manifestInlines += `\nglobalThis.__DINOU_IMPORT_MAP_HTML__ = ${JSON.stringify(importMapHtml)};\n`;
 
-console.log("⚡ [Dinou Bun] Building in-memory VFS for routing...");
+if (process.env.DINOU_DEBUG) {
+  console.log("⚡ [Dinou Bun] Building in-memory VFS for routing...");
+}
 const vfsSnapshot = {};
 function walkVfs(dir) {
   if (!fs.existsSync(dir)) return;
@@ -914,7 +921,7 @@ const finalOutfile = path.join(bunDir, "server.js");
 
 try {
   // Pass A: RSC Engine
-  console.log("🚀 [Dinou Bun] Bundling Pass A: RSC Engine (conditions: react-server)...");
+  console.log("  ⚡ Bundling Pass A (RSC bun) & Pass B (SSR bun)...");
   await esbuild.build({
     entryPoints: [rscEntryPath],
     outfile: rscOutfile,
@@ -938,7 +945,6 @@ try {
   });
 
   // Pass B: SSR Engine
-  console.log("🚀 [Dinou Bun] Bundling Pass B: Native SSR Engine (conditions: browser)...");
   await esbuild.build({
     entryPoints: [ssrEntryPath],
     outfile: ssrOutfile,
@@ -962,7 +968,7 @@ try {
   });
 
   // Pass C: Final Bun Orchestrator
-  console.log("🚀 [Dinou Bun] Bundling Pass C: Bun Orchestrator (server.js)...");
+  console.log("  🚀 Bundling Pass C: Bun Orchestrator (.dinou/bun/server.js)...");
   await esbuild.build({
     entryPoints: [bunEntryPath],
     outfile: finalOutfile,
@@ -984,10 +990,11 @@ try {
     logLevel: "warning",
   });
 
-  console.log(`\n🎉 [Dinou Bun] Pre-bundled AOT build successful!`);
-  console.log(`   Output file: ${finalOutfile}`);
-  console.log(`   Run with: bun ${finalOutfile}`);
-  console.log(`   Or compile standalone: bun build --compile ${finalOutfile} --outfile dist/server\n`);
+  const relOutfile = path.relative(projectRoot, finalOutfile).replace(/\\/g, "/");
+  console.log(`\n✓ Bun build complete!`);
+  console.log(`  Output: ${relOutfile}`);
+  console.log(`  👉 Run with:        bun ${relOutfile}`);
+  console.log(`  👉 Compile binary:  npm run build:bun:compile\n`);
 } catch (err) {
   console.error("❌ [Dinou Bun] Build failed:", err);
   process.exit(1);

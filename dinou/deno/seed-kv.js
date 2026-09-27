@@ -78,7 +78,9 @@ async function processDir(dir, relPrefix = "") {
 
       await setKvCache(kv, cleanRelPath, html, metadata);
       seededCount++;
-      console.log(`   ✅ Cached HTML: ${cleanRelPath}`);
+      if (process.env.DINOU_DEBUG) {
+        console.log(`   ✅ Cached HTML: ${cleanRelPath}`);
+      }
 
       if (cleanRelPath.endsWith("/index.html")) {
         const folderKey = cleanRelPath.slice(0, -11);
@@ -94,12 +96,16 @@ async function processDir(dir, relPrefix = "") {
       } catch (e) {}
       await setKvCache(kv, cleanRelPath, metaContent, metadata);
       seededCount++;
-      console.log(`   ✅ Cached Meta: ${cleanRelPath}`);
+      if (process.env.DINOU_DEBUG) {
+        console.log(`   ✅ Cached Meta: ${cleanRelPath}`);
+      }
     } else if (entry.name === "rsc.rsc") {
       const rsc = fs.readFileSync(fullPath, "utf8");
       await setKvCache(kv, cleanRelPath, rsc, null);
       seededCount++;
-      console.log(`   ✅ Cached RSC:  ${cleanRelPath}`);
+      if (process.env.DINOU_DEBUG) {
+        console.log(`   ✅ Cached RSC:  ${cleanRelPath}`);
+      }
     }
   }
 }

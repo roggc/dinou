@@ -14,7 +14,9 @@ const nodeDir = path.resolve(projectRoot, ".dinou/node");
 fs.mkdirSync(nodeDir, { recursive: true });
 
 try {
-  console.log("⚡ [Dinou Node] Compiling Pass A (RSC) and Pass B (SSR) via Dual-Engine Compiler...");
+  const bundlerName = process.env.DINOU_BUILD_TOOL || "esbuild";
+  console.log(`\n🦖 Dinou v7 (Node.js • ${bundlerName})`);
+  console.log(`  ⚡ Compiling Pass A (RSC) and Pass B (SSR) via Dual-Engine...`);
   const engineResult = await bundleDualEngine({
     isDev: false,
     projectRoot,
@@ -161,7 +163,7 @@ if (isMain) {
 
   // Pass C: Final Node Orchestrator
   const finalOutfile = path.join(nodeDir, "server.mjs");
-  console.log("🚀 [Dinou Node] Bundling Pass C: Node Orchestrator (server.mjs)...");
+  console.log("  🚀 Bundling Pass C: Node Orchestrator (.dinou/node/server.mjs)...");
   await esbuild.build({
     entryPoints: [nodeEntryPath],
     outfile: finalOutfile,
@@ -183,9 +185,10 @@ if (isMain) {
     logLevel: "warning",
   });
 
-  console.log(`\n🎉 [Dinou Node] Pre-bundled AOT build successful!`);
-  console.log(`   Output file: ${finalOutfile}`);
-  console.log(`   Run with: node ${finalOutfile}\n`);
+  const relOutfile = path.relative(projectRoot, finalOutfile).replace(/\\/g, "/");
+  console.log(`\n✓ Node.js production build complete!`);
+  console.log(`  Output: ${relOutfile}`);
+  console.log(`  👉 Run with: npm start  (or node ${relOutfile})\n`);
 } catch (err) {
   console.error("❌ [Dinou Node] Build failed:", err);
   process.exit(1);

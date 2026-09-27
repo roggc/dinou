@@ -89,7 +89,7 @@ try {
   );
 
   // 🚀 Server & Adapter Pre-bundling with react-server condition
-  console.log("[esbuild] Pre-bundling server handler and adapters with conditions: ['react-server']...");
+  console.log("⚡ [esbuild] Pre-bundling server handler and adapters (conditions: ['react-server'])...");
   await esbuild.build({
     entryPoints: {
       handler: path.resolve(__dirname, "../core/handler.js"),
@@ -119,7 +119,6 @@ try {
     path.resolve(process.cwd(), ".dinou/dist3/server/package.json"),
     JSON.stringify({ type: "module" }, null, 2)
   );
-  console.log("[esbuild] Server bundles created at .dinou/dist3/server/");
 
   // 🏗️ Pre-render static pages (SSG) at build time
   const { execSync } = await import("node:child_process");

@@ -31,7 +31,7 @@ const { createBailoutProxy } = require("./bailout-proxy.js");
  * mock-renders them inside a server context, and serializes successful static renders
  * into RSC JSON payloads.
  */
-async function buildStaticPages() {
+async function buildStaticPages(onProgress = null) {
   const srcFolder = path.resolve(process.cwd(), "src");
 
   /**
@@ -97,10 +97,12 @@ async function buildStaticPages() {
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
           if (isLocalPage && !resolveDynamic(dynamic)) {
-            console.log(
-              `Found optional catch-all route: ${segments.join("/") ?? ""
-              }/[[...${paramName}]]`,
-            );
+            if (process.env.DINOU_DEBUG) {
+              console.log(
+                `Found optional catch-all route: ${segments.join("/") ?? ""
+                }/[[...${paramName}]]`,
+              );
+            }
             try {
               if (getStaticPaths) {
                 const paths = await getStaticPaths();
@@ -238,10 +240,12 @@ async function buildStaticPages() {
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
           if (isLocalPage && !resolveDynamic(dynamic)) {
-            console.log(
-              `Found catch-all route: ${segments.join("/") ?? ""
-              }/[...${paramName}]`,
-            );
+            if (process.env.DINOU_DEBUG) {
+              console.log(
+                `Found catch-all route: ${segments.join("/") ?? ""
+                }/[...${paramName}]`,
+              );
+            }
             try {
               if (getStaticPaths) {
                 const paths = await getStaticPaths();
@@ -342,10 +346,12 @@ async function buildStaticPages() {
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
           if (isLocalPage && !resolveDynamic(dynamic)) {
-            console.log(
-              `Found optional dynamic route: ${segments.join("/") ?? ""
-              }/[[${paramName}]]`,
-            );
+            if (process.env.DINOU_DEBUG) {
+              console.log(
+                `Found optional dynamic route: ${segments.join("/") ?? ""
+                }/[[${paramName}]]`,
+              );
+            }
             try {
               if (getStaticPaths) {
                 const paths = await getStaticPaths();
@@ -464,9 +470,11 @@ async function buildStaticPages() {
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
           if (isLocalPage && !resolveDynamic(dynamic)) {
-            console.log(
-              `Found dynamic route: ${segments.join("/") ?? ""}/[${paramName}]`,
-            );
+            if (process.env.DINOU_DEBUG) {
+              console.log(
+                `Found dynamic route: ${segments.join("/") ?? ""}/[${paramName}]`,
+              );
+            }
             try {
               if (getStaticPaths) {
                 const paths = await getStaticPaths();
@@ -673,7 +681,13 @@ async function buildStaticPages() {
         segments,
         params: dParams,
       });
-      console.log(`Found static route: ${segments.join("/") || "/"}`);
+      const routeName = segments.join("/") ? "/" + segments.join("/") : "/";
+      if (typeof onProgress === "function") {
+        onProgress({ phase: "crawling", route: routeName, count: pages.length });
+      }
+      if (process.env.DINOU_DEBUG) {
+        console.log(`Found static route: ${routeName}`);
+      }
     }
 
     return pages;
@@ -682,9 +696,14 @@ async function buildStaticPages() {
   // Crawl complete, start rendering and serialization loop for all discovered static pages
   const pages = await collectPages(srcFolder);
 
+  let pageIdx = 0;
   for (const { path: folderPath, segments, params } of pages) {
+    pageIdx++;
     try {
       const reqPath = segments.length ? "/" + segments.join("/") + "/" : "/";
+      if (typeof onProgress === "function") {
+        onProgress({ phase: "discovering", route: reqPath, current: pageIdx, total: pages.length });
+      }
       // ====================================================================
       // 1. MOCK RES: Fulfilling ResponseProxy interface
       // ====================================================================
@@ -734,9 +753,11 @@ async function buildStaticPages() {
           this._redirectUrl = url;
 
           // Log warning because a redirect in SSG is usually problematic
-          console.warn(
-            `⚠️ [SSG] Redirect detected in ${reqPath} -> ${url} (${status})`,
-          );
+          if (process.env.DINOU_DEBUG) {
+            console.warn(
+              `⚠️ [SSG] Redirect detected in ${reqPath} -> ${url} (${status})`,
+            );
+          }
         },
       };
 
@@ -948,11 +969,13 @@ async function buildStaticPages() {
       if (!isStatic) {
         // ❌ DO NOT save file.
         // Will behave as pure SSR at runtime.
-        console.log(
-          `Skipping static generation for ${segments.join(
-            "/",
-          )} due to dynamic usage.`,
-        );
+        if (process.env.DINOU_DEBUG) {
+          console.log(
+            `Skipping static generation for ${segments.join(
+              "/",
+            )} due to dynamic usage.`,
+          );
+        }
         continue;
       }
 
@@ -967,14 +990,18 @@ async function buildStaticPages() {
         effects: sideEffects,
         tags: cacheTags,
       });
-      console.log(`Registered static page at ${reqPath}`);
+      if (process.env.DINOU_DEBUG) {
+        console.log(`Registered static page at ${reqPath}`);
+      }
     } catch (err) {
       console.error(`Error building page ${segments.join("/")}:`, err);
       continue;
     }
   }
 
-  console.log(`Static site generated with ${pages.length} pages`);
+  if (process.env.DINOU_DEBUG) {
+    console.log(`Static site generated with ${pages.length} pages`);
+  }
 }
 
 /**
@@ -1075,9 +1102,11 @@ async function buildStaticPage(reqPath, isDynamic = null) {
         this._redirectUrl = url;
 
         // We log a warning because a redirect in SSG is usually problematic
-        console.warn(
-          `⚠️ [SSG] Redirect detected in ${reqPath} -> ${url} (${status})`,
-        );
+        if (process.env.DINOU_DEBUG) {
+          console.warn(
+            `⚠️ [SSG] Redirect detected in ${reqPath} -> ${url} (${status})`,
+          );
+        }
       },
     };
 
@@ -1292,11 +1321,13 @@ async function buildStaticPage(reqPath, isDynamic = null) {
     if (!isStatic) {
       // ❌ DO NOT save file.
       // It will behave as pure SSR at runtime.
-      console.log(
-        `Skipping static generation for ${segments.join(
-          "/",
-        )} due to dynamic usage.`,
-      );
+      if (process.env.DINOU_DEBUG) {
+        console.log(
+          `Skipping static generation for ${segments.join(
+            "/",
+          )} due to dynamic usage.`,
+        );
+      }
       if (isDynamic) {
         isDynamic.value = true;
       }

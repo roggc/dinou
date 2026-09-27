@@ -65,21 +65,20 @@ function copyRecursive(src, dest) {
   return count;
 }
 
+const isWebpackBuild = process.env.DINOU_BUILD_TOOL === "webpack";
+const bundlerName = isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild");
+
 const dist2Dir = path.resolve(projectRoot, ".dinou/dist2");
 const dist3Dir = path.resolve(projectRoot, ".dinou/dist3");
+console.log(`\n🦖 Dinou v7 (Cloudflare Workers • ${bundlerName})`);
 if (fs.existsSync(dist2Dir)) {
-  console.log("📄 [Dinou Cloudflare] Synchronizing pre-rendered static HTML and RSC from .dinou/dist2 to .dinou/dist3...");
   const copiedCount = copyRecursive(dist2Dir, dist3Dir);
-  console.log(`   Copied ${copiedCount} pre-rendered file(s) for Cloudflare Workers Static Assets.`);
+  console.log(`  📄 Synchronized ${copiedCount} pre-rendered static route(s) to .dinou/dist3`);
 }
-
-console.log("⚡ [Dinou Cloudflare] Generating static route modules...");
+console.log("  ⚡ Generating route modules & manifests...");
 const routeModulesCode = generateRouteModulesCode(projectRoot, "../..");
 const routeModulesPath = path.join(cloudflareDir, "route-modules.js");
 fs.writeFileSync(routeModulesPath, routeModulesCode, "utf8");
-
-// Check manifests from build (supports Esbuild, Rollup, and Webpack output locations)
-const isWebpackBuild = process.env.DINOU_BUILD_TOOL === "webpack";
 
 function findManifest(filename, fallbackFolder) {
   const candidates = isWebpackBuild
@@ -119,7 +118,9 @@ if (sfManifestPath && fs.existsSync(sfManifestPath)) {
 // ====================================================================
 // Discovery of Client Components for SSR Engine & RSC Manifest
 // ====================================================================
-console.log("🔍 [Dinou Cloudflare] Discovering client components for SSR Engine...");
+if (process.env.DINOU_DEBUG) {
+  console.log("🔍 [Dinou Cloudflare] Discovering client components for SSR Engine...");
+}
 const srcDir = path.resolve(projectRoot, "src");
 
 
@@ -177,7 +178,9 @@ function findClientComponents() {
 }
 
 const clientComponents = findClientComponents();
-console.log(`   Found ${clientComponents.length} client component(s) for Native SSR.`);
+if (process.env.DINOU_DEBUG) {
+  console.log(`   Found ${clientComponents.length} client component(s) for Native SSR.`);
+}
 
 let manifestInlines = "";
 const normalizedManifest = { ...parsedClientManifest };
@@ -376,7 +379,9 @@ if (!isWebpackBuild && Object.keys(parsedClientManifest).length > 0) {
 
 manifestInlines += `\nglobalThis.__DINOU_IMPORT_MAP_HTML__ = ${JSON.stringify(importMapHtml)};\n`;
 
-console.log("⚡ [Dinou Cloudflare] Building in-memory VFS for Edge routing...");
+if (process.env.DINOU_DEBUG) {
+  console.log("⚡ [Dinou Cloudflare] Building in-memory VFS for Edge routing...");
+}
 const vfsSnapshot = {};
 function walkVfs(dir) {
   if (!fs.existsSync(dir)) return;
@@ -972,7 +977,7 @@ const finalOutfile = path.join(cloudflareDir, "worker.js");
 
 try {
   // Pass A: RSC Engine
-  console.log("🚀 [Dinou Cloudflare] Bundling Pass A: RSC Engine (conditions: react-server)...");
+  console.log("  ⚡ Bundling Pass A (RSC workerd) & Pass B (SSR workerd)...");
   await esbuild.build({
     entryPoints: [rscEntryPath],
     outfile: rscOutfile,
@@ -996,7 +1001,6 @@ try {
   });
 
   // Pass B: SSR Engine
-  console.log("🚀 [Dinou Cloudflare] Bundling Pass B: Native SSR Engine (conditions: browser)...");
   await esbuild.build({
     entryPoints: [ssrEntryPath],
     outfile: ssrOutfile,
@@ -1020,7 +1024,7 @@ try {
   });
 
   // Pass C: Final Worker Orchestrator
-  console.log("🚀 [Dinou Cloudflare] Bundling Pass C: Worker Orchestrator...");
+  console.log("  🚀 Bundling Pass C: Cloudflare Worker Orchestrator (.dinou/cloudflare/worker.js)...");
   await esbuild.build({
     entryPoints: [workerEntryPath],
     outfile: finalOutfile,
@@ -1042,8 +1046,11 @@ try {
     logLevel: "warning",
   });
 
-  console.log(`✅ [Dinou Cloudflare] Dual-Bundle Worker bundled successfully: ${finalOutfile}`);
-  console.log("👉 Deploy to Cloudflare using: npx wrangler deploy");
+  const relOutfile = path.relative(projectRoot, finalOutfile).replace(/\\/g, "/");
+  console.log(`\n✓ Cloudflare Workers build complete!`);
+  console.log(`  Output: ${relOutfile}`);
+  console.log("  👉 Preview locally:  npx wrangler dev");
+  console.log("  👉 Deploy to edge:    npx wrangler deploy\n");
 } catch (err) {
   console.error("❌ [Dinou Cloudflare] Worker bundling failed:", err);
   process.exit(1);

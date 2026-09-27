@@ -1312,7 +1312,9 @@ async function handleRequest(request, platformContext = {}) {
     let isgPromise = inFlightKey ? inFlightGenerations.get(inFlightKey) : null;
     if (!isgPromise) {
       isgPromise = (async () => {
-        console.log(`[Edge ISG] Processing page for ${reqPath}...`);
+        if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
+          console.log(`[Edge ISG] Processing page for ${reqPath}...`);
+        }
         const context = createRequestContext(simReq, bridge, platformContext, dynamicState);
         copyCustomContextProperties(rootContext, context);
         const isNotFound = { value: !pagePath };
@@ -1456,12 +1458,16 @@ async function handleRequest(request, platformContext = {}) {
                 bootstrapModules,
                 bootstrapScriptContent,
                 onError(err) {
-                  console.error("[Edge Native SSR] Stream error:", err);
+                  if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
+                    console.error("[Edge Native SSR] Stream error:", err);
+                  }
                 },
               });
             });
           } catch (ssrErr) {
-            console.error("[Edge Native SSR] SSR render threw error, falling back to getErrorJSX:", ssrErr.message);
+            if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
+              console.error("[Edge Native SSR] SSR render threw error, falling back to getErrorJSX:", ssrErr.message);
+            }
             isError = true;
             caughtError = ssrErr;
             bridge.status(500);
@@ -1523,7 +1529,9 @@ async function handleRequest(request, platformContext = {}) {
                 bootstrapModules: errorBootstrapModules,
                 bootstrapScriptContent: errorBootstrapScript,
                 onError(err) {
-                  console.error("[Edge Native SSR Error Page] Stream error:", err);
+                  if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
+                    console.error("[Edge Native SSR Error Page] Stream error:", err);
+                  }
                 },
               });
             });
@@ -1559,12 +1567,16 @@ async function handleRequest(request, platformContext = {}) {
                   await storage.set(rscKey, rscPayload);
                   await storage.set(htmlKey, fullHtml, genMeta);
                   await storage.set(metaKey, JSON.stringify(genMeta));
-                  console.log(`✅ [Edge ISG] Successfully cached ${reqPath} to KV`);
+                  if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
+                    console.log(`✅ [Edge ISG] Successfully cached ${reqPath} to KV`);
+                  }
                 } catch (cacheErr) {
                   console.error("[Edge ISG] Error caching to KV:", cacheErr);
                 }
               } else {
-                console.log(`ℹ️ [Edge ISG] Dynamic bailout detected during render for ${reqPath}, skipping KV cache`);
+                if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
+                  console.log(`ℹ️ [Edge ISG] Dynamic bailout detected during render for ${reqPath}, skipping KV cache`);
+                }
               }
               return {
                 type: "html",

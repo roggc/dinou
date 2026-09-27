@@ -55,7 +55,9 @@ export async function renderRscStreamToHtmlStream(rscStream, consumerManifest, o
 
     return htmlStream;
   } catch (err) {
-    console.error("[Edge Native SSR] Fatal stream reconstruction error:", err);
+    if (process.env.DINOU_DEBUG) {
+      console.error("[Edge Native SSR] Fatal stream reconstruction error:", err);
+    }
     throw err;
   }
 }
