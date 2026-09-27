@@ -46,8 +46,9 @@ const createPostCSSExtractPlugin = (options = {}) => {
       globalThis.__DINOU_MEM_FILES__.set("/styles.css", cachedCSSBuffer);
     }
 
-    // 2. Only write to disk if explicitly requested
-    const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true";
+    // 2. Write to disk if in production OR if DINOU_WRITE_TO_DISK is requested in dev
+    const isProduction = process.env.NODE_ENV === "production";
+    const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || isProduction;
     if (shouldWriteToDisk && cachedExtractedCSS) {
       const outputDir = path.dirname(outputFile);
       if (!fs.existsSync(outputDir)) {
