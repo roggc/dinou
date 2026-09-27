@@ -404,11 +404,11 @@ module.exports = async () => {
     ...(isDevelopment
       ? {
         devServer: {
-          port: 3001,
+          port: Number(process.env.HMR_PORT || (Number(process.env.PORT || 3000) + 1)),
           hot: false,
           liveReload: true,
           client: {
-            webSocketURL: "ws://localhost:3001/ws",
+            webSocketURL: `ws://localhost:${process.env.HMR_PORT || (Number(process.env.PORT || 3000) + 1)}/ws`,
             overlay: false,
           },
           devMiddleware: {
@@ -421,7 +421,7 @@ module.exports = async () => {
           proxy: [
             {
               context: () => true,
-              target: "http://localhost:3000",
+              target: `http://localhost:${process.env.PORT || 3000}`,
               changeOrigin: true,
             },
           ],

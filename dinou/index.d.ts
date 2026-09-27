@@ -89,6 +89,9 @@ export interface RequestContextStore {
     headers: Headers;
     path: string;
     method: "GET" | "POST" | string;
+    env?: Record<string, any>;
+    ctx?: any;
+    [key: string]: any;
   };
 
   /**
@@ -96,7 +99,63 @@ export interface RequestContextStore {
    * response functions in the main process.
    */
   res: ResponseProxy;
+
+  /**
+   * Platform host environment (Cloudflare env, D1, KV, R2, etc.).
+   */
+  env?: Record<string, any>;
+
+  /**
+   * Platform execution context (Cloudflare ctx, waitUntil, etc.).
+   */
+  ctx?: any;
+
+  /**
+   * Any custom properties attached to context by plugins (e.g., context.user, context.auth).
+   */
+  [key: string]: any;
 }
+
+// ====================================================================
+// DINOU CONFIGURATION & PLUGIN INTERFACES
+// ====================================================================
+
+export interface DinouPlugin {
+  name?: string;
+  /**
+   * Universal Web Standards middleware and webhook handler.
+   * Runs on every incoming HTTP request before React rendering.
+   * If a Response is returned, Dinou sends it immediately and terminates the request.
+   * If nothing is returned, execution continues and any mutations to `context`
+   * are preserved and accessible in Server Components and Server Functions via getContext().
+   */
+  onRequest?(
+    request: Request,
+    context: RequestContextStore
+  ): Promise<Response | void> | Response | void;
+
+  /**
+   * Legacy context hook for backwards compatibility.
+   */
+  onRequestContext?(simReq: any, resBridge: any, context: any): void;
+}
+
+export interface DinouConfig {
+  /**
+   * Custom storage adapter for ISR / ISG page caching.
+   */
+  storage?: any;
+
+  /**
+   * Array of Dinou plugins.
+   */
+  plugins?: DinouPlugin[];
+}
+
+/**
+ * Type-safe configuration helper for dinou.config.js / dinou.config.mjs.
+ */
+export declare function defineConfig(config: DinouConfig): DinouConfig;
 
 // ====================================================================
 // MAIN EXPORTED FUNCTIONS (SERVER SIDE)

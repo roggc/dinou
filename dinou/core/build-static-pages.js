@@ -19,6 +19,10 @@ function safeDecode(val) {
   }
 }
 
+function resolveDynamic(d) {
+  return typeof d === "function" ? Boolean(d()) : Boolean(d);
+}
+
 const { createBailoutProxy } = require("./bailout-proxy.js");
 
 /**
@@ -92,7 +96,7 @@ async function buildStaticPages() {
           }
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
-          if (isLocalPage && !dynamic?.()) {
+          if (isLocalPage && !resolveDynamic(dynamic)) {
             console.log(
               `Found optional catch-all route: ${segments.join("/") ?? ""
               }/[[...${paramName}]]`,
@@ -233,7 +237,7 @@ async function buildStaticPages() {
           }
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
-          if (isLocalPage && !dynamic?.()) {
+          if (isLocalPage && !resolveDynamic(dynamic)) {
             console.log(
               `Found catch-all route: ${segments.join("/") ?? ""
               }/[...${paramName}]`,
@@ -337,7 +341,7 @@ async function buildStaticPages() {
           }
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
-          if (isLocalPage && !dynamic?.()) {
+          if (isLocalPage && !resolveDynamic(dynamic)) {
             console.log(
               `Found optional dynamic route: ${segments.join("/") ?? ""
               }/[[${paramName}]]`,
@@ -459,7 +463,7 @@ async function buildStaticPages() {
           }
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
-          if (isLocalPage && !dynamic?.()) {
+          if (isLocalPage && !resolveDynamic(dynamic)) {
             console.log(
               `Found dynamic route: ${segments.join("/") ?? ""}/[${paramName}]`,
             );
@@ -557,7 +561,7 @@ async function buildStaticPages() {
             }
             const isLocalPage =
               pagePath && path.dirname(pagePath) === dynamicPath;
-            if (isLocalPage && !dynamic?.()) {
+            if (isLocalPage && !resolveDynamic(dynamic)) {
               try {
                 if (getStaticPaths) {
                   const paths = await getStaticPaths();
@@ -663,7 +667,7 @@ async function buildStaticPages() {
       dynamic = module.dynamic;
     }
 
-    if (pagePath && !dynamic?.() && !doNotPushAtEnd) {
+    if (pagePath && !resolveDynamic(dynamic) && !doNotPushAtEnd) {
       pages.push({
         path: currentPath,
         segments,
@@ -1149,7 +1153,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
       if (pageFunctionsPath) {
         const pageFunctionsModule = await importModule(pageFunctionsPath);
         const getProps = pageFunctionsModule.getProps;
-        if (isDynamic && (isDynamic.value = pageFunctionsModule.dynamic?.()))
+        if (isDynamic && (isDynamic.value = resolveDynamic(pageFunctionsModule.dynamic)))
           return;
         revalidate = pageFunctionsModule.revalidate;
         if (pageFunctionsModule.getCacheTags) {

@@ -17,6 +17,11 @@
       "import": "./server.mjs",
       "require": "./server.js"
     },
+    "./config": {
+      "types": "./index.d.ts",
+      "import": "./core/config.js",
+      "require": "./core/config.js"
+    },
     "./adapters/node": "./adapters/node.mjs",
     "./adapters/bun": "./adapters/bun.js",
     "./adapters/deno": "./adapters/deno.js",

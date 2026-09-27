@@ -18,6 +18,10 @@ import {
   showIdleStatus,
   printReadyBanner,
 } from "./terminal-status.mjs";
+import { resolveDevPorts } from "./port-selector.mjs";
+
+// Resolve dev HTTP and HMR ports before initiating background compilation
+const { port: PORT, hmrPort: HMR_PORT } = await resolveDevPorts();
 
 const devStartTime = Date.now();
 const devTimings = {};
@@ -1472,8 +1476,6 @@ async function startClientBundler(tool) {
 }
 
 // HTTP Server
-const PORT = Number(process.env.PORT || 3000);
-
 const server = http.createServer(async (req, res) => {
   try {
     if (clientBundlerPromise) {

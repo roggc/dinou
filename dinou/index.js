@@ -1,17 +1,22 @@
 const contextModule = require("./core/request-context.js");
 const navigationModule = require("./core/navigation.js");
-const clientRedirectModule = require("./core/client-redirect.jsx");
-const redirectModule = require("./core/redirect.jsx");
-const linkModule = require("./core/link.jsx");
+const { defineConfig } = require("./core/config.js");
 
 module.exports = {
+  defineConfig,
   getContext: contextModule.getContext,
   usePathname: navigationModule.usePathname,
   useSearchParams: navigationModule.useSearchParams,
   useRouter: navigationModule.useRouter,
   useNavigationLoading: navigationModule.useNavigationLoading,
-  redirect: redirectModule.redirect,
-  ClientRedirect: clientRedirectModule.ClientRedirect,
-  Link: linkModule.Link,
+  get redirect() {
+    return require("./core/redirect.jsx").redirect;
+  },
+  get ClientRedirect() {
+    return require("./core/client-redirect.jsx").ClientRedirect;
+  },
+  get Link() {
+    return require("./core/link.jsx").Link;
+  },
   setCurrentContext: contextModule.setCurrentContext,
 };
