@@ -39,6 +39,8 @@ export default function assetsPlugin({ include = regex, changedIds } = {}) {
                 parentURL: pathToFileURL(args.importer).href,
               });
 
+        if (!resolvedAlias) return null;
+
         if (args.kind === "entry-point") {
           return {
             path: resolvedAlias,
