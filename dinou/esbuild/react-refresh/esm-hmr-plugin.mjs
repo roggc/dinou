@@ -1,7 +1,8 @@
 // plugins-esbuild/esm-hmr-plugin.mjs
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
-import { transformSync } from "@swc/core";
+import { transform } from "@swc/core";
 import { createServer } from "node:http";
 import { EsmHmrEngine } from "./esm-hmr/server.js";
 import { fileURLToPath } from "node:url";
@@ -18,6 +19,45 @@ const normKey = (p) => {
   return s;
 };
 let serverStarted = false;
+
+const swcGlobalCache = new Map();
+let swcCacheLoaded = false;
+let swcCacheDirty = false;
+
+function getSwcCachePath() {
+  const dir = path.resolve(process.cwd(), ".dinou/cache");
+  return { dir, file: path.join(dir, "swc-dev-cache.json") };
+}
+
+function loadSwcCache() {
+  if (swcCacheLoaded) return;
+  swcCacheLoaded = true;
+  try {
+    const { file } = getSwcCachePath();
+    if (fsSync.existsSync(file)) {
+      const parsed = JSON.parse(fsSync.readFileSync(file, "utf8"));
+      for (const [k, v] of Object.entries(parsed)) {
+        swcGlobalCache.set(k, v);
+      }
+    }
+  } catch (e) {}
+}
+
+async function saveSwcCache() {
+  if (!swcCacheDirty) return;
+  swcCacheDirty = false;
+  try {
+    const { dir, file } = getSwcCachePath();
+    if (!fsSync.existsSync(dir)) {
+      fsSync.mkdirSync(dir, { recursive: true });
+    }
+    const data = {};
+    for (const [k, v] of swcGlobalCache.entries()) {
+      data[k] = v;
+    }
+    await fs.writeFile(file, JSON.stringify(data), "utf8");
+  } catch (e) {}
+}
 
 export default function esmHmrPlugin({
   entryNames = ["main", "error"],
@@ -59,30 +99,38 @@ export default function esmHmrPlugin({
       }
 
       const rootEntryMap = new Map();
-      let entryPointsSet = new Set();
-      const swcCache = new Map();
+      let entryPointsSet = null;
+
+      let onLoadCount = 0;
+      let onLoadTime = 0;
 
       build.onStart(async () => {
         swcTotalTime = 0;
         swcCount = 0;
-        rootEntryMap.clear();
-        entryPointsSet = new Set(
-          Object.values(entryPoints || {}).map((val) => normKey(path.resolve(val)))
-        );
-        for (const entryName of entryNames) {
-          const entryPath = entryPoints?.[entryName];
-          if (!entryPath) continue;
+        onLoadCount = 0;
+        onLoadTime = 0;
+        if (!entryPointsSet) {
+          entryPointsSet = new Set(
+            Object.values(entryPoints || {}).map((val) => normKey(path.resolve(val)))
+          );
+        }
+        if (rootEntryMap.size === 0) {
+          for (const entryName of entryNames) {
+            const entryPath = entryPoints?.[entryName];
+            if (!entryPath) continue;
 
-          const absPath = path.resolve(entryPath);
-          const source = await fs.readFile(absPath, "utf8");
-          entryAbsPaths.push(absPath);
-          entrySources.push(source);
-          entryOutputNames.push(entryName + ".js");
-          rootEntryMap.set(normKey(absPath), source);
+            const absPath = path.resolve(entryPath);
+            const source = await fs.readFile(absPath, "utf8");
+            entryAbsPaths.push(absPath);
+            entrySources.push(source);
+            entryOutputNames.push(entryName + ".js");
+            rootEntryMap.set(normKey(absPath), source);
+          }
         }
       });
 
       build.onLoad({ filter: /(?:src|dinou)[\\/].*\.[jt]sx?$/i }, async (args) => {
+        const tStart = Date.now();
         const abs = path.resolve(args.path);
         const absNorm = normKey(abs);
 
@@ -113,8 +161,18 @@ export default function esmHmrPlugin({
         // CASE B: It is a user page or component
         if (isUserComponent) {
           try {
+            loadSwcCache();
+            const cached = swcGlobalCache.get(absNorm);
+            const isKnownUnchanged = !isInitialBuild && changedIds && changedIds.size > 0 && !changedIds.has(absNorm);
+            if (cached && isKnownUnchanged) {
+              return {
+                contents: cached.code,
+                loader: "js",
+                watchFiles: [abs],
+              };
+            }
+
             const stat = await fs.stat(args.path);
-            const cached = swcCache.get(absNorm);
             if (cached && cached.mtime === stat.mtimeMs) {
               return {
                 contents: cached.code,
@@ -126,7 +184,7 @@ export default function esmHmrPlugin({
             // HERE we DO apply SWC transformation to enable React Fast Refresh
             const source = await fs.readFile(args.path, "utf8");
             const tSwc0 = Date.now();
-            const { code } = transformSync(source, {
+            const { code } = await transform(source, {
               filename: abs,
               jsc: {
                 parser: {
@@ -148,7 +206,12 @@ export default function esmHmrPlugin({
             swcCount++;
             globalThis.__DINOU_SWC_TIME__ = swcTotalTime;
             globalThis.__DINOU_SWC_COUNT__ = swcCount;
-            swcCache.set(absNorm, { mtime: stat.mtimeMs, code });
+            swcGlobalCache.set(absNorm, { mtime: stat.mtimeMs, code });
+            swcCacheDirty = true;
+
+            if (swcCount % 6 === 0) {
+              await new Promise((r) => setImmediate(r));
+            }
 
             return {
               contents: code,
@@ -158,10 +221,15 @@ export default function esmHmrPlugin({
           } catch (e) {
             console.error("SWC Error:", e);
             return null;
+          } finally {
+            onLoadCount++;
+            onLoadTime += Date.now() - tStart;
           }
         }
 
         // CASE C: It is not an entry point (libraries, internal helpers, node_modules...)
+        onLoadCount++;
+        onLoadTime += Date.now() - tStart;
         return null;
       });
 
@@ -190,6 +258,7 @@ export default function esmHmrPlugin({
       const wrappedChunkCache = new Map();
 
       build.onEnd(async (result) => {
+        const tWrap0 = Date.now();
         if (!result.metafile) {
           // console.warn(
           //   "[hmr-plugin] Metafile is missing. Enable 'metafile: true'"
@@ -290,11 +359,14 @@ export default function esmHmrPlugin({
           outputFile.contents = encodedWrapped;
           wrappedChunkCache.set(relPath, encodedWrapped);
         }
+        globalThis.__DINOU_WRAP_TIME__ = Date.now() - tWrap0;
       });
 
       build.onEnd(write);
 
       build.onEnd(async (result) => {
+        const tBroadcast0 = Date.now();
+        saveSwcCache().catch(() => {});
         globalThis.__DINOU_SWC_TIME__ = swcTotalTime;
         globalThis.__DINOU_SWC_COUNT__ = swcCount;
         if (isInitialBuild) {
@@ -399,7 +471,9 @@ export default function esmHmrPlugin({
           }
           hmrEngine.value.broadcastMessage({ type: "reload" });
         }
+        saveSwcCache().catch(() => {});
         changedIds.clear();
+        globalThis.__DINOU_BROADCAST_TIME__ = Date.now() - tBroadcast0;
       });
     },
   };

@@ -166,7 +166,11 @@ export default async function getEsbuildEntries({
   });
 
   // Gather client modules and update manifest entries
+  let fileScanCount = 0;
   for (const absPath of files) {
+    if (++fileScanCount % 5 === 0) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
     const code = readFileSync(absPath, "utf8");
     const isClientModule = useClientRegex.test(code.trim());
     const isServerFunction = useServerRegex.test(code.trim());

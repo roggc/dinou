@@ -148,7 +148,11 @@ async function getCSSEntries({
   const serverFiles = new Set();
 
   // Gather client modules and update manifest entries
+  let fileScanCount = 0;
   for (const absPath of files) {
+    if (++fileScanCount % 5 === 0) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
     const code = readFileSync(absPath, "utf8");
     const trimmed = code.trim();
     if (useServerRegex.test(trimmed)) {

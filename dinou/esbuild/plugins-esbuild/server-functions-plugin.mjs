@@ -25,6 +25,13 @@ export default function serverFunctionsPlugin(manifestData = {}, options = {}) {
   return {
     name: "server-functions-proxy",
     setup(build) {
+      if (serverFilesSet && serverFilesSet.size === 0) {
+        return;
+      }
+      const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const sfFilter = serverFilesSet && serverFilesSet.size > 0
+        ? new RegExp(Array.from(serverFilesSet).map((f) => escapeRegExp(path.basename(f))).join("|"))
+        : /\.[jt]sx?$/;
       const root = process.cwd();
       const serverFunctions = new Map(); // Collect server functions here: Map<relativePath, Set<exports>>
       const sfCache = new Map(); // Cache by path: { mtimeMs, isServer, relativePath, exportsSet, proxyCode }
@@ -37,7 +44,7 @@ export default function serverFunctionsPlugin(manifestData = {}, options = {}) {
       });
 
       // 1. TRANSFORM FILES DURING BUILD
-      build.onLoad({ filter: /\.[jt]sx?$/ }, async (args) => {
+      build.onLoad({ filter: sfFilter }, async (args) => {
         const normPath = args.path.replace(/\\/g, "/");
         if (normPath.includes("/node_modules/") || normPath.includes("/.dinou/")) return null;
 
@@ -61,7 +68,7 @@ export default function serverFunctionsPlugin(manifestData = {}, options = {}) {
           if (cached && cached.mtimeMs === stat.mtimeMs) {
             if (!cached.isServer) return null;
             serverFunctions.set(cached.relativePath, cached.exportsSet);
-            return { contents: cached.proxyCode, loader: "js" };
+            return { contents: cached.proxyCode, loader: "js", watchFiles: [args.path] };
           }
 
           const code = await fs.readFile(args.path, "utf8");
@@ -114,6 +121,7 @@ export default function serverFunctionsPlugin(manifestData = {}, options = {}) {
           return {
             contents: proxyCode,
             loader: "js",
+            watchFiles: [args.path],
           };
         } finally {
           sfTime += Date.now() - t0;

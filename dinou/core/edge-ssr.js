@@ -14,9 +14,66 @@ import { renderToReadableStream } from "react-dom/server.edge";
  */
 export async function renderRscStreamToHtmlStream(rscStream, consumerManifest, options = {}) {
   try {
+    let effectiveManifest = consumerManifest;
+    if (consumerManifest && consumerManifest.moduleMap && !consumerManifest.moduleMap.__isDinouProxy) {
+      const origMap = consumerManifest.moduleMap;
+      const proxyMap = new Proxy(origMap, {
+        get(target, prop) {
+          if (typeof prop !== "string") return target[prop];
+          if (prop === "__isDinouProxy") return true;
+          if (prop in target) return target[prop];
+
+          const dynamicMap = typeof globalThis !== "undefined" ? globalThis.__DINOU_DYNAMIC_SSR_MODULE_MAP__ : null;
+          if (dynamicMap) {
+            if (prop in dynamicMap) {
+              target[prop] = dynamicMap[prop];
+              return dynamicMap[prop];
+            }
+            const altProp = prop.startsWith("/") ? prop.slice(1) : "/" + prop;
+            if (altProp in dynamicMap) {
+              target[prop] = dynamicMap[altProp];
+              return dynamicMap[altProp];
+            }
+          }
+
+          const clientManifest = typeof globalThis !== "undefined" ? (globalThis.__DINOU_CLIENT_MANIFEST__ || globalThis.__DINOU_RAW_CLIENT_MANIFEST__) : null;
+          if (clientManifest) {
+            const cleanProp = prop.startsWith("/") ? prop.slice(1) : prop;
+            for (const [k, v] of Object.entries(clientManifest)) {
+              if (!v?.id) continue;
+              const cleanVId = v.id.startsWith("/") ? v.id.slice(1) : v.id;
+              if (v.id === prop || cleanVId === cleanProp || ("/" + cleanVId) === prop) {
+                const fileUrl = k.split("#")[0];
+                const entry = { "*": { id: fileUrl, chunks: [], name: "*" } };
+                target[prop] = entry;
+                return entry;
+              }
+            }
+          }
+
+          if (prop.startsWith("file://")) {
+            const canonicalProp = prop.startsWith("file:///") ? prop : "file:///" + prop.slice(7);
+            const entry = { "*": { id: canonicalProp, chunks: [], name: "*" } };
+            target[prop] = entry;
+            return entry;
+          }
+
+          return target[prop];
+        },
+        has(target, prop) {
+          if (prop === "__isDinouProxy") return true;
+          if (prop in target) return true;
+          const dynamicMap = typeof globalThis !== "undefined" ? globalThis.__DINOU_DYNAMIC_SSR_MODULE_MAP__ : null;
+          if (dynamicMap && (prop in dynamicMap || (prop.startsWith("/") ? prop.slice(1) : "/" + prop) in dynamicMap)) return true;
+          return false;
+        }
+      });
+      effectiveManifest = { ...consumerManifest, moduleMap: proxyMap };
+    }
+
     // 1. Reconstruct JSX element tree from RSC wire stream
     const elementTree = await createFromReadableStream(rscStream, {
-      serverConsumerManifest: consumerManifest,
+      serverConsumerManifest: effectiveManifest,
     });
 
     // 2. Stream HTML using React 19's native Edge renderer

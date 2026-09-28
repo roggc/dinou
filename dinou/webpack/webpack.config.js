@@ -14,6 +14,7 @@ const { regex } = require("../core/asset-extensions");
 const getCSSEntries = require("./helpers/get-webpack-entries");
 const {
   scanProjectDependenciesForClientComponents,
+  scanProjectDependenciesForClientComponentsAsync,
 } = require("../core/scan-dependency-components.js");
 const { useClientRegex } = require("../constants.js");
 
@@ -79,11 +80,19 @@ module.exports = async () => {
   const [cssEntries, , serverFiles] = await getCSSEntries();
 
   const dependencyClientFiles = new Set();
-  scanProjectDependenciesForClientComponents(
-    process.cwd(),
-    dependencyClientFiles,
-    useClientRegex
-  );
+  if (typeof scanProjectDependenciesForClientComponentsAsync === "function") {
+    await scanProjectDependenciesForClientComponentsAsync(
+      process.cwd(),
+      dependencyClientFiles,
+      useClientRegex
+    );
+  } else {
+    scanProjectDependenciesForClientComponents(
+      process.cwd(),
+      dependencyClientFiles,
+      useClientRegex
+    );
+  }
 
   let clientDone = false;
   let serverDone = false;

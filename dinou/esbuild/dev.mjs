@@ -108,7 +108,6 @@ export async function startEsbuildDev(options = {}) {
       ...frameworkEntryPoints,
       ...componentEntryPoints,
       ...cssEntryPoints,
-      ...assetEntryPoints,
     };
   }
 
@@ -200,9 +199,16 @@ export async function startEsbuildDev(options = {}) {
       if (filePath) {
         changedIds.add(normKey(filePath));
         if (currentCtx) {
-          currentCtx.rebuild().catch(() => {});
+          const t0 = Date.now();
+          return currentCtx.rebuild().then((result) => {
+            globalThis.__ESBUILD_CORE_TIME__ = Date.now() - t0;
+            return result;
+          }).catch((err) => {
+            console.error("❌ [Esbuild Dev] Rebuild error:", err);
+          });
         }
       }
+      return Promise.resolve();
     },
     restart: async () => {
       console.log("⚡ [Esbuild Dev] Recreating client bundle due to directive change...");

@@ -1,7 +1,12 @@
+let swc = null;
+try {
+  swc = require("@swc/core");
+} catch (e) {}
+
 const parser = require("@babel/parser");
 const traverse = require("@babel/traverse");
 
-function parseExports(code) {
+function parseExportsWithBabel(code) {
   const ast = parser.parse(code, {
     sourceType: "module",
     plugins: ["jsx", "typescript"],
@@ -41,4 +46,51 @@ function parseExports(code) {
   return [...exports];
 }
 
+function parseExports(code) {
+  if (swc && typeof swc.parseSync === "function") {
+    try {
+      const ast = swc.parseSync(code, { syntax: "typescript", tsx: true });
+      const exports = new Set();
+      for (const item of ast.body) {
+        if (item.type === "ExportDefaultDeclaration" || item.type === "ExportDefaultExpression") {
+          exports.add("default");
+        } else if (item.type === "ExportDeclaration") {
+          const d = item.declaration;
+          if (!d) continue;
+          if (d.type === "FunctionDeclaration" || d.type === "ClassDeclaration") {
+            if (d.identifier?.value) exports.add(d.identifier.value);
+          } else if (d.type === "VariableDeclaration") {
+            for (const v of d.declarations) {
+              if (v.id.type === "Identifier") exports.add(v.id.value);
+            }
+          }
+        } else if (item.type === "ExportNamedDeclaration") {
+          const d = item.declaration;
+          if (d) {
+            if (d.type === "FunctionDeclaration" || d.type === "ClassDeclaration") {
+              if (d.identifier?.value) exports.add(d.identifier.value);
+            } else if (d.type === "VariableDeclaration") {
+              for (const v of d.declarations) {
+                if (v.id.type === "Identifier") exports.add(v.id.value);
+              }
+            }
+          }
+          if (item.specifiers) {
+            for (const s of item.specifiers) {
+              const name = s.exported?.value || s.orig?.value;
+              if (name) exports.add(name);
+            }
+          }
+        }
+      }
+      return [...exports];
+    } catch (e) {
+      // Fallback to Babel
+    }
+  }
+
+  return parseExportsWithBabel(code);
+}
+
 module.exports = parseExports;
+

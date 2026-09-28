@@ -58,9 +58,16 @@ const createPostCSSExtractPlugin = (options = {}) => {
     }
   };
 
+  const addExtractedCss = (cssText) => {
+    if (cssText) {
+      currentExtractedCSS += cssText + "\n";
+    }
+  };
+
   return {
     plugin: postcssPlugin,
     finalize,
+    addExtractedCss,
   };
 };
 

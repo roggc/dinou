@@ -20,6 +20,7 @@ export default function getConfigEsbuild({
   onBuildEnd,
   hmrPort,
 }) {
+  let esbuildRebuildStart = 0;
   let plugins = [
     ...(onBuildStart
       ? [
@@ -27,6 +28,7 @@ export default function getConfigEsbuild({
             name: "build-start-notifier",
             setup(build) {
               build.onStart(() => {
+                esbuildRebuildStart = Date.now();
                 onBuildStart();
               });
             },
@@ -46,6 +48,9 @@ export default function getConfigEsbuild({
             name: "build-end-notifier",
             setup(build) {
               build.onEnd(async (result) => {
+                if (esbuildRebuildStart > 0) {
+                  globalThis.__ESBUILD_CORE_TIME__ = Date.now() - esbuildRebuildStart;
+                }
                 await onBuildEnd(result);
               });
             },

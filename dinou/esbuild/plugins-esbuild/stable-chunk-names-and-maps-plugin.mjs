@@ -11,6 +11,7 @@ const normKey = (p) => {
 
 export default function stableChunkNamesAndMapsPlugin({ dev = true, changedIds } = {}) {
   let isInitial = true;
+  const processedContentsCache = new Map();
 
   return {
     name: "stable-chunk-names",
@@ -92,12 +93,25 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true, changedIds }
             const output = outputs[relPath];
             if (!output.imports || !relPath.endsWith(".js")) continue;
 
+            const importerFile = outputFilesMap.get(relPath);
+            if (!importerFile) continue;
+
             // Only decode and regex-replace if this output imports any renamed chunk
             const hasRenamedChunk = output.imports.some((imp) => renames.has(path.basename(imp.path)));
             if (!hasRenamedChunk) continue;
 
-            const importerFile = outputFilesMap.get(relPath);
-            if (!importerFile) continue;
+            if (isIncremental) {
+              const inputFiles = Object.keys(output.inputs || {});
+              const touchesChanged = inputFiles.some((m) => {
+                const clean = m.replace(/^[a-zA-Z0-9_-]+:/, "");
+                return changedIds.has(normKey(clean));
+              });
+              if (!touchesChanged && processedContentsCache.has(relPath)) {
+                importerFile.contents = processedContentsCache.get(relPath);
+                continue;
+              }
+            }
+
             let content = new TextDecoder().decode(importerFile.contents);
             for (const imp of output.imports) {
               const importedRelPath = imp.path;
@@ -128,6 +142,7 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true, changedIds }
               );
             }
             importerFile.contents = new TextEncoder().encode(content);
+            processedContentsCache.set(relPath, importerFile.contents);
           }
 
           // Step 4: Update sourceMappingURL in the .js files being renamed
@@ -138,6 +153,16 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true, changedIds }
             );
             const oldLocal = path.basename(oldRelPath);
             if (!renames.has(oldLocal)) continue;
+
+            if (isIncremental) {
+              const outputInfo = outputs[oldRelPath];
+              const inputFiles = Object.keys(outputInfo?.inputs || {});
+              const touchesChanged = inputFiles.some((m) => {
+                const clean = m.replace(/^[a-zA-Z0-9_-]+:/, "");
+                return changedIds.has(normKey(clean));
+              });
+              if (!touchesChanged) continue;
+            }
 
             const newLocal = renames.get(oldLocal);
             const oldMapLocal = oldLocal.replace(/\.js$/, ".js.map");
@@ -154,6 +179,7 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true, changedIds }
               `sourceMappingURL=./${escNew}`
             );
             file.contents = new TextEncoder().encode(content);
+            processedContentsCache.set(oldRelPath, file.contents);
           }
 
           // Step 5: Update paths in outputFiles for chunks and maps

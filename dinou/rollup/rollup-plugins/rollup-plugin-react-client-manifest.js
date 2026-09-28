@@ -313,7 +313,11 @@ function setManifestEntry(fileUrl, expName, entry) {
       const emittedAssets = new Set();
       const sharedAstCache = new Map();
 
+      let fileScanIdx = 0;
       for (const absPath of uniqueFiles) {
+        if (++fileScanIdx % 5 === 0) {
+          await new Promise((resolve) => setImmediate(resolve));
+        }
         const code = readFileSync(absPath, "utf8");
         const normalizedPath = absPath.split(path.sep).join(path.posix.sep);
         const isClientModule = useClientRegex.test(code.trim());

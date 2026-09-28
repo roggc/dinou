@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/postcss";
 import autoprefixer from "autoprefixer";
@@ -11,8 +12,47 @@ import { pathToFileURL } from "node:url";
 import resolve from "resolve";
 import createPostCSSExtractPlugin from "../plugins-postcss/postcss-extract-plugin.js";
 
+const cssCache = new Map();
+let cssCacheLoaded = false;
+let cssCacheDirty = false;
+
+function getCssCachePath() {
+  const dir = path.resolve(process.cwd(), ".dinou/cache");
+  return { dir, file: path.join(dir, "css-dev-cache.json") };
+}
+
+function loadCssCache() {
+  if (cssCacheLoaded) return;
+  cssCacheLoaded = true;
+  try {
+    const { file } = getCssCachePath();
+    if (fsSync.existsSync(file)) {
+      const parsed = JSON.parse(fsSync.readFileSync(file, "utf8"));
+      for (const [k, v] of Object.entries(parsed)) {
+        cssCache.set(k, v);
+      }
+    }
+  } catch (e) {}
+}
+
+async function saveCssCache() {
+  if (!cssCacheDirty) return;
+  cssCacheDirty = false;
+  try {
+    const { dir, file } = getCssCachePath();
+    if (!fsSync.existsSync(dir)) {
+      fsSync.mkdirSync(dir, { recursive: true });
+    }
+    const data = {};
+    for (const [k, v] of cssCache.entries()) {
+      data[k] = v;
+    }
+    await fs.writeFile(file, JSON.stringify(data), "utf8");
+  } catch (e) {}
+}
+
 export default function cssProcessorPlugin({ outdir = ".dinou/public", hmrEngine } = {}) {
-  const { finalize, plugin: extractor } = createPostCSSExtractPlugin({
+  const { finalize, plugin: extractor, addExtractedCss } = createPostCSSExtractPlugin({
     outputFile: `${outdir}/styles.css`,
   });
 
@@ -31,12 +71,42 @@ export default function cssProcessorPlugin({ outdir = ".dinou/public", hmrEngine
       });
 
       build.onLoad({ filter: /\.css$/ }, async (args) => {
+        const filePath = args.path;
+        loadCssCache();
+        const stat = await fs.stat(filePath);
+        const cached = cssCache.get(filePath);
+
+        if (cached && cached.mtime === stat.mtimeMs) {
+          if (cached.extractedCss && typeof addExtractedCss === "function") {
+            addExtractedCss(cached.extractedCss);
+          }
+          if (filePath.endsWith(".module.css")) {
+            return {
+              contents: `export default ${JSON.stringify(cached.map || {})};`,
+              loader: "js",
+              watchFiles: [filePath],
+            };
+          } else {
+            return {
+              contents: `/* global: ${path.basename(filePath)} */`,
+              loader: "js",
+              watchFiles: [filePath],
+            };
+          }
+        }
+
         hasCssChange = true;
         const tPostCss0 = Date.now();
-        const filePath = args.path;
         const source = await fs.readFile(filePath, "utf8");
 
         let map = {};
+        let extractedForFile = "";
+        const fileCapturePlugin = {
+          postcssPlugin: "file-capture",
+          OnceExit(root) {
+            extractedForFile = root.toString();
+          },
+        };
 
         await postcss([
           postcssImport({
@@ -45,11 +115,9 @@ export default function cssProcessorPlugin({ outdir = ".dinou/public", hmrEngine
                 parentURL: pathToFileURL(basedir).href,
               });
               if (resolvedAlias) {
-                console.log("ALIAS RESOLVED:", resolvedAlias);
                 return resolvedAlias;
               }
               if (id.startsWith("tailwindcss/")) {
-                console.log("TAILWIND INTERNAL:", id);
                 return resolve.sync(id, { basedir, extensions: [".css"] });
               }
               try {
@@ -71,6 +139,7 @@ export default function cssProcessorPlugin({ outdir = ".dinou/public", hmrEngine
               map = json;
             },
           }),
+          fileCapturePlugin,
           extractor,
         ]).process(source, { from: filePath });
 
@@ -79,21 +148,30 @@ export default function cssProcessorPlugin({ outdir = ".dinou/public", hmrEngine
         globalThis.__DINOU_POSTCSS_TIME__ = postCssTotalTime;
         globalThis.__DINOU_POSTCSS_COUNT__ = postCssCount;
 
+        cssCache.set(filePath, {
+          mtime: stat.mtimeMs,
+          map,
+          extractedCss: extractedForFile,
+        });
+        cssCacheDirty = true;
+
         if (filePath.endsWith(".module.css")) {
-          // console.log(`[CSS MODULE] ${path.basename(filePath)} →`, map);
           return {
             contents: `export default ${JSON.stringify(map)};`,
             loader: "js",
+            watchFiles: [filePath],
           };
         } else {
           return {
             contents: `/* global: ${path.basename(filePath)} */`,
             loader: "js",
+            watchFiles: [filePath],
           };
         }
       });
       build.onEnd(() => {
         finalize();
+        saveCssCache().catch(() => {});
         globalThis.__DINOU_POSTCSS_TIME__ = postCssTotalTime;
         globalThis.__DINOU_POSTCSS_COUNT__ = postCssCount;
         if (!isInitial && hasCssChange && hmrEngine?.value?.broadcastMessage) {

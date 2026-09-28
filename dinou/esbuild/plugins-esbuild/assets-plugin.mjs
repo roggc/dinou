@@ -52,18 +52,29 @@ export default function assetsPlugin({ include = regex, changedIds } = {}) {
         };
       });
 
+      // Cache asset file buffers in memory
+      const assetCache = new Map();
+
       // Loader for normal assets
       build.onLoad({ filter: /.*/, namespace: "dinou-asset" }, async (args) => {
-        const contents = await fs.readFile(args.path);
-        return { contents, loader: "file" };
+        let contents = assetCache.get(args.path);
+        if (!contents) {
+          contents = await fs.readFile(args.path);
+          assetCache.set(args.path, contents);
+        }
+        return { contents, loader: "file", watchFiles: [args.path] };
       });
 
       // Loader for asset entry points
       build.onLoad(
         { filter: /.*/, namespace: "dinou-asset-entry" },
         async (args) => {
-          const contents = await fs.readFile(args.path);
-          return { contents, loader: "file" };
+          let contents = assetCache.get(args.path);
+          if (!contents) {
+            contents = await fs.readFile(args.path);
+            assetCache.set(args.path, contents);
+          }
+          return { contents, loader: "file", watchFiles: [args.path] };
         }
       );
 

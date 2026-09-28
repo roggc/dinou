@@ -15,6 +15,7 @@ const writtenCache = new Map();
 const createdDirs = new Set();
 
 export default async function write(result) {
+  const tWriteTotal0 = Date.now();
   if (!result.metafile) {
     return;
   }
@@ -66,7 +67,9 @@ export default async function write(result) {
     const fileRelPath = normalizeRel(path.relative(process.cwd(), file.path));
     if (skipSet.has(fileRelPath)) continue;
     const cleanPublicRel = normalizeRel(path.relative(publicDir, file.path));
-    const buf = Buffer.isBuffer(file.contents) ? file.contents : Buffer.from(file.contents);
+    const buf = Buffer.isBuffer(file.contents)
+      ? file.contents
+      : Buffer.from(file.contents.buffer, file.contents.byteOffset, file.contents.byteLength);
     globalThis.__DINOU_MEM_FILES__.set(cleanPublicRel, buf);
     globalThis.__DINOU_MEM_FILES__.set("/" + cleanPublicRel, buf);
     const base = path.basename(cleanPublicRel);
@@ -109,6 +112,7 @@ export default async function write(result) {
 
   if (!shouldWriteToDisk) {
     globalThis.__DINOU_WRITE_TIME__ = 0;
+    globalThis.__DINOU_WRITE_TOTAL__ = Date.now() - tWriteTotal0;
     if (isDebug) {
       console.log(`⏱️ [TIMELINE ${timelineTime()}] ${timelineRel()} write.mjs: in-memory cache ready (${result.outputFiles.length} file(s)), disk write skipped (0ms)`);
     }
