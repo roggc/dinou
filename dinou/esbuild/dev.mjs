@@ -1,3 +1,8 @@
+process.env.DINOU_DEV = "true";
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = "development";
+}
+
 import esbuild from "esbuild";
 import fs from "node:fs/promises";
 import getConfigEsbuild from "./helpers-esbuild/get-config-esbuild.mjs";
@@ -6,6 +11,11 @@ import path from "node:path";
 import normalizePath from "./helpers-esbuild/normalize-path.mjs";
 import { fileURLToPath } from "url";
 import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-module.mjs";
+import {
+  syncAllSwcFiles,
+  transformToDisk,
+  getMirrorPath,
+} from "./helpers-esbuild/swc-disk-cache.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -60,6 +70,11 @@ export async function startEsbuildDev(options = {}) {
 
   let manifest = {};
   let entryPoints = {};
+  let cssEntryPoints = {};
+  let allComponentEntries = {};
+  let activeComponentEntries = new Map();
+  let pathToOutfile = new Map();
+  let outfileNameToPath = new Map();
 
   async function updateEntriesAndComponents() {
     manifest = {};
@@ -87,14 +102,16 @@ export async function startEsbuildDev(options = {}) {
       serverFiles.map((f) => normalizePath(path.resolve(f)))
     );
 
+    await syncAllSwcFiles(path.resolve(process.cwd(), "src"), process.cwd());
+
     const componentEntryPoints = [...esbuildEntries].reduce(
-      (acc, dCE) => ({ ...acc, [dCE.outfileName]: dCE.absPath }),
+      (acc, dCE) => ({ ...acc, [dCE.outfileName]: getMirrorPath(dCE.absPath, process.cwd()) }),
       {}
     );
 
     clientComponentsPaths = Object.values(componentEntryPoints);
 
-    const cssEntryPoints = [...detectedCSSEntries].reduce(
+    cssEntryPoints = [...detectedCSSEntries].reduce(
       (acc, dCSSE) => ({ ...acc, [dCSSE.outfileName]: dCSSE.absPath }),
       {}
     );
@@ -103,6 +120,16 @@ export async function startEsbuildDev(options = {}) {
       (acc, dAE) => ({ ...acc, [dAE.outfileName]: dAE.absPath }),
       {}
     );
+
+    allComponentEntries = componentEntryPoints;
+    for (const [outName, absP] of Object.entries(componentEntryPoints)) {
+      const norm = normKey(absP);
+      pathToOutfile.set(norm, outName);
+      outfileNameToPath.set(outName, absP);
+    }
+    for (const dCE of esbuildEntries) {
+      pathToOutfile.set(normKey(dCE.absPath), dCE.outfileName);
+    }
 
     entryPoints = {
       ...frameworkEntryPoints,
@@ -195,9 +222,23 @@ export async function startEsbuildDev(options = {}) {
     broadcast: (msg) => {
       hmrEngine.value?.broadcastMessage?.(msg);
     },
-    notifyFileChanged: (filePath) => {
+    ensureActiveRoute: async () => true,
+    notifyFileChanged: async (filePath) => {
       if (filePath) {
-        changedIds.add(normKey(filePath));
+        const norm = normKey(filePath);
+        changedIds.add(norm);
+
+        // Fast disk-backed SWC compilation of the modified file
+        if (/\.[jt]sx?$/i.test(filePath)) {
+          const tSwc0 = Date.now();
+          const mirrorPath = await transformToDisk(filePath, process.cwd());
+          globalThis.__DINOU_SWC_TIME__ = Date.now() - tSwc0;
+          globalThis.__DINOU_SWC_COUNT__ = 1;
+          if (mirrorPath) {
+            changedIds.add(normKey(mirrorPath));
+          }
+        }
+
         if (currentCtx) {
           const t0 = Date.now();
           return currentCtx.rebuild().then((result) => {

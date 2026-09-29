@@ -41,7 +41,22 @@ export default function reactClientManifestPlugin({
                 continue;
               }
               const absModulePath = path.resolve(modulePath);
-              const baseFileUrl = pathToFileURL(absModulePath).href;
+              let baseFileUrl = pathToFileURL(absModulePath).href;
+
+              // If entry point was loaded from .dinou/swc, map to original file URL
+              if (absModulePath.includes(".dinou/swc") || absModulePath.includes(".dinou\\swc")) {
+                const norm = absModulePath.replace(/\\/g, "/");
+                const rel = norm.replace(/^.*\.dinou\/swc\//, "");
+                const base = path.resolve(process.cwd(), rel.replace(/\.js$/, ""));
+                for (const ext of [".tsx", ".ts", ".jsx", ".js"]) {
+                  const candidate = base + ext;
+                  const candidateUrl = pathToFileURL(candidate).href;
+                  if (manifestPrefixMap.has(candidateUrl)) {
+                    baseFileUrl = candidateUrl;
+                    break;
+                  }
+                }
+              }
 
               const relatedKeys = manifestPrefixMap.get(baseFileUrl);
               if (relatedKeys) {

@@ -129,20 +129,16 @@ export default function esmHmrPlugin({
         }
       });
 
-      build.onLoad({ filter: /(?:src|dinou)[\\/].*\.[jt]sx?$/i }, async (args) => {
-        const tStart = Date.now();
+      build.onLoad({ filter: /(?:[/\\]client|[/\\]client-error)\.[jt]sx?$/i }, async (args) => {
         const abs = path.resolve(args.path);
         const absNorm = normKey(abs);
 
-        // 1. Check if it is a ROOT Entry (client.jsx or error.tsx)
-        // Must be checked BEFORE filtering node_modules, because non-ejected Dinou lives inside node_modules!
+        // Check if it is a ROOT Entry (client.jsx or client-error.jsx)
         const rootSource = rootEntryMap.get(absNorm);
         if (rootSource) {
           let injectCode = `import { createHotContext } from "/__hmr_client__.js";\n`;
           injectCode += `window.__hotContext = createHotContext;\n`;
 
-          // IMPORTANT: We return RAW 'source' + injection.
-          // Without passing through Babel/SWC to prevent $RefreshSig$ from breaking initialization.
           return {
             contents: injectCode + rootSource,
             loader: "jsx",
@@ -150,86 +146,6 @@ export default function esmHmrPlugin({
           };
         }
 
-        const normPath = args.path.replace(/\\/g, "/");
-        if (normPath.includes("/node_modules/")) return null;
-
-        // 2. Check if it is a user component (entry point or any JSX/TSX component in src/)
-        const isUserComponent =
-          entryPointsSet.has(absNorm) ||
-          (normPath.includes("/src/") && /\.[jt]sx?$/i.test(normPath));
-
-        // CASE B: It is a user page or component
-        if (isUserComponent) {
-          try {
-            loadSwcCache();
-            const cached = swcGlobalCache.get(absNorm);
-            const isKnownUnchanged = !isInitialBuild && changedIds && changedIds.size > 0 && !changedIds.has(absNorm);
-            if (cached && isKnownUnchanged) {
-              return {
-                contents: cached.code,
-                loader: "js",
-                watchFiles: [abs],
-              };
-            }
-
-            const stat = await fs.stat(args.path);
-            if (cached && cached.mtime === stat.mtimeMs) {
-              return {
-                contents: cached.code,
-                loader: "js",
-                watchFiles: [abs],
-              };
-            }
-
-            // HERE we DO apply SWC transformation to enable React Fast Refresh
-            const source = await fs.readFile(args.path, "utf8");
-            const tSwc0 = Date.now();
-            const { code } = await transform(source, {
-              filename: abs,
-              jsc: {
-                parser: {
-                  syntax: "typescript",
-                  tsx: true,
-                  dynamicImport: true,
-                },
-                target: "es2022",
-                transform: {
-                  react: {
-                    refresh: true,
-                    development: true,
-                    runtime: "automatic",
-                  },
-                },
-              },
-            });
-            swcTotalTime += Date.now() - tSwc0;
-            swcCount++;
-            globalThis.__DINOU_SWC_TIME__ = swcTotalTime;
-            globalThis.__DINOU_SWC_COUNT__ = swcCount;
-            swcGlobalCache.set(absNorm, { mtime: stat.mtimeMs, code });
-            swcCacheDirty = true;
-
-            if (swcCount % 6 === 0) {
-              await new Promise((r) => setImmediate(r));
-            }
-
-            return {
-              contents: code,
-              loader: "js",
-              watchFiles: [abs],
-            };
-          } catch (e) {
-            console.error("SWC Error:", e);
-            return null;
-          } finally {
-            onLoadCount++;
-            onLoadTime += Date.now() - tStart;
-          }
-        }
-
-        // CASE C: It is not an entry point (libraries, internal helpers, node_modules...)
-        onLoadCount++;
-        onLoadTime += Date.now() - tStart;
         return null;
       });
 
@@ -301,7 +217,8 @@ export default function esmHmrPlugin({
           const hasUserCode = inputFiles.some(
             (f) =>
               !f.includes("node_modules") &&
-              !f.includes("dinou") &&
+              !f.includes("/dinou/core/") &&
+              !f.includes("\\dinou\\core\\") &&
               /\.(jsx?|tsx?)$/.test(f)
           );
           if (!hasUserCode) continue;
@@ -326,9 +243,11 @@ export default function esmHmrPlugin({
             source.matchAll(/import\s+["'](.+?)["']/g),
           ).map((m) => m[1]);
 
-          hmrEngine.value.setEntry(urlId, imports, true);
-          const acceptedEntry = hmrEngine.value.getEntry(urlId, true);
-          acceptedEntry.isHmrAccepted = true;
+          if (hmrEngine.value) {
+            hmrEngine.value.setEntry(urlId, imports, true);
+            const acceptedEntry = hmrEngine.value.getEntry(urlId, true);
+            if (acceptedEntry) acceptedEntry.isHmrAccepted = true;
+          }
           const wrappedCode = `
           const RefreshRuntime = window.__reactRefreshRuntime;
           let prevRefreshReg = window.$RefreshReg$;
@@ -366,9 +285,10 @@ export default function esmHmrPlugin({
 
       build.onEnd(async (result) => {
         const tBroadcast0 = Date.now();
-        saveSwcCache().catch(() => {});
-        globalThis.__DINOU_SWC_TIME__ = swcTotalTime;
-        globalThis.__DINOU_SWC_COUNT__ = swcCount;
+        if (!globalThis.__DINOU_SWC_TIME__) {
+          globalThis.__DINOU_SWC_TIME__ = swcTotalTime;
+          globalThis.__DINOU_SWC_COUNT__ = swcCount;
+        }
         if (isInitialBuild) {
           isInitialBuild = false;
           changedIds?.clear();

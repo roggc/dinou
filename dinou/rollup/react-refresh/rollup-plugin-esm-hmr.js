@@ -6,6 +6,7 @@ const { createServer } = require("node:http");
 const changedIds = new Set();
 const pendingUpdateUrls = new Set();
 let needsFullReload = false;
+let hasPendingCssUpdate = false;
 
 function normalizePath(p) {
   return path.resolve(p).replace(/\\/g, "/").toLowerCase();
@@ -92,74 +93,76 @@ function esmHmrPlugin() {
         fileName: "__hmr_client__.js",
         source: clientSource,
       });
-    },
 
-    writeBundle(_options, bundle) {
-      if (changedIds.size === 0) return;
+      if (changedIds.size > 0) {
+        hasPendingCssUpdate = Array.from(changedIds).some((id) => {
+          const lower = id.toLowerCase();
+          return lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less");
+        });
 
-      const hasCssUpdate = Array.from(changedIds).some((id) => {
-        const lower = id.toLowerCase();
-        return lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less");
-      });
-
-      for (const [fileName, chunkInfo] of Object.entries(bundle)) {
-        if (fileName.endsWith(".css") || chunkInfo.type !== "chunk") {
-          continue;
-        }
-
-        let isChangedByJs = false;
-
-        // 1. Check facadeModuleId
-        if (chunkInfo.facadeModuleId) {
-          const facadeNorm = normalizePath(chunkInfo.facadeModuleId.replace(/\?.*$/, ""));
-          if (changedIds.has(facadeNorm)) {
-            isChangedByJs = true;
+        for (const [fileName, chunkInfo] of Object.entries(bundle)) {
+          if (fileName.endsWith(".css") || chunkInfo.type !== "chunk") {
+            continue;
           }
-        }
 
-        // 2. Check modules in chunk
-        if (!isChangedByJs && chunkInfo.modules) {
-          isChangedByJs = Object.keys(chunkInfo.modules).some((modPath) => {
-            const norm = normalizePath(modPath.replace(/\?.*$/, ""));
-            const lower = norm.toLowerCase();
-            if (
-              (lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less")) &&
-              !lower.endsWith(".module.css")
-            ) {
-              return false;
-            }
-            return changedIds.has(norm);
-          });
-        }
+          let isChangedByJs = false;
 
-        // 3. Fallback: match chunk filename with base name or relative path of changedId
-        if (!isChangedByJs) {
-          const chunkFileNameLower = fileName.toLowerCase().replace(/\.[jt]sx?$/, "");
-          for (const changedId of changedIds) {
-            const relClean = changedId
-              .replace(/^.*\/src\//, "")
-              .replace(/\.[jt]sx?$/, "")
-              .replace(/[^a-zA-Z0-9_-]/g, "_")
-              .toLowerCase();
-            if (relClean && chunkFileNameLower.includes(relClean)) {
+          // 1. Check facadeModuleId
+          if (chunkInfo.facadeModuleId) {
+            const facadeNorm = normalizePath(chunkInfo.facadeModuleId.replace(/\?.*$/, ""));
+            if (changedIds.has(facadeNorm)) {
               isChangedByJs = true;
-              break;
-            }
-            const baseName = path.basename(changedId).replace(/\.[jt]sx?$/, "").toLowerCase();
-            if (baseName.length > 2 && baseName !== "page" && baseName !== "layout" && baseName !== "index" && chunkFileNameLower.includes(baseName)) {
-              isChangedByJs = true;
-              break;
             }
           }
-        }
 
-        if (isChangedByJs) {
-          const urlId = "/" + fileName;
-          pendingUpdateUrls.add(urlId);
+          // 2. Check modules in chunk
+          if (!isChangedByJs && chunkInfo.modules) {
+            isChangedByJs = Object.keys(chunkInfo.modules).some((modPath) => {
+              const norm = normalizePath(modPath.replace(/\?.*$/, ""));
+              const lower = norm.toLowerCase();
+              if (
+                (lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less")) &&
+                !lower.endsWith(".module.css")
+              ) {
+                return false;
+              }
+              return changedIds.has(norm);
+            });
+          }
+
+          // 3. Fallback: match chunk filename with base name or relative path of changedId
+          if (!isChangedByJs) {
+            const chunkFileNameLower = fileName.toLowerCase().replace(/\.[jt]sx?$/, "");
+            for (const changedId of changedIds) {
+              const relClean = changedId
+                .replace(/^.*\/src\//, "")
+                .replace(/\.[jt]sx?$/, "")
+                .replace(/[^a-zA-Z0-9_-]/g, "_")
+                .toLowerCase();
+              if (relClean && chunkFileNameLower.includes(relClean)) {
+                isChangedByJs = true;
+                break;
+              }
+              const baseName = path.basename(changedId).replace(/\.[jt]sx?$/, "").toLowerCase();
+              if (baseName.length > 2 && baseName !== "page" && baseName !== "layout" && baseName !== "index" && chunkFileNameLower.includes(baseName)) {
+                isChangedByJs = true;
+                break;
+              }
+            }
+          }
+
+          if (isChangedByJs) {
+            const urlId = "/" + fileName;
+            pendingUpdateUrls.add(urlId);
+          }
         }
       }
+    },
 
-      if (hasCssUpdate) {
+    writeBundle(_options, _bundle) {
+      if (changedIds.size === 0 && pendingUpdateUrls.size === 0 && !hasPendingCssUpdate) return;
+
+      if (hasPendingCssUpdate) {
         hmrEngine?.broadcastMessage({ type: "style-update", url: "/styles.css" });
       }
 
@@ -208,6 +211,7 @@ function esmHmrPlugin() {
 
       changedIds.clear();
       pendingUpdateUrls.clear();
+      hasPendingCssUpdate = false;
       needsFullReload = false;
     },
 

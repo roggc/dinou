@@ -12,6 +12,7 @@ import {
   useMemo,
   useCallback,
   Component,
+  createElement,
 } from "react";
 import { createFromFetch } from "@roggc/react-server-dom-esm/client";
 import { hydrateRoot } from "react-dom/client";
@@ -405,7 +406,7 @@ function Router() {
   );
 }
 
-hydrateRoot(document, <Router />);
+hydrateRoot(document, createElement(Router));
 
 if (import.meta.hot) {
   import.meta.hot.accept();

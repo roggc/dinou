@@ -10,7 +10,6 @@ const createScopedName = require("../core/createScopedName.js");
 const replace = require("@rollup/plugin-replace");
 const json = require("@rollup/plugin-json");
 const reactRefreshWrapModules = require("./react-refresh/react-refresh-wrap-modules.js");
-const reactRefreshScopedId = require("./react-refresh/babel-plugin-react-refresh-scoped-id.js");
 const { esmHmrPlugin } = require("./react-refresh/rollup-plugin-esm-hmr.js");
 const dinouAssetPlugin = require("./rollup-plugins/dinou-asset-plugin.js");
 const tsconfigPaths = require("rollup-plugin-tsconfig-paths");
@@ -18,6 +17,7 @@ const serverFunctionsPlugin = require("./rollup-plugins/rollup-plugin-server-fun
 const { regex } = require("../core/asset-extensions.js");
 const manifestGeneratorPlugin = require("./rollup-plugins/manifest-generator-plugin.js");
 const rollupMemoryPlugin = require("./rollup-plugins/rollup-plugin-memory.js");
+const rollupSwcPlugin = require("./rollup-plugins/rollup-plugin-swc.js");
 
 const localDinouPath = path.resolve(process.cwd(), "dinou");
 const isEjected = fs.existsSync(localDinouPath);
@@ -142,21 +142,21 @@ module.exports = async function () {
       dinouAssetPlugin({
         include: regex,
       }),
-      babel({
-        babelHelpers: "bundled",
-        extensions: [".js", ".jsx", ".ts", ".tsx"],
-        presets: [
-          ["@babel/preset-react", { runtime: "automatic" }],
-          "@babel/preset-typescript",
-        ],
-        plugins: [
-          !isDevelopment && "babel-plugin-react-compiler",
-          isDevelopment && require.resolve("react-refresh/babel"),
-          isDevelopment && reactRefreshScopedId,
-          "@babel/plugin-syntax-import-meta",
-        ].filter(Boolean),
-        exclude: /node_modules[\\/](?!dinou|react-refresh)/,
-      }),
+      isDevelopment
+        ? rollupSwcPlugin()
+        : babel({
+            babelHelpers: "bundled",
+            extensions: [".js", ".jsx", ".ts", ".tsx"],
+            presets: [
+              ["@babel/preset-react", { runtime: "automatic" }],
+              "@babel/preset-typescript",
+            ],
+            plugins: [
+              "babel-plugin-react-compiler",
+              "@babel/plugin-syntax-import-meta",
+            ].filter(Boolean),
+            exclude: /node_modules[\\/](?!dinou|react-refresh)/,
+          }),
       postcss({
         modules: {
           generateScopedName: (name, filename) =>
@@ -211,7 +211,7 @@ module.exports = async function () {
       ],
     },
     onwarn(warning, warn) {
-      if (warning.code === "CIRCULAR_DEPENDENCY") {
+      if (warning.code === "CIRCULAR_DEPENDENCY" || warning.code === "THIS_IS_UNDEFINED") {
         return;
       }
       // Ignore eval warning if it comes from our request-context file

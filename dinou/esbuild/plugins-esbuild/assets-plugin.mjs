@@ -31,13 +31,27 @@ export default function assetsPlugin({ include = regex, changedIds } = {}) {
       build.initialOptions.assetNames = "assets/[name]-[hash]";
 
       // Handle asset loading with different namespaces
-      build.onResolve({ filter: include }, (args) => {
-        const resolvedAlias =
+      build.onResolve({ filter: include }, async (args) => {
+        if (args.pluginData?.inAssetPlugin) return null;
+        let resolvedAlias =
           args.kind === "entry-point"
             ? args.path
             : getAbsPathWithExt(args.path, {
                 parentURL: pathToFileURL(args.importer).href,
               });
+
+        if (!resolvedAlias) {
+          try {
+            const res = await build.resolve(args.path, {
+              resolveDir: args.resolveDir,
+              kind: args.kind,
+              pluginData: { inAssetPlugin: true },
+            });
+            if (res && res.path) {
+              resolvedAlias = res.path;
+            }
+          } catch (e) {}
+        }
 
         if (!resolvedAlias) return null;
 

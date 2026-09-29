@@ -15,7 +15,7 @@ import { useClientRegex, useServerRegex } from "../../constants.js";
 import { updateManifestForModule } from "./update-manifest-for-module.mjs";
 
 function hashFilePath(absPath) {
-  return crypto.createHash("sha1").update(absPath).digest("hex").slice(0, 8);
+  return crypto.createHash("sha1").update(normalizePath(absPath)).digest("hex").slice(0, 8);
 }
 
 export default async function getEsbuildEntries({
@@ -255,6 +255,14 @@ export default async function getEsbuildEntries({
     const outfileName = `${dCE.name}-${hash}`;
     dCE.outfile = `${outfileName}.js`;
     dCE.outfileName = outfileName;
+    if (manifest) {
+      const fileUrl = pathToFileURL(dCE.absPath).href;
+      for (const key in manifest) {
+        if (key === fileUrl || key.startsWith(fileUrl + "#")) {
+          manifest[key].id = "/" + dCE.outfile;
+        }
+      }
+    }
   }
 
   for (const dCSSE of detectedCSSEntries) {

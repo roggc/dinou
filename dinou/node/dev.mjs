@@ -3,6 +3,11 @@
 // Eliminates child_process.fork() by compiling Pass A (RSC) and Pass B (SSR)
 // using esbuild.context() in memory, running a single unified streaming process.
 
+process.env.DINOU_DEV = "true";
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = "development";
+}
+
 import http from "node:http";
 import path from "node:path";
 import fs from "node:fs";
@@ -1467,6 +1472,8 @@ function notifyClientBuildEnd() {
     if (rcm > 0) details.push(`RCM: ${rcm}ms`);
     const detailsStr = details.length > 0 ? ` [${details.join(" | ")}]` : "";
     lastClientBuildDetails = detailsStr;
+    delete globalThis.__DINOU_SWC_TIME__;
+    delete globalThis.__DINOU_SWC_COUNT__;
     logTimeline(`Client Bundler (esbuild) build finished in ${elapsed}ms${detailsStr}`);
   } else if (tool === "rollup") {
     const manifestTime = globalThis.__DINOU_ROLLUP_MANIFEST_TIME__ || 0;
@@ -1801,6 +1808,27 @@ async function startClientBundler(tool) {
     reactClientManifestPlugin.setOnManifestUpdated?.(() => onManifestUpdated());
 
     let currentWatcher = null;
+    let nextRollupBuildPromise = null;
+    let nextRollupBuildResolve = null;
+    let rollupBuildSafetyTimeout = null;
+
+    function getOrCreateNextRollupBuildPromise() {
+      if (!nextRollupBuildPromise) {
+        nextRollupBuildPromise = new Promise((resolve) => {
+          nextRollupBuildResolve = resolve;
+        });
+        // Safety timeout: if Rollup does not trigger or finish within 800ms (e.g. unchanged or ignored file), resolve
+        rollupBuildSafetyTimeout = setTimeout(() => {
+          if (!activeClientBuildPromise && nextRollupBuildResolve) {
+            const r = nextRollupBuildResolve;
+            nextRollupBuildResolve = null;
+            nextRollupBuildPromise = null;
+            r();
+          }
+        }, 800);
+      }
+      return nextRollupBuildPromise;
+    }
 
     async function startRollupWatcher() {
       if (currentWatcher) {
@@ -1828,9 +1856,18 @@ async function startClientBundler(tool) {
         let initialResolved = false;
         currentWatcher.on("event", (event) => {
           if (event.code === "BUNDLE_START") {
+            if (rollupBuildSafetyTimeout) {
+              clearTimeout(rollupBuildSafetyTimeout);
+              rollupBuildSafetyTimeout = null;
+            }
             updateSpinner("Bundling client with Rollup...");
             notifyClientBuildStart();
+            getOrCreateNextRollupBuildPromise();
           } else if (event.code === "BUNDLE_END") {
+            if (rollupBuildSafetyTimeout) {
+              clearTimeout(rollupBuildSafetyTimeout);
+              rollupBuildSafetyTimeout = null;
+            }
             logSuccess(`Client bundle completed in ${event.duration}ms`);
             if (event.result?.getTimings) {
               const rawTimings = event.result.getTimings();
@@ -1844,14 +1881,30 @@ async function startClientBundler(tool) {
               globalThis.__DINOU_ROLLUP_TIMINGS__ = pluginTimes;
             }
             notifyClientBuildEnd();
+            if (nextRollupBuildResolve) {
+              const r = nextRollupBuildResolve;
+              nextRollupBuildResolve = null;
+              nextRollupBuildPromise = null;
+              r();
+            }
             if (!initialResolved) {
               onManifestUpdated();
               initialResolved = true;
               resolve();
             }
           } else if (event.code === "ERROR") {
+            if (rollupBuildSafetyTimeout) {
+              clearTimeout(rollupBuildSafetyTimeout);
+              rollupBuildSafetyTimeout = null;
+            }
             console.error("❌ [Rollup Dev Error]:", event.error);
             notifyClientBuildEnd();
+            if (nextRollupBuildResolve) {
+              const r = nextRollupBuildResolve;
+              nextRollupBuildResolve = null;
+              nextRollupBuildPromise = null;
+              r();
+            }
             if (!initialResolved) {
               initialResolved = true;
               resolve();
@@ -1866,6 +1919,7 @@ async function startClientBundler(tool) {
     return {
       notifyFileChanged: (filePath) => {
         notifyFileChanged?.(filePath);
+        return getOrCreateNextRollupBuildPromise();
       },
       broadcast: (msg) => {
         getHmrEngine()?.broadcastMessage?.(msg);
@@ -2032,10 +2086,23 @@ const server = http.createServer(async (req, res) => {
 
       // 2.a In-memory fast path for client bundles and assets generated in dev
       if (globalThis.__DINOU_MEM_FILES__) {
-        const memBuf =
+        let memBuf =
           globalThis.__DINOU_MEM_FILES__.get(cleanPath) ||
           globalThis.__DINOU_MEM_FILES__.get(mappedPath) ||
           globalThis.__DINOU_MEM_FILES__.get("/" + cleanPath);
+
+        // Active Route Bundling: On-demand compilation of requested client bundle
+        if (!memBuf && cleanPath.endsWith(".js") && clientBundlerHandle?.ensureActiveRoute) {
+          const base = path.basename(cleanPath, ".js");
+          const activated = await clientBundlerHandle.ensureActiveRoute(base);
+          if (activated) {
+            memBuf =
+              globalThis.__DINOU_MEM_FILES__.get(cleanPath) ||
+              globalThis.__DINOU_MEM_FILES__.get(mappedPath) ||
+              globalThis.__DINOU_MEM_FILES__.get("/" + cleanPath);
+          }
+        }
+
         if (memBuf) {
           const fileExt = path.extname(cleanPath).toLowerCase();
           const contentType = MIME_TYPES[fileExt] || "application/octet-stream";
@@ -2139,6 +2206,14 @@ const server = http.createServer(async (req, res) => {
     }
     if (activeSsrSyncPromise) {
       await activeSsrSyncPromise;
+    }
+
+    // Active Route Bundling: Proactively activate requested route in dev
+    const routePath = pathname.replace(/^\/____rsc_payload____/, "");
+    if (clientBundlerHandle?.ensureActiveRoute && routePath && routePath !== "/") {
+      try {
+        await clientBundlerHandle.ensureActiveRoute(routePath);
+      } catch (e) {}
     }
 
     const webReq = nodeToWebRequest(req);

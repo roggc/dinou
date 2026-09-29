@@ -68,7 +68,9 @@ export async function renderRscStreamToHtmlStream(rscStream, consumerManifest, o
           return false;
         }
       });
-      effectiveManifest = { ...consumerManifest, moduleMap: proxyMap };
+      effectiveManifest = { ...consumerManifest, moduleMap: proxyMap, serverModuleMap: null };
+    } else if (effectiveManifest) {
+      effectiveManifest = { ...effectiveManifest, serverModuleMap: null };
     }
 
     // 1. Reconstruct JSX element tree from RSC wire stream

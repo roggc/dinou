@@ -3,6 +3,10 @@ const path = require("path");
 const { dirname } = require("path");
 const glob = require("fast-glob");
 const { pathToFileURL } = require("url");
+let swc = null;
+try {
+  swc = require("@swc/core");
+} catch (e) {}
 const parser = require("@babel/parser");
 const _traverseRaw = require("@babel/traverse");
 const traverse = typeof _traverseRaw === "function" ? _traverseRaw : (_traverseRaw.default || _traverseRaw);
@@ -14,6 +18,34 @@ const parseExports = require("../../core/parse-exports.js");
 
 function getDefaultExportName(code) {
   let name = null;
+  if (swc && typeof swc.parseSync === "function") {
+    try {
+      const ast = swc.parseSync(code, { syntax: "typescript", tsx: true });
+      for (const item of ast.body) {
+        if (item.type === "ExportDefaultDeclaration") {
+          const d = item.decl;
+          if (d) {
+            if (d.type === "Identifier") {
+              name = d.value;
+            } else if (
+              (d.type === "FunctionDeclaration" || d.type === "ClassDeclaration") &&
+              d.identifier?.value
+            ) {
+              name = d.identifier.value;
+            }
+          }
+          break;
+        } else if (item.type === "ExportDefaultExpression") {
+          if (item.expression?.type === "Identifier") {
+            name = item.expression.value;
+            break;
+          }
+        }
+      }
+      if (name) return name;
+    } catch (e) {}
+  }
+
   try {
     const ast = parser.parse(code, {
       sourceType: "module",
@@ -54,6 +86,15 @@ const defaultExportCache = new Map();
 
 function normalizeFsPath(p) {
   return path.resolve(p).replace(/\\/g, "/").toLowerCase();
+}
+
+function alignDrive(p) {
+  const resolved = path.resolve(p);
+  const cwd = process.cwd();
+  if (process.platform === "win32" && resolved.length > 2 && resolved[1] === ":" && cwd.length > 2 && cwd[1] === ":") {
+    return cwd[0] + resolved.slice(1);
+  }
+  return resolved;
 }
 
 function getStableChunkName(absPath) {
@@ -159,24 +200,39 @@ function setManifestEntry(fileUrl, expName, entry) {
       return sharedCache.get(baseFilePath);
     }
 
-    const ast = parser.parse(code, {
-      sourceType: "module",
-      plugins: ["jsx", "typescript"],
-    });
+    const importSources = [];
+    if (swc && typeof swc.parseSync === "function") {
+      try {
+        const ast = swc.parseSync(code, { syntax: "typescript", tsx: true });
+        for (const item of ast.body) {
+          if (item.type === "ImportDeclaration" && item.source?.value) {
+            importSources.push(item.source.value);
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (importSources.length === 0 && (!swc || typeof swc.parseSync !== "function")) {
+      try {
+        const ast = parser.parse(code, {
+          sourceType: "module",
+          plugins: ["jsx", "typescript"],
+        });
+        traverse(ast, {
+          ImportDeclaration(nodePath) {
+            if (nodePath.node?.source?.value) {
+              importSources.push(nodePath.node.source.value);
+            }
+          },
+        });
+      } catch (e) {}
+    }
+
     const imports = new Set();
     const assets = new Set();
     const csss = new Set();
 
-    // Collect all ImportDeclarations first (to await resolves in batch if needed, but sequential is fine)
-    const importNodes = [];
-    traverse(ast, {
-      ImportDeclaration(nodePath) {
-        importNodes.push(nodePath);
-      },
-    });
-
-    for (const nodePath of importNodes) {
-      const source = nodePath.node.source.value;
+    for (const source of importSources) {
       // console.log("source", source);
 
       // Resolve the import
@@ -265,25 +321,29 @@ function setManifestEntry(fileUrl, expName, entry) {
   let isInitial = true;
   const knownClientChunks = new Map();
   const knownCssChunks = new Map();
+  let hasPendingCssChange = false;
 
   return {
     name: "react-client-manifest",
     async buildStart(options) {
       if (!isInitial) {
-        for (const [id, name] of knownClientChunks) {
+        for (const entry of knownClientChunks.values()) {
           this.emitFile({
             type: "chunk",
-            id,
-            name,
+            id: entry.id,
+            name: entry.name,
           });
         }
-        for (const [id, name] of knownCssChunks) {
-          this.emitFile({
-            type: "chunk",
-            id,
-            name,
-          });
+        if (hasPendingCssChange) {
+          for (const entry of knownCssChunks.values()) {
+            this.emitFile({
+              type: "chunk",
+              id: entry.id,
+              name: entry.name,
+            });
+          }
         }
+        hasPendingCssChange = false;
         return;
       }
       isInitial = false;
@@ -315,42 +375,42 @@ function setManifestEntry(fileUrl, expName, entry) {
 
       let fileScanIdx = 0;
       for (const absPath of uniqueFiles) {
-        if (++fileScanIdx % 5 === 0) {
+        if (++fileScanIdx % 50 === 0) {
           await new Promise((resolve) => setImmediate(resolve));
         }
-        const code = readFileSync(absPath, "utf8");
-        const normalizedPath = absPath.split(path.sep).join(path.posix.sep);
+        const normAbs = alignDrive(absPath);
+        const normKey = normalizeFsPath(normAbs);
+        const code = readFileSync(normAbs, "utf8");
         const isClientModule = useClientRegex.test(code.trim());
         const isServerModule = useServerRegex.test(code.trim());
         if (isServerModule) {
-          serverFiles.add(normalizeFsPath(absPath));
+          serverFiles.add(normKey);
         }
 
         if (isClientModule) {
-          clientModules.add(normalizeFsPath(absPath));
-          updateManifestForModule(absPath, code, true);
-          this.addWatchFile(absPath);
-          const chunkName = getStableChunkName(absPath);
-          knownClientChunks.set(absPath, chunkName);
-          if (!emittedChunks.has(absPath)) {
-            emittedChunks.add(absPath);
+          clientModules.add(normKey);
+          updateManifestForModule(normAbs, code, true);
+          this.addWatchFile(normAbs);
+          const chunkName = getStableChunkName(normAbs);
+          knownClientChunks.set(normKey, { id: normAbs, name: chunkName });
+          if (!emittedChunks.has(normKey)) {
+            emittedChunks.add(normKey);
             this.emitFile({
               type: "chunk",
-              id: absPath,
+              id: normAbs,
               name: chunkName,
             });
           }
-        } else if (isPageOrLayout(absPath)) {
-          serverModules.add(normalizedPath);
-          this.addWatchFile(absPath);
+        } else if (isPageOrLayout(normAbs)) {
+          serverModules.add(normKey);
+          this.addWatchFile(normAbs);
           const { imports, assets, csss } = await getImportsAndAssetsAndCsss(
             code,
-            absPath,
+            normAbs,
             new Set(),
             this,
             sharedAstCache
           );
-          // console.log("assets", assets);
           for (const importPath of imports) {
             this.addWatchFile(importPath);
           }
@@ -364,14 +424,16 @@ function setManifestEntry(fileUrl, expName, entry) {
           }
           for (const cssPath of csss) {
             this.addWatchFile(cssPath);
-            const chunkName = path.basename(cssPath, path.extname(cssPath));
-            knownCssChunks.set(cssPath, chunkName);
-            if (!emittedChunks.has(cssPath)) {
-              emittedChunks.add(cssPath);
+            const normCssAbs = alignDrive(cssPath);
+            const normCssKey = normalizeFsPath(normCssAbs);
+            const chunkName = path.basename(normCssAbs, path.extname(normCssAbs));
+            knownCssChunks.set(normCssKey, { id: normCssAbs, name: chunkName });
+            if (!emittedChunks.has(normCssKey)) {
+              emittedChunks.add(normCssKey);
               // Emit CSS as a Rollup asset so postcss() processes it
               this.emitFile({
                 type: "chunk",
-                id: cssPath,
+                id: normCssAbs,
                 name: chunkName,
               });
             }
@@ -389,35 +451,38 @@ function setManifestEntry(fileUrl, expName, entry) {
       )
         return;
       if (!useClientRegex.test(code)) return;
-      const normId = normalizeFsPath(id);
-      const isClientModule = true;
+      const normAbs = alignDrive(id);
+      const normId = normalizeFsPath(normAbs);
 
-      if (isClientModule) {
-        // console.log("👉 [react-client-manifest] Found client module in transform:", normId);
-        if (!clientModules.has(normId)) {
-          clientModules.add(normId);
-          updateManifestForModule(id, code, true);
-          const chunkName = getStableChunkName(id);
-          knownClientChunks.set(id, chunkName);
-          this.emitFile({
-            type: "chunk",
-            id: id,
-            name: chunkName,
-          });
-        }
+      if (!clientModules.has(normId)) {
+        clientModules.add(normId);
+        updateManifestForModule(normAbs, code, true);
+        const chunkName = getStableChunkName(normAbs);
+        knownClientChunks.set(normId, { id: normAbs, name: chunkName });
+        this.emitFile({
+          type: "chunk",
+          id: normAbs,
+          name: chunkName,
+        });
       }
     },
     async watchChange(id) {
+      const lower = id.toLowerCase();
+      if (lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less")) {
+        hasPendingCssChange = true;
+        return;
+      }
       if (
-        !id.endsWith(".tsx") &&
-        !id.endsWith(".jsx") &&
-        !id.endsWith(".js") &&
-        !id.endsWith(".ts")
+        !lower.endsWith(".tsx") &&
+        !lower.endsWith(".jsx") &&
+        !lower.endsWith(".js") &&
+        !lower.endsWith(".ts")
       )
         return;
-      const normId = normalizeFsPath(id);
-      if (!existsSync(id)) {
-        const fileUrl = normalizeFileUrl(id);
+      const normAbs = alignDrive(id);
+      const normId = normalizeFsPath(normAbs);
+      if (!existsSync(normAbs)) {
+        const fileUrl = normalizeFileUrl(normAbs);
         const fileUrlLower = fileUrl.toLowerCase();
         for (const key in manifest) {
           if (key.toLowerCase().startsWith(fileUrlLower)) {
@@ -427,10 +492,10 @@ function setManifestEntry(fileUrl, expName, entry) {
         clientModules.delete(normId);
         serverModules.delete(normId);
         serverFiles.delete(normId);
-        knownClientChunks.delete(id);
+        knownClientChunks.delete(normId);
         return;
       }
-      const code = readFileSync(id, "utf8");
+      const code = readFileSync(normAbs, "utf8");
       const isClientModule = useClientRegex.test(code.trim());
       const isServerModule = useServerRegex.test(code.trim());
       if (isServerModule) {
@@ -439,37 +504,38 @@ function setManifestEntry(fileUrl, expName, entry) {
         serverFiles.delete(normId);
       }
 
-      updateManifestForModule(id, code, isClientModule);
+      updateManifestForModule(normAbs, code, isClientModule);
 
       if (isClientModule) {
         clientModules.add(normId);
-        const chunkName = getStableChunkName(id);
-        knownClientChunks.set(id, chunkName);
+        const chunkName = getStableChunkName(normAbs);
+        knownClientChunks.set(normId, { id: normAbs, name: chunkName });
         serverModules.delete(normId);
-        this.addWatchFile(id);
+        this.addWatchFile(normAbs);
       } else {
         clientModules.delete(normId);
-        knownClientChunks.delete(id);
-        if (isPageOrLayout(id)) {
+        knownClientChunks.delete(normId);
+        if (isPageOrLayout(normAbs)) {
           serverModules.add(normId);
-          this.addWatchFile(id);
+          this.addWatchFile(normAbs);
           const { imports, assets, csss } = await getImportsAndAssetsAndCsss(
             code,
-            id,
+            normAbs,
             new Set(),
             this
           );
           for (const importPath of imports) {
             this.addWatchFile(importPath);
           }
-          // console.log("assets", assets);
           for (const assetPath of assets) {
             this.addWatchFile(assetPath);
-            // emitAsset(assetPath, this); // Re-emit assets on server file change
           }
           for (const cssPath of csss) {
             this.addWatchFile(cssPath);
-            knownCssChunks.set(cssPath, path.basename(cssPath, path.extname(cssPath)));
+            const normCssAbs = alignDrive(cssPath);
+            const normCssKey = normalizeFsPath(normCssAbs);
+            const chunkName = path.basename(normCssAbs, path.extname(normCssAbs));
+            knownCssChunks.set(normCssKey, { id: normCssAbs, name: chunkName });
           }
         } else {
           serverModules.delete(normId);

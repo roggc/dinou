@@ -5,6 +5,7 @@ import esmHmrPlugin from "../react-refresh/esm-hmr-plugin.mjs";
 import stableChunkNamesAndMapsPlugin from "../plugins-esbuild/stable-chunk-names-and-maps-plugin.mjs";
 import assetsPlugin from "../plugins-esbuild/assets-plugin.mjs";
 import skipMissingEntryPointsPlugin from "../plugins-esbuild/skip-missing-entry-points-plugin.mjs";
+import { swcRedirectPlugin } from "./swc-disk-cache.mjs";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -22,6 +23,7 @@ export default function getConfigEsbuild({
 }) {
   let esbuildRebuildStart = 0;
   let plugins = [
+    swcRedirectPlugin({ projectRoot: process.cwd() }),
     ...(onBuildStart
       ? [
           {
@@ -30,6 +32,9 @@ export default function getConfigEsbuild({
               build.onStart(() => {
                 esbuildRebuildStart = Date.now();
                 onBuildStart();
+              });
+              build.onEnd(() => {
+                globalThis.__ESBUILD_PURE_TIME__ = Date.now() - esbuildRebuildStart;
               });
             },
           },
@@ -80,7 +85,43 @@ export default function getConfigEsbuild({
     ];
   }
 
-  const tsconfigPath = fs.existsSync("tsconfig.json") ? path.resolve("tsconfig.json") : undefined;
+  let userTsconfig = {};
+  if (fs.existsSync("tsconfig.json")) {
+    try {
+      const raw = fs.readFileSync("tsconfig.json", "utf8");
+      const clean = raw.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, "").replace(/,(\s*[}\]])/g, "$1");
+      userTsconfig = JSON.parse(clean);
+    } catch (e) {}
+  }
+  const compilerOptions = userTsconfig.compilerOptions || {};
+  const userPaths = compilerOptions.paths || {};
+
+  const paths = {};
+  for (const [alias, targets] of Object.entries(userPaths)) {
+    const list = Array.isArray(targets) ? targets : [targets];
+    const swcTargets = list.map((t) => {
+      const norm = t.replace(/^\.\//, "");
+      return `.dinou/swc/${norm}`;
+    });
+    paths[alias] = [...swcTargets, ...list];
+  }
+  if (!paths["@/*"]) {
+    paths["@/*"] = [".dinou/swc/src/*", "src/*"];
+  }
+  if (!paths["~/*"]) {
+    paths["~/*"] = [".dinou/swc/src/*", "src/*"];
+  }
+
+  const tsconfigRaw = {
+    ...userTsconfig,
+    compilerOptions: {
+      ...compilerOptions,
+      baseUrl: compilerOptions.baseUrl || ".",
+      paths,
+    },
+  };
+
+  const isDev = process.env.NODE_ENV !== "production";
 
   return {
     entryPoints,
@@ -88,8 +129,9 @@ export default function getConfigEsbuild({
     format: "esm",
     bundle: true,
     splitting: true,
-    sourcemap: true,
-    tsconfig: tsconfigPath,
+    sourcemap: !isDev,
+    treeShaking: !isDev,
+    tsconfigRaw,
     jsx: "automatic",
     target: "es2022",
     write: false,

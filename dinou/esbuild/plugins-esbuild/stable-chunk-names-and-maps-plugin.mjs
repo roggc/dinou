@@ -32,13 +32,19 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true, changedIds }
             result.metafile.outputs
           )) {
             if (info.entryPoint || !oldRelPath.endsWith(".js")) continue;
-            const inputs = Object.keys(info.inputs);
+            const inputs = Object.keys(info.inputs || {});
             const sourceFile = inputs.find(
-              (f) => f.startsWith("src/") && /\.(js|jsx|ts|tsx)$/.test(f)
+              (f) =>
+                (f.startsWith("src/") ||
+                  f.includes(".dinou/swc/src/") ||
+                  f.includes(".dinou\\swc\\src\\")) &&
+                /\.(js|jsx|ts|tsx)$/.test(f)
             );
             if (!sourceFile) continue;
+            // Clean source file if it was loaded from .dinou/swc/
+            const cleanSourceFile = sourceFile.replace(/^.*\.dinou[/\\]swc[/\\]/, "");
             // Stable name based on the source file (always the same)
-            const rel = path.relative("src", sourceFile);
+            const rel = path.relative("src", cleanSourceFile);
             const normalizedRel = rel.replace(/\\/g, "/");
             const dir = path.dirname(normalizedRel);
             const base = path.basename(
@@ -47,16 +53,15 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true, changedIds }
             );
             const stableName =
               dir === "." ? base : `${dir.replace(/\//g, "-")}-${base}`;
-            let finalName;
-            if (dev) {
-              finalName = `${stableName}.js`; // 100% stable in dev
-            } else {
-              const hash = oldRelPath.match(/-([A-Z0-9]+)\./)?.[1] || "";
-              finalName = `${stableName}-${hash}.js`;
-            }
+            const hash = oldRelPath.match(/-([A-Z0-9]+)\./)?.[1] || "";
+            const finalName = hash ? `${stableName}-${hash}.js` : `${stableName}.js`;
             const finalRelPath = `chunk-${finalName}`;
             const oldLocal = path.basename(oldRelPath);
-            renames.set(oldLocal, finalRelPath);
+            if (Array.from(renames.values()).includes(finalRelPath)) {
+              renames.set(oldLocal, oldLocal);
+            } else {
+              renames.set(oldLocal, finalRelPath);
+            }
           }
           // Second, rename maps corresponding to the chunks
           for (const [oldRelPath, info] of Object.entries(
@@ -192,29 +197,27 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true, changedIds }
             }
           }
 
-          // Step 6: Update metafile for consistency (only on initial build)
-          if (!isIncremental) {
-            const newOutputs = {};
-            for (const oldRelPath in outputs) {
-              const oldLocal = path.basename(oldRelPath);
-              const newLocal = renames.get(oldLocal);
-              const newRelPath = newLocal
-                ? normalizeRel(path.join(path.dirname(oldRelPath), newLocal))
-                : oldRelPath;
-              newOutputs[newRelPath] = outputs[oldRelPath];
-              if (newOutputs[newRelPath].imports) {
-                for (let i = 0; i < newOutputs[newRelPath].imports.length; i++) {
-                  const imp = newOutputs[newRelPath].imports[i];
-                  const oldImpLocal = path.basename(imp.path);
-                  const newImpLocal = renames.get(oldImpLocal) || oldImpLocal;
-                  imp.path = normalizeRel(
-                    path.join(path.dirname(imp.path), newImpLocal)
-                  );
-                }
+          // Step 6: Update metafile for consistency
+          const newOutputs = {};
+          for (const oldRelPath in outputs) {
+            const oldLocal = path.basename(oldRelPath);
+            const newLocal = renames.get(oldLocal);
+            const newRelPath = newLocal
+              ? normalizeRel(path.join(path.dirname(oldRelPath), newLocal))
+              : oldRelPath;
+            newOutputs[newRelPath] = outputs[oldRelPath];
+            if (newOutputs[newRelPath].imports) {
+              for (let i = 0; i < newOutputs[newRelPath].imports.length; i++) {
+                const imp = newOutputs[newRelPath].imports[i];
+                const oldImpLocal = path.basename(imp.path);
+                const newImpLocal = renames.get(oldImpLocal) || oldImpLocal;
+                imp.path = normalizeRel(
+                  path.join(path.dirname(imp.path), newImpLocal)
+                );
               }
             }
-            result.metafile.outputs = newOutputs;
           }
+          result.metafile.outputs = newOutputs;
         } finally {
           isInitial = false;
           globalThis.__DINOU_STABLE_TIME__ = Date.now() - tStable0;

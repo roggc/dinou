@@ -7,6 +7,7 @@ import {
   useMemo,
   useCallback,
   Component,
+  createElement,
 } from "react";
 import { createFromFetch } from "react-server-dom-webpack/client";
 import { hydrateRoot } from "react-dom/client";
@@ -394,7 +395,7 @@ function Router() {
   );
 }
 
-hydrateRoot(document, <Router />);
+hydrateRoot(document, createElement(Router));
 
 if (import.meta.hot) {
   import.meta.hot.accept();
