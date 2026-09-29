@@ -142,6 +142,13 @@ export interface DinouPlugin {
 
 export interface DinouConfig {
   /**
+   * Enable or disable React StrictMode in development mode.
+   * When enabled, React double-invokes render and effect functions in development to catch side-effects.
+   * @default true
+   */
+  reactStrictMode?: boolean;
+
+  /**
    * Custom storage adapter for ISR / ISG page caching.
    */
   storage?: any;

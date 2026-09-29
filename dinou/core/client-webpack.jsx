@@ -8,6 +8,7 @@ import {
   useCallback,
   Component,
   createElement,
+  StrictMode,
 } from "react";
 import { createFromFetch } from "react-server-dom-webpack/client";
 import { hydrateRoot } from "react-dom/client";
@@ -395,7 +396,15 @@ function Router() {
   );
 }
 
-hydrateRoot(document, createElement(Router));
+const routerElement = createElement(Router);
+const isDev = process.env.NODE_ENV !== "production";
+const useStrictMode = isDev && (typeof window === "undefined" || window.__DINOU_STRICT_MODE__ !== false);
+
+const app = useStrictMode
+  ? createElement(StrictMode, null, routerElement)
+  : routerElement;
+
+hydrateRoot(document, app);
 
 if (import.meta.hot) {
   import.meta.hot.accept();

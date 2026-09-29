@@ -1419,6 +1419,10 @@ async function handleRequest(request, platformContext = {}) {
           } else {
             bootstrapScriptContent += "window.__DINOU_USE_STATIC__ = false;\n";
           }
+          if (isDevelopment) {
+            const isStrictMode = dinouConfig?.reactStrictMode !== false;
+            bootstrapScriptContent += `window.__DINOU_STRICT_MODE__ = ${isStrictMode ? "true" : "false"};\n`;
+          }
           if (isError) {
             const clientErrMsg = isDevelopment
               ? (caughtError?.message || "Unknown error")
@@ -1517,6 +1521,10 @@ async function handleRequest(request, platformContext = {}) {
               serializedError.message
             )};window.__DINOU_ERROR_NAME__=${JSON.stringify(serializedError.name)};\n`;
             errorBootstrapScript += 'document.body.setAttribute("data-hydrated", "true");\n';
+            if (isDevelopment) {
+              const isStrictMode = dinouConfig?.reactStrictMode !== false;
+              errorBootstrapScript += `window.__DINOU_STRICT_MODE__ = ${isStrictMode ? "true" : "false"};\n`;
+            }
             if (isDevelopment && !isWebpack) {
               const hmrPort = process.env.HMR_PORT || (Number(process.env.PORT || 3000) + 1);
               errorBootstrapScript += `window.$RefreshReg$ = window.$RefreshReg$ || function() {};\n`;
