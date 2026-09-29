@@ -20,6 +20,11 @@
       "import": "./dinou/server.mjs",
       "require": "./dinou/server.js"
     },
+    "./config": {
+      "types": "./dinou/index.d.ts",
+      "import": "./dinou/core/config.js",
+      "require": "./dinou/core/config.js"
+    },
     "./adapters/node": "./dinou/adapters/node.mjs",
     "./adapters/bun": "./dinou/adapters/bun.js",
     "./adapters/deno": "./dinou/adapters/deno.js",
