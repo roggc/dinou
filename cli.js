@@ -171,14 +171,14 @@ program
   .command("build:cloudflare")
   .description("Build the app for Cloudflare Workers (using esbuild)")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.mjs")} && node ${p("node/build.mjs")} && node ${p("cloudflare/build.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.mjs")} && node ${p("cloudflare/build.mjs")}`);
   });
 
 program
   .command("build:cloudflare:esbuild")
   .description("Build the app for Cloudflare Workers with Esbuild")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.mjs")} && node ${p("node/build.mjs")} && node ${p("cloudflare/build.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.mjs")} && node ${p("cloudflare/build.mjs")}`);
   });
 
 program
@@ -202,7 +202,7 @@ const runDenoBuild = (bundler) => {
     ? `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`
     : bundler === "webpack"
     ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
-    : `cross-env NODE_ENV=production node ${p("esbuild/build.mjs")} && node ${p("node/build.mjs")}`;
+    : `cross-env NODE_ENV=production node ${p("esbuild/build.mjs")}`;
 
   const envPrefix = bundler === "webpack" ? "cross-env DINOU_BUILD_TOOL=webpack " : "";
   return `${bundlerCmd} && ${envPrefix}node ${p("deno/build.mjs")} && deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env ${p("deno/seed-kv.js")}`;
@@ -263,7 +263,7 @@ const runBunBuild = (bundler) => {
     ? `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`
     : bundler === "webpack"
     ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
-    : `cross-env NODE_ENV=production node ${p("esbuild/build.mjs")} && node ${p("node/build.mjs")}`;
+    : `cross-env NODE_ENV=production node ${p("esbuild/build.mjs")}`;
 
   const envPrefix = bundler === "webpack" ? "cross-env DINOU_BUILD_TOOL=webpack " : "";
   return `${bundlerCmd} && ${envPrefix}node ${p("bun/build.mjs")}`;
