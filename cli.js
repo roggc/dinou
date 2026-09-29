@@ -121,27 +121,6 @@ program
     runCommand(`cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack node ${p("adapters/node.mjs")}`);
   });
 
-program
-  .command("start:esbuild")
-  .description("Start the app in production mode (alias to start:node:esbuild)")
-  .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("adapters/node.mjs")}`);
-  });
-
-program
-  .command("start:rollup")
-  .description("Start the app in production mode (alias to start:node:rollup)")
-  .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("adapters/node.mjs")}`);
-  });
-
-program
-  .command("start:webpack")
-  .description("Start the app in production mode (alias to start:node:webpack)")
-  .action(() => {
-    runCommand(`cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack node ${p("adapters/node.mjs")}`);
-  });
-
 // --- CLOUDFLARE WORKERS ---
 
 program
