@@ -98,6 +98,13 @@ function alignDrive(p) {
 }
 
 function getStableChunkName(absPath) {
+  const norm = absPath.replace(/\\/g, "/");
+  if (norm.endsWith("/core/client-redirect.jsx") || norm.endsWith("/core/client-redirect.js")) {
+    return "dinouClientRedirect";
+  }
+  if (norm.endsWith("/core/link.jsx") || norm.endsWith("/core/link.js")) {
+    return "dinouLink";
+  }
   const rel = path.relative(process.cwd(), absPath).replace(/\\/g, "/");
   const clean = rel
     .replace(/\.[jt]sx?$/, "")
@@ -445,7 +452,7 @@ function setManifestEntry(fileUrl, expName, entry) {
     async transform(code, id) {
       if (
         id.includes("\0") ||
-        id.includes("node_modules") ||
+        (id.includes("node_modules") && !id.includes("dinou")) ||
         id.startsWith("commonjsHelpers") ||
         id.includes("react-refresh")
       )
@@ -563,7 +570,7 @@ function setManifestEntry(fileUrl, expName, entry) {
           if (
             !absModulePath.includes("\0") &&
             !absModulePath.startsWith("commonjsHelpers") &&
-            !absModulePath.includes("node_modules")
+            (!absModulePath.includes("node_modules") || absModulePath.includes("dinou"))
           ) {
             const normPath = getNormFsPath(absModulePath);
             if (clientModules.has(normPath)) {
@@ -597,7 +604,7 @@ function setManifestEntry(fileUrl, expName, entry) {
           if (
             modulePath.includes("\0") ||
             modulePath.startsWith("commonjsHelpers") ||
-            modulePath.includes("node_modules")
+            (modulePath.includes("node_modules") && !modulePath.includes("dinou"))
           ) {
             continue;
           }

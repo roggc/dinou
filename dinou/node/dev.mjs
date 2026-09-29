@@ -329,6 +329,15 @@ async function updateManifestsState(options = {}) {
   linkChunkId = resolvedLinkChunkId;
   redirectChunkId = resolvedRedirectChunkId;
 
+  if (!isWebpackBuild) {
+    if (!redirectChunkId || redirectChunkId.includes("node_modules")) {
+      redirectChunkId = "/dinouClientRedirect.js";
+    }
+    if (!linkChunkId || linkChunkId.includes("node_modules")) {
+      linkChunkId = "/dinouLink.js";
+    }
+  }
+
   if (linkChunkId) {
     const linkChunks = isWebpackBuild ? (linkEntry?.chunks || [linkChunkId]) : "Link";
     const linkDefaultChunks = isWebpackBuild ? (linkEntry?.chunks || [linkChunkId]) : "default";
