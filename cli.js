@@ -49,29 +49,6 @@ program
     runCommand(`cross-env DINOU_BUILD_TOOL=webpack node ${p("node/dev.mjs")}`);
   });
 
-// --- CLIENT BUNDLERS (BUILD) ---
-
-program
-  .command("build:esbuild")
-  .description("Build client assets with Esbuild")
-  .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.mjs")}`);
-  });
-
-program
-  .command("build:rollup")
-  .description("Build client assets with Rollup")
-  .action(() => {
-    runCommand(`cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`);
-  });
-
-program
-  .command("build:webpack")
-  .description("Build client assets with Webpack")
-  .action(() => {
-    runCommand(`cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`);
-  });
-
 // --- NODE (BUILD & START) ---
 
 program
