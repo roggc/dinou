@@ -1,11 +1,11 @@
 const frameworkEntries = new Set([
   "main.js",
-  "error.js",
   "runtime.js",
   "refresh.js",
   "serverFunctionProxy.js",
   "dinouClientRedirect.js",
   "dinouLink.js",
+  "dinouSlot.js",
   "__hmr_client__.js",
   "_commonjsHelpers.js",
 ]);

@@ -85,7 +85,8 @@ async function revalidatePath(reqPath) {
     const cleanPathKey = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
     const htmlKey = cleanPathKey ? `${cleanPathKey}/index.html` : "index.html";
     const metaKey = cleanPathKey ? `${cleanPathKey}/metadata.json` : "metadata.json";
-    const rscKey = cleanPathKey ? `${cleanPathKey}/rsc.rsc` : "rsc.rsc";
+    const rscKey = cleanPathKey ? `${cleanPathKey}/page.rsc` : "page.rsc";
+    const legacyRscKey = cleanPathKey ? `${cleanPathKey}/rsc.rsc` : "rsc.rsc";
 
     let cached = await storage.get(htmlKey);
     if (!cached && cleanPathKey) {
@@ -119,6 +120,9 @@ async function revalidatePath(reqPath) {
 
     try {
       let cachedRsc = await storage.get(rscKey);
+      if (!cachedRsc) {
+        cachedRsc = await storage.get(legacyRscKey);
+      }
       if (cachedRsc && cachedRsc.content) {
         const newRsc = cachedRsc.content.replace(
           /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g,
@@ -141,6 +145,12 @@ async function revalidatePath(reqPath) {
       copyFileSync(
         path.join(dist2Folder, reqPathWithSlash, "index.html"),
         path.join(dist2Folder, reqPathWithSlash, "index._old.html")
+      );
+    }
+    if (existsSync(path.join(dist2Folder, reqPathWithSlash, "page.rsc"))) {
+      copyFileSync(
+        path.join(dist2Folder, reqPathWithSlash, "page.rsc"),
+        path.join(dist2Folder, reqPathWithSlash, "page._old.rsc")
       );
     }
     if (existsSync(path.join(dist2Folder, reqPathWithSlash, "rsc.rsc"))) {

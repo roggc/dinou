@@ -99,7 +99,7 @@ async function processDir(dir, relPrefix = "") {
       if (process.env.DINOU_DEBUG) {
         console.log(`   ✅ Cached Meta: ${cleanRelPath}`);
       }
-    } else if (entry.name === "rsc.rsc") {
+    } else if (entry.name.endsWith(".rsc")) {
       const rsc = fs.readFileSync(fullPath, "utf8");
       await setKvCache(kv, cleanRelPath, rsc, null);
       seededCount++;

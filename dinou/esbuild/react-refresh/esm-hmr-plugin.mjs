@@ -129,11 +129,11 @@ export default function esmHmrPlugin({
         }
       });
 
-      build.onLoad({ filter: /(?:[/\\]client|[/\\]client-error)\.[jt]sx?$/i }, async (args) => {
+      build.onLoad({ filter: /[/\\]client\.[jt]sx?$/i }, async (args) => {
         const abs = path.resolve(args.path);
         const absNorm = normKey(abs);
 
-        // Check if it is a ROOT Entry (client.jsx or client-error.jsx)
+        // Check if it is a ROOT Entry (client.jsx)
         const rootSource = rootEntryMap.get(absNorm);
         if (rootSource) {
           let injectCode = `import { createHotContext } from "/__hmr_client__.js";\n`;
@@ -204,7 +204,6 @@ export default function esmHmrPlugin({
           const safeId = JSON.stringify(urlId);
           const frameworkEntries = new Set([
             "main.js",
-            "error.js",
             "serverFunctionProxy.js",
             "runtime.js",
             "react-refresh-entry.js",
@@ -321,7 +320,6 @@ export default function esmHmrPlugin({
 
         const frameworkEntries = new Set([
           "main.js",
-          "error.js",
           "serverFunctionProxy.js",
           "runtime.js",
           "react-refresh-entry.js",

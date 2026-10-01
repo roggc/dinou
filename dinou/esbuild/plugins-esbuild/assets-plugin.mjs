@@ -70,6 +70,7 @@ export default function assetsPlugin({ include = regex, changedIds } = {}) {
 
       // Cache asset file buffers in memory
       const assetCache = new Map();
+      const emittedAssets = new Map();
 
       // Loader for normal assets
       build.onLoad({ filter: /.*/, namespace: "dinou-asset" }, async (args) => {
@@ -78,7 +79,25 @@ export default function assetsPlugin({ include = regex, changedIds } = {}) {
           contents = await fs.readFile(args.path);
           assetCache.set(args.path, contents);
         }
-        return { contents, loader: "file", watchFiles: [args.path] };
+        const ext = path.extname(args.path);
+        const base = path.basename(args.path, ext);
+        const scoped = createScopedName(base, args.path);
+        const assetUrl = `/assets/${scoped}${ext}`;
+        const newLocal = `assets/${scoped}${ext}`;
+
+        emittedAssets.set(newLocal, {
+          path: path.join(outdir, newLocal),
+          contents,
+          get text() {
+            return new TextDecoder().decode(this.contents);
+          },
+        });
+
+        return {
+          contents: `export default "${assetUrl}";`,
+          loader: "js",
+          watchFiles: [args.path],
+        };
       });
 
       // Loader for asset entry points
@@ -102,6 +121,13 @@ export default function assetsPlugin({ include = regex, changedIds } = {}) {
           const normalizeRel = (p) => p.replace(/\\/g, "/");
           const isIncremental = !isInitial && changedIds && changedIds.size > 0;
           const hasAssetChanged = isIncremental && Array.from(changedIds).some((id) => include.test(id));
+
+          // Ensure JS-loaded assets are included in output files
+          for (const asset of emittedAssets.values()) {
+            if (!result.outputFiles.some((f) => f.path === asset.path)) {
+              result.outputFiles.push(asset);
+            }
+          }
 
           let renames = cachedRenames;
 

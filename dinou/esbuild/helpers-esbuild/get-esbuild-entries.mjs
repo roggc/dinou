@@ -257,8 +257,10 @@ export default async function getEsbuildEntries({
     dCE.outfileName = outfileName;
     if (manifest) {
       const fileUrl = pathToFileURL(dCE.absPath).href;
+      const lowerFileUrl = fileUrl.toLowerCase();
       for (const key in manifest) {
-        if (key === fileUrl || key.startsWith(fileUrl + "#")) {
+        const kBase = key.split("#")[0].toLowerCase();
+        if (kBase === lowerFileUrl) {
           manifest[key].id = "/" + dCE.outfile;
         }
       }

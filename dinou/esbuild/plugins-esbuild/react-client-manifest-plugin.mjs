@@ -21,10 +21,10 @@ export default function reactClientManifestPlugin({
         try {
           const meta = result.metafile;
           if (meta && meta.outputs) {
-            // Group manifest keys by base file URL for O(1) matching
+            // Group manifest keys by base file URL for O(1) matching (case-insensitive for Windows)
             const manifestPrefixMap = new Map();
             for (const key of Object.keys(manifest)) {
-              const base = key.split("#")[0];
+              const base = key.split("#")[0].toLowerCase();
               let list = manifestPrefixMap.get(base);
               if (!list) {
                 list = [];
@@ -51,14 +51,14 @@ export default function reactClientManifestPlugin({
                 for (const ext of [".tsx", ".ts", ".jsx", ".js"]) {
                   const candidate = base + ext;
                   const candidateUrl = pathToFileURL(candidate).href;
-                  if (manifestPrefixMap.has(candidateUrl)) {
+                  if (manifestPrefixMap.has(candidateUrl.toLowerCase())) {
                     baseFileUrl = candidateUrl;
                     break;
                   }
                 }
               }
 
-              const relatedKeys = manifestPrefixMap.get(baseFileUrl);
+              const relatedKeys = manifestPrefixMap.get(baseFileUrl.toLowerCase());
               if (relatedKeys) {
                 for (const key of relatedKeys) {
                   manifest[key].id = outUrl;

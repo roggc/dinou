@@ -19,17 +19,23 @@ const { requestStorage } = require("./request-context.js");
 const OUT_DIR = path.resolve(".dinou/dist2");
 const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 
-async function generateStaticRSC(reqPath) {
+async function generateStaticRSC(reqPath, options = {}) {
   const finalReqPath = reqPath.endsWith("/") ? reqPath : reqPath + "/";
+  const segment = options.segment || "page";
+  const fileName = segment === "layout" ? "layout.rsc" : "page.rsc";
 
-  const payloadPath = path.join(OUT_DIR, finalReqPath, "rsc.rsc");
-  const tempPayloadPath = path.join(OUT_DIR, finalReqPath, `rsc.rsc.${Date.now()}-${Math.random()}.tmp`);
+  const payloadPath = path.join(OUT_DIR, finalReqPath, fileName);
+  const tempPayloadPath = path.join(
+    OUT_DIR,
+    finalReqPath,
+    `${fileName}.${Date.now()}-${Math.random()}.tmp`
+  );
 
   // 👇 2. MOCK RES (Complete and Robust Version)
   const mockRes = {
     _statusCode: 200,
     _headers: {},
-    _redirectUrl: null, // ✅ We recover this property
+    _redirectUrl: null,
     _cookies: [],
 
     cookie(name, value, options) {
@@ -48,12 +54,10 @@ async function generateStaticRSC(reqPath) {
       this._statusCode = code;
     },
 
-    // ✅ YOUR ORIGINAL LOGIC (The correct one)
     redirect(arg1, arg2) {
       let status = 302;
       let url = "";
 
-      // Overload handling: redirect(url) vs redirect(status, url)
       if (typeof arg1 === "number") {
         status = arg1;
         url = arg2;
@@ -104,7 +108,10 @@ async function generateStaticRSC(reqPath) {
     const passThrough = new PassThrough();
 
     await requestStorage.run(mockContext, async () => {
-      const jsx = await getJSX(finalReqPath, {}, null, false);
+      const jsx = await getJSX(finalReqPath, {}, null, false, false, {
+        segment,
+        layoutPath: options.layoutPath,
+      });
       const renderToPipeableStream = getRenderToPipeableStream();
       const { pipe } = isWebpack
         ? renderToPipeableStream(jsx, manifest)
@@ -119,23 +126,40 @@ async function generateStaticRSC(reqPath) {
       });
     });
 
-    // 3. RETURN RESULT (We DO NOT rename here)
+    // 3. RETURN RESULT (We DO NOT rename here, atomic rename handled by caller)
     const success = mockRes._statusCode !== 500;
 
     return {
       success,
       type: "rsc",
+      segment,
+      fileName,
       reqPath: finalReqPath,
       tempPath: tempPayloadPath,
       finalPath: payloadPath,
       status: mockRes._statusCode,
     };
   } catch (error) {
-    console.error("❌ Error generating RSC payload:", error);
+    console.error(`❌ Error generating ${fileName} payload:`, error);
     // Emergency cleanup
     if (fs.existsSync(tempPayloadPath)) fs.unlinkSync(tempPayloadPath);
-    return { success: false, tempPath: tempPayloadPath };
+    return { success: false, segment, fileName, tempPath: tempPayloadPath };
   }
 }
 
+async function generateStaticPageRSC(reqPath, options = {}) {
+  return generateStaticRSC(reqPath, { ...options, segment: "page" });
+}
+
+async function generateStaticLayoutRSC(layoutFolderPath, layoutFilePath, options = {}) {
+  return generateStaticRSC(layoutFolderPath, {
+    ...options,
+    segment: "layout",
+    layoutPath: layoutFilePath,
+  });
+}
+
 module.exports = generateStaticRSC;
+module.exports.generateStaticRSC = generateStaticRSC;
+module.exports.generateStaticPageRSC = generateStaticPageRSC;
+module.exports.generateStaticLayoutRSC = generateStaticLayoutRSC;

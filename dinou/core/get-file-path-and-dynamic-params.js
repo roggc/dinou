@@ -15,7 +15,7 @@ function getSlots(currentPath, reqSegments, query) {
   const entries = readdirSync(currentPath, { withFileTypes: true });
 
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory() || entry.name.startsWith("_")) continue;
 
     if (entry.name.startsWith("@")) {
       const [slotPath, slotParams] = getFilePathAndDynamicParams(
@@ -107,7 +107,7 @@ function getFilePathAndDynamicParams(
     if (index > reqSegments.length - 1) {
       const entries = readdirSync(currentPath, { withFileTypes: true });
       for (const entry of entries) {
-        if (entry.isDirectory()) {
+        if (entry.isDirectory() && !entry.name.startsWith("_")) {
           if (entry.name.startsWith("[[...") && entry.name.endsWith("]]")) {
             const paramName = entry.name.slice(5, -2);
             const paramValue =
@@ -247,7 +247,8 @@ function getFilePathAndDynamicParams(
     ((reqSegments[index].startsWith("(") && reqSegments[index].endsWith(")")) ||
       (reqSegments[index].startsWith("[") &&
         reqSegments[index].endsWith("]")) ||
-      reqSegments[index].startsWith("@"));
+      reqSegments[index].startsWith("@") ||
+      reqSegments[index].startsWith("_"));
   if (existsSync(staticPath) && !isRouterSyntaxInSegment) {
     return getFilePathAndDynamicParams(
       reqSegments,
@@ -266,7 +267,7 @@ function getFilePathAndDynamicParams(
   } else {
     const entries = readdirSync(currentPath, { withFileTypes: true });
     for (const entry of entries) {
-      if (entry.isDirectory()) {
+      if (entry.isDirectory() && !entry.name.startsWith("_")) {
         if (entry.name.startsWith("[[...") && entry.name.endsWith("]]")) {
           const paramName = entry.name.slice(5, -2);
           const paramValue =

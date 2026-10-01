@@ -318,6 +318,41 @@ function parseCookieHeader(cookieHeader) {
   return cookies;
 }
 
+let discoveredLayoutsCache = null;
+let lastLayoutsDiscoveryTime = 0;
+
+function getDiscoveredLayouts() {
+  if (typeof globalThis !== "undefined" && Array.isArray(globalThis.__DINOU_LAYOUTS__) && globalThis.__DINOU_LAYOUTS__.length > 0) {
+    return globalThis.__DINOU_LAYOUTS__;
+  }
+  const now = Date.now();
+  if (discoveredLayoutsCache && now - lastLayoutsDiscoveryTime < 1000) {
+    return discoveredLayoutsCache;
+  }
+  const discovered = [];
+  const srcFolder = path.resolve(process.cwd(), "src");
+  function find(dir, rel = "") {
+    if (!existsSync(dir)) return;
+    let entries;
+    try {
+      entries = require("fs").readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        find(path.join(dir, entry.name), rel ? `${rel}/${entry.name}` : entry.name);
+      } else if (/^layout\.[jt]sx?$/.test(entry.name)) {
+        discovered.push(rel);
+      }
+    }
+  }
+  find(srcFolder);
+  discoveredLayoutsCache = discovered;
+  lastLayoutsDiscoveryTime = now;
+  return discovered;
+}
+
 /**
  * Bridges Node.js style response methods to a WHATWG Web Response.
  */
@@ -552,7 +587,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
       const scriptTag = `<script>document.cookie = ${safeCookieStr};</script>`;
       resBridge._injectedScripts = (resBridge._injectedScripts || "") + scriptTag;
       if (resBridge.headersSent) {
-        if (!simReq.path.includes("____rsc_payload")) {
+        if (!simReq.path.includes("____rsc_")) {
           resBridge.write(scriptTag);
         }
         return;
@@ -575,7 +610,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
         const scriptTag = `<script>document.cookie = ${safeCookieStr};</script>`;
         resBridge._injectedScripts = (resBridge._injectedScripts || "") + scriptTag;
         if (resBridge.headersSent) {
-          if (!simReq.path.includes("____rsc_payload")) {
+          if (!simReq.path.includes("____rsc_")) {
             resBridge.write(scriptTag);
           }
           return;
@@ -588,7 +623,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
     }
     if (resBridge.headersSent) {
       if (methodName === "redirect") {
-        if (simReq.path.includes("____rsc_payload")) {
+        if (simReq.path.includes("____rsc_")) {
           return;
         }
         hasRedirected = true;
@@ -621,7 +656,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
       if (typeof resolvedUrl === "string" && resolvedUrl.startsWith("/") && !resolvedUrl.startsWith("//")) {
         finalUrl = resolvedUrl;
       }
-      if (simReq.path.includes("____rsc_payload")) {
+      if (simReq.path.includes("____rsc_")) {
         resBridge.setHeader("x-rsc-redirect", finalUrl);
         resBridge.status(200).end();
         return;
@@ -976,6 +1011,7 @@ async function handleRequest(request, platformContext = {}) {
           queryObj,
           clientError,
           isDevelopment,
+          { segment: "page" },
         );
         bridge.setHeader("Content-Type", "text/x-component");
         bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -990,19 +1026,24 @@ async function handleRequest(request, platformContext = {}) {
     }
   }
 
-  // 6. RSC Payload Endpoints (GET /____rsc_payload____/*)
-  if (pathname.includes("____rsc_payload")) {
+  // 6. Segmented RSC Payload Endpoints (GET /____rsc_page____/*, /____rsc_layout____/*, /____rsc_payload____/*)
+  if (
+    pathname.includes("____rsc_page") ||
+    pathname.includes("____rsc_layout") ||
+    pathname.includes("____rsc_payload")
+  ) {
+    const isLayoutReq = pathname.includes("____rsc_layout");
+    const isPageReq = pathname.includes("____rsc_page");
     const isOld =
-      pathname.startsWith("/____rsc_payload_old_static____") ||
-      pathname.startsWith("/____rsc_payload_old____");
+      pathname.includes("_old_static") ||
+      pathname.includes("_old");
     const isStatic =
-      pathname.startsWith("/____rsc_payload_old_static____") ||
-      pathname.startsWith("/____rsc_payload_static____");
+      pathname.includes("_old_static") ||
+      pathname.includes("_static");
+
     const cleanPath = (pathname.endsWith("/") ? pathname : pathname + "/")
-      .replace("/____rsc_payload_old_static____", "")
-      .replace("/____rsc_payload_old____", "")
-      .replace("/____rsc_payload_static____", "")
-      .replace("/____rsc_payload____", "");
+      .replace(/^\/____rsc_(?:page|layout|payload)_(?:old_static|old|static)____/, "")
+      .replace(/^\/____rsc_(?:page|layout|payload)____/, "");
 
     const reqSegments = cleanPath.split("/").filter(Boolean);
     const srcFolder = path.resolve(process.cwd(), "src");
@@ -1015,6 +1056,14 @@ async function handleRequest(request, platformContext = {}) {
 
     const nonBuildIdQueryKeys = Object.keys(queryObj).filter((k) => k !== "buildId");
     const hasQueryParams = nonBuildIdQueryKeys.length > 0;
+
+    const targetFileName = isLayoutReq
+      ? isOld
+        ? "layout._old.rsc"
+        : "layout.rsc"
+      : isOld
+      ? "page._old.rsc"
+      : "page.rsc";
 
     if (!isDevelopment && !dynamicState.value && (!hasQueryParams || isStatic)) {
       let currentGeneratedAt = null;
@@ -1033,11 +1082,29 @@ async function handleRequest(request, platformContext = {}) {
           currentGeneratedAt &&
           queryObj.buildId !== String(currentGeneratedAt));
 
-      const payloadPath = path.resolve(
+      const actualFileName = useOld
+        ? isLayoutReq
+          ? "layout._old.rsc"
+          : "page._old.rsc"
+        : targetFileName;
+
+      let payloadPath = path.resolve(
         ".dinou/dist2",
         cleanPath.replace(/^\//, ""),
-        useOld ? "rsc._old.rsc" : "rsc.rsc",
+        actualFileName,
       );
+
+      // Legacy fallback for rsc_payload if page.rsc doesn't exist
+      if (!existsSync(payloadPath) && !isLayoutReq && !isPageReq) {
+        const legacyPath = path.resolve(
+          ".dinou/dist2",
+          cleanPath.replace(/^\//, ""),
+          useOld ? "rsc._old.rsc" : "rsc.rsc",
+        );
+        if (existsSync(legacyPath)) {
+          payloadPath = legacyPath;
+        }
+      }
 
       const distDir = path.resolve(".dinou/dist2");
       if (!payloadPath.startsWith(distDir)) {
@@ -1046,11 +1113,13 @@ async function handleRequest(request, platformContext = {}) {
 
       if (isEdgeRuntime(platformContext)) {
         const storage = getStorageAdapter();
-        const rscKey = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "")
-          ? `${cleanPath.replace(/^\/+/, "").replace(/\/+$/, "")}/rsc.rsc`
-          : "rsc.rsc";
+        const cleanRel = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
+        const rscKey = cleanRel ? `${cleanRel}/${actualFileName}` : actualFileName;
         try {
-          const cached = await storage.get(rscKey);
+          let cached = await storage.get(rscKey);
+          if (!cached && !isLayoutReq && !isPageReq) {
+            cached = await storage.get(cleanRel ? `${cleanRel}/rsc.rsc` : "rsc.rsc");
+          }
           if (cached && cached.content) {
             const contentStr = typeof cached.content === "string" ? cached.content : "";
             if (!contentStr.trimStart().startsWith("<")) {
@@ -1106,14 +1175,17 @@ async function handleRequest(request, platformContext = {}) {
     const context = createRequestContext(simReq, bridge, platformContext, dynamicState);
     copyCustomContextProperties(rootContext, context);
     const isNotFound = {};
+    const segment = isLayoutReq ? "layout" : "page";
 
     await requestStorage.run(context, async () => {
       try {
-        const jsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, isPathBlocked);
+        const jsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, isPathBlocked, {
+          segment,
+        });
         if (bridge.headers.has("x-rsc-redirect") || bridge.headers.has("Location")) {
           return;
         }
-        if (isNotFound.value) {
+        if (isNotFound.value && !isLayoutReq) {
           bridge.status(404);
         }
         bridge.setHeader("Content-Type", "text/x-component");
@@ -1122,9 +1194,13 @@ async function handleRequest(request, platformContext = {}) {
         const manifest = getClientManifest();
         pipeRSC(jsx, bridge, manifest, platformContext);
       } catch (err) {
-        console.error("[Dinou] Error rendering RSC payload:", err);
-        const serializedError = { message: err.message || "Unknown Error", name: err.name };
-        const errJsx = await getErrorJSX(reqPath, queryObj, serializedError, isDevelopment);
+        console.error(`[Dinou] Error rendering RSC ${segment}:`, err);
+        const serializedError = {
+          message: err.message || "Unknown Error",
+          name: err.name || "Error",
+          stack: isDevelopment ? err.stack : undefined,
+        };
+        const errJsx = await getErrorJSX(reqPath, queryObj, serializedError, isDevelopment, { segment });
         bridge.status(500);
         const manifest = getClientManifest();
         pipeRSC(errJsx, bridge, manifest, platformContext);
@@ -1246,7 +1322,19 @@ async function handleRequest(request, platformContext = {}) {
                   }),
                 ]);
                 const htmlText = await new Response(htmlStream).text();
+                const pageRscKey = cleanPath ? `${cleanPath}/page.rsc` : "page.rsc";
                 const rscKey = cleanPath ? `${cleanPath}/rsc.rsc` : "rsc.rsc";
+
+                let pageRscText = "";
+                try {
+                  const pageJsx = await getJSX(reqPath, queryObj, isNotFound, false, false, { segment: "page" });
+                  const pageStream = renderRSCStream(pageJsx, clientManifest, { runtime: "edge" });
+                  pageRscText = await new Response(pageStream).text();
+                } catch (e) {
+                  pageRscText = rscText;
+                }
+
+                await storage.set(pageRscKey, pageRscText);
                 await storage.set(rscKey, rscText);
                 const updatedMeta = {
                   status: 200,
@@ -1258,7 +1346,19 @@ async function handleRequest(request, platformContext = {}) {
                 console.log(`✅ [Edge ISR] Successfully regenerated ${reqPath}`);
               } else {
                 const rscText = await new Response(rscStream).text();
+                const pageRscKey = cleanPath ? `${cleanPath}/page.rsc` : "page.rsc";
                 const rscKey = cleanPath ? `${cleanPath}/rsc.rsc` : "rsc.rsc";
+
+                let pageRscText = "";
+                try {
+                  const pageJsx = await getJSX(reqPath, queryObj, isNotFound, false, false, { segment: "page" });
+                  const pageStream = renderRSCStream(pageJsx, clientManifest, { runtime: "edge" });
+                  pageRscText = await new Response(pageStream).text();
+                } catch (e) {
+                  pageRscText = rscText;
+                }
+
+                await storage.set(pageRscKey, pageRscText);
                 await storage.set(rscKey, rscText);
 
                 // Update HTML with new timestamp
@@ -1330,7 +1430,7 @@ async function handleRequest(request, platformContext = {}) {
         try {
           if (!isError) {
             await requestStorage.run(context, async () => {
-              jsx = await getJSX(reqPath, queryObj, isNotFound, false, !pagePath);
+              jsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, !pagePath);
             });
           }
         } catch (err) {
@@ -1348,6 +1448,7 @@ async function handleRequest(request, platformContext = {}) {
           };
         }
 
+        let errorMeta = {};
         if (isError) {
           const serializedError = {
             message: isDevelopment
@@ -1358,7 +1459,7 @@ async function handleRequest(request, platformContext = {}) {
           };
           try {
             await requestStorage.run(context, async () => {
-              jsx = await getErrorJSX(reqPath, queryObj, serializedError, isDevelopment);
+              jsx = await getErrorJSX(reqPath, queryObj, serializedError, isDevelopment, errorMeta);
             });
           } catch (e) {
             console.error("[Edge ISG] Failed to render error JSX:", e);
@@ -1414,6 +1515,8 @@ async function handleRequest(request, platformContext = {}) {
           const [streamForSsr, streamForCache] = rscStream.tee();
 
           let bootstrapScriptContent = "";
+          const knownLayouts = getDiscoveredLayouts();
+          bootstrapScriptContent += `window.__DINOU_LAYOUTS__ = ${JSON.stringify(knownLayouts)};\n`;
           if (shouldCacheISG) {
             bootstrapScriptContent += "window.__DINOU_USE_STATIC__ = true;\n";
           } else {
@@ -1429,7 +1532,15 @@ async function handleRequest(request, platformContext = {}) {
               : "An error occurred in the Server Components render";
             bootstrapScriptContent += `window.__DINOU_ERROR_MESSAGE__=${JSON.stringify(
               clientErrMsg
-            )};window.__DINOU_ERROR_NAME__=${JSON.stringify(caughtError?.name || "Error")};\n`;
+            )};window.__DINOU_ERROR_NAME__=${JSON.stringify(
+              caughtError?.name || "Error"
+            )};window.__DINOU_ERROR_STACK__=${JSON.stringify(
+              isDevelopment ? (caughtError?.stack || "") : ""
+            )};window.__DINOU_ERROR_SEGMENT__=${JSON.stringify(
+              errorMeta?.hasLayout ? "page" : "layout"
+            )};window.__DINOU_ACTIVE_LAYOUT__=${JSON.stringify(
+              errorMeta?.appliedLayoutKey || null
+            )};\n`;
             bootstrapScriptContent += 'document.body.setAttribute("data-hydrated", "true");\n';
           }
           if (bridge._injectedScripts) {
@@ -1437,9 +1548,7 @@ async function handleRequest(request, platformContext = {}) {
             bootstrapScriptContent += clean + "\n";
           }
 
-          const clientEntry = isError
-            ? getAssetFromManifest("error.js")
-            : getAssetFromManifest("main.js");
+          const clientEntry = getAssetFromManifest("main.js");
 
           const bootstrapModules = isDevelopment
             ? [
@@ -1486,9 +1595,10 @@ async function handleRequest(request, platformContext = {}) {
             };
 
             let errorJsx;
+            const errorMeta = {};
             try {
               await requestStorage.run(context, async () => {
-                errorJsx = await getErrorJSX(reqPath, queryObj, serializedError, isDevelopment);
+                errorJsx = await getErrorJSX(reqPath, queryObj, serializedError, isDevelopment, errorMeta);
               });
             } catch (errJsxErr) {
               console.error("[Edge Native SSR] Failed to get error JSX:", errJsxErr);
@@ -1498,9 +1608,15 @@ async function handleRequest(request, platformContext = {}) {
               const errMsg = isDevelopment
                 ? (ssrErr?.message || "Error")
                 : "An error occurred in the Server Components render";
+              const stackHtml = isDevelopment && serializedError.stack
+                ? `<pre style="background:#0f172a;color:#f8fafc;padding:16px;border-radius:8px;overflow-x:auto;font-size:0.8125rem;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;">${serializedError.stack.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre>`
+                : "";
+              const devHelp = isDevelopment
+                ? `<p style="margin:0 0 16px 0;font-size:0.875rem;color:#9f1239;line-height:1.5;">An unhandled error occurred during rendering. You can provide a custom error UI by creating an <code style="background:#ffe4e6;padding:2px 6px;border-radius:4px;font-weight:600;">error.tsx</code> file in your route folder.</p>`
+                : "";
               return {
                 type: "html",
-                html: `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Dinou</title></head><body data-hydrated="true"><div class="min-h-screen bg-slate-950 text-slate-100 p-6"><h2>Application Error</h2><p>${errMsg}</p></div></body></html>`,
+                html: `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dinou Dev Error</title></head><body style="margin:0;background:#fff1f2;padding:20px;"><div style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:32px;max-width:960px;margin:40px auto;background-color:#fff1f2;border:1px solid #fecdd3;border-radius:12px;color:#9f1239;box-shadow:0 10px 25px -5px rgba(0,0,0,0.1);"><div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><span style="background:#e11d48;color:white;padding:2px 8px;border-radius:9999px;font-size:12px;font-weight:bold;">${isDevelopment ? "Dinou Dev Error" : "Application Error"}</span><h2 style="margin:0;font-size:1.25rem;font-weight:700;color:#881337;">${errMsg.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</h2></div>${devHelp}${stackHtml}</div></body></html>`,
                 status: 500,
                 headers: new Headers(bridge.headers),
                 cookies: [...bridge.cookies],
@@ -1508,7 +1624,7 @@ async function handleRequest(request, platformContext = {}) {
             }
 
             const errorRscStream = renderRSCStream(errorJsx, clientManifest, { runtime: "edge" });
-            const errorClientEntry = getAssetFromManifest("error.js");
+            const errorClientEntry = getAssetFromManifest("main.js");
             const errorBootstrapModules = isDevelopment
               ? [
                   isWebpack ? undefined : getAssetFromManifest("runtime.js"),
@@ -1517,9 +1633,20 @@ async function handleRequest(request, platformContext = {}) {
               : [errorClientEntry];
 
             let errorBootstrapScript = "";
+            const knownLayouts = getDiscoveredLayouts();
+            errorBootstrapScript += `window.__DINOU_LAYOUTS__ = ${JSON.stringify(knownLayouts)};\n`;
+            errorBootstrapScript += "window.__DINOU_USE_STATIC__ = false;\n";
             errorBootstrapScript += `window.__DINOU_ERROR_MESSAGE__=${JSON.stringify(
               serializedError.message
-            )};window.__DINOU_ERROR_NAME__=${JSON.stringify(serializedError.name)};\n`;
+            )};window.__DINOU_ERROR_NAME__=${JSON.stringify(
+              serializedError.name
+            )};window.__DINOU_ERROR_STACK__=${JSON.stringify(
+              isDevelopment ? (serializedError.stack || "") : ""
+            )};window.__DINOU_ERROR_SEGMENT__=${JSON.stringify(
+              errorMeta?.hasLayout ? "page" : "layout"
+            )};window.__DINOU_ACTIVE_LAYOUT__=${JSON.stringify(
+              errorMeta?.appliedLayoutKey || null
+            )};\n`;
             errorBootstrapScript += 'document.body.setAttribute("data-hydrated", "true");\n';
             if (isDevelopment) {
               const isStrictMode = dinouConfig?.reactStrictMode !== false;
@@ -1532,17 +1659,37 @@ async function handleRequest(request, platformContext = {}) {
               errorBootstrapScript += `window.HMR_WEBSOCKET_URL="ws://localhost:${hmrPort}";\n`;
             }
 
-            await requestStorage.run(context, async () => {
-              htmlStream = await platformContext.renderHtmlStream(errorRscStream, {
-                bootstrapModules: errorBootstrapModules,
-                bootstrapScriptContent: errorBootstrapScript,
-                onError(err) {
-                  if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
-                    console.error("[Edge Native SSR Error Page] Stream error:", err);
-                  }
-                },
+            try {
+              await requestStorage.run(context, async () => {
+                htmlStream = await platformContext.renderHtmlStream(errorRscStream, {
+                  bootstrapModules: errorBootstrapModules,
+                  bootstrapScriptContent: errorBootstrapScript,
+                  onError(err) {
+                    if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
+                      console.error("[Edge Native SSR Error Page] Stream error:", err);
+                    }
+                  },
+                });
               });
-            });
+            } catch (errStreamErr) {
+              console.error("[Edge Native SSR] Error stream rendering failed, using emergency HTML fallback:", errStreamErr);
+              const errMsg = isDevelopment
+                ? (serializedError.message || "Error")
+                : "An error occurred in the Server Components render";
+              const stackHtml = isDevelopment && serializedError.stack
+                ? `<pre style="background:#0f172a;color:#f8fafc;padding:16px;border-radius:8px;overflow-x:auto;font-size:0.8125rem;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;">${serializedError.stack.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre>`
+                : "";
+              const devHelp = isDevelopment
+                ? `<p style="margin:0 0 16px 0;font-size:0.875rem;color:#9f1239;line-height:1.5;">An unhandled error occurred during rendering. You can provide a custom error UI by creating an <code style="background:#ffe4e6;padding:2px 6px;border-radius:4px;font-weight:600;">error.tsx</code> file in your route folder.</p>`
+                : "";
+              return {
+                type: "html",
+                html: `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dinou Dev Error</title></head><body style="margin:0;background:#fff1f2;padding:20px;"><div style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:32px;max-width:960px;margin:40px auto;background-color:#fff1f2;border:1px solid #fecdd3;border-radius:12px;color:#9f1239;box-shadow:0 10px 25px -5px rgba(0,0,0,0.1);"><div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><span style="background:#e11d48;color:white;padding:2px 8px;border-radius:9999px;font-size:12px;font-weight:bold;">${isDevelopment ? "Dinou Dev Error" : "Application Error"}</span><h2 style="margin:0;font-size:1.25rem;font-weight:700;color:#881337;">${errMsg.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</h2></div>${devHelp}${stackHtml}</div></body></html>`,
+                status: 500,
+                headers: new Headers(bridge.headers),
+                cookies: [...bridge.cookies],
+              };
+            }
           }
 
           if (bridge.headers.has("Location") || (bridge.statusCode >= 300 && bridge.statusCode < 400)) {

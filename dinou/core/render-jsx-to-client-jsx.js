@@ -44,6 +44,7 @@ function renderJSXToClientJSX(jsx, key = null) {
       if (
         jsx.type === Symbol.for("react.fragment") ||
         jsx.type === Symbol.for("react.suspense") ||
+        jsx.type === Symbol.for("react.view_transition") ||
         typeof jsx.type === "string"
       ) {
         return {
@@ -65,6 +66,41 @@ function renderJSXToClientJSX(jsx, key = null) {
         } else {
           // Server component: execute and process
           const returnedJsx = Component(props);
+          return renderJSXToClientJSX(returnedJsx, key ?? jsx.key);
+        }
+      } else if (
+        typeof jsx.type === "object" &&
+        jsx.type !== null &&
+        jsx.type.$$typeof === Symbol.for("react.forward_ref")
+      ) {
+        if (isClientComponent(jsx.type)) {
+          return {
+            ...jsx,
+            $$typeof: Symbol.for("react.transitional.element"),
+            type: jsx.type,
+            props: renderJSXToClientJSX(jsx.props),
+            key: key ?? jsx.key,
+          };
+        } else {
+          const returnedJsx = jsx.type.render(jsx.props, jsx.ref);
+          return renderJSXToClientJSX(returnedJsx, key ?? jsx.key);
+        }
+      } else if (
+        typeof jsx.type === "object" &&
+        jsx.type !== null &&
+        jsx.type.$$typeof === Symbol.for("react.memo")
+      ) {
+        if (isClientComponent(jsx.type)) {
+          return {
+            ...jsx,
+            $$typeof: Symbol.for("react.transitional.element"),
+            type: jsx.type,
+            props: renderJSXToClientJSX(jsx.props),
+            key: key ?? jsx.key,
+          };
+        } else {
+          const innerComp = jsx.type.type;
+          const returnedJsx = typeof innerComp === "function" ? innerComp(jsx.props) : null;
           return renderJSXToClientJSX(returnedJsx, key ?? jsx.key);
         }
       } else {
@@ -122,6 +158,7 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
       if (
         jsx.type === Symbol.for("react.fragment") ||
         jsx.type === Symbol.for("react.suspense") ||
+        jsx.type === Symbol.for("react.view_transition") ||
         typeof jsx.type === "string"
       ) {
         return {
@@ -147,6 +184,45 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
         } else {
           // Server component: execute and process
           const returnedJsx = await Component(props);
+          return await asyncRenderJSXToClientJSX(returnedJsx, key ?? jsx.key);
+        }
+      } else if (
+        typeof jsx.type === "object" &&
+        jsx.type !== null &&
+        jsx.type.$$typeof === Symbol.for("react.forward_ref")
+      ) {
+        if (isClientComponent(jsx.type)) {
+          return {
+            ...jsx,
+            $$typeof: Symbol.for("react.transitional.element"),
+            type: jsx.type,
+            props: {
+              ...(await asyncRenderJSXToClientJSX(jsx.props, key ?? jsx.key)),
+              key: key ?? jsx.key,
+            },
+          };
+        } else {
+          const returnedJsx = await jsx.type.render(jsx.props, jsx.ref);
+          return await asyncRenderJSXToClientJSX(returnedJsx, key ?? jsx.key);
+        }
+      } else if (
+        typeof jsx.type === "object" &&
+        jsx.type !== null &&
+        jsx.type.$$typeof === Symbol.for("react.memo")
+      ) {
+        if (isClientComponent(jsx.type)) {
+          return {
+            ...jsx,
+            $$typeof: Symbol.for("react.transitional.element"),
+            type: jsx.type,
+            props: {
+              ...(await asyncRenderJSXToClientJSX(jsx.props, key ?? jsx.key)),
+              key: key ?? jsx.key,
+            },
+          };
+        } else {
+          const innerComp = jsx.type.type;
+          const returnedJsx = typeof innerComp === "function" ? await innerComp(jsx.props) : null;
           return await asyncRenderJSXToClientJSX(returnedJsx, key ?? jsx.key);
         }
       } else {

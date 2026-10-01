@@ -10,6 +10,7 @@ const { requestStorage } = require("./request-context.js");
 
 const staticRoutes = new Set();
 const staticMetadata = new Map();
+const staticLayouts = new Map();
 
 function safeDecode(val) {
   try {
@@ -49,8 +50,27 @@ async function buildStaticPages(onProgress = null) {
     const entries = readdirSync(currentPath, { withFileTypes: true });
     const pages = [];
 
+    // 🛡️ Descubrir layout en esta carpeta si existe
+    const layoutExtensions = [".tsx", ".jsx", ".ts", ".js"];
+    for (const ext of layoutExtensions) {
+      const candidateLayout = path.join(currentPath, `layout${ext}`);
+      if (existsSync(candidateLayout)) {
+        const routePath = segments.length ? "/" + segments.join("/") : "/";
+        staticLayouts.set(currentPath, {
+          folderPath: currentPath,
+          layoutPath: candidateLayout,
+          routePath,
+          segments,
+        });
+        break;
+      }
+    }
+
     for (const entry of entries) {
       if (entry.isDirectory()) {
+        if (entry.name.startsWith("_")) {
+          continue;
+        }
         if (entry.name.startsWith("(") && entry.name.endsWith(")")) {
           pages.push(
             ...(await collectPages(
@@ -986,7 +1006,7 @@ async function buildStaticPages(onProgress = null) {
 
       staticRoutes.add(reqPath);
       staticMetadata.set(reqPath, {
-        revalidate: revalidate?.(),
+        revalidate: typeof revalidate === "function" ? revalidate() : revalidate,
         effects: sideEffects,
         tags: cacheTags,
       });
@@ -1023,7 +1043,8 @@ async function buildStaticPage(reqPath, isDynamic = null) {
         segment &&
         ((segment.startsWith("(") && segment.endsWith(")")) ||
           (segment.startsWith("[") && segment.endsWith("]")) ||
-          segment.startsWith("@"));
+          segment.startsWith("@") ||
+          segment.startsWith("_"));
       const currentPath = path.join(folderPath, segment);
       if (existsSync(currentPath) && !isRouterSyntaxInSegment) {
         folderPath = currentPath;
@@ -1360,9 +1381,15 @@ function getStaticMetadata(reqPath) {
   return staticMetadata.get(reqPath);
 }
 
+function getStaticLayouts() {
+  return Array.from(staticLayouts.values());
+}
+
 module.exports = {
   buildStaticPages,
   buildStaticPage,
   getStaticPaths,
   getStaticMetadata,
+  getStaticLayouts,
 };
+

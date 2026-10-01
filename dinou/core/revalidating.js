@@ -44,6 +44,11 @@ function revalidating(reqPath, isDynamicFromServer) {
               path.join(dist2Folder, reqPath, "index.html"),
               path.join(dist2Folder, reqPath, "index._old.html")
             );
+          if (existsSync(path.join(dist2Folder, reqPath, "page.rsc")))
+            copyFileSync(
+              path.join(dist2Folder, reqPath, "page.rsc"),
+              path.join(dist2Folder, reqPath, "page._old.rsc")
+            );
           if (existsSync(path.join(dist2Folder, reqPath, "rsc.rsc")))
             copyFileSync(
               path.join(dist2Folder, reqPath, "rsc.rsc"),

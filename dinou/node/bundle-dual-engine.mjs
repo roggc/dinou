@@ -43,9 +43,11 @@ export async function bundleDualEngine(options = {}) {
 
   const candidateLinkPaths = new Set();
   const candidateRedirectPaths = new Set();
+  const candidateSlotPaths = new Set();
   for (const r of candidateDinouRoots) {
     candidateLinkPaths.add(path.resolve(r, "core/link.jsx"));
     candidateRedirectPaths.add(path.resolve(r, "core/client-redirect.jsx"));
+    candidateSlotPaths.add(path.resolve(r, "core/slot.js"));
   }
 
   // 1. Generate route modules
@@ -119,6 +121,7 @@ export async function bundleDualEngine(options = {}) {
     const coreCandidates = [
       ...Array.from(candidateLinkPaths),
       ...Array.from(candidateRedirectPaths),
+      ...Array.from(candidateSlotPaths),
     ];
     for (const f of coreCandidates) {
       if (fs.existsSync(f)) {
@@ -136,9 +139,7 @@ export async function bundleDualEngine(options = {}) {
           const baseName = path.basename(filePath);
           if (
             baseName === "client.jsx" ||
-            baseName === "client-error.jsx" ||
-            baseName === "client-webpack.jsx" ||
-            baseName === "client-error-webpack.jsx"
+            baseName === "client-webpack.jsx"
           ) {
             continue;
           }
@@ -179,6 +180,8 @@ export async function bundleDualEngine(options = {}) {
   let redirectChunkId = null;
   let linkEntry = null;
   let redirectEntry = null;
+  let slotChunkId = null;
+  let slotEntry = null;
 
   for (const [k, v] of Object.entries(parsedClientManifest)) {
     if (k.includes("/core/link.jsx") || k.includes("dinouLink")) {
@@ -191,6 +194,12 @@ export async function bundleDualEngine(options = {}) {
       if (v && v.id) {
         redirectChunkId = v.id;
         redirectEntry = v;
+      }
+    }
+    if (k.includes("/core/slot.") || k.includes("dinouSlot")) {
+      if (v && v.id) {
+        slotChunkId = v.id;
+        slotEntry = v;
       }
     }
   }
@@ -221,6 +230,19 @@ export async function bundleDualEngine(options = {}) {
     }
   }
 
+  if (slotChunkId) {
+    const slotChunks = isWebpackBuild ? slotEntry?.chunks || [slotChunkId] : "DinouPageSlot";
+    const slotDefaultChunks = isWebpackBuild ? slotEntry?.chunks || [slotChunkId] : "default";
+
+    for (const sp of candidateSlotPaths) {
+      for (const url of generateAllUrlVariants(sp)) {
+        normalizedManifest[`${url}#DinouPageSlot`] = { id: slotChunkId, chunks: slotChunks, name: "DinouPageSlot" };
+        normalizedManifest[`${url}#default`] = { id: slotChunkId, chunks: slotDefaultChunks, name: "default" };
+        normalizedManifest[url] = { id: slotChunkId, chunks: slotDefaultChunks, name: "default" };
+      }
+    }
+  }
+
   for (const comp of clientComponents) {
     const fileUrl = pathToFileURL(comp).href;
     const fileUrlLower = fileUrl.replace(/file:\/\/\/([a-zA-Z]):/, (m, d) => "file:///" + d.toLowerCase() + ":");
@@ -228,6 +250,7 @@ export async function bundleDualEngine(options = {}) {
     const compResolved = path.resolve(comp);
     const isCoreLink = candidateLinkPaths.has(compResolved);
     const isCoreRedirect = candidateRedirectPaths.has(compResolved);
+    const isCoreSlot = candidateSlotPaths.has(compResolved);
 
     if (!normalizedManifest[fileUrlLower]) {
       if (isCoreLink && linkChunkId) {
@@ -240,6 +263,12 @@ export async function bundleDualEngine(options = {}) {
         normalizedManifest[fileUrlLower] = {
           id: redirectChunkId,
           chunks: isWebpackBuild ? redirectEntry?.chunks || [redirectChunkId] : "default",
+          name: "default",
+        };
+      } else if (isCoreSlot && slotChunkId) {
+        normalizedManifest[fileUrlLower] = {
+          id: slotChunkId,
+          chunks: isWebpackBuild ? slotEntry?.chunks || [slotChunkId] : "default",
           name: "default",
         };
       } else {
@@ -257,6 +286,12 @@ export async function bundleDualEngine(options = {}) {
         normalizedManifest[fileUrlUpper] = {
           id: redirectChunkId,
           chunks: isWebpackBuild ? redirectEntry?.chunks || [redirectChunkId] : "default",
+          name: "default",
+        };
+      } else if (isCoreSlot && slotChunkId) {
+        normalizedManifest[fileUrlUpper] = {
+          id: slotChunkId,
+          chunks: isWebpackBuild ? slotEntry?.chunks || [slotChunkId] : "default",
           name: "default",
         };
       } else {
@@ -336,11 +371,37 @@ export async function bundleDualEngine(options = {}) {
         }
       }
     }
+    if (slotChunkId) {
+      imports["dinou/core/slot.js"] = slotChunkId;
+      imports["dinou/core/slot"] = slotChunkId;
+      imports["/dinou/core/slot.js"] = slotChunkId;
+      imports["./dinou/core/slot.js"] = slotChunkId;
+      for (const sp of candidateSlotPaths) {
+        for (const u of generateAllUrlVariants(sp)) {
+          imports[u] = slotChunkId;
+        }
+      }
+    }
 
     importMapHtml = `<script type="importmap">{"imports":${JSON.stringify(imports)}}</script>`;
   }
 
   manifestInlines += `\nglobalThis.__DINOU_IMPORT_MAP_HTML__ = ${JSON.stringify(importMapHtml)};\n`;
+
+  const discoveredLayouts = [];
+  function findLayoutRoutes(dir, rel = "") {
+    if (!fs.existsSync(dir)) return;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        findLayoutRoutes(path.join(dir, entry.name), rel ? `${rel}/${entry.name}` : entry.name);
+      } else if (/^layout\.[jt]sx?$/.test(entry.name)) {
+        discoveredLayouts.push(rel);
+      }
+    }
+  }
+  findLayoutRoutes(srcDir);
+  manifestInlines += `\nglobalThis.__DINOU_LAYOUTS__ = ${JSON.stringify(discoveredLayouts)};\n`;
 
   // 4. In-memory VFS snapshot for routing
   const vfsSnapshot = {};
@@ -474,6 +535,18 @@ globalThis.__DINOU_VFS__ = ${JSON.stringify(vfsSnapshot)};
     }
   }
 
+  if (slotChunkId) {
+    const slotCompIndex = clientComponents.findIndex((c) => candidateSlotPaths.has(path.resolve(c)));
+    if (slotCompIndex !== -1) {
+      addClientModule(slotChunkId, `mod_${slotCompIndex}`);
+      for (const sp of candidateSlotPaths) {
+        for (const u of generateAllUrlVariants(sp)) {
+          addClientModule(u, `mod_${slotCompIndex}`);
+        }
+      }
+    }
+  }
+
   serverFunctionFiles.forEach((relPath, index) => {
     const normRel = relPath.replace(/\\/g, "/");
     const relFileUrl = "file:///" + normRel;
@@ -552,6 +625,19 @@ globalThis.__DINOU_VFS__ = ${JSON.stringify(vfsSnapshot)};
     }
   }
 
+  if (slotChunkId) {
+    const slotCompIndex = clientComponents.findIndex((c) => candidateSlotPaths.has(path.resolve(c)));
+    if (slotCompIndex !== -1) {
+      const fileUrl = pathToFileURL(clientComponents[slotCompIndex]).href;
+      addModuleMap(slotChunkId, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
+      for (const sp of candidateSlotPaths) {
+        for (const u of generateAllUrlVariants(sp)) {
+          addModuleMap(u, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
+        }
+      }
+    }
+  }
+
   ssrManifestCode += `  },\n  serverModuleMap: {\n`;
   const emittedServerModuleMap = new Set();
   function addServerModuleMap(key, valueObjStr) {
@@ -596,7 +682,7 @@ globalThis.__DINOU_VFS__ = ${JSON.stringify(vfsSnapshot)};
 import "./env-setup.mjs";
 import "./route-modules.mjs";
 export { handleRequest } from "${dinouDirSlash}/core/handler.js";
-export { buildStaticPages, getStaticPaths } from "${dinouDirSlash}/core/build-static-pages.js";
+export { buildStaticPages, getStaticPaths, getStaticLayouts } from "${dinouDirSlash}/core/build-static-pages.js";
 `;
   const rscEntryPath = path.join(nodeDir, "rsc-entry.mjs");
   fs.writeFileSync(rscEntryPath, rscEntryContent, "utf8");

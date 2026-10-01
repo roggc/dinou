@@ -46,7 +46,6 @@ module.exports = async function () {
           "react-refresh/react-refresh-entry.js",
         ),
         main: path.resolve(__dirname, "../core/client.jsx"),
-        error: path.resolve(__dirname, "../core/client-error.jsx"),
         serverFunctionProxy: path.resolve(
           __dirname,
           "../core/server-function-proxy.js",
@@ -58,11 +57,14 @@ module.exports = async function () {
         dinouLink: path.resolve(
           __dirname,
           "../core/link.jsx",
+        ),
+        dinouSlot: path.resolve(
+          __dirname,
+          "../core/slot.js",
         ),
       }
       : {
         main: path.resolve(__dirname, "../core/client.jsx"),
-        error: path.resolve(__dirname, "../core/client-error.jsx"),
         serverFunctionProxy: path.resolve(
           __dirname,
           "../core/server-function-proxy.js",
@@ -74,6 +76,10 @@ module.exports = async function () {
         dinouLink: path.resolve(
           __dirname,
           "../core/link.jsx",
+        ),
+        dinouSlot: path.resolve(
+          __dirname,
+          "../core/slot.js",
         ),
       },
     output: {
@@ -284,7 +290,7 @@ module.exports = async function () {
             JSON.stringify({ type: "module" }, null, 2)
           );
           const { execSync } = require("child_process");
-          execSync(`"${process.execPath}" "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
+          execSync(`"${process.execPath}" --conditions=react-server "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
             stdio: "inherit",
             env: { ...process.env, NODE_ENV: "production" },
           });

@@ -109,7 +109,7 @@ module.exports = async () => {
         JSON.stringify({ type: "module" }, null, 2)
       );
       const { execSync } = require("child_process");
-      execSync(`"${process.execPath}" "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
+      execSync(`"${process.execPath}" --conditions=react-server "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
         stdio: "inherit",
         env: { ...process.env, NODE_ENV: "production", DINOU_BUILD_TOOL: "webpack" },
       });
@@ -130,9 +130,6 @@ module.exports = async () => {
       main: [path.resolve(__dirname, "../core/client-webpack.jsx")].filter(
         Boolean,
       ),
-      error: [
-        path.resolve(__dirname, "../core/client-error-webpack.jsx"),
-      ].filter(Boolean),
       serverFunctionProxy: path.resolve(
         __dirname,
         "../core/server-function-proxy-webpack.js",
@@ -142,6 +139,7 @@ module.exports = async () => {
         "../core/client-redirect.jsx",
       ),
       dinouLink: path.resolve(__dirname, "../core/link.jsx"),
+      dinouSlot: path.resolve(__dirname, "../core/slot.js"),
       ...[...cssEntries].reduce(
         (acc, cssEntry) => ({
           ...acc,

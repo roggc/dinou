@@ -40,10 +40,12 @@ const candidateDinouRoots = [
 
 const candidateLinkPaths = new Set();
 const candidateRedirectPaths = new Set();
+const candidateSlotPaths = new Set();
 
 for (const r of candidateDinouRoots) {
   candidateLinkPaths.add(path.resolve(r, "core/link.jsx"));
   candidateRedirectPaths.add(path.resolve(r, "core/client-redirect.jsx"));
+  candidateSlotPaths.add(path.resolve(r, "core/slot.js"));
 }
 
 function copyRecursive(src, dest) {
@@ -163,7 +165,7 @@ function findClientComponents() {
       try {
         const filePath = fileURLToPath(fileUrl);
         const baseName = path.basename(filePath);
-        if (baseName === "client.jsx" || baseName === "client-error.jsx" || baseName === "client-webpack.jsx" || baseName === "client-error-webpack.jsx") {
+        if (baseName === "client.jsx" || baseName === "client-webpack.jsx") {
           continue;
         }
         if (fs.existsSync(filePath) && isSupportedClientModule(filePath)) {
@@ -205,8 +207,10 @@ function generateAllUrlVariants(absPath) {
 
 let linkChunkId = null;
 let redirectChunkId = null;
+let slotChunkId = null;
 let linkEntry = null;
 let redirectEntry = null;
+let slotEntry = null;
 
 for (const [k, v] of Object.entries(parsedClientManifest)) {
   if (k.includes("/core/link.jsx") || k.includes("dinouLink")) {
@@ -219,6 +223,12 @@ for (const [k, v] of Object.entries(parsedClientManifest)) {
     if (v && v.id) {
       redirectChunkId = v.id;
       redirectEntry = v;
+    }
+  }
+  if (k.includes("/core/slot.") || k.includes("dinouSlot")) {
+    if (v && v.id) {
+      slotChunkId = v.id;
+      slotEntry = v;
     }
   }
 }
@@ -257,6 +267,23 @@ if (redirectChunkId) {
   }
 }
 
+if (slotChunkId) {
+  const slotChunks = isWebpackBuild
+    ? (slotEntry?.chunks || [slotChunkId])
+    : "DinouPageSlot";
+  const slotDefaultChunks = isWebpackBuild
+    ? (slotEntry?.chunks || [slotChunkId])
+    : "default";
+
+  for (const sp of candidateSlotPaths) {
+    for (const url of generateAllUrlVariants(sp)) {
+      normalizedManifest[`${url}#DinouPageSlot`] = { id: slotChunkId, chunks: slotChunks, name: "DinouPageSlot" };
+      normalizedManifest[`${url}#default`] = { id: slotChunkId, chunks: slotDefaultChunks, name: "default" };
+      normalizedManifest[url] = { id: slotChunkId, chunks: slotDefaultChunks, name: "default" };
+    }
+  }
+}
+
 for (const comp of clientComponents) {
   const fileUrl = pathToFileURL(comp).href;
   const fileUrlLower = fileUrl.replace(/file:\/\/\/([a-zA-Z]):/, (m, d) => 'file:///' + d.toLowerCase() + ':');
@@ -264,6 +291,7 @@ for (const comp of clientComponents) {
   const compResolved = path.resolve(comp);
   const isCoreLink = candidateLinkPaths.has(compResolved);
   const isCoreRedirect = candidateRedirectPaths.has(compResolved);
+  const isCoreSlot = candidateSlotPaths.has(compResolved);
 
   if (!normalizedManifest[fileUrlLower]) {
     if (isCoreLink && linkChunkId) {
@@ -276,6 +304,12 @@ for (const comp of clientComponents) {
       normalizedManifest[fileUrlLower] = {
         id: redirectChunkId,
         chunks: isWebpackBuild ? (redirectEntry?.chunks || [redirectChunkId]) : "default",
+        name: "default",
+      };
+    } else if (isCoreSlot && slotChunkId) {
+      normalizedManifest[fileUrlLower] = {
+        id: slotChunkId,
+        chunks: isWebpackBuild ? (slotEntry?.chunks || [slotChunkId]) : "default",
         name: "default",
       };
     } else {
@@ -293,6 +327,12 @@ for (const comp of clientComponents) {
       normalizedManifest[fileUrlUpper] = {
         id: redirectChunkId,
         chunks: isWebpackBuild ? (redirectEntry?.chunks || [redirectChunkId]) : "default",
+        name: "default",
+      };
+    } else if (isCoreSlot && slotChunkId) {
+      normalizedManifest[fileUrlUpper] = {
+        id: slotChunkId,
+        chunks: isWebpackBuild ? (slotEntry?.chunks || [slotChunkId]) : "default",
         name: "default",
       };
     } else {

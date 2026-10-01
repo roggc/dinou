@@ -11,6 +11,7 @@ if (!process.env.NODE_ENV) {
 import http from "node:http";
 import path from "node:path";
 import fs from "node:fs";
+import crypto from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Readable } from "node:stream";
@@ -75,6 +76,20 @@ const dinouDir = fs.existsSync(path.resolve(projectRoot, "dinou"))
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dinouDirSlash = dinouDir.replace(/\\/g, "/");
 
+function getFallbackChunkId(absPath) {
+  const norm = absPath.replace(/\\/g, "/");
+  const name = path.basename(absPath, path.extname(absPath));
+  if (isWebpackBuild) {
+    return `/${name}.js`;
+  }
+  const buildTool = (process.env.DINOU_BUILD_TOOL || "esbuild").toLowerCase();
+  if (buildTool === "rollup") {
+    return `/${name}.js`;
+  }
+  const hash = crypto.createHash("sha1").update(norm).digest("hex").slice(0, 8);
+  return `/${name}-${hash}.js`;
+}
+
 const { generateRouteModulesCode } = require(path.join(dinouDir, "core/route-generator.js"));
 const parseExports = require(path.join(dinouDir, "core/parse-exports.js"));
 const { useClientRegex, useServerRegex } = require(path.join(dinouDir, "constants.js"));
@@ -107,9 +122,11 @@ const candidateDinouRoots = [
 ];
 const candidateLinkPaths = new Set();
 const candidateRedirectPaths = new Set();
+const candidateSlotPaths = new Set();
 for (const r of candidateDinouRoots) {
   candidateLinkPaths.add(path.resolve(r, "core/link.jsx"));
   candidateRedirectPaths.add(path.resolve(r, "core/client-redirect.jsx"));
+  candidateSlotPaths.add(path.resolve(r, "core/slot.js"));
 }
 
 function generateAllUrlVariants(absPath) {
@@ -148,7 +165,7 @@ async function findClientComponents(parsedClientManifest = {}) {
   }
   await walk(srcDir);
 
-  for (const f of [...candidateLinkPaths, ...candidateRedirectPaths]) {
+  for (const f of [...candidateLinkPaths, ...candidateRedirectPaths, ...candidateSlotPaths]) {
     if (fs.existsSync(f)) clientFiles.add(path.resolve(f));
   }
 
@@ -169,9 +186,7 @@ async function findClientComponents(parsedClientManifest = {}) {
         const base = path.basename(filePath);
         if (
           base === "client.jsx" ||
-          base === "client-error.jsx" ||
           base === "client-webpack.jsx" ||
-          base === "client-error-webpack.jsx" ||
           base.startsWith("react-refresh") ||
           base === "runtime.js" ||
           filePath.includes("react-refresh")
@@ -218,6 +233,7 @@ let parsedAssetManifest = {};
 let clientComponents = [];
 let linkChunkId = null;
 let redirectChunkId = null;
+let slotChunkId = null;
 const knownClientFiles = new Set();
 const knownServerFiles = new Set();
 const compExportsCache = new Map();
@@ -362,6 +378,31 @@ async function updateManifestsState(options = {}) {
     }
   }
 
+  slotChunkId = null;
+  let slotEntry = null;
+  for (const [k, v] of Object.entries(parsedClientManifest)) {
+    if (k.includes("/core/slot.") || k.includes("dinouSlot")) {
+      if (v && v.id) {
+        slotChunkId = v.id;
+        slotEntry = v;
+      }
+    }
+  }
+  if (!isWebpackBuild && (!slotChunkId || slotChunkId.includes("node_modules"))) {
+    slotChunkId = "/dinouSlot.js";
+  }
+  if (slotChunkId) {
+    const slotChunks = isWebpackBuild ? (slotEntry?.chunks || [slotChunkId]) : "DinouPageSlot";
+    const slotDefaultChunks = isWebpackBuild ? (slotEntry?.chunks || [slotChunkId]) : "default";
+    for (const sp of candidateSlotPaths) {
+      for (const url of generateAllUrlVariants(sp)) {
+        normalized[`${url}#DinouPageSlot`] = { id: slotChunkId, chunks: slotChunks, name: "DinouPageSlot" };
+        normalized[`${url}#default`] = { id: slotChunkId, chunks: slotDefaultChunks, name: "default" };
+        normalized[url] = { id: slotChunkId, chunks: slotDefaultChunks, name: "default" };
+      }
+    }
+  }
+
   // Detect if parsedClientManifest introduces any brand new client components not in knownClientFiles
   let hasNewClientFiles = false;
   if (!forceRescan && clientComponents.length > 0) {
@@ -398,24 +439,61 @@ async function updateManifestsState(options = {}) {
         await yieldToEventLoop();
       }
 
+      const isValidEntryId = (entry) => Boolean(entry?.id && (isWebpackBuild || entry.id.endsWith(".js")));
+
       // Check if parsedClientManifest already has an entry for this component
       let matchedEntry = null;
       for (const u of urlVariants) {
-        if (parsedClientManifest[u]) { matchedEntry = parsedClientManifest[u]; break; }
-        if (parsedClientManifest[`${u}#default`]) { matchedEntry = parsedClientManifest[`${u}#default`]; break; }
+        if (isValidEntryId(parsedClientManifest[u])) { matchedEntry = parsedClientManifest[u]; break; }
+        if (isValidEntryId(parsedClientManifest[`${u}#default`])) { matchedEntry = parsedClientManifest[`${u}#default`]; break; }
+        for (const exp of fileExports) {
+          const expEntry = parsedClientManifest[`${u}#${exp}`];
+          if (isValidEntryId(expEntry)) {
+            matchedEntry = expEntry;
+            break;
+          }
+        }
+        if (matchedEntry) break;
+      }
+      if (!matchedEntry) {
+        for (const u of urlVariants) {
+          const uLower = u.toLowerCase();
+          for (const [k, v] of Object.entries(parsedClientManifest)) {
+            const kLower = k.toLowerCase();
+            if ((kLower === uLower || kLower.startsWith(uLower + "#")) && isValidEntryId(v)) {
+              matchedEntry = v;
+              break;
+            }
+          }
+          if (matchedEntry) break;
+        }
       }
 
-      const compId = matchedEntry?.id || pathToFileURL(comp).href;
+      const compId = isValidEntryId(matchedEntry)
+        ? matchedEntry.id
+        : getFallbackChunkId(comp);
       const compChunks = matchedEntry?.chunks || [];
 
       for (const u of urlVariants) {
-        if (!normalized[u]) {
+        if (!normalized[u] || !normalized[u].id || !isValidEntryId(normalized[u])) {
           normalized[u] = { id: compId, chunks: compChunks, name: "*" };
+        } else if (isValidEntryId(matchedEntry)) {
+          normalized[u].id = compId;
+          normalized[u].chunks = compChunks;
         }
         for (const exp of fileExports) {
           const hashKey = `${u}#${exp}`;
-          if (!normalized[hashKey] || normalized[hashKey].name === "*") {
-            normalized[hashKey] = { id: compId, chunks: compChunks, name: exp };
+          const expEntry = parsedClientManifest[hashKey];
+          const expId = isValidEntryId(expEntry)
+            ? expEntry.id
+            : compId;
+          const expChunks = expEntry?.chunks || compChunks;
+
+          if (!normalized[hashKey] || normalized[hashKey].name === "*" || !isValidEntryId(normalized[hashKey])) {
+            normalized[hashKey] = { id: expId, chunks: expChunks, name: exp };
+          } else if (isValidEntryId(expEntry)) {
+            normalized[hashKey].id = expId;
+            normalized[hashKey].chunks = expChunks;
           }
         }
       }
@@ -425,32 +503,62 @@ async function updateManifestsState(options = {}) {
     }
   } else {
     // Fast path: update normalized mapping for known client components without re-reading files or parsing AST
+    const isValidEntryId = (entry) => Boolean(entry?.id && (isWebpackBuild || entry.id.endsWith(".js")));
     for (const comp of clientComponents) {
       const urlVariants = generateAllUrlVariants(comp);
       const fileExports = getCachedFileExports(comp);
       let matchedEntry = null;
       for (const u of urlVariants) {
-        if (parsedClientManifest[u]) { matchedEntry = parsedClientManifest[u]; break; }
-        if (parsedClientManifest[`${u}#default`]) { matchedEntry = parsedClientManifest[`${u}#default`]; break; }
+        if (isValidEntryId(parsedClientManifest[u])) { matchedEntry = parsedClientManifest[u]; break; }
+        if (isValidEntryId(parsedClientManifest[`${u}#default`])) { matchedEntry = parsedClientManifest[`${u}#default`]; break; }
+        for (const exp of fileExports) {
+          const expEntry = parsedClientManifest[`${u}#${exp}`];
+          if (isValidEntryId(expEntry)) {
+            matchedEntry = expEntry;
+            break;
+          }
+        }
+        if (matchedEntry) break;
+      }
+      if (!matchedEntry) {
+        for (const u of urlVariants) {
+          const uLower = u.toLowerCase();
+          for (const [k, v] of Object.entries(parsedClientManifest)) {
+            const kLower = k.toLowerCase();
+            if ((kLower === uLower || kLower.startsWith(uLower + "#")) && isValidEntryId(v)) {
+              matchedEntry = v;
+              break;
+            }
+          }
+          if (matchedEntry) break;
+        }
       }
 
-      const compId = matchedEntry?.id || pathToFileURL(comp).href;
+      const compId = isValidEntryId(matchedEntry)
+        ? matchedEntry.id
+        : getFallbackChunkId(comp);
       const compChunks = matchedEntry?.chunks || [];
 
       for (const u of urlVariants) {
-        if (!normalized[u]) {
+        if (!normalized[u] || !normalized[u].id || !isValidEntryId(normalized[u])) {
           normalized[u] = { id: compId, chunks: compChunks, name: "*" };
-        } else {
+        } else if (isValidEntryId(matchedEntry)) {
           normalized[u].id = compId;
           normalized[u].chunks = compChunks;
         }
         for (const exp of fileExports) {
           const hashKey = `${u}#${exp}`;
-          if (!normalized[hashKey] || normalized[hashKey].name === "*") {
-            normalized[hashKey] = { id: compId, chunks: compChunks, name: exp };
-          } else {
-            normalized[hashKey].id = compId;
-            normalized[hashKey].chunks = compChunks;
+          const expEntry = parsedClientManifest[hashKey];
+          const expId = isValidEntryId(expEntry)
+            ? expEntry.id
+            : compId;
+          const expChunks = expEntry?.chunks || compChunks;
+
+          if (!normalized[hashKey] || normalized[hashKey].name === "*" || !isValidEntryId(normalized[hashKey])) {
+            normalized[hashKey] = { id: expId, chunks: expChunks, name: exp };
+          } else if (isValidEntryId(expEntry)) {
+            normalized[hashKey].id = expId;
+            normalized[hashKey].chunks = expChunks;
           }
         }
       }
@@ -515,6 +623,15 @@ async function updateManifestsState(options = {}) {
         for (const u of generateAllUrlVariants(rp)) imports[u] = redirectChunkId;
       }
     }
+    if (slotChunkId) {
+      imports["dinou/core/slot.js"] = slotChunkId;
+      imports["dinou/core/slot"] = slotChunkId;
+      imports["/dinou/core/slot.js"] = slotChunkId;
+      imports["./dinou/core/slot.js"] = slotChunkId;
+      for (const sp of candidateSlotPaths) {
+        for (const u of generateAllUrlVariants(sp)) imports[u] = slotChunkId;
+      }
+    }
     importMapHtml = `<script type="importmap">{"imports":${JSON.stringify(imports)}}</script>`;
   }
   globalThis.__DINOU_IMPORT_MAP_HTML__ = importMapHtml;
@@ -575,7 +692,7 @@ async function updateManifestsState(options = {}) {
   for (const [k, v] of Object.entries(normalized)) {
     const fileUrl = k.split("#")[0];
     const expName = k.includes("#") ? k.split("#")[1] : null;
-    if (v?.id && v.id.endsWith(".js")) {
+    if (v?.id && (isWebpackBuild || v.id.endsWith(".js"))) {
       registerModuleMapEntry(v.id, fileUrl, expName);
     }
   }
@@ -598,10 +715,19 @@ async function updateManifestsState(options = {}) {
     }
   }
 
+  if (slotChunkId) {
+    const slotCompIndex = clientComponents.findIndex((c) => candidateSlotPaths.has(path.resolve(c)));
+    if (slotCompIndex !== -1) {
+      const fileUrl = pathToFileURL(clientComponents[slotCompIndex]).href;
+      registerModuleMapEntry(slotChunkId, fileUrl, "DinouPageSlot");
+      registerModuleMapEntry(slotChunkId, fileUrl, "default");
+    }
+  }
+
   globalThis.__DINOU_DYNAMIC_SSR_MODULE_MAP__ = dynamicSsrModuleMap;
   globalThis.__DINOU_SSR_CHUNK_TO_FILE__ = chunkToFile;
 
-  return { linkChunkId, redirectChunkId, componentsChanged };
+  return { linkChunkId, redirectChunkId, slotChunkId, componentsChanged };
 }
 
 // Initial manifest scan
@@ -698,6 +824,16 @@ if (typeof globalThis.__webpack_chunk_load__ === 'undefined') {
     }
   }
 
+  if (slotChunkId) {
+    const slotCompIndex = clientComponents.findIndex((c) => candidateSlotPaths.has(path.resolve(c)));
+    if (slotCompIndex !== -1) {
+      addClientModule(slotChunkId, `mod_${slotCompIndex}`);
+      for (const sp of candidateSlotPaths) {
+        for (const u of generateAllUrlVariants(sp)) addClientModule(u, `mod_${slotCompIndex}`);
+      }
+    }
+  }
+
   serverFunctionFiles.forEach((relPath, index) => {
     const normRel = relPath.replace(/\\/g, "/");
     const relFileUrl = "file:///" + normRel;
@@ -756,6 +892,17 @@ if (typeof globalThis.__webpack_chunk_load__ === 'undefined') {
       addModuleMap(redirectChunkId, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
       for (const rp of candidateRedirectPaths) {
         for (const u of generateAllUrlVariants(rp)) addModuleMap(u, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
+      }
+    }
+  }
+
+  if (slotChunkId) {
+    const slotCompIndex = clientComponents.findIndex((c) => candidateSlotPaths.has(path.resolve(c)));
+    if (slotCompIndex !== -1) {
+      const fileUrl = pathToFileURL(clientComponents[slotCompIndex]).href;
+      addModuleMap(slotChunkId, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
+      for (const sp of candidateSlotPaths) {
+        for (const u of generateAllUrlVariants(sp)) addModuleMap(u, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
       }
     }
   }
@@ -1549,7 +1696,13 @@ async function doRebuild(filePath = "", eventType = "change") {
     const serverDirectiveChanged = isServerFile !== wasServerFile;
 
     let clientRebuildPromise = null;
-    const isClientRelevant = isClientFile || wasClientFile || clientDirectiveChanged || isCssFile;
+    const isClientRelevant =
+      isClientFile ||
+      wasClientFile ||
+      clientDirectiveChanged ||
+      isCssFile ||
+      normLower.endsWith(".tsx") ||
+      normLower.endsWith(".jsx");
     if (clientBundlerHandle?.notifyFileChanged && absFilePath && isClientRelevant) {
       clientRebuildPromise = clientBundlerHandle.notifyFileChanged(absFilePath);
     }
@@ -1559,9 +1712,11 @@ async function doRebuild(filePath = "", eventType = "change") {
     if (needsClientBundlerRestart && clientBundlerHandle?.restart) {
       updateSpinner(`${clientDirectiveChanged ? "Directive change" : "CSS change"} in ${baseName}. Recreating bundle...`);
       await clientBundlerHandle.restart();
-      await broadcastToClients({ type: "reload" });
-      logSuccess(`Recreated bundle for ${baseName} in ${Date.now() - t0}ms`);
-      return;
+      if (!clientDirectiveChanged) {
+        await broadcastToClients({ type: "reload" });
+        logSuccess(`Recreated bundle for ${baseName} in ${Date.now() - t0}ms`);
+        return;
+      }
     }
 
     const needsStructureRebuild = isStructureChange || clientDirectiveChanged || serverDirectiveChanged;
@@ -2218,7 +2373,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Active Route Bundling: Proactively activate requested route in dev
-    const routePath = pathname.replace(/^\/____rsc_payload____/, "");
+    const routePath = pathname.replace(/^\/____rsc_(?:payload|page|layout|payload_static|payload_old|page_static|layout_static)____/, "");
     if (clientBundlerHandle?.ensureActiveRoute && routePath && routePath !== "/") {
       try {
         await clientBundlerHandle.ensureActiveRoute(routePath);
@@ -2241,8 +2396,10 @@ const server = http.createServer(async (req, res) => {
     console.error("[Dinou Dev Server] Request error:", err);
     if (!res.headersSent) {
       res.statusCode = 500;
-      res.setHeader("content-type", "text/plain; charset=utf-8");
-      res.end("Internal Server Error: " + (err?.message || String(err)));
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      const errMsg = (err?.message || String(err)).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const errStack = (err?.stack || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      res.end(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Dinou Dev Error</title></head><body style="margin:0;background:#fff1f2;padding:20px;"><div style="font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:32px;max-width:960px;margin:40px auto;background-color:#fff1f2;border:1px solid #fecdd3;border-radius:12px;color:#9f1239;box-shadow:0 10px 25px -5px rgba(0,0,0,0.1);"><div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;"><span style="background:#e11d48;color:white;padding:2px 8px;border-radius:9999px;font-size:12px;font-weight:bold;">Dinou Dev Error</span><h2 style="margin:0;font-size:1.25rem;font-weight:700;color:#881337;">${errMsg}</h2></div><p style="margin:0 0 16px 0;font-size:0.875rem;color:#9f1239;line-height:1.5;">An unhandled error occurred in the dev server request handler.</p>${errStack ? `<pre style="background:#0f172a;color:#f8fafc;padding:16px;border-radius:8px;overflow-x:auto;font-size:0.8125rem;line-height:1.6;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;">${errStack}</pre>` : ""}</div></body></html>`);
     }
   }
 });

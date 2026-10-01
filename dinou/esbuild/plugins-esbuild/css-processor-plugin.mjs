@@ -76,23 +76,16 @@ export default function cssProcessorPlugin({ outdir = ".dinou/public", hmrEngine
         const stat = await fs.stat(filePath);
         const cached = cssCache.get(filePath);
 
-        if (cached && cached.mtime === stat.mtimeMs) {
+        const isModule = filePath.endsWith(".module.css");
+        if (isModule && cached && cached.mtime === stat.mtimeMs) {
           if (cached.extractedCss && typeof addExtractedCss === "function") {
             addExtractedCss(cached.extractedCss);
           }
-          if (filePath.endsWith(".module.css")) {
-            return {
-              contents: `export default ${JSON.stringify(cached.map || {})};`,
-              loader: "js",
-              watchFiles: [filePath],
-            };
-          } else {
-            return {
-              contents: `/* global: ${path.basename(filePath)} */`,
-              loader: "js",
-              watchFiles: [filePath],
-            };
-          }
+          return {
+            contents: `export default ${JSON.stringify(cached.map || {})};`,
+            loader: "js",
+            watchFiles: [filePath],
+          };
         }
 
         hasCssChange = true;
