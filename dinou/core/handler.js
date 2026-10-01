@@ -331,24 +331,56 @@ function getDiscoveredLayouts() {
     return discoveredLayoutsCache;
   }
   const discovered = [];
-  const srcFolder = path.resolve(process.cwd(), "src");
-  function find(dir, rel = "") {
-    if (!existsSync(dir)) return;
-    let entries;
-    try {
-      entries = require("fs").readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        find(path.join(dir, entry.name), rel ? `${rel}/${entry.name}` : entry.name);
-      } else if (/^layout\.[jt]sx?$/.test(entry.name)) {
-        discovered.push(rel);
+
+  // 1. Edge/Workers: Discover layouts from VFS
+  if (typeof globalThis !== "undefined" && globalThis.__DINOU_VFS__) {
+    const vfs = globalThis.__DINOU_VFS__;
+    for (const key of Object.keys(vfs)) {
+      if (vfs[key]?.type === "file" && /(?:^|\/)layout\.[jt]sx?$/.test(key)) {
+        const clean = key.replace(/^\/?src\/?/, "").replace(/\/?layout\.[jt]sx?$/, "");
+        if (!discovered.includes(clean)) {
+          discovered.push(clean);
+        }
       }
     }
   }
-  find(srcFolder);
+
+  // 2. Edge/Workers: Discover layouts from Route Modules registry
+  if (discovered.length === 0 && typeof globalThis !== "undefined" && globalThis.__DINOU_ROUTE_MODULES__) {
+    for (const key of Object.keys(globalThis.__DINOU_ROUTE_MODULES__)) {
+      if (/(?:^|\/)layout\.[jt]sx?$/.test(key)) {
+        const clean = key.replace(/^\/?src\/?/, "").replace(/\/?layout\.[jt]sx?$/, "");
+        if (!discovered.includes(clean)) {
+          discovered.push(clean);
+        }
+      }
+    }
+  }
+
+  // 3. Node/Local filesystem discovery
+  if (discovered.length === 0) {
+    try {
+      const srcFolder = path.resolve(process.cwd(), "src");
+      function find(dir, rel = "") {
+        if (!existsSync(dir)) return;
+        let entries;
+        try {
+          entries = require("fs").readdirSync(dir, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const entry of entries) {
+          if (entry.isDirectory()) {
+            find(path.join(dir, entry.name), rel ? `${rel}/${entry.name}` : entry.name);
+          } else if (/^layout\.[jt]sx?$/.test(entry.name)) {
+            discovered.push(rel);
+          }
+        }
+      }
+      find(srcFolder);
+    } catch (e) {}
+  }
+
   discoveredLayoutsCache = discovered;
   lastLayoutsDiscoveryTime = now;
   return discovered;
@@ -1556,7 +1588,12 @@ async function handleRequest(request, platformContext = {}) {
       bridge.setHeader("Content-Type", "text/html; charset=utf-8");
       bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
       bridge.status(metadata.status || 200);
-      bridge.end(cachedItem.content);
+      let content = cachedItem.content;
+      if (typeof content === "string" && !content.includes("window.__DINOU_LAYOUTS__")) {
+        const knownLayouts = getDiscoveredLayouts();
+        content = content.replace("</head>", `<script>window.__DINOU_LAYOUTS__=${JSON.stringify(knownLayouts)};</script></head>`);
+      }
+      bridge.end(content);
       return bridge.toResponse();
     }
 
@@ -2007,7 +2044,8 @@ async function handleRequest(request, platformContext = {}) {
 
         bridge.status(status || 200);
 
-        let scripts = `<script>window.__DINOU_USE_STATIC__=true;</script>`;
+        const knownLayouts = getDiscoveredLayouts();
+        let scripts = `<script>window.__DINOU_USE_STATIC__=true;window.__DINOU_LAYOUTS__=${JSON.stringify(knownLayouts)};</script>`;
         if (htmlPathOld && existsSync(htmlPathOld)) {
           scripts += `<script>window.__DINOU_USE_OLD_RSC__=true;</script>`;
         }

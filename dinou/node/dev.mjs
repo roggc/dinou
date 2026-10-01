@@ -738,6 +738,21 @@ function generateEntryFiles() {
   const routeModulesCode = generateRouteModulesCode(projectRoot, "../..");
   fs.writeFileSync(path.join(devDir, "route-modules.mjs"), routeModulesCode, "utf8");
 
+  const discoveredLayouts = [];
+  function findLayoutRoutes(dir, rel = "") {
+    if (!fs.existsSync(dir)) return;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        findLayoutRoutes(path.join(dir, entry.name), rel ? `${rel}/${entry.name}` : entry.name);
+      } else if (/^layout\.[jt]sx?$/.test(entry.name)) {
+        discoveredLayouts.push(rel);
+      }
+    }
+  }
+  findLayoutRoutes(srcDir);
+  globalThis.__DINOU_LAYOUTS__ = discoveredLayouts;
+
   const envSetupContent = `// Auto-generated Dev Environment Setup
 if (typeof globalThis.__webpack_require__ === 'undefined') {
   globalThis.__webpack_require__ = function(id) {
@@ -753,6 +768,7 @@ if (typeof globalThis.__webpack_require__.u === 'undefined') {
 if (typeof globalThis.__webpack_chunk_load__ === 'undefined') {
   globalThis.__webpack_chunk_load__ = () => Promise.resolve();
 }
+globalThis.__DINOU_LAYOUTS__ = ${JSON.stringify(discoveredLayouts)};
 `;
   fs.writeFileSync(path.join(devDir, "env-setup.mjs"), envSetupContent, "utf8");
 

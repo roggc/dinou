@@ -419,7 +419,23 @@ if (!isWebpackBuild && Object.keys(parsedClientManifest).length > 0) {
 
 manifestInlines += `\nglobalThis.__DINOU_IMPORT_MAP_HTML__ = ${JSON.stringify(importMapHtml)};\n`;
 
+const discoveredLayouts = [];
+function findLayoutRoutes(dir, rel = "") {
+  if (!fs.existsSync(dir)) return;
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      findLayoutRoutes(path.join(dir, entry.name), rel ? `${rel}/${entry.name}` : entry.name);
+    } else if (/^layout\.[jt]sx?$/.test(entry.name)) {
+      discoveredLayouts.push(rel);
+    }
+  }
+}
+findLayoutRoutes(srcDir);
+manifestInlines += `\nglobalThis.__DINOU_LAYOUTS__ = ${JSON.stringify(discoveredLayouts)};\n`;
+
 if (process.env.DINOU_DEBUG) {
+
   console.log("⚡ [Dinou Cloudflare] Building in-memory VFS for Edge routing...");
 }
 const vfsSnapshot = {};

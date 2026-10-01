@@ -497,11 +497,13 @@ async function buildStaticPages(onProgress = null) {
           const lfPath = getLayoutFunctionsPath(dynamicPath);
           if (lfPath) {
             const lmod = await importModule(lfPath);
-            if (!getStaticPaths && typeof lmod.getStaticPaths === "function") {
-              getStaticPaths = lmod.getStaticPaths;
+            const lmodGetStaticPaths = lmod.getStaticPaths || lmod.default?.getStaticPaths;
+            const lmodDynamic = lmod.dynamic || lmod.default?.dynamic;
+            if (!getStaticPaths && typeof lmodGetStaticPaths === "function") {
+              getStaticPaths = lmodGetStaticPaths;
             }
-            if (!dynamic && lmod.dynamic) {
-              dynamic = lmod.dynamic;
+            if (!dynamic && lmodDynamic) {
+              dynamic = lmodDynamic;
             }
           }
           const isLocalPage =
