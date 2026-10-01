@@ -55,7 +55,9 @@ class FileSystemStorage extends StorageAdapter {
 
     // Check companion metadata if available
     let metadata = null;
-    const metaPath = path.join(path.dirname(targetPath), "metadata.json");
+    const isLayoutKey = String(key || "").includes("layout.rsc");
+    const metaFileName = isLayoutKey ? "layout.metadata.json" : "metadata.json";
+    const metaPath = path.join(path.dirname(targetPath), metaFileName);
     if (fs.existsSync(metaPath)) {
       try {
         metadata = JSON.parse(fs.readFileSync(metaPath, "utf8"));
@@ -76,7 +78,9 @@ class FileSystemStorage extends StorageAdapter {
     fs.writeFileSync(targetPath, content, "utf8");
 
     if (metadata) {
-      const metaPath = path.join(dir, "metadata.json");
+      const isLayoutKey = String(key || "").includes("layout.rsc");
+      const metaFileName = isLayoutKey ? "layout.metadata.json" : "metadata.json";
+      const metaPath = path.join(dir, metaFileName);
       fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2), "utf8");
     }
   }

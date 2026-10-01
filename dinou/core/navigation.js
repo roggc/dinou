@@ -138,16 +138,24 @@ export function useSearchParams() {
         return params;
       }
     } catch (e) { }
+    return new URLSearchParams();
   }
 
   // 🔵 2. CLIENT LOGIC
   const context = useContext(RouterContext);
 
   // ⚠️ CRITICAL CHANGE: We extract .url
-  const fullRoute = typeof context === "string" ? context : context.url;
+  const fullRoute = typeof context === "string" ? context : context?.url;
 
-  if (typeof fullRoute !== "string") return new URLSearchParams();
+  if (typeof fullRoute === "string" && fullRoute.includes("?")) {
+    const searchPart = (fullRoute.split("?")[1] || "").split("#")[0];
+    return new URLSearchParams(searchPart);
+  }
 
-  const searchPart = (fullRoute.split("?")[1] || "").split("#")[0];
-  return new URLSearchParams(searchPart);
+  if (typeof window !== "undefined" && window.location && window.location.search) {
+    return new URLSearchParams(window.location.search);
+  }
+
+  return new URLSearchParams();
 }
+

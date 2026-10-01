@@ -7,6 +7,7 @@ const {
 } = require("./get-file-path-and-dynamic-params");
 const importModule = require("./import-module");
 const { asyncRenderJSXToClientJSX } = require("./render-jsx-to-client-jsx");
+const { getLayoutProps } = require("./layout-functions");
 
 async function getJSX(
   reqPath,
@@ -129,7 +130,7 @@ async function getJSX(
           const pageFunctionsModule = await importModule(pageFunctionsPath);
           const getProps = pageFunctionsModule.getProps;
           pageFunctionsProps = await getProps?.(dParams ?? {});
-          props = { ...props, ...(pageFunctionsProps?.page ?? {}) };
+          props = { ...props, ...(pageFunctionsProps ?? {}) };
         }
 
         jsx = React.createElement(Page, props);
@@ -165,7 +166,7 @@ async function getJSX(
         const pageFunctionsModule = await importModule(pageFunctionsPath);
         const getProps = pageFunctionsModule.getProps;
         pageFunctionsProps = await getProps?.(dynamicParams);
-        props = { ...props, ...(pageFunctionsProps?.page ?? {}) };
+        props = { ...props, ...(pageFunctionsProps ?? {}) };
       }
 
       jsx = React.createElement(Page, props);
@@ -282,10 +283,8 @@ async function getJSX(
           updatedSlots[slotName] = updatedSlotElement;
         }
       }
-      let props = { params: dParams, ...updatedSlots };
-      if (index === layouts.length - 1 || resetLayoutPath) {
-        props = { ...props, ...(pageFunctionsProps?.layout ?? {}) };
-      }
+      const layoutProps = await getLayoutProps(layoutPath, dParams);
+      let props = { params: dParams, ...updatedSlots, ...(layoutProps ?? {}) };
       try {
         const testElement = React.createElement(Layout, props, null);
         await asyncRenderJSXToClientJSX(testElement);

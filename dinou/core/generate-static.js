@@ -76,7 +76,24 @@ async function generateStatic() {
           const layoutRscText = await layoutRes.text();
           const cleanLayoutPath = layoutReqPath.replace(/^\/+/, "").replace(/\/+$/, "");
           const layoutRscKey = cleanLayoutPath ? `${cleanLayoutPath}/layout.rsc` : "layout.rsc";
-          await storage.set(layoutRscKey, layoutRscText);
+
+          let layoutMeta = {
+            status: 200,
+            generatedAt: Date.now(),
+            revalidate: undefined,
+            tags: [],
+          };
+          try {
+            const { resolveLayoutFunctionsConfig } = require("./layout-functions.js");
+            const layoutConfig = await resolveLayoutFunctionsConfig(
+              layoutInfo.layoutPath,
+              layoutInfo.params || {}
+            );
+            layoutMeta.revalidate = layoutConfig.revalidate;
+            layoutMeta.tags = layoutConfig.tags || [];
+          } catch (e) {}
+
+          await storage.set(layoutRscKey, layoutRscText, layoutMeta);
         } else {
           const layoutResult = await generateStaticLayoutRSC(
             layoutReqPath,

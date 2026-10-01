@@ -38,7 +38,7 @@ async function walkMetadataFiles(dir, fileList = []) {
       const entryPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         await walkMetadataFiles(entryPath, fileList);
-      } else if (entry.name === "metadata.json") {
+      } else if (entry.name === "metadata.json" || entry.name === "layout.metadata.json") {
         fileList.push(entryPath);
       }
     }
@@ -153,6 +153,12 @@ async function revalidatePath(reqPath) {
         path.join(dist2Folder, reqPathWithSlash, "page._old.rsc")
       );
     }
+    if (existsSync(path.join(dist2Folder, reqPathWithSlash, "layout.rsc"))) {
+      copyFileSync(
+        path.join(dist2Folder, reqPathWithSlash, "layout.rsc"),
+        path.join(dist2Folder, reqPathWithSlash, "layout._old.rsc")
+      );
+    }
     if (existsSync(path.join(dist2Folder, reqPathWithSlash, "rsc.rsc"))) {
       copyFileSync(
         path.join(dist2Folder, reqPathWithSlash, "rsc.rsc"),
@@ -183,6 +189,19 @@ async function revalidatePath(reqPath) {
 
     await getSafeRename()(rscResult.tempPath, rscResult.finalPath);
 
+    try {
+      const layoutFinalPath = path.join(dist2Folder, reqPathWithSlash, "layout.rsc");
+      const layoutOldPath = path.join(dist2Folder, reqPathWithSlash, "layout._old.rsc");
+      if (existsSync(layoutFinalPath) || existsSync(layoutOldPath)) {
+        const layoutRscResult = await getGenerateStaticRSC()(cleanPath, { segment: "layout" });
+        if (layoutRscResult && layoutRscResult.success) {
+          await getSafeRename()(layoutRscResult.tempPath, layoutRscResult.finalPath);
+        }
+      }
+    } catch (e) {
+      // Ignore layout revalidation error if no layout exists for this segment
+    }
+
     const pageResult = await getGenerateStaticPage()(cleanPath);
     if (pageResult.success) {
       await getSafeRename()(pageResult.tempPath, pageResult.finalPath);
@@ -199,6 +218,66 @@ async function revalidatePath(reqPath) {
   }
 }
 
+async function revalidateLayout(cleanPath) {
+  let targetPath = cleanPath;
+  if (!targetPath.startsWith("/")) {
+    targetPath = "/" + targetPath;
+  }
+  if (targetPath !== "/" && targetPath.endsWith("/")) {
+    targetPath = targetPath.slice(0, -1);
+  }
+
+  if (isEdgeRuntime()) {
+    const storage = getStorageAdapter();
+    const cleanPathKey = targetPath.replace(/^\/+/, "").replace(/\/+$/, "");
+    const layoutRscKey = cleanPathKey ? `${cleanPathKey}/layout.rsc` : "layout.rsc";
+    const layoutMetaKey = cleanPathKey ? `${cleanPathKey}/layout.metadata.json` : "layout.metadata.json";
+
+    let cached = await storage.get(layoutRscKey);
+    let currentMeta = (cached && cached.metadata) || {};
+    try {
+      const metaItem = await storage.get(layoutMetaKey);
+      if (metaItem && metaItem.content) {
+        currentMeta = JSON.parse(metaItem.content);
+      }
+    } catch (e) {}
+
+    const prevGenTime = (currentMeta && currentMeta.generatedAt) || 0;
+    const now = Date.now();
+    const newGenTime = now <= prevGenTime ? prevGenTime + 100 : now;
+    currentMeta.generatedAt = newGenTime;
+
+    await storage.set(layoutMetaKey, JSON.stringify(currentMeta), currentMeta);
+    if (cached && cached.content) {
+      await storage.set(layoutRscKey, cached.content, currentMeta);
+    }
+    console.log(`✅ [Edge Revalidate] Successfully revalidated layout ${targetPath} (generatedAt: ${newGenTime})`);
+    return;
+  }
+
+  const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
+  const reqPathWithSlash = targetPath.endsWith("/") ? targetPath : targetPath + "/";
+  const layoutFinalPath = path.join(dist2Folder, reqPathWithSlash, "layout.rsc");
+  const layoutOldPath = path.join(dist2Folder, reqPathWithSlash, "layout._old.rsc");
+
+  if (existsSync(layoutFinalPath)) {
+    try {
+      copyFileSync(layoutFinalPath, layoutOldPath);
+    } catch (e) {}
+  }
+
+  console.log(`[Revalidate] Starting on-demand layout revalidation for ${targetPath}...`);
+  try {
+    const layoutRscResult = await getGenerateStaticRSC()(targetPath, { segment: "layout" });
+    if (layoutRscResult && layoutRscResult.success) {
+      await getSafeRename()(layoutRscResult.tempPath, layoutRscResult.finalPath);
+      console.log(`✅ [Revalidate] Successfully revalidated layout ${targetPath}`);
+    }
+  } catch (err) {
+    console.warn(`⚠️ [Revalidate] Failed to revalidate layout ${targetPath}:`, err.message || err);
+  }
+}
+
 async function revalidateTag(tag) {
   console.log(`[Revalidate] Starting on-demand revalidation for tag: "${tag}"...`);
 
@@ -207,8 +286,21 @@ async function revalidateTag(tag) {
     if (typeof storage.keys === "function") {
       const allKeys = await storage.keys();
       const targetPaths = new Set();
+      const targetLayoutPaths = new Set();
       for (const key of allKeys) {
-        if (key.endsWith("metadata.json")) {
+        if (key.endsWith("layout.metadata.json") || key.endsWith("layout.rsc")) {
+          try {
+            const item = await storage.get(key);
+            let meta = item?.metadata;
+            if (!meta && item?.content) {
+              try { meta = JSON.parse(item.content); } catch (e) {}
+            }
+            if (meta && Array.isArray(meta.tags) && meta.tags.includes(tag)) {
+              const cleanKey = key.replace(/\/(?:layout\.metadata\.json|layout\.rsc)$/, "").replace(/^(?:layout\.metadata\.json|layout\.rsc)$/, "");
+              targetLayoutPaths.add("/" + cleanKey);
+            }
+          } catch (e) {}
+        } else if (key.endsWith("metadata.json")) {
           try {
             const item = await storage.get(key);
             let meta = item?.metadata;
@@ -231,7 +323,10 @@ async function revalidateTag(tag) {
           } catch (e) {}
         }
       }
-      await Promise.all(Array.from(targetPaths).map((p) => revalidatePath(p)));
+      await Promise.all([
+        ...Array.from(targetPaths).map((p) => revalidatePath(p)),
+        ...Array.from(targetLayoutPaths).map((p) => revalidateLayout(p)),
+      ]);
     }
     return;
   }
@@ -250,7 +345,11 @@ async function revalidateTag(tag) {
         // Calculate the request path
         const relative = path.relative(dist2Folder, path.dirname(fileOfMeta));
         const reqPath = "/" + relative.replace(/\\/g, "/");
-        revalidatePromises.push(revalidatePath(reqPath));
+        if (path.basename(fileOfMeta) === "layout.metadata.json") {
+          revalidatePromises.push(revalidateLayout(reqPath));
+        } else {
+          revalidatePromises.push(revalidatePath(reqPath));
+        }
       }
     } catch (err) {
       console.error(`[Revalidate] Error reading tags from ${fileOfMeta}:`, err);
@@ -263,4 +362,5 @@ async function revalidateTag(tag) {
 module.exports = {
   revalidatePath,
   revalidateTag,
+  revalidateLayout,
 };

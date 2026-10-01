@@ -43,8 +43,20 @@ const getLayoutKey = (pathname) => {
   const segments = cleanPath.split("/").filter(Boolean);
 
   for (let i = segments.length; i >= 1; i--) {
-    const candidate = segments.slice(0, i).join("/");
+    const candidateSegments = segments.slice(0, i);
+    const candidate = candidateSegments.join("/");
     if (layouts.includes(candidate)) {
+      return "/" + candidate;
+    }
+    const dynamicMatch = layouts.find((l) => {
+      const lSegs = l.split("/").filter(Boolean);
+      if (lSegs.length !== candidateSegments.length) return false;
+      return lSegs.every((seg, idx) => {
+        if (seg.startsWith("[") && seg.endsWith("]")) return true;
+        return seg === candidateSegments[idx];
+      });
+    });
+    if (dynamicMatch) {
       return "/" + candidate;
     }
   }
@@ -641,6 +653,9 @@ if (!isLayoutError) {
     window.__DINOU_ERROR_MESSAGE__,
     "- skipping client hydration to preserve the server-rendered error screen."
   );
+  if (typeof document !== "undefined" && document.body) {
+    document.body.setAttribute("data-hydrated", "true");
+  }
 }
 
 if (import.meta.hot) {

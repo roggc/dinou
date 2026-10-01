@@ -6,6 +6,7 @@ const {
 } = require("./get-file-path-and-dynamic-params");
 const importModule = require("./import-module");
 const { asyncRenderJSXToClientJSX } = require("./render-jsx-to-client-jsx");
+const { getLayoutProps } = require("./layout-functions");
 
 function cleanErrorStack(stack) {
   if (!stack || typeof stack !== "string") return "";
@@ -290,9 +291,11 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false, options
             updatedSlots[slotName] = updatedSlotElement;
           }
         }
+        const layoutProps = await getLayoutProps(layoutPath, dParams);
         let props = {
           params: dParams,
           ...updatedSlots,
+          ...(layoutProps ?? {}),
         };
         try {
           const testElement = React.createElement(Layout, props, jsx);
