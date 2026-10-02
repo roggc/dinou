@@ -271,6 +271,9 @@ if (slotChunkId) {
   const slotChunks = isWebpackBuild
     ? (slotEntry?.chunks || [slotChunkId])
     : "DinouPageSlot";
+  const slotBoundaryChunks = isWebpackBuild
+    ? (slotEntry?.chunks || [slotChunkId])
+    : "DinouCacheSlotBoundary";
   const slotDefaultChunks = isWebpackBuild
     ? (slotEntry?.chunks || [slotChunkId])
     : "default";
@@ -278,6 +281,7 @@ if (slotChunkId) {
   for (const sp of candidateSlotPaths) {
     for (const url of generateAllUrlVariants(sp)) {
       normalizedManifest[`${url}#DinouPageSlot`] = { id: slotChunkId, chunks: slotChunks, name: "DinouPageSlot" };
+      normalizedManifest[`${url}#DinouCacheSlotBoundary`] = { id: slotChunkId, chunks: slotBoundaryChunks, name: "DinouCacheSlotBoundary" };
       normalizedManifest[`${url}#default`] = { id: slotChunkId, chunks: slotDefaultChunks, name: "default" };
       normalizedManifest[url] = { id: slotChunkId, chunks: slotDefaultChunks, name: "default" };
     }

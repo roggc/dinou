@@ -5,6 +5,9 @@ import React from "react";
 const createContext = React.createContext;
 const useContext = React.useContext;
 const useMemo = React.useMemo;
+const useState = React.useState;
+const useEffect = React.useEffect;
+const startTransition = React.startTransition;
 const use = React.use;
 const createElement = React.createElement;
 const Suspense = React.Suspense;
@@ -240,6 +243,57 @@ export function DinouPageSlot() {
     { resetKey, pagePromise },
     createElement(PageConsumer, { pagePromise })
   );
+}
+
+function SlotConsumer({ slotPromise, fallback }) {
+  if (slotPromise && slotPromise.status === "rejected") {
+    throw slotPromise.reason;
+  }
+  return use ? use(slotPromise) : (slotPromise || fallback);
+}
+
+export function DinouCacheSlotBoundary({ id, children }) {
+  if (typeof useState !== "function") {
+    return children;
+  }
+  const [slotPromise, setSlotPromise] = useState(null);
+
+  useEffect(() => {
+    const handleRefresh = (e) => {
+      if (!e || !e.detail || e.detail.id === id || e.detail.id === "*") {
+        if (
+          typeof window !== "undefined" &&
+          typeof window.__DINOU_FETCH_SLOT__ === "function"
+        ) {
+          const promise = window.__DINOU_FETCH_SLOT__(id, e.detail?.options);
+          if (promise) {
+            if (typeof startTransition === "function") {
+              startTransition(() => {
+                setSlotPromise(promise);
+              });
+            } else {
+              setSlotPromise(promise);
+            }
+          }
+        }
+      }
+    };
+    window.addEventListener("dinou:refresh-slot", handleRefresh);
+    return () => window.removeEventListener("dinou:refresh-slot", handleRefresh);
+  }, [id]);
+
+  if (slotPromise) {
+    return createElement(
+      SlotErrorBoundary,
+      { resetKey: slotPromise, pagePromise: slotPromise },
+      createElement(
+        Suspense,
+        { fallback: children },
+        createElement(SlotConsumer, { slotPromise, fallback: children })
+      )
+    );
+  }
+  return children;
 }
 
 export default DinouPageSlot;

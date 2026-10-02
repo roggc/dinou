@@ -38,7 +38,11 @@ async function walkMetadataFiles(dir, fileList = []) {
       const entryPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         await walkMetadataFiles(entryPath, fileList);
-      } else if (entry.name === "metadata.json" || entry.name === "layout.metadata.json") {
+      } else if (
+        entry.name === "metadata.json" ||
+        entry.name === "layout.metadata.json" ||
+        entry.name === "slot.metadata.json"
+      ) {
         fileList.push(entryPath);
       }
     }
@@ -287,8 +291,20 @@ async function revalidateTag(tag) {
       const allKeys = await storage.keys();
       const targetPaths = new Set();
       const targetLayoutPaths = new Set();
+      const targetSlotKeys = new Set();
       for (const key of allKeys) {
-        if (key.endsWith("layout.metadata.json") || key.endsWith("layout.rsc")) {
+        if (key.includes("slot")) {
+          try {
+            const item = await storage.get(key);
+            let meta = item?.metadata;
+            if (!meta && item?.content) {
+              try { meta = JSON.parse(item.content); } catch (e) {}
+            }
+            if (meta && Array.isArray(meta.tags) && meta.tags.includes(tag)) {
+              targetSlotKeys.add(key);
+            }
+          } catch (e) {}
+        } else if (key.endsWith("layout.metadata.json") || key.endsWith("layout.rsc")) {
           try {
             const item = await storage.get(key);
             let meta = item?.metadata;
@@ -326,6 +342,7 @@ async function revalidateTag(tag) {
       await Promise.all([
         ...Array.from(targetPaths).map((p) => revalidatePath(p)),
         ...Array.from(targetLayoutPaths).map((p) => revalidateLayout(p)),
+        ...Array.from(targetSlotKeys).map((k) => storage.delete(k)),
       ]);
     }
     return;
@@ -342,12 +359,19 @@ async function revalidateTag(tag) {
       const content = await fs.readFile(fileOfMeta, "utf8");
       const metadata = JSON.parse(content);
       if (metadata && Array.isArray(metadata.tags) && metadata.tags.includes(tag)) {
-        // Calculate the request path
-        const relative = path.relative(dist2Folder, path.dirname(fileOfMeta));
-        const reqPath = "/" + relative.replace(/\\/g, "/");
-        if (path.basename(fileOfMeta) === "layout.metadata.json") {
+        if (path.basename(fileOfMeta) === "slot.metadata.json") {
+          const slotFolder = path.dirname(fileOfMeta);
+          console.log(`✅ [Revalidate] Invalidating cache slot directory: ${slotFolder}`);
+          revalidatePromises.push(
+            fs.rm(slotFolder, { recursive: true, force: true }).catch(() => {})
+          );
+        } else if (path.basename(fileOfMeta) === "layout.metadata.json") {
+          const relative = path.relative(dist2Folder, path.dirname(fileOfMeta));
+          const reqPath = "/" + relative.replace(/\\/g, "/");
           revalidatePromises.push(revalidateLayout(reqPath));
         } else {
+          const relative = path.relative(dist2Folder, path.dirname(fileOfMeta));
+          const reqPath = "/" + relative.replace(/\\/g, "/");
           revalidatePromises.push(revalidatePath(reqPath));
         }
       }

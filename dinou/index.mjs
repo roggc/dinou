@@ -3,6 +3,7 @@ import {
   usePathname,
   useSearchParams,
   useRouter,
+  refreshSlot,
   useNavigationLoading,
 } from "./core/navigation.js";
 import { redirect } from "./core/redirect.jsx";
@@ -20,6 +21,7 @@ const dinou = {
   usePathname,
   useSearchParams,
   useRouter,
+  refreshSlot,
   useNavigationLoading,
   redirect,
   ClientRedirect,
@@ -33,6 +35,7 @@ export {
   usePathname,
   useSearchParams,
   useRouter,
+  refreshSlot,
   useNavigationLoading,
   redirect,
   ClientRedirect,

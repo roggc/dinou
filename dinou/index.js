@@ -8,6 +8,7 @@ module.exports = {
   usePathname: navigationModule.usePathname,
   useSearchParams: navigationModule.useSearchParams,
   useRouter: navigationModule.useRouter,
+  refreshSlot: navigationModule.refreshSlot,
   useNavigationLoading: navigationModule.useNavigationLoading,
   get redirect() {
     return require("./core/redirect.jsx").redirect;

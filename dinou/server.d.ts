@@ -11,6 +11,21 @@ export declare function revalidatePath(path: string): Promise<void>;
  */
 export declare function revalidateTag(tag: string): Promise<void>;
 
+export interface DinouCacheSlotProps {
+  id?: string;
+  tag?: string;
+  tags?: string[];
+  revalidate?: number;
+  children: any;
+}
+
+/**
+ * DinouCacheSlot: Primitiva de segmentación vertical (Micro-ISR) para Server Components.
+ * Permite cachear e invalidar sub-árboles de componentes dentro de una página
+ * mediante revalidate y revalidateTag, sin re-evaluar la página ni la base de datos.
+ */
+export declare function DinouCacheSlot(props: DinouCacheSlotProps): Promise<any>;
+
 // ====================================================================
 // STORAGE ADAPTER TYPES (ISR / CACHE)
 // ====================================================================

@@ -88,7 +88,26 @@ export function useRouter() {
      * and re-renders the server component without a full browser reload.
      */
     refresh: () => context.refresh(),
+
+    /**
+     * Refresh a specific DinouCacheSlot without re-rendering the rest of the page.
+     * @param {string} slotId The ID or tag of the slot to refresh.
+     * @param {object} [options] Optional configuration ({ fresh?: boolean }).
+     */
+    refreshSlot: (slotId, options) => refreshSlot(slotId, options),
   };
+}
+
+export function refreshSlot(slotId, options) {
+  if (typeof window !== "undefined") {
+    if (typeof window.__DINOU_REFRESH_SLOT__ === "function") {
+      window.__DINOU_REFRESH_SLOT__(slotId, options);
+    } else {
+      window.dispatchEvent(
+        new CustomEvent("dinou:refresh-slot", { detail: { id: slotId, options } })
+      );
+    }
+  }
 }
 
 const DINOU_CONTEXT_KEY = Symbol.for("dinou.request.context.storage");

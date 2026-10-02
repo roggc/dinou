@@ -722,6 +722,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
     },
     env: platformContext.env || {},
     ctx: platformContext.ctx || null,
+    platformContext,
   };
 
   if (dinouConfig.plugins && Array.isArray(dinouConfig.plugins)) {
@@ -1055,6 +1056,60 @@ async function handleRequest(request, platformContext = {}) {
       return bridge.toResponse();
     } catch (err) {
       console.error("[Dinou] Error rendering fallback error RSC:", err);
+      return new Response("Internal Server Error", { status: 500 });
+    }
+  }
+
+  // 5.5. Granular Slot RSC Endpoint (GET /____rsc_slot____/*)
+  if (pathname.includes("____rsc_slot____")) {
+    try {
+      const slotId = pathname
+        .replace(/^.*\/____rsc_slot____\/?/, "")
+        .split("?")[0]
+        .split("/")[0]
+        .trim();
+
+      if (!slotId) {
+        return new Response("Missing slot id", { status: 400 });
+      }
+
+      const urlObj = new URL(request.url || `http://localhost${pathname}`);
+      const isFresh = urlObj.searchParams.get("fresh") === "1" || urlObj.searchParams.has("fresh");
+
+      const { getSlotJSX } = require("./cache-slot.js");
+      const currentPath =
+        request.headers?.get?.("x-dinou-current-path") ||
+        simReq.headers?.["x-dinou-current-path"] ||
+        "/";
+
+      const context = createRequestContext(simReq, bridge, platformContext);
+      copyCustomContextProperties(rootContext, context);
+
+      let slotJsx = null;
+      await requestStorage.run(context, async () => {
+        slotJsx = await getSlotJSX(slotId, {
+          req: request,
+          currentPath,
+          fresh: isFresh,
+        });
+
+        if (!slotJsx) {
+          bridge.status(404);
+          bridge.send(`Slot "${slotId}" not found in cache or registry`);
+          return;
+        }
+
+        bridge.setHeader("Content-Type", "text/x-component");
+        bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        bridge.setHeader("X-Dinou-Slot", slotId);
+
+        const manifest = getClientManifest();
+        pipeRSC(slotJsx, bridge, manifest, platformContext);
+      });
+
+      return bridge.toResponse();
+    } catch (err) {
+      console.error("[Dinou] Error rendering slot RSC payload:", err);
       return new Response("Internal Server Error", { status: 500 });
     }
   }

@@ -56,7 +56,12 @@ class FileSystemStorage extends StorageAdapter {
     // Check companion metadata if available
     let metadata = null;
     const isLayoutKey = String(key || "").includes("layout.rsc");
-    const metaFileName = isLayoutKey ? "layout.metadata.json" : "metadata.json";
+    const isSlotKey = String(key || "").includes("slot");
+    const metaFileName = isLayoutKey
+      ? "layout.metadata.json"
+      : isSlotKey
+      ? "slot.metadata.json"
+      : "metadata.json";
     const metaPath = path.join(path.dirname(targetPath), metaFileName);
     if (fs.existsSync(metaPath)) {
       try {
@@ -79,7 +84,12 @@ class FileSystemStorage extends StorageAdapter {
 
     if (metadata) {
       const isLayoutKey = String(key || "").includes("layout.rsc");
-      const metaFileName = isLayoutKey ? "layout.metadata.json" : "metadata.json";
+      const isSlotKey = String(key || "").includes("slot");
+      const metaFileName = isLayoutKey
+        ? "layout.metadata.json"
+        : isSlotKey
+        ? "slot.metadata.json"
+        : "metadata.json";
       const metaPath = path.join(dir, metaFileName);
       fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2), "utf8");
     }
@@ -97,6 +107,15 @@ class FileSystemStorage extends StorageAdapter {
     let targetPath = this._resolve(key);
     if (fs.existsSync(targetPath)) {
       fs.rmSync(targetPath, { force: true, recursive: true });
+    }
+    const isSlotKey = String(key || "").includes("slot");
+    if (isSlotKey) {
+      const dir = path.dirname(targetPath);
+      if (fs.existsSync(dir)) {
+        try {
+          fs.rmSync(dir, { force: true, recursive: true });
+        } catch (e) {}
+      }
     }
   }
 
@@ -440,36 +459,39 @@ class DenoKVStorage extends StorageAdapter {
   }
 }
 
-let activeStorageAdapter = null;
+const DINOU_STORAGE_KEY = Symbol.for("dinou.storage.adapter");
 
 function getStorageAdapter() {
-  if (!activeStorageAdapter) {
-    const runtime =
-      (typeof globalThis !== "undefined" && globalThis.__DINOU_RUNTIME__) ||
-      (typeof process !== "undefined" && process.env && process.env.DINOU_RUNTIME) ||
-      "";
-
-    const isEdge =
-      runtime === "edge" ||
-      runtime === "deno-edge" ||
-      (typeof runtime === "string" && runtime.includes("edge")) ||
-      (typeof Deno !== "undefined" && !runtime.includes("node"));
-
-    if (isEdge) {
-      if (typeof Deno !== "undefined" && typeof Deno.openKv === "function") {
-        activeStorageAdapter = new DenoKVStorage();
-      } else {
-        activeStorageAdapter = new MemoryStorage();
-      }
-    } else {
-      activeStorageAdapter = new FileSystemStorage();
-    }
+  if (globalThis[DINOU_STORAGE_KEY]) {
+    return globalThis[DINOU_STORAGE_KEY];
   }
-  return activeStorageAdapter;
+  let adapter = null;
+  const runtime =
+    (typeof globalThis !== "undefined" && globalThis.__DINOU_RUNTIME__) ||
+    (typeof process !== "undefined" && process.env && process.env.DINOU_RUNTIME) ||
+    "";
+
+  const isEdge =
+    runtime === "edge" ||
+    runtime === "deno-edge" ||
+    (typeof runtime === "string" && runtime.includes("edge")) ||
+    (typeof Deno !== "undefined" && !runtime.includes("node"));
+
+  if (isEdge) {
+    if (typeof Deno !== "undefined" && typeof Deno.openKv === "function") {
+      adapter = new DenoKVStorage();
+    } else {
+      adapter = new MemoryStorage();
+    }
+  } else {
+    adapter = new FileSystemStorage();
+  }
+  globalThis[DINOU_STORAGE_KEY] = adapter;
+  return adapter;
 }
 
 function setStorageAdapter(adapter) {
-  activeStorageAdapter = adapter;
+  globalThis[DINOU_STORAGE_KEY] = adapter;
 }
 
 module.exports = {

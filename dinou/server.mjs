@@ -8,6 +8,11 @@ export async function revalidateTag(tag) {
   return fn(tag);
 }
 
+export async function DinouCacheSlot(props) {
+  const { DinouCacheSlot: fn } = await import("./core/cache-slot.js");
+  return fn(props);
+}
+
 export {
   StorageAdapter,
   FileSystemStorage,

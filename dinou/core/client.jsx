@@ -227,8 +227,37 @@ const getErrorRSCPayload = (route, error) => {
   return promise;
 };
 
+const fetchSlotRSC = (slotId, options = {}) => {
+  const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
+  const freshQuery = options && options.fresh ? "&fresh=1" : "";
+  const slotUrl = `/____rsc_slot____/${slotId}?t=${Date.now()}${freshQuery}`;
+  return createFromFetch(
+    fetch(slotUrl, {
+      headers: {
+        "x-dinou-current-path": currentPath,
+      },
+    }),
+    {
+      callServer: async (id, args) => {
+        const proxy = createServerFunctionProxy(id);
+        return proxy(...args);
+      },
+    }
+  );
+};
+
+export const refreshSlot = (slotId, options) => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent("dinou:refresh-slot", { detail: { id: slotId, options } })
+    );
+  }
+};
+
 if (typeof globalThis !== "undefined") {
   globalThis.__DINOU_GET_ERROR_RSC_PAYLOAD__ = getErrorRSCPayload;
+  globalThis.__DINOU_FETCH_SLOT__ = fetchSlotRSC;
+  globalThis.__DINOU_REFRESH_SLOT__ = refreshSlot;
 }
 
 class ErrorBoundary extends Component {

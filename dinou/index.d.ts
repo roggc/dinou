@@ -315,7 +315,21 @@ export declare function useRouter(): {
    * Useful for updating the UI after a mutation (e.g., form submission) or to poll for new data.
    */
   refresh: () => void;
+
+  /**
+   * Refreshes a specific DinouCacheSlot without re-rendering the rest of the page.
+   * @param slotId - The slot identifier or tag.
+   * @param options - Optional configuration ({ fresh?: boolean }).
+   */
+  refreshSlot: (slotId: string, options?: { fresh?: boolean }) => void;
 };
+
+/**
+ * Programmatically refreshes a specific DinouCacheSlot in the browser without reloading the page.
+ * @param slotId - The slot identifier or tag to refresh.
+ * @param options - Optional configuration ({ fresh?: boolean }).
+ */
+export declare function refreshSlot(slotId: string, options?: { fresh?: boolean }): void;
 
 /**
  * A Client Component hook that returns true if a navigation (SPA transition) is currently in progress.

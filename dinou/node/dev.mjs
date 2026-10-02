@@ -393,10 +393,12 @@ async function updateManifestsState(options = {}) {
   }
   if (slotChunkId) {
     const slotChunks = isWebpackBuild ? (slotEntry?.chunks || [slotChunkId]) : "DinouPageSlot";
+    const slotBoundaryChunks = isWebpackBuild ? (slotEntry?.chunks || [slotChunkId]) : "DinouCacheSlotBoundary";
     const slotDefaultChunks = isWebpackBuild ? (slotEntry?.chunks || [slotChunkId]) : "default";
     for (const sp of candidateSlotPaths) {
       for (const url of generateAllUrlVariants(sp)) {
         normalized[`${url}#DinouPageSlot`] = { id: slotChunkId, chunks: slotChunks, name: "DinouPageSlot" };
+        normalized[`${url}#DinouCacheSlotBoundary`] = { id: slotChunkId, chunks: slotBoundaryChunks, name: "DinouCacheSlotBoundary" };
         normalized[`${url}#default`] = { id: slotChunkId, chunks: slotDefaultChunks, name: "default" };
         normalized[url] = { id: slotChunkId, chunks: slotDefaultChunks, name: "default" };
       }
@@ -720,6 +722,7 @@ async function updateManifestsState(options = {}) {
     if (slotCompIndex !== -1) {
       const fileUrl = pathToFileURL(clientComponents[slotCompIndex]).href;
       registerModuleMapEntry(slotChunkId, fileUrl, "DinouPageSlot");
+      registerModuleMapEntry(slotChunkId, fileUrl, "DinouCacheSlotBoundary");
       registerModuleMapEntry(slotChunkId, fileUrl, "default");
     }
   }
