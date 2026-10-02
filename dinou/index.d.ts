@@ -151,7 +151,7 @@ export interface DinouConfig {
   /**
    * Global Partial Prerendering (PPR) configuration.
    * When enabled globally, all static-eligible routes generate static shells with Suspense streaming holes.
-   * Can also be enabled per route by declaring `export const ppr = true;` in page.tsx.
+   * Can also be enabled or disabled per route or layout in page_functions.ts or layout_functions.ts.
    * @default false
    */
   ppr?: boolean;
@@ -169,39 +169,96 @@ export interface DinouConfig {
 
 /**
  * Route Segment Configuration for Partial Prerendering (PPR).
- * In Dinou, export `const ppr = true;` (or `export const experimental_ppr = true;` for Next.js parity)
- * in your page.tsx or layout.tsx to enable instant static shell delivery with dynamic Suspense streaming holes.
+ * In Dinou, export `const ppr = true;` or `export function ppr(): boolean`
+ * in your page_functions.ts or layout_functions.ts to enable instant static shell delivery with dynamic Suspense streaming holes.
  */
-export type PPRConfig = boolean;
+export type PPRConfig = boolean | (() => boolean | Promise<boolean>);
 
-export interface RouteSegmentConfig {
+/**
+ * A single static path item returned or defined by `getStaticPaths`.
+ * Can be:
+ * - A string: e.g. `"alpha"` for dynamic segment `[slug]`
+ * - A number: e.g. `1` for dynamic segment `[id]`
+ * - A string array: e.g. `["docs", "getting-started"]` for catch-all segment `[...slug]`
+ * - A parameter object: e.g. `{ slug: "alpha", id: "1" }`
+ */
+export type StaticPathItem<TParams = Record<string, string | number | string[] | undefined>> =
+  | string
+  | number
+  | string[]
+  | TParams;
+
+/**
+ * Result array or promise of array for `getStaticPaths`.
+ */
+export type StaticPathsResult<TParams = Record<string, string | number | string[] | undefined>> =
+  | StaticPathItem<TParams>[]
+  | Promise<StaticPathItem<TParams>[]>;
+
+export interface RouteSegmentConfig<TParams = any, TProps = any> {
   /**
    * Partial Prerendering (PPR) flag.
+   * Can be declared as a constant or a function (sync or async) in page_functions or layout_functions.
    * @default false
    */
-  ppr?: boolean;
+  ppr?: PPRConfig;
 
   /**
-   * Next.js compatibility alias for PPR.
-   * @default false
+   * Route caching and revalidation strategy in seconds (s). Single source of truth for page rendering mode.
+   * - `0` (or `< 1`): Dynamically rendered on every request (dynamic SSR, bypassing static cache).
+   * - `>= 1`: Pre-rendered/cached with Incremental Static Regeneration (ISR) expiring after the specified seconds.
+   * - `false` (or omitted): Statically pre-rendered and cached forever until on-demand revalidation via `revalidatePath` or `revalidateTag`.
+   *
+   * Can be declared as a number, false, or as a sync/async function in `page_functions.ts` or `layout_functions.ts`.
    */
-  experimental_ppr?: boolean;
+  revalidate?: number | false | (() => number | false | Promise<number | false>);
 
   /**
-   * Incremental Static Regeneration revalidation time in seconds, or false to cache indefinitely.
+   * Cache tags associated with this route segment for on-demand invalidation via `revalidateTag(tag)`.
+   * Can be declared as a sync/async function `getCacheTags(params)` or as a constant array `getCacheTags = [...]`.
    */
-  revalidate?: number | false;
+  getCacheTags?: string[] | ((params?: TParams) => string[] | Promise<string[]>);
 
   /**
-   * Dynamic rendering strategy.
+   * Generates static path parameter objects or values for dynamic route segments during build time (SSG).
+   * Supports returning:
+   * - Array of strings (e.g. `["alpha", "beta"]`)
+   * - Array of numbers (e.g. `[1, 2, 3]`)
+   * - Array of string arrays for catch-all routes (e.g. `[["docs", "intro"], ["docs", "setup"]]`)
+   * - Array of parameter objects (e.g. `[{ slug: "alpha" }, { slug: "beta" }]`)
+   *
+   * Can be declared as a sync or async function, or as a constant array in `page_functions.ts` or `layout_functions.ts`.
    */
-  dynamic?: boolean | "auto" | "force-dynamic" | "force-static";
+  getStaticPaths?:
+    | StaticPathItem<TParams>[]
+    | (() => StaticPathsResult<TParams>);
 
   /**
-   * Cache tags associated with this route for on-demand invalidation.
+   * Server-side loader that fetches or calculates props passed directly to the Page or Layout component.
    */
-  tags?: string[];
+  getProps?: (params?: TParams) => TProps | Promise<TProps>;
+
+  /**
+   * Parameter validator hook. If it returns false, Dinou halts rendering and returns 404 Not Found.
+   */
+  validateParams?: (params?: TParams) => boolean | Promise<boolean>;
+
+  /**
+   * Controls whether on-demand Incremental Static Generation (ISG) is allowed for ungenerated paths.
+   * @default true
+   */
+  allowISG?: boolean | (() => boolean | Promise<boolean>);
 }
+
+/**
+ * Type-safe interface representing the available exports in `page_functions.ts`.
+ */
+export type PageFunctions<TParams = any, TProps = any> = RouteSegmentConfig<TParams, TProps>;
+
+/**
+ * Type-safe interface representing the available exports in `layout_functions.ts`.
+ */
+export type LayoutFunctions<TParams = any, TProps = any> = RouteSegmentConfig<TParams, TProps>;
 
 /**
  * Type-safe configuration helper for dinou.config.js / dinou.config.mjs.

@@ -38,6 +38,7 @@ const { getStorageAdapter, setStorageAdapter } = require("./storage-adapter.js")
 const { createBailoutProxy } = require("./bailout-proxy.js");
 const getAssetFromManifest = require("./get-asset-from-manifest.js");
 const { handlePprResume } = require("./ppr-runtime.js");
+const { resolveModulePpr } = require("./resolve-module-ppr.js");
 
 // Load Dinou configuration and plugins
 let dinouConfig = { plugins: [] };
@@ -197,27 +198,28 @@ async function resolvePprForRoute(pagePath, pageFunctionsModule, reqSegments, qu
   } catch (e) {}
 
   let explicitPagePpr = null;
-  if (pagePath) {
+  let pfMod = pageFunctionsModule;
+  if (!pfMod && pagePath) {
     try {
-      const pageModule = await importModule(pagePath);
-      if (pageModule && (pageModule.ppr !== undefined || pageModule.experimental_ppr !== undefined)) {
-        explicitPagePpr = Boolean(pageModule.ppr ?? pageModule.experimental_ppr);
+      const pageFolder = path.dirname(pagePath);
+      const [pageFunctionsPath] = getFilePathAndDynamicParams(
+        reqSegments || [],
+        queryObj || {},
+        pageFolder,
+        "page_functions",
+        true,
+        true,
+        undefined,
+        (reqSegments || []).length
+      );
+      if (pageFunctionsPath) {
+        pfMod = await importModule(pageFunctionsPath);
       }
     } catch (e) {}
   }
-  if (explicitPagePpr === null && pageFunctionsModule) {
-    if (pageFunctionsModule.ppr !== undefined || pageFunctionsModule.experimental_ppr !== undefined) {
-      explicitPagePpr = Boolean(pageFunctionsModule.ppr ?? pageFunctionsModule.experimental_ppr);
-    }
-  }
-  if (explicitPagePpr === null && typeof globalThis !== "undefined" && globalThis.__DINOU_ROUTE_METADATA__) {
-    const normKey = pagePath ? pagePath.replace(/\\/g, "/") : "";
-    for (const [k, meta] of Object.entries(globalThis.__DINOU_ROUTE_METADATA__)) {
-      if (meta.ppr !== undefined && (normKey === k || normKey.endsWith("/" + k) || normKey.endsWith(k))) {
-        explicitPagePpr = Boolean(meta.ppr);
-        break;
-      }
-    }
+
+  if (pfMod) {
+    explicitPagePpr = await resolveModulePpr(pfMod);
   }
 
   return explicitPagePpr !== null ? explicitPagePpr : inheritedPpr;
@@ -264,29 +266,40 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
 
         let staticPathsSet = null;
         if (pageFunctionsModule.getStaticPaths) {
-          const paths = await pageFunctionsModule.getStaticPaths();
-          staticPathsSet = new Set(
-            (paths || []).map((pathObj) => {
-              const sortedEntries = Object.entries(pathObj).sort((a, b) =>
-                a[0].localeCompare(b[0])
-              );
-              return JSON.stringify(sortedEntries);
-            })
-          );
+          const paths = await (typeof pageFunctionsModule.getStaticPaths === "function"
+            ? pageFunctionsModule.getStaticPaths()
+            : pageFunctionsModule.getStaticPaths);
+          if (Array.isArray(paths)) {
+            staticPathsSet = new Set(
+              paths.map((pathObj) => {
+                if (pathObj && typeof pathObj === "object" && !Array.isArray(pathObj)) {
+                  const sortedEntries = Object.entries(pathObj).sort((a, b) =>
+                    a[0].localeCompare(b[0])
+                  );
+                  return JSON.stringify(sortedEntries);
+                }
+                return String(pathObj);
+              })
+            );
+          }
         }
-
-        const isDynamic = Boolean(
-          (typeof pageFunctionsModule.dynamic === "function" ? pageFunctionsModule.dynamic() : pageFunctionsModule.dynamic) ||
-          pageFunctionsModule.revalidate === 0
-        );
 
         let revalidateVal = typeof pageFunctionsModule.revalidate === "function"
           ? await pageFunctionsModule.revalidate()
           : pageFunctionsModule.revalidate;
-        const getTagsFn = pageFunctionsModule.getCacheTags || pageFunctionsModule.cacheTags;
-        let tagsVal = typeof getTagsFn === "function"
-          ? await getTagsFn()
-          : (pageFunctionsModule.tags || pageFunctionsModule.cacheTags || pageFunctionsModule.getCacheTags || []);
+
+        const isDynamic = typeof revalidateVal === "number" && revalidateVal < 1;
+        const rawTags = pageFunctionsModule.getCacheTags ?? pageFunctionsModule.default?.getCacheTags;
+        let tagsVal = [];
+        if (typeof rawTags === "function") {
+          try {
+            tagsVal = await rawTags(dynamicParams);
+          } catch (e) {
+            console.error("Error running getCacheTags in handler:", e);
+          }
+        } else if (Array.isArray(rawTags)) {
+          tagsVal = rawTags;
+        }
 
         cachedConfig = {
           allowISG: resolvedAllowISG,
@@ -336,7 +349,9 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
               return [k, String(v)];
             });
           const serializedQuery = JSON.stringify(sortedQueryEntries);
-          isPathAllowed = staticPathsSet.has(serializedQuery);
+          const singleVal = Object.values(dynamicParams)[0];
+          const singleValStr = Array.isArray(singleVal) ? singleVal.join(",") : String(singleVal);
+          isPathAllowed = staticPathsSet.has(serializedQuery) || staticPathsSet.has(singleValStr);
         }
         if (!isPathAllowed) {
           if (isDevelopment) {
@@ -1317,7 +1332,7 @@ async function handleRequest(request, platformContext = {}) {
             let isExpired = false;
             if (isLayoutReq && cached.metadata) {
               const { revalidate, generatedAt } = cached.metadata;
-              if (typeof revalidate === "number" && revalidate > 0 && Date.now() > (generatedAt || 0) + revalidate) {
+              if (typeof revalidate === "number" && revalidate >= 1 && Date.now() > (generatedAt || 0) + revalidate * 1000) {
                 isExpired = true;
               }
             }
@@ -1521,7 +1536,9 @@ async function handleRequest(request, platformContext = {}) {
               return [k, String(v)];
             });
           const serializedQuery = JSON.stringify(sortedEntries);
-          isPathAllowed = layoutConfig.staticPathsSet.has(serializedQuery);
+          const singleVal = Object.values(layoutParams || {})[0];
+          const singleValStr = Array.isArray(singleVal) ? singleVal.join(",") : String(singleVal);
+          isPathAllowed = layoutConfig.staticPathsSet.has(serializedQuery) || layoutConfig.staticPathsSet.has(singleValStr);
         }
         if (!isPathAllowed) {
           if (isDevelopment) {
@@ -1616,8 +1633,8 @@ async function handleRequest(request, platformContext = {}) {
       const { revalidate, generatedAt } = metadata;
       const isExpired =
         typeof revalidate === "number" &&
-        revalidate > 0 &&
-        Date.now() > (generatedAt || 0) + revalidate;
+        revalidate >= 1 &&
+        Date.now() > (generatedAt || 0) + revalidate * 1000;
 
       if (isExpired) {
         // Trigger background revalidation on Edge!
@@ -1660,7 +1677,7 @@ async function handleRequest(request, platformContext = {}) {
                 await storage.set(rscKey, rscText);
                 const updatedMeta = {
                   status: 200,
-                  revalidate: metadata.revalidate || 3000,
+                  revalidate: metadata.revalidate || 3,
                   generatedAt: Date.now(),
                 };
                 await storage.set(htmlKey, htmlText, updatedMeta);
@@ -1697,7 +1714,7 @@ async function handleRequest(request, platformContext = {}) {
 
                 const updatedMeta = {
                   status: 200,
-                  revalidate: metadata.revalidate || 3000,
+                  revalidate: metadata.revalidate || 3,
                   generatedAt: Date.now(),
                 };
                 await storage.set(htmlKey, html, updatedMeta);

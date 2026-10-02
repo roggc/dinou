@@ -25,7 +25,7 @@ async function getJSX(
   let jsx;
   let pageFunctionsProps;
 
-  // 1. Manejo segmentado para Layout: Si se solicita solo el layout
+  // 1. Segmented handling for Layout: If only the layout is requested
   if (options && options.segment === "layout") {
     let { DinouPageSlot } = require("./slot.js");
     if (
@@ -172,7 +172,7 @@ async function getJSX(
       jsx = React.createElement(Page, props);
     }
 
-    // 2. Manejo segmentado para Página: Si se solicita solo la página, retornar sin layouts
+    // 2. Segmented handling for Page: If only the page is requested, return without layouts
     if (options && options.segment === "page") {
       return jsx;
     }

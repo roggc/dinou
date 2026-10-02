@@ -10,7 +10,14 @@ export declare function revalidatePath(path: string): Promise<void>;
  * @param tag The tag string to revalidate (e.g. "blog-posts").
  */
 export declare function revalidateTag(tag: string): Promise<void>;
-export type { PPRConfig, RouteSegmentConfig } from "./index";
+export type {
+  PPRConfig,
+  RouteSegmentConfig,
+  PageFunctions,
+  LayoutFunctions,
+  StaticPathItem,
+  StaticPathsResult,
+} from "./index";
 
 export interface DinouCacheSlotProps {
   id?: string;
@@ -21,9 +28,9 @@ export interface DinouCacheSlotProps {
 }
 
 /**
- * DinouCacheSlot: Primitiva de segmentación vertical (Micro-ISR) para Server Components.
- * Permite cachear e invalidar sub-árboles de componentes dentro de una página
- * mediante revalidate y revalidateTag, sin re-evaluar la página ni la base de datos.
+ * DinouCacheSlot: Vertical segmentation primitive (Micro-ISR) for React Server Components.
+ * Caches and invalidates component sub-trees inside a page via revalidate and revalidateTag,
+ * without re-evaluating the parent page or re-fetching unneeded database queries.
  */
 export declare function DinouCacheSlot(props: DinouCacheSlotProps): Promise<any>;
 

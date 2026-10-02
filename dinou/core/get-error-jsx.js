@@ -168,7 +168,7 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false, options
     });
   }
 
-  // Manejo segmentado para Página: Si se solicita solo el error para el slot de página
+  // Segmented handling for Page: If only the error for the page slot is requested
   if (options && options.segment === "page") {
     return jsx;
   }

@@ -1,6 +1,7 @@
 const path = require("path");
 const { existsSync } = require("./vfs");
 const importModule = require("./import-module");
+const { resolveModulePpr } = require("./resolve-module-ppr");
 
 const LAYOUT_FUNCTIONS_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js"];
 const LAYOUT_FUNCTIONS_NAMES = ["layout_functions", "layout.functions"];
@@ -84,35 +85,26 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
 
   if (!layoutPath) return defaultConfig;
 
-  let layoutPpr = null;
-  if (layoutPath) {
-    try {
-      const layoutModule = await importModule(layoutPath);
-      if (layoutModule && (layoutModule.ppr !== undefined || layoutModule.experimental_ppr !== undefined)) {
-        layoutPpr = Boolean(layoutModule.ppr ?? layoutModule.experimental_ppr);
-      }
-    } catch (e) {}
-  }
-  if (layoutPpr === null && typeof globalThis !== "undefined" && globalThis.__DINOU_ROUTE_METADATA__) {
-    const normKey = layoutPath ? layoutPath.replace(/\\/g, "/") : "";
-    for (const [k, meta] of Object.entries(globalThis.__DINOU_ROUTE_METADATA__)) {
-      if (meta.ppr !== undefined && (normKey === k || normKey.endsWith("/" + k) || normKey.endsWith(k))) {
-        layoutPpr = Boolean(meta.ppr);
-        break;
-      }
-    }
-  }
-
   const layoutFolder = /\.[a-zA-Z0-9]+$/.test(layoutPath)
     ? path.dirname(layoutPath)
     : layoutPath;
   const layoutFunctionsPath = getLayoutFunctionsPath(layoutFolder);
-  if (!layoutFunctionsPath) return { ...defaultConfig, ppr: layoutPpr };
+  if (!layoutFunctionsPath) return defaultConfig;
 
+  let layoutPpr = null;
   try {
     const mod = await importModule(layoutFunctionsPath);
-    if (layoutPpr === null && mod && (mod.ppr !== undefined || mod.default?.ppr !== undefined || mod.experimental_ppr !== undefined || mod.default?.experimental_ppr !== undefined)) {
-      layoutPpr = Boolean(mod.ppr ?? mod.default?.ppr ?? mod.experimental_ppr ?? mod.default?.experimental_ppr);
+    if (mod) {
+      layoutPpr = await resolveModulePpr(mod);
+    }
+    if (layoutPpr === null && typeof globalThis !== "undefined" && globalThis.__DINOU_ROUTE_METADATA__) {
+      const normKey = layoutFunctionsPath ? layoutFunctionsPath.replace(/\\/g, "/") : "";
+      for (const [k, meta] of Object.entries(globalThis.__DINOU_ROUTE_METADATA__)) {
+        if (meta.ppr !== undefined && (normKey === k || normKey.endsWith("/" + k) || normKey.endsWith(k))) {
+          layoutPpr = Boolean(meta.ppr);
+          break;
+        }
+      }
     }
     const resolvedAllowISG =
       typeof mod.allowISG === "function"
@@ -123,12 +115,12 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
 
     const getStaticPathsFn = mod.getStaticPaths || mod.default?.getStaticPaths;
     let staticPathsSet = null;
-    if (typeof getStaticPathsFn === "function") {
-      const paths = await getStaticPathsFn();
+    if (getStaticPathsFn) {
+      const paths = await (typeof getStaticPathsFn === "function" ? getStaticPathsFn() : getStaticPathsFn);
       if (Array.isArray(paths)) {
         staticPathsSet = new Set(
           paths.map((p) => {
-            if (typeof p === "object" && p !== null) {
+            if (typeof p === "object" && p !== null && !Array.isArray(p)) {
               const sorted = Object.entries(p).sort((a, b) => a[0].localeCompare(b[0]));
               return JSON.stringify(sorted);
             }
@@ -138,13 +130,6 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
       }
     }
 
-    const dynamicFnOrVal = mod.dynamic ?? mod.default?.dynamic;
-    const isDynamic = Boolean(
-      (typeof dynamicFnOrVal === "function" ? await dynamicFnOrVal() : dynamicFnOrVal) ||
-      mod.revalidate === 0 ||
-      mod.default?.revalidate === 0
-    );
-
     const revalidateVal =
       typeof mod.revalidate === "function"
         ? await mod.revalidate()
@@ -152,15 +137,19 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
         ? await mod.default.revalidate()
         : (mod.revalidate ?? mod.default?.revalidate);
 
-    const getTagsFn =
-      mod.getCacheTags ||
-      mod.cacheTags ||
-      mod.default?.getCacheTags ||
-      mod.default?.cacheTags;
-    let tagsVal =
-      typeof getTagsFn === "function"
-        ? await getTagsFn(dParams)
-        : (mod.tags || mod.cacheTags || mod.getCacheTags || mod.default?.tags || mod.default?.cacheTags || mod.default?.getCacheTags || []);
+    const isDynamic = typeof revalidateVal === "number" && revalidateVal < 1;
+
+    const rawTags = mod.getCacheTags ?? mod.default?.getCacheTags;
+    let tagsVal = [];
+    if (typeof rawTags === "function") {
+      try {
+        tagsVal = await rawTags(dParams);
+      } catch (e) {
+        console.error("Error running getCacheTags in layout-functions:", e);
+      }
+    } else if (Array.isArray(rawTags)) {
+      tagsVal = rawTags;
+    }
 
     const validateParamsFn = mod.validateParams || mod.default?.validateParams;
     const getPropsFn =

@@ -14,7 +14,7 @@ class WebpackMemoryPlugin {
       process.env.NODE_ENV !== "production" ||
       process.env.DINOU_DEV === "true";
 
-    // Solo actúa en modo desarrollo. En producción, Webpack escribe a .dinou/dist3 normalmente.
+    // Only acts in development mode. In production, Webpack writes to .dinou/dist3 normally.
     if (!isDev) {
       return;
     }
