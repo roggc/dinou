@@ -10,6 +10,7 @@ export declare function revalidatePath(path: string): Promise<void>;
  * @param tag The tag string to revalidate (e.g. "blog-posts").
  */
 export declare function revalidateTag(tag: string): Promise<void>;
+export type { PPRConfig, RouteSegmentConfig } from "./index";
 
 export interface DinouCacheSlotProps {
   id?: string;

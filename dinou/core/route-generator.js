@@ -1,8 +1,6 @@
-// dinou/core/route-generator.js
-// Scans src/ directory and generates static import mappings for Edge/Cloudflare bundling.
-
 const fs = require("fs");
 const path = require("path");
+const parseExports = require("./parse-exports.js");
 
 function collectSourceFiles(dir, baseDir = dir) {
   if (!fs.existsSync(dir)) return [];
@@ -25,7 +23,8 @@ function collectSourceFiles(dir, baseDir = dir) {
 }
 
 /**
- * Generates JS code that registers all src/ modules into globalThis.__DINOU_ROUTE_MODULES__.
+ * Generates JS code that registers all src/ modules into globalThis.__DINOU_ROUTE_MODULES__
+ * and their metadata (such as PPR support) into globalThis.__DINOU_ROUTE_METADATA__.
  * @param {string} projectRoot Root directory of the project
  * @param {string} relativeImportBase Relative path from generated output file to projectRoot
  * @returns {string} JavaScript code
@@ -54,17 +53,36 @@ function generateRouteModulesCode(projectRoot = process.cwd(), relativeImportBas
 
   lines.push("export const routeModules = {");
 
+  const routeMetadata = {};
+
   for (const file of files) {
     const importPath = `${relativeImportBase}/${file.relPath}`.replace(/\/+/g, "/");
     lines.push(`  ${JSON.stringify(file.relPath)}: () => import(${JSON.stringify(importPath)}),`);
+
+    // Detect PPR and route segment configuration
+    if (/(?:^|\/)(?:page|page_functions|layout|layout_functions)\.[jt]sx?$/.test(file.relPath)) {
+      try {
+        const content = fs.readFileSync(file.fullPath, "utf8");
+        const isPpr = parseExports.parsePprConfig ? parseExports.parsePprConfig(content) : null;
+        if (isPpr !== null) {
+          routeMetadata[file.relPath] = { ppr: Boolean(isPpr) };
+        }
+      } catch (e) {}
+    }
   }
 
   lines.push("};");
+  lines.push("");
+  lines.push("export const routeMetadata = " + JSON.stringify(routeMetadata, null, 2) + ";");
   lines.push("");
   lines.push("if (typeof globalThis !== 'undefined') {");
   lines.push("  globalThis.__DINOU_ROUTE_MODULES__ = {");
   lines.push("    ...(globalThis.__DINOU_ROUTE_MODULES__ || {}),");
   lines.push("    ...routeModules,");
+  lines.push("  };");
+  lines.push("  globalThis.__DINOU_ROUTE_METADATA__ = {");
+  lines.push("    ...(globalThis.__DINOU_ROUTE_METADATA__ || {}),");
+  lines.push("    ...routeMetadata,");
   lines.push("  };");
   if (foundConfig) {
     lines.push("  const resolvedConfig = (dinouConfigModule && dinouConfigModule.default) ? dinouConfigModule.default : dinouConfigModule;");

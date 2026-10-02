@@ -684,7 +684,7 @@ globalThis.__DINOU_VFS__ = ${JSON.stringify(vfsSnapshot)};
 import "./env-setup.mjs";
 import "./route-modules.mjs";
 export { handleRequest } from "${dinouDirSlash}/core/handler.js";
-export { buildStaticPages, getStaticPaths, getStaticLayouts } from "${dinouDirSlash}/core/build-static-pages.js";
+export { buildStaticPages, getStaticPaths, getStaticLayouts, getStaticMetadata } from "${dinouDirSlash}/core/build-static-pages.js";
 `;
   const rscEntryPath = path.join(nodeDir, "rsc-entry.mjs");
   fs.writeFileSync(rscEntryPath, rscEntryContent, "utf8");

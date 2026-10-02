@@ -142,8 +142,30 @@ async function generateStatic() {
         isSSG: true,
       });
 
+      const routeMeta = typeof rscModule.getStaticMetadata === "function" ? rscModule.getStaticMetadata(reqPath) : null;
+      const isRoutePpr = Boolean(routeMeta?.ppr);
+      const cleanPagePath = reqPath.replace(/^\/+/, "").replace(/\/+$/, "");
+
       if (res.status === 200) {
         renderedCount++;
+        if (isRoutePpr) {
+          const indexHtmlKey = cleanPagePath ? `${cleanPagePath}/index.html` : "index.html";
+          const shellHtmlKey = cleanPagePath ? `${cleanPagePath}/shell.html` : "shell.html";
+          const metaKey = cleanPagePath ? `${cleanPagePath}/metadata.json` : "metadata.json";
+
+          const htmlItem = await storage.get(indexHtmlKey);
+          if (htmlItem) {
+            await storage.set(shellHtmlKey, htmlItem.content, { ...(htmlItem.metadata || {}), ppr: true, holes: routeMeta.holes || [] });
+          }
+          const metaItem = await storage.get(metaKey);
+          let metaObj = {};
+          try {
+            metaObj = metaItem ? JSON.parse(metaItem.content || "{}") : {};
+          } catch (e) {}
+          metaObj.ppr = true;
+          metaObj.holes = routeMeta.holes || [];
+          await storage.set(metaKey, JSON.stringify(metaObj));
+        }
       } else {
         if (process.env.DINOU_DEBUG) {
           console.warn(`⚠️ [SSG] Route ${reqPath} returned status ${res.status}`);
@@ -158,9 +180,12 @@ async function generateStatic() {
         });
         if (pageRes.status === 200) {
           const pageRscText = await pageRes.text();
-          const cleanPagePath = reqPath.replace(/^\/+/, "").replace(/\/+$/, "");
           const pageRscKey = cleanPagePath ? `${cleanPagePath}/page.rsc` : "page.rsc";
           await storage.set(pageRscKey, pageRscText);
+          if (isRoutePpr) {
+            const shellRscKey = cleanPagePath ? `${cleanPagePath}/shell.rsc` : "shell.rsc";
+            await storage.set(shellRscKey, pageRscText, { ppr: true });
+          }
         } else {
           const pageResult = await generateStaticPageRSC(reqPath);
           if (

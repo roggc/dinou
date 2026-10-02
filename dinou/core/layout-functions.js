@@ -79,18 +79,41 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
     revalidate: undefined,
     tags: [],
     getProps: null,
+    ppr: null,
   };
 
   if (!layoutPath) return defaultConfig;
+
+  let layoutPpr = null;
+  if (layoutPath) {
+    try {
+      const layoutModule = await importModule(layoutPath);
+      if (layoutModule && (layoutModule.ppr !== undefined || layoutModule.experimental_ppr !== undefined)) {
+        layoutPpr = Boolean(layoutModule.ppr ?? layoutModule.experimental_ppr);
+      }
+    } catch (e) {}
+  }
+  if (layoutPpr === null && typeof globalThis !== "undefined" && globalThis.__DINOU_ROUTE_METADATA__) {
+    const normKey = layoutPath ? layoutPath.replace(/\\/g, "/") : "";
+    for (const [k, meta] of Object.entries(globalThis.__DINOU_ROUTE_METADATA__)) {
+      if (meta.ppr !== undefined && (normKey === k || normKey.endsWith("/" + k) || normKey.endsWith(k))) {
+        layoutPpr = Boolean(meta.ppr);
+        break;
+      }
+    }
+  }
 
   const layoutFolder = /\.[a-zA-Z0-9]+$/.test(layoutPath)
     ? path.dirname(layoutPath)
     : layoutPath;
   const layoutFunctionsPath = getLayoutFunctionsPath(layoutFolder);
-  if (!layoutFunctionsPath) return defaultConfig;
+  if (!layoutFunctionsPath) return { ...defaultConfig, ppr: layoutPpr };
 
   try {
     const mod = await importModule(layoutFunctionsPath);
+    if (layoutPpr === null && mod && (mod.ppr !== undefined || mod.default?.ppr !== undefined || mod.experimental_ppr !== undefined || mod.default?.experimental_ppr !== undefined)) {
+      layoutPpr = Boolean(mod.ppr ?? mod.default?.ppr ?? mod.experimental_ppr ?? mod.default?.experimental_ppr);
+    }
     const resolvedAllowISG =
       typeof mod.allowISG === "function"
         ? await mod.allowISG()
@@ -153,10 +176,11 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
       revalidate: revalidateVal,
       tags: Array.isArray(tagsVal) ? tagsVal : [],
       getProps: typeof getPropsFn === "function" ? getPropsFn : null,
+      ppr: layoutPpr,
     };
   } catch (err) {
     console.error(`[Dinou] Error resolving layout_functions config from ${layoutFunctionsPath}:`, err);
-    return defaultConfig;
+    return { ...defaultConfig, ppr: layoutPpr };
   }
 }
 

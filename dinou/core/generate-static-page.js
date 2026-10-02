@@ -38,6 +38,28 @@ async function generateStaticPage(reqPath) {
       const text = await res.text();
       await fs.writeFile(tempHtmlPath, text, "utf8");
 
+      const routeMeta = typeof rscModule.getStaticMetadata === "function" ? rscModule.getStaticMetadata(finalReqPath) : null;
+      let isRoutePpr = Boolean(routeMeta?.ppr);
+      if (!isRoutePpr) {
+        try {
+          const metaDisk = JSON.parse(await fs.readFile(path.join(OUT_DIR, finalReqPath, "metadata.json"), "utf8"));
+          if (metaDisk?.ppr) isRoutePpr = true;
+        } catch (e) {}
+      }
+      if (isRoutePpr) {
+        const shellHtmlPath = path.join(OUT_DIR, finalReqPath, "shell.html");
+        await fs.writeFile(shellHtmlPath, text, "utf8").catch(() => {});
+        try {
+          const pageReq = new Request(`http://localhost/____rsc_page____${finalReqPath}`);
+          const pageRes = await rscModule.handleRequest(pageReq, { runtime: "node-bundle" });
+          if (pageRes.status === 200) {
+            const pageRscText = await pageRes.text();
+            const shellRscPath = path.join(OUT_DIR, finalReqPath, "shell.rsc");
+            await fs.writeFile(shellRscPath, pageRscText, "utf8").catch(() => {});
+          }
+        } catch (e) {}
+      }
+
       return {
         success: res.status !== 500 && text.length > 0,
         type: "html",
@@ -45,6 +67,7 @@ async function generateStaticPage(reqPath) {
         tempPath: tempHtmlPath,
         finalPath: htmlPath,
         status: res.status || 200,
+        ppr: isRoutePpr,
       };
     }
 

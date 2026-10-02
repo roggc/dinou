@@ -149,6 +149,14 @@ export interface DinouConfig {
   reactStrictMode?: boolean;
 
   /**
+   * Global Partial Prerendering (PPR) configuration.
+   * When enabled globally, all static-eligible routes generate static shells with Suspense streaming holes.
+   * Can also be enabled per route by declaring `export const ppr = true;` in page.tsx.
+   * @default false
+   */
+  ppr?: boolean;
+
+  /**
    * Custom storage adapter for ISR / ISG page caching.
    */
   storage?: any;
@@ -157,6 +165,42 @@ export interface DinouConfig {
    * Array of Dinou plugins.
    */
   plugins?: DinouPlugin[];
+}
+
+/**
+ * Route Segment Configuration for Partial Prerendering (PPR).
+ * In Dinou, export `const ppr = true;` (or `export const experimental_ppr = true;` for Next.js parity)
+ * in your page.tsx or layout.tsx to enable instant static shell delivery with dynamic Suspense streaming holes.
+ */
+export type PPRConfig = boolean;
+
+export interface RouteSegmentConfig {
+  /**
+   * Partial Prerendering (PPR) flag.
+   * @default false
+   */
+  ppr?: boolean;
+
+  /**
+   * Next.js compatibility alias for PPR.
+   * @default false
+   */
+  experimental_ppr?: boolean;
+
+  /**
+   * Incremental Static Regeneration revalidation time in seconds, or false to cache indefinitely.
+   */
+  revalidate?: number | false;
+
+  /**
+   * Dynamic rendering strategy.
+   */
+  dynamic?: boolean | "auto" | "force-dynamic" | "force-static";
+
+  /**
+   * Cache tags associated with this route for on-demand invalidation.
+   */
+  tags?: string[];
 }
 
 /**

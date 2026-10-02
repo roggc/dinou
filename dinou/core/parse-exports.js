@@ -92,5 +92,91 @@ function parseExports(code) {
   return parseExportsWithBabel(code);
 }
 
+function parsePprConfigWithBabel(code) {
+  try {
+    const ast = parser.parse(code, {
+      sourceType: "module",
+      plugins: ["jsx", "typescript"],
+    });
+
+    let pprValue = null;
+    const traverseFn = typeof traverse === "function" ? traverse : (traverse.default || traverse);
+
+    traverseFn(ast, {
+      ExportNamedDeclaration(p) {
+        if (p.node.declaration && p.node.declaration.type === "VariableDeclaration") {
+          for (const d of p.node.declaration.declarations) {
+            if (d.id && d.id.type === "Identifier") {
+              if (d.id.name === "ppr" || d.id.name === "experimental_ppr") {
+                if (d.init) {
+                  if (d.init.type === "BooleanLiteral") {
+                    pprValue = d.init.value;
+                  } else if (d.init.type === "StringLiteral") {
+                    pprValue = d.init.value !== "false";
+                  } else if (d.init.type === "Identifier") {
+                    pprValue = d.init.name === "true";
+                  } else {
+                    pprValue = true;
+                  }
+                } else {
+                  pprValue = true;
+                }
+              }
+            }
+          }
+        }
+      },
+    });
+
+    return pprValue;
+  } catch (e) {
+    // Regex fallback
+    const match = code.match(/(?:export\s+const|export\s+let|export\s+var)\s+(?:experimental_)?ppr\s*=\s*(true|false|"[^"]*"|'[^']*')/);
+    if (match) {
+      const val = match[1].trim();
+      return val !== "false" && val !== '"false"' && val !== "'false'";
+    }
+    return null;
+  }
+}
+
+function parsePprConfig(code) {
+  if (!code || typeof code !== "string") return null;
+  if (!code.includes("ppr")) return null;
+
+  if (swc && typeof swc.parseSync === "function") {
+    try {
+      const ast = swc.parseSync(code, { syntax: "typescript", tsx: true });
+      for (const item of ast.body) {
+        if (item.type === "ExportDeclaration" || item.type === "ExportNamedDeclaration") {
+          const d = item.declaration;
+          if (d && d.type === "VariableDeclaration") {
+            for (const v of d.declarations) {
+              const name = v.id?.value || v.id?.name;
+              if (name === "ppr" || name === "experimental_ppr") {
+                if (v.init) {
+                  if (v.init.type === "BooleanLiteral") return Boolean(v.init.value);
+                  if (v.init.type === "StringLiteral") return v.init.value !== "false";
+                  if (v.init.type === "Identifier") return v.init.value === "true";
+                  return true;
+                }
+                return true;
+              }
+            }
+          }
+        }
+      }
+      return null;
+    } catch (e) {
+      // Fallback to Babel
+    }
+  }
+
+  return parsePprConfigWithBabel(code);
+}
+
+parseExports.parsePprConfig = parsePprConfig;
+parseExports.hasPpr = (code) => parsePprConfig(code) === true;
+
 module.exports = parseExports;
 

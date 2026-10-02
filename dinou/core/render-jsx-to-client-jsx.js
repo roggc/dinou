@@ -1,3 +1,10 @@
+const {
+  isPprBuildActive,
+  enterSuspense,
+  exitSuspense,
+  registerHole,
+} = require("./ppr-context.js");
+
 // Function to check if a component is a client component
 function isClientComponent(type) {
   if (!type) {
@@ -156,9 +163,51 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
     throw new Error(`Unsupported symbol: ${String(jsx)}`);
   } else if (typeof jsx === "object") {
     if (jsx.$$typeof === Symbol.for("react.transitional.element")) {
-      if (
+      if (jsx.type === Symbol.for("react.suspense")) {
+        if (isPprBuildActive()) {
+          const holeId = enterSuspense();
+          try {
+            const renderedChildren = await asyncRenderJSXToClientJSX(jsx.props?.children);
+            exitSuspense();
+            return {
+              ...jsx,
+              props: {
+                ...jsx.props,
+                children: renderedChildren,
+                fallback: await asyncRenderJSXToClientJSX(jsx.props?.fallback),
+              },
+              key: key ?? jsx.key,
+            };
+          } catch (err) {
+            exitSuspense();
+            if (
+              (err && err.$$typeof === Symbol.for("dinou.ppr.postpone")) ||
+              (err && typeof err?.then === "function") ||
+              (err && err?.$$typeof === Symbol.for("react.postpone"))
+            ) {
+              registerHole(holeId, { type: err.pprType || "suspense" });
+              const renderedFallback = await asyncRenderJSXToClientJSX(jsx.props?.fallback);
+              return {
+                $$typeof: Symbol.for("react.transitional.element"),
+                type: "div",
+                props: {
+                  "data-ppr-hole": holeId,
+                  style: { display: "contents" },
+                  children: renderedFallback,
+                },
+                key: key ?? jsx.key,
+              };
+            }
+            throw err;
+          }
+        }
+        return {
+          ...jsx,
+          props: await asyncRenderJSXToClientJSX(jsx.props),
+          key: key ?? jsx.key,
+        };
+      } else if (
         jsx.type === Symbol.for("react.fragment") ||
-        jsx.type === Symbol.for("react.suspense") ||
         jsx.type === Symbol.for("react.view_transition") ||
         typeof jsx.type === "string"
       ) {

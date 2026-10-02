@@ -37,6 +37,7 @@ const { pipeRSC, renderRSCStream, isEdgeRuntime } = require("./rsc-renderer.js")
 const { getStorageAdapter, setStorageAdapter } = require("./storage-adapter.js");
 const { createBailoutProxy } = require("./bailout-proxy.js");
 const getAssetFromManifest = require("./get-asset-from-manifest.js");
+const { handlePprResume } = require("./ppr-runtime.js");
 
 // Load Dinou configuration and plugins
 let dinouConfig = { plugins: [] };
@@ -169,6 +170,59 @@ const botGarbagePatterns = [
 const isDynamic = new Map();
 const pageFunctionsConfigCache = new Map();
 
+async function resolvePprForRoute(pagePath, pageFunctionsModule, reqSegments, queryObj) {
+  let inheritedPpr = false;
+  try {
+    const srcFolder = path.resolve(process.cwd(), "src");
+    const layouts = getFilePathAndDynamicParams(
+      reqSegments || [],
+      queryObj || {},
+      srcFolder,
+      "layout",
+      true,
+      false,
+      undefined,
+      0,
+      {},
+      true
+    );
+    if (layouts && Array.isArray(layouts)) {
+      for (const [lPath, lParams] of layouts) {
+        const lConfig = await resolveLayoutFunctionsConfig(lPath, lParams);
+        if (lConfig && lConfig.ppr !== null && lConfig.ppr !== undefined) {
+          inheritedPpr = Boolean(lConfig.ppr);
+        }
+      }
+    }
+  } catch (e) {}
+
+  let explicitPagePpr = null;
+  if (pagePath) {
+    try {
+      const pageModule = await importModule(pagePath);
+      if (pageModule && (pageModule.ppr !== undefined || pageModule.experimental_ppr !== undefined)) {
+        explicitPagePpr = Boolean(pageModule.ppr ?? pageModule.experimental_ppr);
+      }
+    } catch (e) {}
+  }
+  if (explicitPagePpr === null && pageFunctionsModule) {
+    if (pageFunctionsModule.ppr !== undefined || pageFunctionsModule.experimental_ppr !== undefined) {
+      explicitPagePpr = Boolean(pageFunctionsModule.ppr ?? pageFunctionsModule.experimental_ppr);
+    }
+  }
+  if (explicitPagePpr === null && typeof globalThis !== "undefined" && globalThis.__DINOU_ROUTE_METADATA__) {
+    const normKey = pagePath ? pagePath.replace(/\\/g, "/") : "";
+    for (const [k, meta] of Object.entries(globalThis.__DINOU_ROUTE_METADATA__)) {
+      if (meta.ppr !== undefined && (normKey === k || normKey.endsWith("/" + k) || normKey.endsWith(k))) {
+        explicitPagePpr = Boolean(meta.ppr);
+        break;
+      }
+    }
+  }
+
+  return explicitPagePpr !== null ? explicitPagePpr : inheritedPpr;
+}
+
 /**
  * Resolves page_functions configuration (allowISG, validateParams, getStaticPaths)
  * and determines whether the current request path is blocked or allowed for ISG.
@@ -194,8 +248,16 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
         reqSegments.length,
       );
 
+      let pageFunctionsModule = null;
       if (pageFunctionsPath) {
-        const pageFunctionsModule = await importModule(pageFunctionsPath);
+        try {
+          pageFunctionsModule = await importModule(pageFunctionsPath);
+        } catch (e) {}
+      }
+
+      const isPpr = await resolvePprForRoute(pagePath, pageFunctionsModule, reqSegments, queryObj);
+
+      if (pageFunctionsModule) {
         const resolvedAllowISG = pageFunctionsModule.allowISG
           ? await pageFunctionsModule.allowISG()
           : true;
@@ -233,6 +295,7 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
           isDynamic,
           revalidate: revalidateVal,
           tags: tagsVal,
+          ppr: isPpr,
         };
       } else {
         cachedConfig = {
@@ -242,6 +305,7 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
           isDynamic: false,
           revalidate: undefined,
           tags: [],
+          ppr: isPpr,
         };
       }
 
@@ -295,6 +359,7 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
     isDynamicConfig,
     revalidate: cachedConfig?.revalidate,
     tags: cachedConfig?.tags || [],
+    ppr: Boolean(cachedConfig?.ppr),
   };
 }
 
@@ -1184,17 +1249,25 @@ async function handleRequest(request, platformContext = {}) {
       ? "page._old.rsc"
       : "page.rsc";
 
-    if (!isDevelopment && !dynamicState.value && (!hasQueryParams || isStatic)) {
-      let currentGeneratedAt = null;
-      try {
-        const metaFileName = isLayoutReq ? "layout.metadata.json" : "metadata.json";
-        const metadataPath = path.join(".dinou/dist2", cleanPath, metaFileName);
-        if (existsSync(metadataPath)) {
-          const metaObj = JSON.parse(readFileSync(metadataPath, "utf8"));
-          currentGeneratedAt = metaObj.generatedAt || null;
+    let isRoutePpr = false;
+    let currentGeneratedAt = null;
+    try {
+      const metaFileName = isLayoutReq ? "layout.metadata.json" : "metadata.json";
+      const metadataPath = path.join(".dinou/dist2", cleanPath, metaFileName);
+      if (existsSync(metadataPath)) {
+        const metaObj = JSON.parse(readFileSync(metadataPath, "utf8"));
+        currentGeneratedAt = metaObj.generatedAt || null;
+        if (metaObj.ppr) {
+          isRoutePpr = true;
         }
-      } catch (e) {}
+      }
+    } catch (e) {}
 
+    if (!isRoutePpr) {
+      isRoutePpr = await resolvePprForRoute(pagePath, null, reqSegments, queryObj);
+    }
+
+    if (!isDevelopment && !dynamicState.value && (!hasQueryParams || isStatic) && !isRoutePpr) {
       const useOld =
         isOld ||
         regenerating.has(cleanPath) ||
@@ -1391,7 +1464,7 @@ async function handleRequest(request, platformContext = {}) {
   }
   const dynamicState = isDynamic.get(reqPath);
 
-  let { isPathBlocked, allowISGValue, isDynamicConfig, revalidate, tags } = await resolvePageFunctionsConfig(
+  let { isPathBlocked, allowISGValue, isDynamicConfig, revalidate, tags, ppr: isPprConfig } = await resolvePageFunctionsConfig(
     pagePath,
     reqSegments,
     queryObj,
@@ -1495,6 +1568,10 @@ async function handleRequest(request, platformContext = {}) {
       if (!cachedItem) {
         cachedItem = await storage.get(cleanPath);
       }
+      if (!cachedItem && isPprConfig) {
+        const shellHtmlKey = cleanPath ? `${cleanPath}/shell.html` : "shell.html";
+        cachedItem = await storage.get(shellHtmlKey);
+      }
     }
 
     // 2. If not in storageAdapter, check env.ASSETS for pre-rendered build static page
@@ -1534,7 +1611,7 @@ async function handleRequest(request, platformContext = {}) {
     }
 
     // 3. If we found a cached/pre-rendered page:
-    if (!isDevelopment && cachedItem && !dynamicState.value && !isPathBlocked && queryObj.ssr_crash !== "true") {
+    if (!isDevelopment && cachedItem && !dynamicState.value && !isPathBlocked && queryObj.ssr_crash !== "true" && !platformContext?.isSSG) {
       const metadata = cachedItem.metadata || {};
       const { revalidate, generatedAt } = metadata;
       const isExpired =
@@ -1640,6 +1717,23 @@ async function handleRequest(request, platformContext = {}) {
         }
       }
 
+      if (metadata.ppr || isPprConfig) {
+        return handlePprResume({
+          reqPath,
+          queryObj,
+          simReq,
+          bridge,
+          platformContext,
+          rootContext,
+          cachedItem,
+          metadata,
+          isDevelopment,
+          getDiscoveredLayouts,
+          createRequestContext,
+          copyCustomContextProperties,
+        });
+      }
+
       bridge.setHeader("Content-Type", "text/html; charset=utf-8");
       bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
       bridge.status(metadata.status || 200);
@@ -1683,12 +1777,24 @@ async function handleRequest(request, platformContext = {}) {
         let jsx;
         let rscText = "";
 
-        let pageBody = "";
+        let pprHoles = [];
         try {
           if (!isError) {
-            await requestStorage.run(context, async () => {
-              jsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, !pagePath);
-            });
+            if (platformContext?.isSSG && isPprConfig) {
+              const { runWithPprContext, getRegisteredHoles } = require("./ppr-context.js");
+              const { asyncRenderJSXToClientJSX } = require("./render-jsx-to-client-jsx.js");
+              await requestStorage.run(context, async () => {
+                await runWithPprContext({ isPpr: true }, async () => {
+                  jsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, !pagePath);
+                  jsx = await asyncRenderJSXToClientJSX(jsx);
+                  pprHoles = getRegisteredHoles();
+                });
+              });
+            } else {
+              await requestStorage.run(context, async () => {
+                jsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, !pagePath);
+              });
+            }
           }
         } catch (err) {
           isError = true;
@@ -1728,6 +1834,8 @@ async function handleRequest(request, platformContext = {}) {
           generatedAt: Date.now(),
           revalidate: combinedRevalidate,
           tags: tags || [],
+          ppr: Boolean(isPprConfig),
+          holes: pprHoles,
           effects: {
             redirect: bridge.headers.get("Location") || null,
             cookies: [...bridge.cookies],
@@ -1778,10 +1886,13 @@ async function handleRequest(request, platformContext = {}) {
           let bootstrapScriptContent = "";
           const knownLayouts = getDiscoveredLayouts();
           bootstrapScriptContent += `window.__DINOU_LAYOUTS__ = ${JSON.stringify(knownLayouts)};\n`;
-          if (shouldCacheISG) {
+          if (shouldCacheISG && !isPprConfig) {
             bootstrapScriptContent += "window.__DINOU_USE_STATIC__ = true;\n";
           } else {
             bootstrapScriptContent += "window.__DINOU_USE_STATIC__ = false;\n";
+            if (isPprConfig) {
+              bootstrapScriptContent += "window.__DINOU_PPR__ = true;\n";
+            }
           }
           if (isDevelopment) {
             const isStrictMode = dinouConfig?.reactStrictMode !== false;
@@ -1987,6 +2098,12 @@ async function handleRequest(request, platformContext = {}) {
                   await storage.set(rscKey, rscPayload);
                   await storage.set(htmlKey, fullHtml, genMeta);
                   await storage.set(metaKey, JSON.stringify(genMeta));
+                  if (genMeta.ppr) {
+                    const shellHtmlKey = cleanPath ? `${cleanPath}/shell.html` : "shell.html";
+                    const shellRscKey = cleanPath ? `${cleanPath}/shell.rsc` : "shell.rsc";
+                    await storage.set(shellHtmlKey, fullHtml, genMeta);
+                    await storage.set(shellRscKey, rscPayload, { ppr: true });
+                  }
                   if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
                     console.log(`✅ [Edge ISG] Successfully cached ${reqPath} to KV`);
                   }
@@ -2106,6 +2223,22 @@ async function handleRequest(request, platformContext = {}) {
             buildId = metaObj.generatedAt || "";
             if (!status && metaObj.status) {
               status = metaObj.status;
+            }
+            if (metaObj.ppr || isPprConfig) {
+              return handlePprResume({
+                reqPath,
+                queryObj,
+                simReq,
+                bridge,
+                platformContext,
+                rootContext,
+                cachedItem: { content: htmlContent, metadata: metaObj },
+                metadata: metaObj,
+                isDevelopment,
+                getDiscoveredLayouts,
+                createRequestContext,
+                copyCustomContextProperties,
+              });
             }
           }
         } catch (e) {}
