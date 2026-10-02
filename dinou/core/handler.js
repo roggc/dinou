@@ -1602,8 +1602,15 @@ async function handleRequest(request, platformContext = {}) {
       return new Response("Not Found", { status: 404 });
     }
 
-    // Concurrency Stampede Protection (Production only, never share dynamic streams in dev)
-    const inFlightKey = !isDevelopment ? (simReq.url || reqPath) : null;
+    // Concurrency Stampede Protection (Production only, never share dynamic streams in dev or requests with user cookies)
+    const hasCookies = simReq.cookies && Object.keys(simReq.cookies).length > 0;
+    const canUseInFlight =
+      !isDevelopment &&
+      !hasCookies &&
+      !isDynamicConfig &&
+      allowISGValue !== false &&
+      Object.keys(queryObj).length === 0;
+    const inFlightKey = canUseInFlight ? (simReq.url || reqPath) : null;
     let isgPromise = inFlightKey ? inFlightGenerations.get(inFlightKey) : null;
     if (!isgPromise) {
       isgPromise = (async () => {
@@ -1680,6 +1687,10 @@ async function handleRequest(request, platformContext = {}) {
             allowISGValue !== false &&
             Object.keys(queryObj).length === 0) ||
           platformContext.isSSG === true;
+
+        if (!shouldCacheISG && inFlightKey) {
+          inFlightGenerations.delete(inFlightKey);
+        }
 
         // Generic fallback for double crash
         if (queryObj.double_crash === "true" || (isError && !jsx)) {
@@ -1943,7 +1954,9 @@ async function handleRequest(request, platformContext = {}) {
           }
 
           // Dynamic streaming responses cannot be shared across multiple requests in inFlightGenerations
-          inFlightGenerations.delete(inFlightKey);
+          if (inFlightKey) {
+            inFlightGenerations.delete(inFlightKey);
+          }
 
           return {
             type: "stream",

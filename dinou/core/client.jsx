@@ -49,7 +49,10 @@ const getLayoutKey = (pathname) => {
       return "/" + candidate;
     }
     const dynamicMatch = layouts.find((l) => {
-      const lSegs = l.split("/").filter(Boolean);
+      const lSegs = l
+        .split("/")
+        .filter(Boolean)
+        .filter((seg) => !(seg.startsWith("(") && seg.endsWith(")")));
       if (lSegs.length !== candidateSegments.length) return false;
       return lSegs.every((seg, idx) => {
         if (seg.startsWith("[") && seg.endsWith("]")) return true;
@@ -60,7 +63,17 @@ const getLayoutKey = (pathname) => {
       return "/" + candidate;
     }
   }
-  if (layouts.includes("") || layouts.includes("/")) {
+  if (
+    layouts.includes("") ||
+    layouts.includes("/") ||
+    layouts.some(
+      (l) =>
+        l
+          .split("/")
+          .filter(Boolean)
+          .filter((s) => !(s.startsWith("(") && s.endsWith(")"))).length === 0
+    )
+  ) {
     return "/";
   }
   return null;
