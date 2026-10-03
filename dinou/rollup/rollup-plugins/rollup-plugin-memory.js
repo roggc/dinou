@@ -34,9 +34,7 @@ function rollupMemoryPlugin() {
           globalThis.__DINOU_MEM_FILES__.set(normKey, buf);
           globalThis.__DINOU_MEM_FILES__.set("/" + normKey, buf);
           const base = path.basename(normKey);
-          if (!globalThis.__DINOU_MEM_FILES__.has(base)) {
-            globalThis.__DINOU_MEM_FILES__.set(base, buf);
-          }
+          globalThis.__DINOU_MEM_FILES__.set(base, buf);
         }
 
         if (item.map) {
@@ -53,9 +51,7 @@ function rollupMemoryPlugin() {
             globalThis.__DINOU_MEM_FILES__.set(mapKey, mapBuf);
             globalThis.__DINOU_MEM_FILES__.set("/" + mapKey, mapBuf);
             const baseMap = path.basename(mapKey);
-            if (!globalThis.__DINOU_MEM_FILES__.has(baseMap)) {
-              globalThis.__DINOU_MEM_FILES__.set(baseMap, mapBuf);
-            }
+            globalThis.__DINOU_MEM_FILES__.set(baseMap, mapBuf);
           }
         }
 

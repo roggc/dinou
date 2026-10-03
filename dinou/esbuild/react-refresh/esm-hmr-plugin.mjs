@@ -8,6 +8,7 @@ import { EsmHmrEngine } from "./esm-hmr/server.js";
 import { fileURLToPath } from "node:url";
 import write from "../helpers-esbuild/write.mjs";
 import normalizePath from "../helpers-esbuild/normalize-path.mjs";
+import stripNamespace from "../helpers-esbuild/strip-namespace.mjs";
 
 const norm = (p) => path.resolve(p).replace(/\\/g, "/");
 const normKey = (p) => {
@@ -18,6 +19,7 @@ const normKey = (p) => {
   }
   return s;
 };
+
 let serverStarted = false;
 
 const swcGlobalCache = new Map();
@@ -223,7 +225,7 @@ export default function esmHmrPlugin({
           if (!hasUserCode) continue;
 
           const isChangedByModule = !isInitialBuild && inputFiles.some((modulePath) => {
-            const cleanPath = modulePath.replace(/^[a-zA-Z0-9_-]+:/, "");
+            const cleanPath = stripNamespace(modulePath);
             return changedIds.has(normKey(cleanPath));
           });
 
@@ -339,7 +341,7 @@ export default function esmHmrPlugin({
           const modules = Object.keys(chunk?.inputs ?? {});
 
           const isChangedByModule = modules.some((modulePath) => {
-            const cleanPath = modulePath.replace(/^[a-zA-Z0-9_-]+:/, "");
+            const cleanPath = stripNamespace(modulePath);
             const norm = normKey(cleanPath);
             const lower = norm.toLowerCase();
             if (

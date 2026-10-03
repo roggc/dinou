@@ -4,6 +4,7 @@ import createScopedName from "../../core/createScopedName.js";
 import { regex } from "../../core/asset-extensions.js";
 import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
 import { pathToFileURL } from "node:url";
+import stripNamespace from "../helpers-esbuild/strip-namespace.mjs";
 
 const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -264,7 +265,7 @@ export default function assetsPlugin({ include = regex, changedIds } = {}) {
               const outputInfo = result.metafile.outputs[relPath];
               const inputFiles = Object.keys(outputInfo?.inputs || {});
               const touchesChanged = inputFiles.some((m) => {
-                const clean = m.replace(/^[a-zA-Z0-9_-]+:/, "");
+                const clean = stripNamespace(m);
                 return changedIds.has(normKey(clean));
               });
               if (!touchesChanged) continue;

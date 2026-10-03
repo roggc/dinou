@@ -41,9 +41,7 @@ class WebpackMemoryPlugin {
             globalThis.__DINOU_MEM_FILES__.set(cleanKey, buf);
             globalThis.__DINOU_MEM_FILES__.set("/" + cleanKey, buf);
             const base = path.basename(cleanKey);
-            if (!globalThis.__DINOU_MEM_FILES__.has(base)) {
-              globalThis.__DINOU_MEM_FILES__.set(base, buf);
-            }
+            globalThis.__DINOU_MEM_FILES__.set(base, buf);
           }
 
           if (cleanKey === "react-client-manifest.json") {

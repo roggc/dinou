@@ -73,9 +73,7 @@ export default async function write(result) {
     globalThis.__DINOU_MEM_FILES__.set(cleanPublicRel, buf);
     globalThis.__DINOU_MEM_FILES__.set("/" + cleanPublicRel, buf);
     const base = path.basename(cleanPublicRel);
-    if (!globalThis.__DINOU_MEM_FILES__.has(base)) {
-      globalThis.__DINOU_MEM_FILES__.set(base, buf);
-    }
+    globalThis.__DINOU_MEM_FILES__.set(base, buf);
   }
 
   // 1.b Also populate aliases for renamed chunks so old/raw names never 404
@@ -92,9 +90,7 @@ export default async function write(result) {
         const oldBase = path.basename(cleanOld);
         globalThis.__DINOU_MEM_FILES__.set(cleanOld, buf);
         globalThis.__DINOU_MEM_FILES__.set("/" + cleanOld, buf);
-        if (!globalThis.__DINOU_MEM_FILES__.has(oldBase)) {
-          globalThis.__DINOU_MEM_FILES__.set(oldBase, buf);
-        }
+        globalThis.__DINOU_MEM_FILES__.set(oldBase, buf);
       }
     }
   }
