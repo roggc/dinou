@@ -474,7 +474,7 @@ async function updateManifestsState(options = {}) {
       const compId = isValidEntryId(matchedEntry)
         ? matchedEntry.id
         : getFallbackChunkId(comp);
-      const compChunks = matchedEntry?.chunks || [];
+      const compChunks = matchedEntry?.chunks || (isWebpackBuild ? [] : "default");
 
       for (const u of urlVariants) {
         if (!normalized[u] || !normalized[u].id || !isValidEntryId(normalized[u])) {
@@ -489,7 +489,7 @@ async function updateManifestsState(options = {}) {
           const expId = isValidEntryId(expEntry)
             ? expEntry.id
             : compId;
-          const expChunks = expEntry?.chunks || compChunks;
+          const expChunks = expEntry?.chunks || (isWebpackBuild ? compChunks : exp);
 
           if (!normalized[hashKey] || normalized[hashKey].name === "*" || !isValidEntryId(normalized[hashKey])) {
             normalized[hashKey] = { id: expId, chunks: expChunks, name: exp };
@@ -539,7 +539,7 @@ async function updateManifestsState(options = {}) {
       const compId = isValidEntryId(matchedEntry)
         ? matchedEntry.id
         : getFallbackChunkId(comp);
-      const compChunks = matchedEntry?.chunks || [];
+      const compChunks = matchedEntry?.chunks || (isWebpackBuild ? [] : "default");
 
       for (const u of urlVariants) {
         if (!normalized[u] || !normalized[u].id || !isValidEntryId(normalized[u])) {
@@ -554,7 +554,7 @@ async function updateManifestsState(options = {}) {
           const expId = isValidEntryId(expEntry)
             ? expEntry.id
             : compId;
-          const expChunks = expEntry?.chunks || compChunks;
+          const expChunks = expEntry?.chunks || (isWebpackBuild ? compChunks : exp);
 
           if (!normalized[hashKey] || normalized[hashKey].name === "*" || !isValidEntryId(normalized[hashKey])) {
             normalized[hashKey] = { id: expId, chunks: expChunks, name: exp };

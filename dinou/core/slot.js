@@ -146,6 +146,9 @@ function SlotErrorRenderer({ error, reset }) {
   }
 
   if (React.isValidElement(element)) {
+    if (typeof element.type === "string") {
+      return React.cloneElement(element);
+    }
     return React.cloneElement(element, { error, reset });
   }
 

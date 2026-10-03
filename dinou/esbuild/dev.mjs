@@ -232,7 +232,35 @@ export async function startEsbuildDev(options = {}) {
     broadcast: (msg) => {
       hmrEngine.value?.broadcastMessage?.(msg);
     },
-    ensureActiveRoute: async () => true,
+    ensureActiveRoute: async (routeOrChunk) => {
+      if (!currentCtx || !routeOrChunk) return false;
+      // Ignore route paths (e.g. "/test-dev"). Esbuild compiles entrypoints eagerly.
+      if (typeof routeOrChunk === "string" && (routeOrChunk.startsWith("/") || routeOrChunk.startsWith("\\"))) {
+        return true;
+      }
+      const clean = routeOrChunk.replace(/^\//, "").replace(/\.js$/, "");
+      const mem = globalThis.__DINOU_MEM_FILES__;
+      if (
+        mem?.has(clean) ||
+        mem?.has(`${clean}.js`) ||
+        mem?.has(`/${clean}.js`) ||
+        mem?.has(`/${clean}`)
+      ) {
+        return true;
+      }
+      try {
+        await updateEntriesAndComponents();
+        await currentCtx.rebuild();
+        return Boolean(
+          mem?.has(clean) ||
+          mem?.has(`${clean}.js`) ||
+          mem?.has(`/${clean}.js`) ||
+          mem?.has(`/${clean}`)
+        );
+      } catch (e) {
+        return false;
+      }
+    },
     notifyFileChanged: async (filePath) => {
       if (filePath) {
         const norm = normKey(filePath);
