@@ -10,9 +10,11 @@ const { requestStorage } = require("./request-context.js");
 const { getLayoutProps, resolveLayoutFunctionsConfig } = require("./layout-functions");
 const { runWithPprContext, getRegisteredHoles } = require("./ppr-context.js");
 const { resolveModulePpr } = require("./resolve-module-ppr");
+const { getDinouConfig } = require("./load-dinou-config");
 
 async function resolveBuildPprForRoute(segments, pagePath, pageFunctionsPath, srcFolder) {
-  let inheritedPpr = false;
+  const globalCfg = await getDinouConfig();
+  let inheritedPpr = Boolean(globalCfg?.ppr);
   try {
     const parentLayouts = getFilePathAndDynamicParams(
       segments || [],

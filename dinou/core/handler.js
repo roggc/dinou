@@ -39,6 +39,7 @@ const { createBailoutProxy } = require("./bailout-proxy.js");
 const getAssetFromManifest = require("./get-asset-from-manifest.js");
 const { handlePprResume } = require("./ppr-runtime.js");
 const { resolveModulePpr } = require("./resolve-module-ppr.js");
+const { getDinouConfig: loadDinouConfig } = require("./load-dinou-config");
 
 // Load Dinou configuration and plugins
 let dinouConfig = { plugins: [] };
@@ -57,48 +58,12 @@ async function getDinouConfig() {
     return dinouConfigPromise;
   }
   dinouConfigPromise = (async () => {
-    if (typeof globalThis !== "undefined" && globalThis.__DINOU_CONFIG__) {
-      const cfg = globalThis.__DINOU_CONFIG__;
-      if (cfg && cfg.storage) {
-        setStorageAdapter(cfg.storage);
-      }
-      dinouConfig = cfg;
-      return cfg;
+    const cfg = await loadDinouConfig();
+    if (cfg && cfg.storage) {
+      setStorageAdapter(cfg.storage);
     }
-    const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
-    for (const filename of ["dinou.config.js", "dinou.config.mjs", "dinou.config.cjs"]) {
-      const p = path.resolve(cwd, filename);
-      if (existsSync(p)) {
-        try {
-          let loaded;
-          if (p.endsWith(".mjs")) {
-            loaded = await import(pathToFileURL(p).href + (isDevelopment ? `?t=${Date.now()}` : ""));
-          } else {
-            const nodeReq = (typeof globalThis !== "undefined" && typeof globalThis.__dinou_require__ === "function")
-              ? globalThis.__dinou_require__
-              : (typeof require === "function" ? require : null);
-            if (nodeReq) {
-              try {
-                loaded = nodeReq(p);
-              } catch (e) {
-                loaded = await import(pathToFileURL(p).href + (isDevelopment ? `?t=${Date.now()}` : ""));
-              }
-            } else {
-              loaded = await import(pathToFileURL(p).href + (isDevelopment ? `?t=${Date.now()}` : ""));
-            }
-          }
-          const cfg = (loaded && loaded.default) ? loaded.default : (loaded || { plugins: [] });
-          if (cfg && cfg.storage) {
-            setStorageAdapter(cfg.storage);
-          }
-          dinouConfig = cfg;
-          return cfg;
-        } catch (err) {
-          console.error(`[Dinou] Error loading ${filename}:`, err);
-        }
-      }
-    }
-    return dinouConfig;
+    dinouConfig = cfg;
+    return cfg;
   })();
   return dinouConfigPromise;
 }
@@ -172,7 +137,8 @@ const isDynamic = new Map();
 const pageFunctionsConfigCache = new Map();
 
 async function resolvePprForRoute(pagePath, pageFunctionsModule, reqSegments, queryObj) {
-  let inheritedPpr = false;
+  const globalCfg = await getDinouConfig();
+  let inheritedPpr = Boolean(globalCfg?.ppr);
   try {
     const srcFolder = path.resolve(process.cwd(), "src");
     const layouts = getFilePathAndDynamicParams(
@@ -260,9 +226,12 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
       const isPpr = await resolvePprForRoute(pagePath, pageFunctionsModule, reqSegments, queryObj);
 
       if (pageFunctionsModule) {
-        const resolvedAllowISG = pageFunctionsModule.allowISG
-          ? await pageFunctionsModule.allowISG()
-          : true;
+        const resolvedAllowISG =
+          typeof pageFunctionsModule.allowISG === "function"
+            ? await pageFunctionsModule.allowISG()
+            : typeof pageFunctionsModule.default?.allowISG === "function"
+            ? await pageFunctionsModule.default.allowISG()
+            : (pageFunctionsModule.allowISG ?? pageFunctionsModule.default?.allowISG ?? true);
 
         let staticPathsSet = null;
         if (pageFunctionsModule.getStaticPaths) {
