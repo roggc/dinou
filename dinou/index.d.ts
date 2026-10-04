@@ -456,7 +456,12 @@ export interface LinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
    * * Supports absolute paths (e.g., `/dashboard`).
    * * Supports relative paths (e.g., `../settings` or `details`).
    */
-  href: string;
+  href?: string;
+
+  /**
+   * Alias for `href` (React Router / Remix compatibility).
+   */
+  to?: string;
 
   /**
    * Whether to prefetch the RSC payload when the mouse enters the link area (hover).

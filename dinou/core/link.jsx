@@ -5,35 +5,45 @@ import { resolveUrl, isExternalUrl } from "./navigation-utils.js";
 
 export function Link({
   href,
+  to,
   children,
   prefetch = true,
   fresh = false,
+  onClick,
   ...props
 }) {
+  const targetHref = href || to || "";
   const { push } = useRouter();
   const pathname = usePathname();
-  const resolvedHref = resolveUrl(href, pathname);
+  const resolvedHref = resolveUrl(targetHref, pathname);
 
   const handlePrefetch = () => {
-    if (!prefetch || !href || fresh || isExternalUrl(href)) return;
+    if (!prefetch || !targetHref || fresh || isExternalUrl(targetHref)) return;
     if (window.__DINOU_PREFETCH__) {
       window.__DINOU_PREFETCH__(resolvedHref);
     }
   };
 
   const handleClick = (e) => {
-    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || isExternalUrl(href)) return;
+    if (onClick) {
+      onClick(e);
+    }
+
+    if (e.defaultPrevented) return;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || isExternalUrl(targetHref)) return;
 
     e.preventDefault();
-    push(href, { fresh });
+    if (targetHref) {
+      push(targetHref, { fresh });
+    }
   };
 
   return (
     <a
-      href={resolvedHref}
+      {...props}
+      href={resolvedHref || undefined}
       onClick={handleClick}
       onMouseEnter={handlePrefetch}
-      {...props}
     >
       {children}
     </a>

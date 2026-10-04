@@ -1742,13 +1742,6 @@ async function doRebuildBatch(changesMap) {
       const wasServerFile = knownServerFiles.has(absFilePath);
       const serverDirectiveChanged = isServerFile !== wasServerFile;
 
-      if (clientDirectiveChanged || serverDirectiveChanged) {
-        needsStructureRebuild = true;
-      }
-      if (clientDirectiveChanged || (isStructureChange && isCssFile)) {
-        needsClientBundlerRestart = true;
-      }
-
       const isClientRelevant =
         isClientFile ||
         wasClientFile ||
@@ -1756,6 +1749,13 @@ async function doRebuildBatch(changesMap) {
         isCssFile ||
         normLower.endsWith(".tsx") ||
         normLower.endsWith(".jsx");
+
+      if (clientDirectiveChanged || serverDirectiveChanged) {
+        needsStructureRebuild = true;
+      }
+      if (clientDirectiveChanged || (isStructureChange && (isClientRelevant || isCssFile))) {
+        needsClientBundlerRestart = true;
+      }
 
       if (clientBundlerHandle?.notifyFileChanged && isClientRelevant) {
         clientRebuildPromises.push(clientBundlerHandle.notifyFileChanged(absFilePath));
@@ -1770,7 +1770,7 @@ async function doRebuildBatch(changesMap) {
     }
 
     if (needsClientBundlerRestart && clientBundlerHandle?.restart) {
-      updateSpinner(`Directive or CSS change detected. Recreating client bundle...`);
+      updateSpinner(`Directive or structure change detected. Recreating client bundle...`);
       await clientBundlerHandle.restart();
       if (!needsStructureRebuild) {
         await broadcastToClients({ type: "reload" });
@@ -1789,6 +1789,9 @@ async function doRebuildBatch(changesMap) {
       ssrModule = await dynamicImportWithRetry(pathToFileURL(ssrOutfile).href + v);
       logTimeline(`SSR module imported into V8 runtime`);
       logSuccess(`Rebuilt in ${Date.now() - t0}ms (${baseName})`);
+      if (clientRebuildPromises.length > 0) {
+        await Promise.all(clientRebuildPromises);
+      }
       if (activeClientBuildPromise) {
         await activeClientBuildPromise;
       }
@@ -2056,15 +2059,17 @@ async function startClientBundler(tool) {
         nextRollupBuildPromise = new Promise((resolve) => {
           nextRollupBuildResolve = resolve;
         });
-        // Safety timeout: if Rollup does not trigger or finish within 800ms (e.g. unchanged or ignored file), resolve
-        rollupBuildSafetyTimeout = setTimeout(() => {
-          if (!activeClientBuildPromise && nextRollupBuildResolve) {
-            const r = nextRollupBuildResolve;
-            nextRollupBuildResolve = null;
-            nextRollupBuildPromise = null;
-            r();
-          }
-        }, 800);
+        // Safety timeout: if Rollup does not trigger or finish within 6000ms (e.g. unchanged or ignored file), resolve
+        if (!activeClientBuildPromise) {
+          rollupBuildSafetyTimeout = setTimeout(() => {
+            if (!activeClientBuildPromise && nextRollupBuildResolve) {
+              const r = nextRollupBuildResolve;
+              nextRollupBuildResolve = null;
+              nextRollupBuildPromise = null;
+              r();
+            }
+          }, 6000);
+        }
       }
       return nextRollupBuildPromise;
     }
@@ -2093,7 +2098,7 @@ async function startClientBundler(tool) {
 
       return new Promise((resolve) => {
         let initialResolved = false;
-        currentWatcher.on("event", (event) => {
+        currentWatcher.on("event", async (event) => {
           if (event.code === "BUNDLE_START") {
             if (rollupBuildSafetyTimeout) {
               clearTimeout(rollupBuildSafetyTimeout);
@@ -2119,6 +2124,7 @@ async function startClientBundler(tool) {
               pluginTimes.sort((a, b) => b.ms - a.ms);
               globalThis.__DINOU_ROLLUP_TIMINGS__ = pluginTimes;
             }
+            await onManifestUpdated();
             notifyClientBuildEnd();
             if (nextRollupBuildResolve) {
               const r = nextRollupBuildResolve;
@@ -2127,7 +2133,6 @@ async function startClientBundler(tool) {
               r();
             }
             if (!initialResolved) {
-              onManifestUpdated();
               initialResolved = true;
               resolve();
             }

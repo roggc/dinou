@@ -14,14 +14,20 @@ if (typeof window === "undefined") {
     try {
       if (typeof globalThis.__dinou_require__ === "function") {
         AsyncLocalStorageClass = globalThis.__dinou_require__("node:async_hooks")?.AsyncLocalStorage;
-      } else if (typeof process !== "undefined" && process.versions && process.versions.node) {
-        const nodeRequire = (0, eval)("require");
-        AsyncLocalStorageClass = nodeRequire("node:async_hooks")?.AsyncLocalStorage;
+      } else if (typeof process !== "undefined" && process.versions && (process.versions.node || process.versions.bun)) {
+        const getRequire = new Function("return typeof require !== 'undefined' ? require : null");
+        const nodeRequire = getRequire();
+        if (nodeRequire) {
+          AsyncLocalStorageClass = nodeRequire("node:async_hooks")?.AsyncLocalStorage;
+        }
       }
     } catch (e) {}
   }
 
   if (AsyncLocalStorageClass) {
+    if (typeof globalThis.AsyncLocalStorage === "undefined") {
+      globalThis.AsyncLocalStorage = AsyncLocalStorageClass;
+    }
     if (!globalThis[DINOU_CONTEXT_KEY]) {
       globalThis[DINOU_CONTEXT_KEY] = new AsyncLocalStorageClass();
     }

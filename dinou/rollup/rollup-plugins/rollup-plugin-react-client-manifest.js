@@ -280,6 +280,13 @@ function setManifestEntry(fileUrl, expName, entry) {
 
       try {
         const importCode = readFileSync(absImportPathWithExt, "utf8");
+        // Optimization: stop recursing at Client Component boundaries.
+        // Everything inside a "use client" module is bundled by Rollup's client pipeline,
+        // and dinou-asset-plugin already emits all assets referenced by client modules.
+        if (useClientRegex.test(importCode.trim())) {
+          continue;
+        }
+
         const nested = await getImportsAndAssetsAndCsss(
           importCode,
           absImportPathWithExt,
@@ -311,11 +318,14 @@ function setManifestEntry(fileUrl, expName, entry) {
 
   // New helper to emit a single asset (used in buildStart and watchChange)
   function emitAsset(absAssetPath, pluginContext) {
-    const source = readFileSync(absAssetPath);
     const base = path.basename(absAssetPath, path.extname(absAssetPath));
     const scoped = createScopedName(base, absAssetPath);
     const ext = path.extname(absAssetPath);
     const fileName = `assets/${scoped}${ext}`;
+    const emitted = globalThis.__DINOU_EMITTED_ASSETS__ || (globalThis.__DINOU_EMITTED_ASSETS__ = new Set());
+    if (emitted.has(fileName)) return;
+    emitted.add(fileName);
+    const source = readFileSync(absAssetPath);
     pluginContext.emitFile({
       type: "asset",
       fileName,
@@ -336,6 +346,10 @@ function setManifestEntry(fileUrl, expName, entry) {
   return {
     name: "react-client-manifest",
     async buildStart(options) {
+      if (globalThis.__DINOU_EMITTED_ASSETS__) {
+        globalThis.__DINOU_EMITTED_ASSETS__.clear();
+      }
+
       if (!isInitial) {
         for (const entry of knownClientChunks.values()) {
           this.emitFile({
@@ -352,8 +366,35 @@ function setManifestEntry(fileUrl, expName, entry) {
               name: entry.name,
             });
           }
+          hasPendingCssChange = false;
         }
-        hasPendingCssChange = false;
+
+        // Quick scan for newly added client files in incremental builds
+        try {
+          const freshSrcFiles = await glob(["**/*.{js,jsx,ts,tsx}"], {
+            cwd: srcDir,
+            absolute: true,
+          });
+          for (const absPath of freshSrcFiles) {
+            const normAbs = alignDrive(absPath);
+            const normKey = normalizeFsPath(normAbs);
+            if (knownClientChunks.has(normKey)) continue;
+            let code = "";
+            try { code = readFileSync(normAbs, "utf8"); } catch (e) { continue; }
+            if (useClientRegex.test(code.trim())) {
+              clientModules.add(normKey);
+              updateManifestForModule(normAbs, code, true);
+              this.addWatchFile(normAbs);
+              const chunkName = getStableChunkName(normAbs);
+              knownClientChunks.set(normKey, { id: normAbs, name: chunkName });
+              this.emitFile({
+                type: "chunk",
+                id: normAbs,
+                name: chunkName,
+              });
+            }
+          }
+        } catch (e) {}
         return;
       }
       isInitial = false;
