@@ -90,7 +90,10 @@ function getFallbackChunkId(absPath) {
   return `/${name}-${hash}.js`;
 }
 
-const { generateRouteModulesCode } = require(path.join(dinouDir, "core/route-generator.js"));
+const { generateRouteModulesCode, generateRouteTypes } = require(path.join(dinouDir, "core/route-generator.js"));
+try {
+  generateRouteTypes(projectRoot);
+} catch (e) {}
 const parseExports = require(path.join(dinouDir, "core/parse-exports.js"));
 const { useClientRegex, useServerRegex } = require(path.join(dinouDir, "constants.js"));
 const { nodeToWebRequest, sendWebResponseToNode } = require(path.join(dinouDir, "core/http-adapter.js"));
@@ -1888,6 +1891,11 @@ srcWatcher.on("all", (event, fullPath) => {
   globalThis.__TIMELINE_T0__ = Date.now();
   logTimeline(`File change detected: ${event} ${path.basename(fullPath)}`);
   pendingSrcChanges.set(path.resolve(fullPath), event);
+  if ((event === "add" || event === "unlink") && /(?:^|[\\/])page\.[jt]sx?$/i.test(fullPath)) {
+    try {
+      generateRouteTypes(projectRoot);
+    } catch (e) {}
+  }
   if (srcDebounce) clearTimeout(srcDebounce);
   srcDebounce = setTimeout(() => {
     srcDebounce = null;

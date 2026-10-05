@@ -1,4 +1,4 @@
-import { getContext, setCurrentContext } from "./core/request-context.js";
+import { getContext } from "./core/request-context.js";
 import {
   usePathname,
   useSearchParams,
@@ -17,7 +17,6 @@ function defineConfig(config) {
 const dinou = {
   defineConfig,
   getContext,
-  setCurrentContext,
   usePathname,
   useSearchParams,
   useRouter,
@@ -31,7 +30,6 @@ const dinou = {
 export {
   defineConfig,
   getContext,
-  setCurrentContext,
   usePathname,
   useSearchParams,
   useRouter,

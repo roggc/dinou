@@ -98,7 +98,10 @@ function generateRouteModulesCode(projectRoot = process.cwd(), relativeImportBas
   return lines.join("\n");
 }
 
+const { generateRouteTypes } = require("./generate-route-types.js");
+
 module.exports = {
   collectSourceFiles,
   generateRouteModulesCode,
+  generateRouteTypes,
 };

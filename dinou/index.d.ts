@@ -320,8 +320,8 @@ export declare function ClientRedirect(props: ClientRedirectProps): ReactNode;
 export declare function redirect(destination: string): ReactNode;
 
 /**
- * A Client Component hook that lets you read the current URL's pathname.
- * This hook triggers a re-render when the route changes.
+ * Universal hook (works in both Server Components and Client Components) that lets you read the current URL's pathname.
+ * On the client, this hook triggers a re-render when the route changes.
  *
  * @returns {string} The current pathname (e.g., "/dashboard") without search parameters.
  * @example
@@ -331,8 +331,8 @@ export declare function redirect(destination: string): ReactNode;
 export declare function usePathname(): string;
 
 /**
- * A Client Component hook that lets you read the current URL's search parameters.
- * This hook triggers a re-render when the route changes.
+ * Universal hook (works in both Server Components and Client Components) that lets you read the current URL's search parameters.
+ * On the client, this hook triggers a re-render when the route changes.
  *
  * @returns {URLSearchParams} A read-only version of the standard URLSearchParams interface.
  * @example
@@ -378,20 +378,111 @@ export interface NavigationOptions {
  * // Soft refresh (re-fetch data without full reload)
  * router.refresh();
  */
+// ====================================================================
+// TYPE-SAFE ROUTING (Level 1 & Level 2)
+// ====================================================================
+
+export namespace DinouRouter {
+  export interface Register {
+    // When .dinou/types/routes.d.ts is generated, it augments this interface.
+  }
+}
+
+/**
+ * Union of all valid routes in the application.
+ * When typed routes are generated, autocompletes known routes.
+ * Falls back to string if not yet generated or in loose mode.
+ */
+export type DinouRoute = DinouRouter.Register extends { route: infer R extends string }
+  ? R
+  : string;
+
+/**
+ * Utility types to parse dynamic route parameters from a route string pattern.
+ * e.g. ExtractRouteParams<"/blog/[id]"> => { id: string }
+ * e.g. ExtractRouteParams<"/docs/[...slug]"> => { slug: string[] }
+ * e.g. ExtractRouteParams<"/shop/[[...slug]]"> => { slug?: string[] }
+ * e.g. ExtractRouteParams<"/item/[[code]]"> => { code?: string }
+ */
+export type ExtractSegmentParam<Segment extends string> =
+  Segment extends `[[...${infer Param}]]`
+    ? { [K in Param]?: string[] }
+    : Segment extends `[[${infer Param}]]`
+    ? { [K in Param]?: string }
+    : Segment extends `[...${infer Param}]`
+    ? { [K in Param]: string[] }
+    : Segment extends `[${infer Param}]`
+    ? { [K in Param]: string }
+    : {};
+
+export type ExtractRouteParams<Path extends string> =
+  Path extends `/${infer Rest}`
+    ? ExtractRouteParams<Rest>
+    : Path extends `${infer Start}/${infer Rest}`
+    ? ExtractSegmentParam<Start> & ExtractRouteParams<Rest>
+    : ExtractSegmentParam<Path>;
+
+/**
+ * All known route patterns in the application (e.g. "/blog/[slug]", "/t-params/[[slug]]").
+ * Autocompletes all project routes when typing PageProps<"..." or LayoutProps<"...".
+ */
+export type DinouRoutePattern = DinouRouter.Register extends { params: infer P }
+  ? (keyof P extends string ? keyof P | (keyof P extends `/${infer Rest}` ? Rest : never) : string)
+  : string;
+
+export type CleanRoutePath<T extends string> = T extends `/${string}` ? T : `/${T}`;
+
+/**
+ * Resolved route parameter types for a route.
+ * Prioritizes the generated route parameters map from .dinou/types/routes.d.ts,
+ * and falls back to template literal extraction.
+ */
+export type RouteParams<T extends string = string> =
+  DinouRouter.Register extends { params: infer P }
+    ? (CleanRoutePath<T> extends keyof P
+        ? P[CleanRoutePath<T>]
+        : (T extends keyof P ? P[T] : ExtractRouteParams<T>))
+    : ExtractRouteParams<T>;
+
+/**
+ * Props for Dinou Page components.
+ * 
+ * @example
+ * export default function Page({ params }: PageProps<"/blog/[id]">) {
+ *   return <h1>Post {params.id}</h1>;
+ * }
+ */
+export interface PageProps<T extends DinouRoutePattern = DinouRoutePattern> {
+  params: RouteParams<T>;
+}
+
+/**
+ * Props for Dinou Layout components.
+ * 
+ * @example
+ * export default function Layout({ children, params }: LayoutProps<"/blog/[id]">) {
+ *   return <div>{children}</div>;
+ * }
+ */
+export interface LayoutProps<T extends DinouRoutePattern = DinouRoutePattern> {
+  children: React.ReactNode;
+  params: RouteParams<T>;
+}
+
 export declare function useRouter(): {
   /**
    * Navigate to the provided href. Pushes a new entry into the history stack.
    * @param href - The URL to navigate to (e.g., "/about").
    * @param options - Optional configuration for the navigation (e.g., force fresh data).
    */
-  push: (href: string, options?: NavigationOptions) => void;
+  push: (href: DinouRoute, options?: NavigationOptions) => void;
 
   /**
    * Navigate to the provided href. Replaces the current entry in the history stack.
    * @param href - The URL to navigate to.
    * @param options - Optional configuration for the navigation.
    */
-  replace: (href: string, options?: NavigationOptions) => void;
+  replace: (href: DinouRoute, options?: NavigationOptions) => void;
 
   /**
    * Navigate back in the browser's history.
@@ -450,18 +541,19 @@ import type { AnchorHTMLAttributes } from "react";
  * Props for the Dinou Link component.
  * It extends standard HTML <a> attributes, allowing className, style, etc.
  */
-export interface LinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
+export interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> {
   /**
    * The destination URL or path.
+   * * Autocompletes all known routes discovered by Dinou.
    * * Supports absolute paths (e.g., `/dashboard`).
    * * Supports relative paths (e.g., `../settings` or `details`).
    */
-  href?: string;
+  href?: DinouRoute;
 
   /**
    * Alias for `href` (React Router / Remix compatibility).
    */
-  to?: string;
+  to?: DinouRoute;
 
   /**
    * Whether to prefetch the RSC payload when the mouse enters the link area (hover).
@@ -500,3 +592,4 @@ export interface LinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
  * </Link>
  */
 export declare function Link(props: LinkProps): ReactNode;
+

@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { generateRouteModulesCode } = require("../core/route-generator.js");
+const { generateRouteModulesCode, generateRouteTypes } = require("../core/route-generator.js");
 const parseExports = require("../core/parse-exports.js");
 const { useClientRegex, useServerRegex } = require("../constants.js");
 const {
@@ -23,6 +23,10 @@ const {
 const projectRoot = process.cwd();
 const cloudflareDir = path.resolve(projectRoot, ".dinou/cloudflare");
 fs.mkdirSync(cloudflareDir, { recursive: true });
+
+try {
+  generateRouteTypes(projectRoot);
+} catch (e) {}
 
 // Locate dinou root: ejected in project or in package directory
 const dinouDir = fs.existsSync(path.resolve(projectRoot, "dinou"))

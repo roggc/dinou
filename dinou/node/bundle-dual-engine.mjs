@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { generateRouteModulesCode } = require("../core/route-generator.js");
+const { generateRouteModulesCode, generateRouteTypes } = require("../core/route-generator.js");
 const parseExports = require("../core/parse-exports.js");
 const { useClientRegex, useServerRegex } = require("../constants.js");
 const createScopedName = require("../core/createScopedName.js");
@@ -26,6 +26,10 @@ export async function bundleDualEngine(options = {}) {
   const projectRoot = path.resolve(options.projectRoot || process.cwd());
   const nodeDir = path.resolve(projectRoot, options.outDir || ".dinou/node");
   fs.mkdirSync(nodeDir, { recursive: true });
+
+  try {
+    generateRouteTypes(projectRoot);
+  } catch (e) {}
 
   // Locate dinou root
   const dinouDir = fs.existsSync(path.resolve(projectRoot, "dinou"))

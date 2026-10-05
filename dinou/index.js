@@ -19,5 +19,4 @@ module.exports = {
   get Link() {
     return require("./core/link.jsx").Link;
   },
-  setCurrentContext: contextModule.setCurrentContext,
 };
