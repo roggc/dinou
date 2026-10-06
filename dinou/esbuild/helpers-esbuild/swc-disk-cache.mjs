@@ -11,10 +11,19 @@ const fontExtensions = ["woff", "woff2", "ttf", "eot", "otf"];
 const redirectExtensions = [...styleExtensions, ...assetExtensions, ...fontExtensions];
 const redirectFilter = new RegExp(`\\.(${redirectExtensions.join("|")})$`, "i");
 
+const normPath = (p) => {
+  if (!p) return "";
+  let s = path.resolve(p).replace(/\\/g, "/");
+  if (process.platform === "win32") {
+    s = s.replace(/^([a-zA-Z]):/, (_, d) => d.toLowerCase() + ":");
+  }
+  return s;
+};
+
 export function getMirrorPath(srcPath, projectRoot = process.cwd()) {
   if (!srcPath) return "";
-  const norm = path.resolve(srcPath).replace(/\\/g, "/");
-  const rootNorm = path.resolve(projectRoot).replace(/\\/g, "/");
+  const norm = normPath(srcPath);
+  const rootNorm = normPath(projectRoot);
   if (!norm.startsWith(rootNorm)) return srcPath;
   const rel = norm.slice(rootNorm.length + 1);
   const targetRel = rel.replace(/\.[jt]sx?$/, ".js");
@@ -23,8 +32,8 @@ export function getMirrorPath(srcPath, projectRoot = process.cwd()) {
 
 export function getOriginalPath(mirrorPath, projectRoot = process.cwd()) {
   if (!mirrorPath) return "";
-  const norm = path.resolve(mirrorPath).replace(/\\/g, "/");
-  const rootNorm = path.resolve(projectRoot).replace(/\\/g, "/");
+  const norm = normPath(mirrorPath);
+  const rootNorm = normPath(projectRoot);
   const swcPrefix = `${rootNorm}/.dinou/swc/`;
   if (!norm.startsWith(swcPrefix)) return mirrorPath;
   const rel = norm.slice(swcPrefix.length);
