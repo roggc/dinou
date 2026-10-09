@@ -20,9 +20,9 @@ module.exports = {
     const { revalidatePage: fn } = require("./core/cache-revalidate.js");
     return fn(path);
   },
-  revalidateTag: async function (tag) {
+  revalidateTag: async function (tag, options) {
     const { revalidateTag: fn } = require("./core/cache-revalidate.js");
-    return fn(tag);
+    return fn(tag, options);
   },
   StorageAdapter,
   FileSystemStorage,

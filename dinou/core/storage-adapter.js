@@ -53,10 +53,22 @@ class FileSystemStorage extends StorageAdapter {
     if (!fs.existsSync(targetPath)) return null;
     const content = fs.readFileSync(targetPath, "utf8");
 
+    const cleanKey = String(key || "").replace(/\\/g, "/");
+    const isMetaJson = cleanKey.endsWith("metadata.json") || path.basename(targetPath).endsWith("metadata.json");
+
+    // If key itself is a metadata json file, its metadata IS its own parsed content
+    if (isMetaJson) {
+      let metadata = null;
+      try {
+        metadata = JSON.parse(content);
+      } catch (e) {}
+      return { content, metadata };
+    }
+
     // Check companion metadata if available
     let metadata = null;
-    const isLayoutKey = String(key || "").includes("layout.rsc");
-    const isSlotKey = String(key || "").includes("slot");
+    const isLayoutKey = cleanKey.includes("layout.rsc") || cleanKey.includes("layout.metadata.json");
+    const isSlotKey = cleanKey.includes("slot");
     const metaFileName = isLayoutKey
       ? "layout.metadata.json"
       : isSlotKey
@@ -82,9 +94,12 @@ class FileSystemStorage extends StorageAdapter {
     }
     fs.writeFileSync(targetPath, content, "utf8");
 
-    if (metadata) {
-      const isLayoutKey = String(key || "").includes("layout.rsc");
-      const isSlotKey = String(key || "").includes("slot");
+    // Only write a companion metadata file if targetPath is NOT itself a metadata file
+    const cleanKey = String(key || "").replace(/\\/g, "/");
+    const isMetaJson = cleanKey.endsWith("metadata.json") || path.basename(targetPath).endsWith("metadata.json");
+    if (metadata && !isMetaJson) {
+      const isLayoutKey = cleanKey.includes("layout.rsc") || cleanKey.includes("layout.metadata.json");
+      const isSlotKey = cleanKey.includes("slot");
       const metaFileName = isLayoutKey
         ? "layout.metadata.json"
         : isSlotKey
@@ -129,8 +144,9 @@ class FileSystemStorage extends StorageAdapter {
         if (entry.isDirectory()) {
           walk(path.join(dir, entry.name), entryRel);
         } else {
-          if (!prefix || entryRel.startsWith(prefix)) {
-            results.push(entryRel);
+          const cleanRel = entryRel.replace(/\\/g, "/");
+          if (!prefix || cleanRel.startsWith(prefix)) {
+            results.push(cleanRel);
           }
         }
       }

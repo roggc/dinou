@@ -88,7 +88,7 @@ async function processDir(dir, relPrefix = "") {
       } else if (cleanRelPath === "index.html") {
         await setKvCache(kv, "", html, metadata);
       }
-    } else if (entry.name === "metadata.json") {
+    } else if (entry.name.endsWith("metadata.json")) {
       const metaContent = fs.readFileSync(fullPath, "utf8");
       let metadata = null;
       try {

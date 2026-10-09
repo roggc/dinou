@@ -8,9 +8,9 @@ export async function revalidatePage(path) {
   return fn(path);
 }
 
-export async function revalidateTag(tag) {
+export async function revalidateTag(tag, options) {
   const { revalidateTag: fn } = await import("./core/cache-revalidate.js");
-  return fn(tag);
+  return fn(tag, options);
 }
 
 export async function DinouCacheSlot(props) {

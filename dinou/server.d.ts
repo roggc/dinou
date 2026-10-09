@@ -20,9 +20,16 @@ export declare function revalidatePage(path: string): Promise<void>;
 
 /**
  * Revalidates all routes that are associated with the specified cache tag.
+ * * By default, layout tags only revalidate the layout shell (`layout.rsc`) for maximum efficiency.
+ * * When `{ cascade: true }` is specified, layout tags invoke `revalidatePath(path, { cascade: true })`
+ * to cascade `revalidatePage` to all child pages, ensuring 0 hydration mismatch.
  * @param tag The tag string to revalidate (e.g. "blog-posts").
+ * @param options Optional configuration: `{ cascade?: boolean }` or legacy `"layout"`.
  */
-export declare function revalidateTag(tag: string): Promise<void>;
+export declare function revalidateTag(
+  tag: string,
+  options?: { cascade?: boolean } | "layout"
+): Promise<void>;
 export type {
   PPRConfig,
   RouteSegmentConfig,

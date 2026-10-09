@@ -1604,6 +1604,15 @@ async function handleRequest(request, platformContext = {}) {
                   metadata,
                 };
                 await storage.set(htmlKey, html, cachedItem.metadata);
+                await storage.set(metaKey, JSON.stringify(cachedItem.metadata));
+                const layoutMetaKey = cleanPath ? `${cleanPath}/layout.metadata.json` : "layout.metadata.json";
+                try {
+                  const layoutMetaRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${layoutMetaKey}`, request.url)));
+                  if (layoutMetaRes && layoutMetaRes.status === 200) {
+                    const layoutMetaText = await layoutMetaRes.text();
+                    await storage.set(layoutMetaKey, layoutMetaText);
+                  }
+                } catch (e) {}
               }
             }
           }
