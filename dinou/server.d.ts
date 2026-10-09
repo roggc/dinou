@@ -1,9 +1,22 @@
 /**
  * Revalidates the cache for a specific route path.
  * * It deletes the old cached HTML and RSC files and rebuilds them synchronously.
- * @param path The path of the route to revalidate (e.g. "/blog" or "/blog/12").
+ * * When `{ cascade: true }` is specified, if a layout is present and revalidated in that path,
+ * it cascades `revalidatePage` to all child routes to ensure 0 hydration mismatch.
+ * @param path The path of the route to revalidate (e.g. "/blog" or "/dashboard").
+ * @param options Optional configuration: `{ cascade?: boolean }` or legacy `"layout"`.
  */
-export declare function revalidatePath(path: string): Promise<void>;
+export declare function revalidatePath(
+  path: string,
+  options?: { cascade?: boolean } | "layout"
+): Promise<void>;
+
+/**
+ * Revalidates only the page component (`page.rsc`) and its HTML (`index.html`) for a specific route path,
+ * without touching any layout.
+ * @param path The path of the page to revalidate (e.g. "/dashboard/analytics").
+ */
+export declare function revalidatePage(path: string): Promise<void>;
 
 /**
  * Revalidates all routes that are associated with the specified cache tag.

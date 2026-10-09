@@ -147,7 +147,7 @@ const getPagePayload = (route, isPrefetch = false) => {
   return promise;
 };
 
-const getLayoutPayload = (layoutKey, searchPart = "") => {
+const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
   if (!layoutKey) return null;
   const cacheKey = `${layoutKey}${searchPart}`;
   if (layoutCache.has(cacheKey)) {
@@ -159,6 +159,10 @@ const getLayoutPayload = (layoutKey, searchPart = "") => {
     (window.__DINOU_USE_STATIC__
       ? "/____rsc_layout_static____"
       : "/____rsc_layout____") + cleanKey + searchPart;
+
+  if (version) {
+    layoutUrl += (layoutUrl.includes("?") ? "&" : "?") + "v=" + version;
+  }
 
   const promise = createFromFetch(
     fetch(layoutUrl).then((res) => {
@@ -377,6 +381,7 @@ function Router() {
   const [isPopState, setIsPopState] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [version, setVersion] = useState(0);
+  const [layoutVersion, setLayoutVersion] = useState(0);
   const [navError, setNavError] = useState(null);
   const [navCount, setNavCount] = useState(0);
 
@@ -447,11 +452,27 @@ function Router() {
 
   const back = () => window.history.back();
   const forward = () => window.history.forward();
-  const refresh = useCallback(() => {
+  const refresh = useCallback((options = {}) => {
     const currentPath = window.location.pathname + window.location.search;
     pageCache.delete(currentPath);
+
+    const shouldRefreshLayout = Boolean(options && options.layout);
+    if (shouldRefreshLayout) {
+      const currentLayoutKey = getLayoutKey(window.location.pathname);
+      if (currentLayoutKey) {
+        for (const k of layoutCache.keys()) {
+          if (k === currentLayoutKey || k.startsWith(currentLayoutKey + "?")) {
+            layoutCache.delete(k);
+          }
+        }
+      }
+    }
+
     startTransition(() => {
       setVersion((v) => v + 1);
+      if (shouldRefreshLayout) {
+        setLayoutVersion((v) => v + 1);
+      }
       setNavError(null);
       setNavCount((c) => c + 1);
     });
@@ -613,8 +634,10 @@ function Router() {
   }, [route, version, navError]);
 
   const layoutPromise = useMemo(() => {
-    return layoutKey !== null ? getLayoutPayload(layoutKey, searchPart) : null;
-  }, [layoutKey, searchPart]);
+    return layoutKey !== null
+      ? getLayoutPayload(layoutKey, searchPart, layoutVersion)
+      : null;
+  }, [layoutKey, searchPart, layoutVersion]);
 
   const contextValue = useMemo(
     () => ({
@@ -625,7 +648,7 @@ function Router() {
       refresh,
       isPending,
     }),
-    [route, isPending],
+    [route, isPending, refresh],
   );
 
   const slotContextValue = useMemo(

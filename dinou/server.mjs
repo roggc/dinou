@@ -1,5 +1,10 @@
-export async function revalidatePath(path) {
+export async function revalidatePath(path, options) {
   const { revalidatePath: fn } = await import("./core/cache-revalidate.js");
+  return fn(path, options);
+}
+
+export async function revalidatePage(path) {
+  const { revalidatePage: fn } = await import("./core/cache-revalidate.js");
   return fn(path);
 }
 

@@ -62,7 +62,7 @@ export function useRouter() {
       replace: () => { },
       back: () => { },
       forward: () => { },
-      refresh: () => { },
+      refresh: (options) => { },
     };
   }
 
@@ -86,8 +86,9 @@ export function useRouter() {
      * Refresh the current route.
      * Makes a new request to the server for the current URL, clearing the cache,
      * and re-renders the server component without a full browser reload.
+     * Pass `{ layout: true }` to also invalidate and re-render the layout.
      */
-    refresh: () => context.refresh(),
+    refresh: (options) => context.refresh(options),
 
     /**
      * Refresh a specific DinouCacheSlot without re-rendering the rest of the page.

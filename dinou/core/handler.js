@@ -1214,12 +1214,28 @@ async function handleRequest(request, platformContext = {}) {
     }
     const dynamicState = isDynamic.get(cleanPath);
 
+    const reqPath = cleanPath.endsWith("/") ? cleanPath : cleanPath + "/";
+    let isPathBlocked = false;
+
     let layoutConfig = null;
+    let pageConfig = null;
     if (isLayoutReq) {
       layoutConfig = await resolveLayoutFunctionsConfig(layoutPath, layoutParams);
       if (layoutConfig.isDynamic) {
         dynamicState.value = true;
       }
+    } else if (isPageReq) {
+      pageConfig = await resolvePageFunctionsConfig(
+        pagePath,
+        reqSegments,
+        queryObj,
+        dynamicParams,
+        reqPath,
+      );
+      if (pageConfig.isDynamicConfig) {
+        dynamicState.value = true;
+      }
+      isPathBlocked = pageConfig.isPathBlocked;
     }
 
     const nonBuildIdQueryKeys = Object.keys(queryObj).filter((k) => k !== "buildId");
@@ -1248,7 +1264,9 @@ async function handleRequest(request, platformContext = {}) {
     } catch (e) {}
 
     if (!isRoutePpr) {
-      isRoutePpr = await resolvePprForRoute(pagePath, null, reqSegments, queryObj);
+      isRoutePpr = pageConfig?.ppr !== undefined && pageConfig?.ppr !== null
+        ? Boolean(pageConfig.ppr)
+        : await resolvePprForRoute(pagePath, null, reqSegments, queryObj);
     }
 
     if (!isDevelopment && !dynamicState.value && (!hasQueryParams || isStatic) && !isRoutePpr) {
@@ -1349,9 +1367,6 @@ async function handleRequest(request, platformContext = {}) {
       }
     }
 
-    const reqPath = cleanPath.endsWith("/") ? cleanPath : cleanPath + "/";
-    let isPathBlocked = false;
-
     if (isLayoutReq) {
       if (layouts && Array.isArray(layouts)) {
         for (const [lPath, lParams] of layouts) {
@@ -1384,8 +1399,8 @@ async function handleRequest(request, platformContext = {}) {
       if (isPathBlocked) {
         return new Response("Not Found", { status: 404 });
       }
-    } else {
-      const pageConfig = await resolvePageFunctionsConfig(
+    } else if (!pageConfig) {
+      pageConfig = await resolvePageFunctionsConfig(
         pagePath,
         reqSegments,
         queryObj,

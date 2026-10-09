@@ -12,8 +12,12 @@ const { DinouCacheSlot } = require("./core/cache-slot.js");
 
 module.exports = {
   DinouCacheSlot,
-  revalidatePath: async function (path) {
+  revalidatePath: async function (path, options) {
     const { revalidatePath: fn } = require("./core/cache-revalidate.js");
+    return fn(path, options);
+  },
+  revalidatePage: async function (path) {
+    const { revalidatePage: fn } = require("./core/cache-revalidate.js");
     return fn(path);
   },
   revalidateTag: async function (tag) {

@@ -52,7 +52,7 @@ async function walkMetadataFiles(dir, fileList = []) {
   return fileList;
 }
 
-async function revalidatePath(reqPath) {
+function normalizeRevalidatePath(reqPath) {
   let targetPath = reqPath;
 
   if (targetPath && !targetPath.startsWith("/") && !targetPath.includes("://")) {
@@ -83,6 +83,11 @@ async function revalidatePath(reqPath) {
   if (cleanPath !== "/" && cleanPath.endsWith("/")) {
     cleanPath = cleanPath.slice(0, -1);
   }
+  return cleanPath;
+}
+
+async function revalidatePage(reqPath) {
+  const cleanPath = normalizeRevalidatePath(reqPath);
 
   if (isEdgeRuntime()) {
     const storage = getStorageAdapter();
@@ -136,7 +141,7 @@ async function revalidatePath(reqPath) {
       }
     } catch (e) {}
 
-    console.log(`✅ [Edge Revalidate] Successfully revalidated ${cleanPath} (generatedAt: ${newGenTime})`);
+    console.log(`✅ [Edge Revalidate] Successfully revalidated page ${cleanPath} (generatedAt: ${newGenTime})`);
     return;
   }
 
@@ -157,12 +162,6 @@ async function revalidatePath(reqPath) {
         path.join(dist2Folder, reqPathWithSlash, "page._old.rsc")
       );
     }
-    if (existsSync(path.join(dist2Folder, reqPathWithSlash, "layout.rsc"))) {
-      copyFileSync(
-        path.join(dist2Folder, reqPathWithSlash, "layout.rsc"),
-        path.join(dist2Folder, reqPathWithSlash, "layout._old.rsc")
-      );
-    }
     if (existsSync(path.join(dist2Folder, reqPathWithSlash, "rsc.rsc"))) {
       copyFileSync(
         path.join(dist2Folder, reqPathWithSlash, "rsc.rsc"),
@@ -173,7 +172,7 @@ async function revalidatePath(reqPath) {
     // Ignore copy errors
   }
 
-  console.log(`[Revalidate] Starting on-demand revalidation for ${cleanPath}...`);
+  console.log(`[Revalidate] Starting on-demand page revalidation for ${cleanPath}...`);
   try {
     const isDynamic = {};
     await getBuildStaticPage()(cleanPath, isDynamic);
@@ -193,24 +192,11 @@ async function revalidatePath(reqPath) {
 
     await getSafeRename()(rscResult.tempPath, rscResult.finalPath);
 
-    try {
-      const layoutFinalPath = path.join(dist2Folder, reqPathWithSlash, "layout.rsc");
-      const layoutOldPath = path.join(dist2Folder, reqPathWithSlash, "layout._old.rsc");
-      if (existsSync(layoutFinalPath) || existsSync(layoutOldPath)) {
-        const layoutRscResult = await getGenerateStaticRSC()(cleanPath, { segment: "layout" });
-        if (layoutRscResult && layoutRscResult.success) {
-          await getSafeRename()(layoutRscResult.tempPath, layoutRscResult.finalPath);
-        }
-      }
-    } catch (e) {
-      // Ignore layout revalidation error if no layout exists for this segment
-    }
-
     const pageResult = await getGenerateStaticPage()(cleanPath);
     if (pageResult.success) {
       await getSafeRename()(pageResult.tempPath, pageResult.finalPath);
       getUpdateStatus()(cleanPath, pageResult.status);
-      console.log(`✅ [Revalidate] Successfully revalidated ${cleanPath} (Status: ${pageResult.status})`);
+      console.log(`✅ [Revalidate] Successfully revalidated page ${cleanPath} (Status: ${pageResult.status})`);
     } else {
       console.warn(`⚠️ [Revalidate] HTML generation failed for ${cleanPath}.`);
       if (pageResult.tempPath && existsSync(pageResult.tempPath)) {
@@ -218,7 +204,99 @@ async function revalidatePath(reqPath) {
       }
     }
   } catch (e) {
-    console.warn(`⚠️ [Revalidate] Failed to revalidate ${cleanPath}:`, e.message || e);
+    console.warn(`⚠️ [Revalidate] Failed to revalidate page ${cleanPath}:`, e.message || e);
+  }
+}
+
+async function revalidatePath(reqPath, options = {}) {
+  const isCascade = options === "layout" || (typeof options === "object" && options?.cascade === true);
+  const cleanPath = normalizeRevalidatePath(reqPath);
+  let layoutRevalidated = false;
+
+  if (isEdgeRuntime()) {
+    // 1. Revalidar la página
+    await revalidatePage(cleanPath);
+
+    // 2. Paridad Edge: Revalidar layout si existe para este segmento
+    const storage = getStorageAdapter();
+    const cleanPathKey = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
+    const layoutRscKey = cleanPathKey ? `${cleanPathKey}/layout.rsc` : "layout.rsc";
+    const layoutMetaKey = cleanPathKey ? `${cleanPathKey}/layout.metadata.json` : "layout.metadata.json";
+
+    const cachedLayout = await storage.get(layoutRscKey);
+    const cachedLayoutMeta = await storage.get(layoutMetaKey);
+    if (cachedLayout || cachedLayoutMeta) {
+      await revalidateLayout(cleanPath);
+      layoutRevalidated = true;
+    }
+
+    // 3. Cascada en Edge: solo si se solicitó cascade y se revalidó un layout
+    if (isCascade && layoutRevalidated && typeof storage.keys === "function") {
+      const allKeys = await storage.keys();
+      const prefix = cleanPathKey ? `${cleanPathKey}/` : "";
+      const childPaths = new Set();
+      for (const key of allKeys) {
+        if (key.startsWith(prefix) && (key.endsWith("metadata.json") || key.endsWith("index.html"))) {
+          if (!key.endsWith("layout.metadata.json") && !key.endsWith("slot.metadata.json")) {
+            const relKey = key.replace(/\/(?:metadata\.json|index\.html)$/, "").replace(/^(?:metadata\.json|index\.html)$/, "");
+            const childPath = "/" + relKey;
+            if (childPath !== cleanPath) {
+              childPaths.add(childPath);
+            }
+          }
+        }
+      }
+      await Promise.all(Array.from(childPaths).map((p) => revalidatePage(p)));
+    }
+    return;
+  }
+
+  const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
+  const reqPathWithSlash = cleanPath.endsWith("/") ? cleanPath : cleanPath + "/";
+
+  // Check if layout exists to copy to _old
+  const layoutFinalPath = path.join(dist2Folder, reqPathWithSlash, "layout.rsc");
+  const layoutOldPath = path.join(dist2Folder, reqPathWithSlash, "layout._old.rsc");
+  if (existsSync(layoutFinalPath)) {
+    try {
+      copyFileSync(layoutFinalPath, layoutOldPath);
+    } catch (e) {}
+  }
+
+  // 1. Revalidar la página
+  await revalidatePage(cleanPath);
+
+  // 2. Revalidar el layout si existe en este segmento
+  if (existsSync(layoutFinalPath) || existsSync(layoutOldPath)) {
+    try {
+      const layoutRscResult = await getGenerateStaticRSC()(cleanPath, { segment: "layout" });
+      if (layoutRscResult && layoutRscResult.success) {
+        await getSafeRename()(layoutRscResult.tempPath, layoutRscResult.finalPath);
+        layoutRevalidated = true;
+        console.log(`✅ [Revalidate] Successfully revalidated layout for ${cleanPath}`);
+      }
+    } catch (e) {
+      // Ignore layout revalidation error
+    }
+  }
+
+  // 3. Cascada en Node: solo si se solicitó cascade y se revalidó un layout
+  if (isCascade && layoutRevalidated) {
+    const targetDir = path.join(dist2Folder, reqPathWithSlash);
+    if (existsSync(targetDir)) {
+      const childFiles = await walkMetadataFiles(targetDir);
+      const childPaths = new Set();
+      for (const fileOfMeta of childFiles) {
+        if (path.basename(fileOfMeta) === "metadata.json") {
+          const relative = path.relative(dist2Folder, path.dirname(fileOfMeta));
+          const childPath = "/" + relative.replace(/\\/g, "/");
+          if (childPath !== cleanPath) {
+            childPaths.add(childPath);
+          }
+        }
+      }
+      await Promise.all(Array.from(childPaths).map((p) => revalidatePage(p)));
+    }
   }
 }
 
@@ -385,6 +463,7 @@ async function revalidateTag(tag) {
 
 module.exports = {
   revalidatePath,
+  revalidatePage,
   revalidateTag,
   revalidateLayout,
 };

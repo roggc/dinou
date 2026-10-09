@@ -173,8 +173,6 @@ export default function esmHmrPlugin({
         });
       });
 
-      const wrappedChunkCache = new Map();
-
       build.onEnd(async (result) => {
         const tWrap0 = Date.now();
         if (!result.metafile) {
@@ -224,17 +222,6 @@ export default function esmHmrPlugin({
           );
           if (!hasUserCode) continue;
 
-          const isChangedByModule = !isInitialBuild && inputFiles.some((modulePath) => {
-            const cleanPath = stripNamespace(modulePath);
-            return changedIds.has(normKey(cleanPath));
-          });
-
-          const cachedWrapped = wrappedChunkCache.get(relPath);
-          if (!isInitialBuild && !isChangedByModule && cachedWrapped) {
-            outputFile.contents = cachedWrapped;
-            continue;
-          }
-
           const source = new TextDecoder().decode(outputFile.contents);
           if (source.includes("__reactRefreshRuntime")) {
             continue;
@@ -277,7 +264,6 @@ export default function esmHmrPlugin({
         `;
           const encodedWrapped = new TextEncoder().encode(wrappedCode);
           outputFile.contents = encodedWrapped;
-          wrappedChunkCache.set(relPath, encodedWrapped);
         }
         globalThis.__DINOU_WRAP_TIME__ = Date.now() - tWrap0;
       });

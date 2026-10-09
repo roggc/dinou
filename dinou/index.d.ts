@@ -500,13 +500,17 @@ export declare function useRouter(): {
    * Refresh the current route.
    *
    * This triggers a "Soft Reload":
-   * 1. Clears the client-side cache for the current route.
+   * 1. Clears the client-side cache for the current page (`pageCache`).
    * 2. Re-fetches fresh RSC payload from the server.
-   * 3. Re-renders the page components without a full browser refresh.
+   * 3. Re-renders the page components without a full browser refresh, preserving client state.
+   *
+   * By default, it refreshes only the page. Pass `{ layout: true }` to also invalidate and re-fetch the layout.
    *
    * Useful for updating the UI after a mutation (e.g., form submission) or to poll for new data.
+   *
+   * @param options - Optional configuration (`{ layout?: boolean }`).
    */
-  refresh: () => void;
+  refresh: (options?: { layout?: boolean }) => void;
 
   /**
    * Refreshes a specific DinouCacheSlot without re-rendering the rest of the page.
