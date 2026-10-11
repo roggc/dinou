@@ -477,6 +477,19 @@ export interface LayoutProps<T extends DinouRoutePattern = DinouRoutePattern> {
   params: RouteParams<T>;
 }
 
+/**
+ * Props for Dinou Error Boundary components (error.tsx).
+ * 
+ * @example
+ * export default function ErrorBoundary({ error, params }: ErrorProps<"/blog/[id]">) {
+ *   return <h1>Error loading {params.id}: {error.message}</h1>;
+ * }
+ */
+export interface ErrorProps<T extends DinouRoutePattern = DinouRoutePattern> {
+  error: Error;
+  params: RouteParams<T>;
+}
+
 export declare function useRouter(): {
   /**
    * Navigate to the provided href. Pushes a new entry into the history stack.
