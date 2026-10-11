@@ -1104,7 +1104,7 @@ try {
   console.log(`\n✓ Deno build complete!`);
   console.log(`  Output: ${relOutfile}`);
   console.log(`  👉 Run locally:     deno run --unstable-kv -A ${relOutfile}`);
-  console.log(`  👉 Deploy to edge:  deployctl deploy --project=<your-project> ${relOutfile}`);
+  console.log(`  👉 Deploy to edge:  deno deploy --project=<your-project> ${relOutfile}`);
   console.log(`  👉 Compile binary:  npm run build:deno:compile\n`);
 } catch (err) {
   console.error("❌ [Dinou Deno] Build failed:", err);

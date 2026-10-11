@@ -252,13 +252,21 @@ export interface RouteSegmentConfig<TParams = any, TProps = any> {
 
 /**
  * Type-safe interface representing the available exports in `page_functions.ts`.
+ * Accepts either a route pattern string (e.g. `"/products/[id]"`) or a direct parameters dictionary.
  */
-export type PageFunctions<TParams = any, TProps = any> = RouteSegmentConfig<TParams, TProps>;
+export type PageFunctions<TRouteOrParams = any, TProps = any> = RouteSegmentConfig<
+  [TRouteOrParams] extends [string] ? RouteParams<TRouteOrParams> : TRouteOrParams,
+  TProps
+>;
 
 /**
  * Type-safe interface representing the available exports in `layout_functions.ts`.
+ * Accepts either a route pattern string (e.g. `"/[organization]"`) or a direct parameters dictionary.
  */
-export type LayoutFunctions<TParams = any, TProps = any> = RouteSegmentConfig<TParams, TProps>;
+export type LayoutFunctions<TRouteOrParams = any, TProps = any> = RouteSegmentConfig<
+  [TRouteOrParams] extends [string] ? RouteParams<TRouteOrParams> : TRouteOrParams,
+  TProps
+>;
 
 /**
  * Type-safe configuration helper for dinou.config.js / dinou.config.mjs.
