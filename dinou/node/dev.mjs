@@ -1745,13 +1745,18 @@ async function doRebuildBatch(changesMap) {
       const wasServerFile = knownServerFiles.has(absFilePath);
       const serverDirectiveChanged = isServerFile !== wasServerFile;
 
+      const isJsTsSource =
+        normLower.endsWith(".tsx") ||
+        normLower.endsWith(".jsx") ||
+        normLower.endsWith(".ts") ||
+        normLower.endsWith(".js");
+
       const isClientRelevant =
         isClientFile ||
         wasClientFile ||
         clientDirectiveChanged ||
         isCssFile ||
-        normLower.endsWith(".tsx") ||
-        normLower.endsWith(".jsx");
+        isJsTsSource;
 
       if (clientDirectiveChanged || serverDirectiveChanged) {
         needsStructureRebuild = true;

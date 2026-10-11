@@ -185,7 +185,7 @@ export function swcRedirectPlugin({ projectRoot = process.cwd() } = {}) {
             return null;
           }
 
-          for (const ext of [".js", ".jsx", ".ts", ".tsx", "/index.js", "/index.jsx"]) {
+          for (const ext of [".js", ".jsx", ".ts", ".tsx", "/index.js", "/index.jsx", "/index.ts", "/index.tsx"]) {
             const candidate = candidateBase + ext;
             if (fsSync.existsSync(candidate) && !fsSync.statSync(candidate).isDirectory()) {
               resolveCache.set(cacheKey, null);
