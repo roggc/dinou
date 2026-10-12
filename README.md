@@ -273,6 +273,17 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [Deno (process.env & --allow-env)](#deno-processenv----allow-env)
   - [Type-Safe Environment Validation (Zod)](#type-safe-environment-validation-zod)
   - [Anti-Leak Security & Bot Shield](#anti-leak-security--bot-shield)
+- [Import Aliases & Path Resolution](#import-aliases--path-resolution)
+  - [Import Aliases in Dinou](#import-aliases-in-dinou)
+  - [Configuring tsconfig.json](#configuring-tsconfigjson)
+    - [Defining Multiple Granular Aliases](#defining-multiple-granular-aliases)
+  - [Where Aliases Work (Code, CSS, & Assets)](#where-aliases-work-code-css--assets)
+    - [1. TypeScript & JavaScript Modules](#1-typescript--javascript-modules)
+    - [2. CSS @import Rules](#2-css-import-rules)
+    - [3. Asset & Media Imports](#3-asset--media-imports)
+  - [Automatic Extension & Index Resolution](#automatic-extension--index-resolution)
+  - [IDE Autocomplete & Refactoring Support](#ide-autocomplete--refactoring-support)
+  - [Best Practices & Common Gotchas](#best-practices--common-gotchas)
 - [Configuration API (`dinou.config.js`)](#configuration-api-dinouconfigjs)
   - [1. Universal Middleware (`onRequest`)](#1-universal-middleware-onrequest)
   - [2. SWC Disk-Mirror (`useSwcDiskMirror`)](#2-swc-disk-mirror-useswcdiskmirror)
@@ -6567,6 +6578,162 @@ GET /public/.env
 - Configure platform secrets via your host's dashboard or CLI (e.g. `railway variables set`, `fly secrets set`, `wrangler secret put`).
 - Ensure sensitive API credentials are only referenced inside Server Components or Server Functions.
 - Use schema validation (like Zod) to catch missing variables immediately on server boot.
+
+---
+
+## Import Aliases & Path Resolution
+
+Configure clean, refactor-proof import paths across your codebase using standard `tsconfig.json` path mappings — supported seamlessly across code, stylesheets, and assets.
+
+### Import Aliases in Dinou
+
+In large projects, deeply nested relative paths like `../../../../components/ui/button` are fragile, difficult to read, and break whenever a file is moved to another directory.
+
+Dinou provides **zero-config path alias support** by reading your standard `tsconfig.json` directly. Even in plain JavaScript projects, using a `tsconfig.json` with `"allowJs": true` is the recommended standard across modern tooling.
+
+| Fragile Relative Imports (Before) | Clean Aliased Imports (With Dinou) |
+| :--- | :--- |
+| `import { Button } from "../../../components/button";` | `import { Button } from "@/components/button";` |
+| `import { db } from "../../../../lib/db";` | `import { db } from "@/lib/db";` |
+| `import logo from "../../assets/logo.svg";` | `import logo from "@/assets/logo.svg";` |
+
+---
+
+### Configuring tsconfig.json
+
+To enable the standard `@/*` alias pointing to your `src/` directory, configure `paths` in your project root `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "allowJs": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler"
+  },
+  "include": [
+    "src",
+    "dinou-env.d.ts"
+  ]
+}
+```
+
+> [!NOTE]
+> **Using Plain JavaScript?**
+> Even if your project is written entirely in JavaScript (`.js` / `.jsx`), maintain a `tsconfig.json` with `"allowJs": true`. This gives your editor and Dinou's build tools identical resolution semantics and full autocompletion without any TypeScript syntax required in your code.
+
+#### Defining Multiple Granular Aliases
+
+You are not limited to just `@/*`. You can declare multiple granular aliases to organize domain layers cleanly:
+
+```json
+{
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["src/*"],
+      "@components/*": ["src/components/*"],
+      "@server/*": ["src/server-functions/*"],
+      "@lib/*": ["src/lib/*"],
+      "@styles/*": ["src/styles/*"],
+      "@assets/*": ["src/assets/*"]
+    }
+  }
+}
+```
+
+Dinou parses every alias mapping at startup, resolving wildcards (`/*`) relative to the project root.
+
+---
+
+### Where Aliases Work (Code, CSS, & Assets)
+
+Unlike setups where aliases only work inside JavaScript/TypeScript files, Dinou propagates alias resolution across all asset types in your build pipeline:
+
+#### 1. TypeScript & JavaScript Modules
+
+Use aliases freely in Server Components (RSC), Client Components (`"use client"`), Server Functions (`"use server"`), and Page Functions:
+
+```tsx
+// src/app/dashboard/page.tsx
+import { UserCard } from "@/components/user-card";
+import { fetchUserMetrics } from "@/server/metrics";
+import { formatDate } from "@/lib/utils";
+
+export default async function DashboardPage() {
+  const metrics = await fetchUserMetrics();
+  return <UserCard data={metrics} formattedTime={formatDate(Date.now())} />;
+}
+```
+
+#### 2. CSS @import Rules
+
+Dinou's PostCSS pipeline integrates `postcss-import` with the alias resolver. You can reference path aliases directly inside global CSS or CSS modules:
+
+```css
+/* src/styles/theme.css */
+@import "@/styles/tokens.css";
+@import "@/styles/typography.css";
+
+:root {
+  --font-primary: var(--brand-font);
+}
+```
+
+The resolver resolves `@/styles/tokens.css` to `src/styles/tokens.css` automatically during stylesheet extraction.
+
+#### 3. Asset & Media Imports
+
+Media files (images, SVGs, audio, video) can also be imported using path aliases:
+
+```tsx
+// src/components/hero.tsx
+import heroImage from "@/assets/images/hero-banner.webp";
+import logoSvg from "@/assets/brand/logo.svg";
+
+export function Hero() {
+  return (
+    <div className="hero">
+      <img src={logoSvg} alt="Brand Logo" className="h-10" />
+      <img src={heroImage} alt="Hero Banner" className="rounded-xl shadow-lg" />
+    </div>
+  );
+}
+```
+
+---
+
+### Automatic Extension & Index Resolution
+
+When importing via aliases, you do not need to specify file extensions or trailing `/index` files:
+
+| Import Statement | Resolved Disk Path |
+| :--- | :--- |
+| `import { Card } from "@/components/card";` | `src/components/card.tsx` (or `.ts`, `.jsx`, `.js`) |
+| `import { Modal } from "@/components/modal";` | `src/components/modal/index.tsx` (directory index) |
+| `import { db } from "@/lib/db";` | `src/lib/db.ts` |
+
+---
+
+### IDE Autocomplete & Refactoring Support
+
+Because Dinou uses standard TypeScript compiler configurations, modern development environments (VS Code, Cursor, WebStorm, Neovim) provide full first-class support without any plugins:
+
+- **IntelliSense & Auto-Import:** Typing component names automatically suggests the clean `@/` alias import.
+- **Jump to Definition:** `Cmd+Click` (or `Ctrl+Click` / `F12`) navigates directly to the target source file across aliases.
+- **Safe File Renaming:** Renaming or moving files in your IDE updates all aliased import paths across your codebase automatically.
+
+---
+
+### Best Practices & Common Gotchas
+
+- **Ensure `"moduleResolution": "bundler"` is set:** In modern TypeScript, `"moduleResolution": "bundler"` accurately mirrors how Dinou's dual-bundler engine resolves files without requiring explicit `.js` file extensions on TypeScript imports.
+- **Paths resolve relative to tsconfig.json:** With modern TypeScript (`"moduleResolution": "bundler"`), `paths` mappings resolve directly relative to the project root without needing the deprecated `baseUrl` option.
+- **Avoid Circular Dependency Loops:** While aliases make it easy to import anything from anywhere, maintain clear architecture layers (e.g. components import from `@/lib`, but `@/lib` utilities should not import React UI components) to avoid circular reference warnings.
 
 ---
 
