@@ -5,9 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [7.0.0] - 2026-09-25
+## [7.0.0] - 2026-10-12
+
+### ⚠️ Breaking Changes
+- **`getProps` Contract: Direct Props Object Return**: Eliminated the legacy artificial wrapper `{ page: { ... } }`. In v7, `getProps` directly returns the object that is injected as top-level props into the route component in `page.tsx` (e.g. `{ user, title }`).
+- **`revalidate` Time Unit: Strictly Seconds (`s`)**: Cache revalidation intervals are now strictly specified in seconds. Legacy millisecond values (e.g. `60000ms`) must be divided by 1000 (e.g. `60s`).
+- **Elimination of `export const dynamic` (Single Source of Truth via `revalidate`)**: The `dynamic` export keyword has been completely removed. `revalidate` is now the sole authority for route execution and caching: `revalidate = 0` (Dynamic SSR), `revalidate >= 1` (ISR with background re-generation), and `revalidate = false` (Static SSG).
+- **Ahead-of-Time (AOT) SSG Compilation vs. Server Startup**: Static site generation no longer executes at server boot time during `dinou start`. All static HTML and RSC Flight payloads are now pre-rendered strictly during the build step (`dinou build`), enabling instant (0ms) production server startup. CI/CD pipelines must provide CMS and database credentials during `npm run build`.
+- **Layout Lifecycle & State Preservation (Horizontal Segmentation)**: Layout components (`layout.tsx`) never unmount or re-execute when navigating between sibling routes. Client state (form inputs, video playback, active tabs) is 100% preserved across navigations.
+- **Express Decoupling & Modern Plugin System**: Removed Express dependency and the `onServerInit(app)` plugin hook. Custom plugins now hook into standard Web APIs via `onRequest(request, context)` and `onResponse(response, context)` defined in `dinou.config.mjs`.
+- **Development Assets 100% In-Memory by Default**: `dinou dev` operates entirely in RAM via `globalThis.__DINOU_MEM_FILES__` (<0.5ms response times) to eliminate disk I/O bottlenecks and Windows antivirus penalties. The `.dinou/public/` folder is no longer generated on disk during development (use `DINOU_WRITE_TO_DISK=true` to force physical disk writes).
 
 ### Added
+- **Layered Segmentation Architecture**:
+  * **Horizontal Segmentation (`layout_functions.{ts,js}`)**: Decoupled layout server lifecycles, enabling independent data loading (`getProps`), independent layout ISR caching (`revalidate`), independent Partial Prerendering (`ppr`), and route parameter validation (`validateParams`) without touching child pages.
+  * **Vertical Segmentation (`<DinouCacheSlot>` & `refreshSlot`)**: Sub-page micro-ISR component allowing individual UI sub-trees to be cached and revalidated independently without re-evaluating parent layouts or siblings, coupled with the client-side `refreshSlot(slotId)` hook for live, in-place widget updates with zero page reload.
+- **Partial Prerendering (PPR) Engine**:
+  * First-class PPR support enabled globally (`ppr: true` in `dinou.config.mjs`), per layout (`layout_functions.ts`), or per page (`page_functions.ts`).
+  * Emits an instant static shell prelude at 0ms TTFB while concurrently streaming dynamic holes via React 19 `<Suspense>`.
+- **Zero-Runtime Type-Safe Routing**:
+  * Inferred compile-time type safety derived directly from folder bracket naming conventions (`[slug]`, `[...slug]`, `[[...slug]]`, `(auth)`).
+  * Auto-generated type exports from `"dinou"`: `DinouRoute`, `DinouRoutePattern`, `PageProps<T>`, `LayoutProps<T>`, `ErrorProps<T>`, and `RouteParams<T>`.
+- **Surgical Page Cache Invalidation (`revalidatePage`)**:
+  * Added `revalidatePage(pattern)` to `"dinou/server"` to purge all compiled cache entries for a parameterized route pattern across the cluster in a single invocation.
+- **Centralized ESM Configuration (`dinou.config.mjs`) & `defineConfig`**:
+  * Introduced native ESM configuration file with type-safe `defineConfig` helper for configuring plugins, storage adapters, `reactStrictMode`, and `ppr`.
+- **Native Path Aliasing (`tsconfig.json`)**:
+  * Zero-config path alias resolution (`@/*`, `~/*`) across TypeScript, JSX, CSS modules (`@import "@/styles/..."`), and static assets across all supported bundlers (Esbuild, Rollup, Webpack).
+- **React StrictMode by Default in Development**:
+  * Client components are automatically wrapped in `<React.StrictMode>` during development to surface side-effects early (configurable via `dinou.config.mjs`).
+- **Private Folders with Underscore Prefix (`_folder`)**:
+  * Directories prefixed with an underscore (e.g. `_components/`, `_archived/`) are strictly quarantined and ignored by the route scanner.
 - **Universal Web Standards Request Handler (`dinou/core/handler.js`)**: Completely decoupled Dinou's core runtime from Node.js and Express. SSR, RSC streaming, Server Functions, routing, and static asset serving are now driven by a pure `(Request) => Promise<Response>` handler built exclusively on Web Standards (`Request`, `Response`, `ReadableStream`, `Headers`):
   * **Double Crash & Error Boundary Resilience**: Captures secondary failures if a custom application error boundary component crashes during rendering, gracefully returning a reliable fallback HTML document without bringing down the server.
   * **Streaming Header & Cookie Mutation**: Supports dynamic response header and cookie updates (`ctx.res.setHeader`, `ctx.res.cookie`) directly from async Server Components and Server Functions during streaming SSR renders.
@@ -41,7 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   * **Bun Adapter (`dinou/adapters/bun.js`)**: High-performance Bun native server utilizing zero-copy `Bun.file()` for `.dinou/dist3` production asset serving, configurable `IDLE_TIMEOUT`, and streaming RSC/SSR.
   * **Deno & Deno Deploy Adapter (`dinou/adapters/deno.js`)**: Native `Deno.serve()` integration with built-in asset streaming and automatic edge detection.
   * **Cloudflare Workers Adapter (`dinou/adapters/cloudflare.js`)**: Full edge worker integration supporting Workerd runtime, asset fetching, ISR via Cloudflare KV, and streaming responses.
-  * **Netlify Functions Adapter (`dinou/adapters/netlify.js`)**: Standard edge/serverless handler ready for Netlify Functions.
+  * **Netlify Functions Adapter (`dinou/adapters/netlify.js`)**: Standard edge/serverless handler ready for Netlify Functions v2 with `preferStatic: true`.
   * **Node / Express Adapter (`dinou/core/http-adapter.js`)**: Bi-directional bridge converting Node.js `IncomingMessage` and `ServerResponse` to Web Standard `Request` and `Response`, making the server a lightweight consumer of `handleRequest`.
 - **Pluggable Storage System & Edge ISR (`dinou/core/storage-adapter.js`)**: Decoupled SSG/ISR cache and revalidation from Node's filesystem.
   * Added `StorageAdapter` interface with `FSStorageAdapter` (Node/Bun filesystem), `MemoryStorageAdapter` (ephemeral/testing), `DenoKVStorage` (distributed Edge KV), and `CloudflareKVStorage` (Cloudflare KV via `env.DINOU_CACHE`).
@@ -58,6 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   * Added `./adapters/bun`, `./adapters/deno`, `./adapters/cloudflare`, and `./adapters/netlify` subpath exports in root `package.json`.
 
 ### Changed
+- **Peer Dependencies Updated to React 19.3.0+**: Dinou v7 now requires `react >= 19.3.0` and `react-dom >= 19.3.0` for full React Server Components, Server Functions (`"use server"`), and `react-dom/server.edge` streaming.
 - **Hardened State-Preserving React Fast Refresh (Esbuild & Rollup)**:
   * **Rollup**: Decoupled development builds from React Compiler to eliminate AST collisions and component state loss, stabilizing component identities and hook signatures via `reactRefreshScopedId` for instantaneous, resilient hot reloading.
   * **Esbuild**: Hardened and optimized the Rust-powered `@swc/core` Fast Refresh transform, restricting it strictly to user components and entrypoints to prevent initialization conflicts on client runtime roots.
