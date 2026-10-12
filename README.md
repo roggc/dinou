@@ -3384,7 +3384,21 @@ Dinou provides strict server-side governance exports to secure on-demand generat
   ```
 ### 7. Complete Rendering Strategies Matrix
 
-Dinou provides a seamless continuum across all rendering and data fetching strategies. For the complete side-by-side comparison matrix, execution lifecycles, TTFB benchmarks, server load profiles, and individual recipes for all 13 patterns, proceed directly to [Data Fetching: The 13 Strategies](#data-fetching-the-13-strategies) below.
+Summary of all rendering strategies supported natively by Dinou v7:
+
+| Strategy | How to Configure | TTFB | Freshness | Database Load | Best For |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Pure SSG** | Default / `revalidate = false` | `0ms` (Instant) | Build-time | `0` queries (Build-time only) | Landing pages, marketing, documentation |
+| **ISR** | `revalidate = N` (`N >= 1`) | `0ms` (Cached) | Stale-while-revalidate | 1 query per TTL (`0` on cache hits) | Blogs, catalogs, news feeds |
+| **Dynamic SSR** | `revalidate = 0` | Request-time (Blocked) | 100% Real-time | Heavy: 100% queries on every request | User settings, banking, checkout |
+| **PPR (Partial Prerendering)** | `ppr = true` + `<Suspense>` | `0ms` (Shell from Edge) | 100% Real-time (Holes) | Heavy: 100% Hole queries on every request | E-commerce, dashboards with static shells |
+| **Micro-ISR (Static / Asymmetric ISR)** | `<DinouCacheSlot>` (in Static/ISR page) | `0ms` (CDN Edge) | Decoupled Slot TTL / Tags | Low: Isolated to expired slots | Static product/catalog pages with volatile widgets (stock, prices) |
+| **Micro-ISR (Dynamic SSR)** | `<DinouCacheSlot>` (in Dynamic SSR page) | Fast (Early Layout / Slot-cached) | Component TTL / Tags | Low: Isolated to expired slots | Dynamic user dashboards with heavy SQL calculations |
+| **PPR + Micro-ISR (Synergy)** | `ppr = true` + `<DinouCacheSlot>` | `0ms` (Edge) + `~2ms` (Hole) | Cached Streamed Hole | Near-Zero: 1 query per slot TTL (99.9% reduction) | High-concurrency e-commerce, telemetry dashboards |
+| **ISG (Incremental Static)** | `allowISG = true` (default) | `0ms` (after 1st hit) | Cached permanently | 1 query on 1st generation (`0` thereafter) | Long-tail e-commerce products, dynamic paths |
+
+> [!TIP]
+> For deep-dive code recipes, runtime execution timing, TTFB charts, and production trade-offs across all 13 rendering and data fetching patterns, see [Data Fetching: The 13 Strategies](#data-fetching-the-13-strategies) below.
 
 ---
 
