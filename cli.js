@@ -202,13 +202,17 @@ const denoTargets = [
 
 for (const t of denoTargets) {
   for (const b of ["esbuild", "rollup", "webpack"]) {
-    const cmdName = `build:deno:compile${t.name}${b === "esbuild" && !t.name ? "" : ":" + b}`;
-    program
-      .command(cmdName)
-      .description(`Compile standalone Deno executable (${t.name || "host"}, ${b})`)
-      .action(() => {
-        runCommand(`${runDenoBuild(b)} && deno compile ${t.flags}--no-check --no-config --allow-net --allow-read --allow-write --allow-env --allow-sys --output ${t.outfile} .dinou/deno/main.js`);
-      });
+    const cmdNames = b === "esbuild"
+      ? [`build:deno:compile${t.name}`, `build:deno:compile${t.name}:esbuild`]
+      : [`build:deno:compile${t.name}:${b}`];
+    for (const cmdName of cmdNames) {
+      program
+        .command(cmdName)
+        .description(`Compile standalone Deno executable (${t.name || "host"}, ${b})`)
+        .action(() => {
+          runCommand(`${runDenoBuild(b)} && deno compile ${t.flags}--no-check --no-config --allow-net --allow-read --allow-write --allow-env --allow-sys --output ${t.outfile} .dinou/deno/main.js`);
+        });
+    }
   }
 }
 
@@ -283,13 +287,17 @@ const bunTargets = [
 
 for (const t of bunTargets) {
   for (const b of ["esbuild", "rollup", "webpack"]) {
-    const cmdName = `build:bun:compile${t.name}${b === "esbuild" && !t.name ? "" : ":" + b}`;
-    program
-      .command(cmdName)
-      .description(`Compile standalone Bun executable (${t.name || "host"}, ${b})`)
-      .action(() => {
-        runCommand(`${runBunBuild(b)} && bun build --compile ${t.flags}.dinou/bun/server.js --outfile ${t.outfile}`);
-      });
+    const cmdNames = b === "esbuild"
+      ? [`build:bun:compile${t.name}`, `build:bun:compile${t.name}:esbuild`]
+      : [`build:bun:compile${t.name}:${b}`];
+    for (const cmdName of cmdNames) {
+      program
+        .command(cmdName)
+        .description(`Compile standalone Bun executable (${t.name || "host"}, ${b})`)
+        .action(() => {
+          runCommand(`${runBunBuild(b)} && bun build --compile ${t.flags}.dinou/bun/server.js --outfile ${t.outfile}`);
+        });
+    }
   }
 }
 
@@ -327,13 +335,17 @@ program
 
 for (const t of bunTargets) {
   for (const b of ["esbuild", "rollup", "webpack"]) {
-    const cmdName = `build:bun:pure:compile${t.name}${b === "esbuild" && !t.name ? "" : ":" + b}`;
-    program
-      .command(cmdName)
-      .description(`Compile standalone Bun Pure executable (${t.name || "host"}, ${b})`)
-      .action(() => {
-        runCommand(`${runBunPureBuild(b)} && bun build --compile ${t.flags}.dinou/bun/server.js --outfile ${t.outfile}`);
-      });
+    const cmdNames = b === "esbuild"
+      ? [`build:bun:pure:compile${t.name}`, `build:bun:pure:compile${t.name}:esbuild`]
+      : [`build:bun:pure:compile${t.name}:${b}`];
+    for (const cmdName of cmdNames) {
+      program
+        .command(cmdName)
+        .description(`Compile standalone Bun Pure executable (${t.name || "host"}, ${b})`)
+        .action(() => {
+          runCommand(`${runBunPureBuild(b)} && bun build --compile ${t.flags}.dinou/bun/server.js --outfile ${t.outfile}`);
+        });
+    }
   }
 }
 
