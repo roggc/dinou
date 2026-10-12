@@ -113,6 +113,24 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [6.5. The Synergy: Partial Prerendering (PPR) + <DinouCacheSlot>](#65-the-synergy-partial-prerendering-ppr--dinoucacheslot)
     - [6.6. When Should You Use <DinouCacheSlot>?](#66-when-should-you-use-dinoucacheslot)
     - [6.7. Common Traps & Anti-Patterns to Avoid](#67-common-traps--anti-patterns-to-avoid)
+- [Page & Layout Functions (page_functions.ts & layout_functions.ts)](#page--layout-functions-page_functionsts--layout_functionsts)
+  - [Overview & Horizontal Segmentation](#overview--horizontal-segmentation)
+  - [1. getProps (Direct Component Props)](#1-getprops-direct-component-props)
+  - [2. getStaticPaths (Static Generation)](#2-getstaticpaths-static-generation)
+    - [2.1. Constant Array vs Function Export](#21-constant-array-vs-function-export)
+    - [2.2. Return Formats](#22-return-formats)
+    - [2.3. Simple Dynamic Routes](#23-simple-dynamic-routes)
+    - [2.4. Catch-all Routes](#24-catch-all-routes)
+    - [2.5. Automatic Route Propagation (Recursion)](#25-automatic-route-propagation-recursion)
+    - [2.6. Nested Pages & The "Chain of Responsibility"](#26-nested-pages--the-chain-of-responsibility)
+    - [2.7. Nested & Pass-through Segments](#27-nested--pass-through-segments)
+    - [2.8. Async Support (CMS & DB)](#28-async-support-cms--db)
+  - [3. validateParams (Route Parameter Validation)](#3-validateparams-route-parameter-validation)
+  - [4. allowISG (Incremental Static Opt-Out)](#4-allowisg-incremental-static-opt-out)
+  - [5. revalidate (ISR & Dynamic SSR Escape)](#5-revalidate-isr--dynamic-ssr-escape)
+  - [6. getCacheTags (Cache Tagging)](#6-getcachetags-cache-tagging)
+  - [7. ppr (Partial Prerendering)](#7-ppr-partial-prerendering)
+  - [8. End-to-End Type-Safe Example](#8-end-to-end-type-safe-example)
 - [Data Fetching: The 13 Strategies](#data-fetching-the-13-strategies)
   - [Overview: The 13-Strategy Architecture](#overview-the-13-strategy-architecture)
   - [Data Fetching & Rendering Strategies Matrix](#data-fetching--rendering-strategies-matrix)
@@ -1957,6 +1975,916 @@ export function RefreshPriceButton({ productId }: { productId: string }) {
 - **Trap 3: Accessing browser APIs in component body during SSR.** Calling `window.innerWidth` or `localStorage.getItem()` outside of a `useEffect` in a Client Component causes server pre-rendering crashes. Always wrap browser calls in `useEffect` or an environment check (`if (typeof window !== "undefined")`).
 - **Trap 4: Passing non-serializable objects across boundaries.** Do not pass callback functions or ORM model class instances with methods as props to Client Components. Extract plain JavaScript objects or use Server Functions (`"use server"`) for actions.
 - **Trap 5: Fetching data in Client Components via `useEffect` on mount.** In modern RSC architectures, fetching on mount via `useEffect` creates network waterfalls, causes layout shifts, and misses server streaming. Pass data from Server Components or use Strategy 9 (RSC Promise) / Strategy 12 (Server Function RPC).
+
+## Page & Layout Functions (page_functions.ts & layout_functions.ts)
+
+In Dinou, every route segment can independently configure its data fetching, static pre-rendering, cache lifecycles, and parameter validation without cluttering component UI code. 
+
+- **`page_functions.ts`**: Placed alongside `page.tsx`. Configures data fetching (`getProps`), static paths (`getStaticPaths`), cache strategy (`revalidate`), Partial Prerendering (`ppr`), cache tags (`getCacheTags`), and parameter validation (`validateParams`) specifically for that page.
+- **`layout_functions.ts`**: Placed alongside `layout.tsx`. Supplies data directly to the layout component (`getProps`) and manages segment-level cache strategy (`revalidate`, `ppr`) independently from child pages.
+
+### Overview & Horizontal Segmentation
+
+Dinou strictly separates server-side data orchestration and cache configuration from presentation UI:
+
+```
+src/blog/
+├── layout.tsx                # Presentation shell (RSC)
+├── layout_functions.ts       # Layout cache strategy (revalidate = 300) & getProps
+└── [slug]/
+    ├── page.tsx              # Page presentation (RSC or "use client")
+    └── page_functions.ts     # Page data fetching (getProps), paths, and validation
+```
+
+#### The Unified Architectural Contract: `RouteSegmentConfig<TParams, TProps>`
+
+In Dinou, every server-side configuration file implements the exact same foundational contract: **`RouteSegmentConfig`**. This is the framework's underlying "abstract" interface defining all segment capabilities. For day-to-day application code, Dinou exports two concrete, role-based aliases: **`PageFunctions`** (for pages) and **`LayoutFunctions`** (for layouts):
+
+```typescript
+// Exported directly from "dinou":
+
+/**
+ * Foundational "abstract" interface governing all route segments in Dinou.
+ */
+export interface RouteSegmentConfig<TParams = any, TProps = any> {
+  // Partial Prerendering (PPR) configuration
+  ppr?: boolean | (() => boolean | Promise<boolean>);
+
+  // Cache & revalidation strategy (< 1 = Dynamic SSR, >= 1 = ISR, false = Static)
+  revalidate?: number | false | (() => number | false | Promise<number | false>);
+
+  // Cache tags for on-demand invalidation via revalidateTag(tag)
+  getCacheTags?: string[] | ((params?: TParams) => string[] | Promise<string[]>);
+
+  // Path generator for SSG (constant array or sync/async function)
+  getStaticPaths?: StaticPathItem<TParams>[] | (() => StaticPathsResult<TParams>);
+
+  // Server loader providing direct props to the component
+  getProps?: (params?: TParams) => TProps | Promise<TProps>;
+
+  // Parameter validator guard (returns false to halt and return 404)
+  validateParams?: (params?: TParams) => boolean | Promise<boolean>;
+
+  // Controls whether Incremental Static Generation (ISG) is allowed for ungenerated paths
+  allowISG?: boolean | (() => boolean | Promise<boolean>);
+}
+
+/**
+ * Concrete semantic alias to import and use in 'page_functions.ts'
+ */
+export type PageFunctions<TParams = any, TProps = any> = RouteSegmentConfig<TParams, TProps>;
+
+/**
+ * Concrete semantic alias to import and use in 'layout_functions.ts'
+ */
+export type LayoutFunctions<TParams = any, TProps = any> = RouteSegmentConfig<TParams, TProps>;
+```
+
+| Where to use | Type to import | Purpose |
+| :--- | :--- | :--- |
+| `src/.../page_functions.ts` | `PageFunctions` | Types data loading (`getProps`), static paths, and cache for the **page**. |
+| `src/.../layout_functions.ts` | `LayoutFunctions` | Types data loading (`getProps`) and independent cache for the **layout** shell. |
+| Plugins & Shared Utils | `RouteSegmentConfig` | Base "abstract" interface for generic utilities that process arbitrary route segments. |
+
+##### 3 Architectural Reasons for Separation
+
+1. **Semantic Intent:** Seeing `import type { PageFunctions }` in a page file immediately clarifies intent and self-documents that the functions belong to the page tier.
+2. **Mental Separation:** Reinforces Dinou's horizontal segment isolation: layouts have independent cache lifetimes and props from child pages.
+3. **Future Extensibility:** If future Dinou versions introduce layout-only properties (e.g. scroll boundaries) or page-only hooks, your application code remains completely decoupled and non-breaking.
+
+---
+
+### 1. getProps (Direct Component Props)
+
+Use `getProps` to load data on the server based on route `params` and pass it directly to your component.
+
+> [!NOTE]
+> **v7 Direct Return Contract:**
+> In Dinou v7, `getProps` directly returns the props object (`{ ... }`). The legacy wrapper `{ page: { ... }, layout: { ... } }` has been deprecated because pages and layouts now have their own dedicated configuration files.
+
+- **Arguments:** `params?: TParams` (The normalized dynamic route parameters)
+- **Returns:** `TProps | Promise<TProps>` (Injected directly as the component's props)
+
+#### Example: Type-Safe Page Component Loader
+
+```typescript
+// src/blog/[slug]/page_functions.ts
+import type { PageFunctions, RouteParams } from "dinou";
+import { db, type Post } from "@/lib/db";
+
+export interface BlogPostData {
+  post: Post;
+}
+
+// Best Practice: Type getProps using PageFunctions for strict parameters & return contract
+export const getProps: PageFunctions<RouteParams<"/blog/[slug]">, BlogPostData>["getProps"] = async (params) => {
+  const post = await db.getPost(params?.slug);
+  // Directly returns BlogPostData for page.tsx
+  return { post };
+};
+```
+
+```tsx
+// src/blog/[slug]/page.tsx
+import type { PageProps } from "dinou";
+import type { BlogPostData } from "./page_functions";
+
+// Best Practice: Extend PageProps with the loader's returned BlogPostData
+interface BlogPostProps extends PageProps<"/blog/[slug]">, BlogPostData {}
+
+export default function BlogPost({ params, post }: BlogPostProps) {
+  return (
+    <article>
+      <span className="text-xs text-muted-foreground">Route: /blog/{params.slug}</span>
+      <h1>{post.title}</h1>
+      <div>{post.content}</div>
+    </article>
+  );
+}
+```
+
+#### Example: Type-Safe Layout Component Loader
+
+```typescript
+// src/blog/layout_functions.ts
+import type { LayoutFunctions } from "dinou";
+import { db } from "@/lib/db";
+
+export interface BlogLayoutData {
+  categories: string[];
+}
+
+// Best Practice: Type layout server functions with LayoutFunctions
+export const getProps: LayoutFunctions<any, BlogLayoutData>["getProps"] = async () => {
+  const categories = await db.getCategories();
+  // Directly returns props for layout.tsx
+  return { categories };
+};
+```
+
+```tsx
+// src/blog/layout.tsx
+import type { LayoutProps } from "dinou";
+import type { BlogLayoutData } from "./layout_functions";
+
+// Best Practice: Extend LayoutProps for automatic typing of children and params
+interface BlogLayoutProps extends LayoutProps, BlogLayoutData {}
+
+export default function BlogLayout({
+  children,
+  categories,
+}: BlogLayoutProps) {
+  return (
+    <div className="blog-shell">
+      <aside className="blog-sidebar">
+        <h3>Categories</h3>
+        <ul>
+          {categories.map((c) => (
+            <li key={c}>{c}</li>
+          ))}
+        </ul>
+      </aside>
+      <main>{children}</main>
+    </div>
+  );
+}
+```
+
+#### Deep-Dive Architecture: Why `getProps` Only Receives `params` & The Dynamic Bailout Mechanism
+
+##### Resource Identity & Cache Integrity
+
+Route `params` (e.g. `/blog/[slug]`) identify the *resource*, not the visitor. Because the content for a given route is identical for everyone, Dinou can run `getProps` in advance—at build time (SSG) or on first request (ISR)—and safely pre-render and cache the HTML (in static storage, server memory, reverse proxies, or CDNs). 
+
+In contrast, `cookies`, `headers`, and `query params` belong to a specific HTTP connection. If `getProps` relied on them, the output could contain private user data, making shared caching impossible and forcing the server to render every request on demand.
+
+##### The Dynamic Bailout Mechanism
+
+If you call `getContext()` inside `getProps` to read request-time connection data:
+
+| Property Accessed | Behavior | Why? |
+| :--- | :--- | :--- |
+| `context.request.headers` | ❌ **Build Error (SSG) / Dynamic Bailout (SSR)** | Headers vary per client request. Accessing them invalidates shared static caching. |
+| `context.request.cookies` | ❌ **Build Error (SSG) / Dynamic Bailout (SSR)** | Cookies are user-specific (sessions, auth). Cannot be baked into shared HTML. |
+| `context.searchParams` | ❌ **Build Error (SSG) / Dynamic Bailout (SSR)** | Query strings vary infinitely (`?ref=...`, `?utm_source=...`). Cannot be pre-rendered at build time. |
+| `context.params` | ✅ **Allowed Everywhere (SSG, ISR, SSR, PPR)** | Identifies the route resource (`[slug]`). Pure and deterministically cacheable. |
+
+##### The Recommended Pattern: Where Each Type of Data Belongs
+
+To keep pages pre-renderable (SSG/ISR) and instant to load, organize your data into its natural layer: route data in `getProps`, session cookies inside `<Suspense>`, and query parameters via the universal `useSearchParams()` hook:
+
+```typescript
+// src/blog/[slug]/page_functions.ts
+import type { PageFunctions, RouteParams } from "dinou";
+import { db, type Post } from "@/lib/db";
+
+export interface BlogPostData {
+  post: Post;
+}
+
+// 1. Pure route loader: depends solely on params
+// Cached statically for all visitors (SSG / ISR)
+export const getProps: PageFunctions<RouteParams<"/blog/[slug]">, BlogPostData>["getProps"] = async (params) => {
+  const post = await db.getPost(params?.slug);
+  return { post };
+};
+```
+
+```tsx
+// src/blog/[slug]/page.tsx
+import { Suspense } from "react";
+import type { PageProps } from "dinou";
+import type { BlogPostData } from "./page_functions";
+import { UserSession } from "./user-session";
+import { RelatedPosts } from "./related-posts";
+import { SearchFilter } from "./search-filter";
+
+interface BlogPostProps extends PageProps<"/blog/[slug]">, BlogPostData {}
+
+export default function BlogPostPage({ params, post }: BlogPostProps) {
+  return (
+    <article className="post-container">
+      {/* 1. Instant static shell: delivered immediately from cache */}
+      <header>
+        <span className="text-xs text-muted-foreground">Route: /blog/{params.slug}</span>
+        <h1>{post.title}</h1>
+        {/* Client Component using useSearchParams() for instant input sync */}
+        <SearchFilter />
+      </header>
+
+      <div className="post-body">{post.content}</div>
+
+      {/* 2. Dynamic cookie component streamed via Suspense */}
+      <Suspense fallback={<div className="text-xs text-muted-foreground">Loading session...</div>}>
+        <UserSession />
+      </Suspense>
+
+      {/* 3. Server Component using useSearchParams() streamed via Suspense */}
+      <Suspense fallback={<div className="text-xs text-muted-foreground">Filtering articles...</div>}>
+        <RelatedPosts />
+      </Suspense>
+    </article>
+  );
+}
+```
+
+```tsx
+// src/blog/[slug]/user-session.tsx (Server Component)
+import { getContext } from "dinou";
+import { auth } from "@/lib/auth";
+
+// Cookie & auth access isolated inside Suspense:
+// Streaming this component prevents getProps from bailing out to Dynamic SSR!
+export async function UserSession() {
+  const { req } = getContext();
+  const sessionToken = req?.cookies?.session;
+  const user = sessionToken ? await auth.verify(sessionToken) : null;
+
+  if (!user) {
+    return <a href="/login" className="text-xs font-semibold">Sign In</a>;
+  }
+
+  return (
+    <aside className="user-badge">
+      <span>Welcome back, <strong>{user.name}</strong>!</span>
+    </aside>
+  );
+}
+```
+
+```tsx
+// src/blog/[slug]/related-posts.tsx (Server Component)
+import { useSearchParams } from "dinou";
+import { db } from "@/lib/db";
+
+// Universal hook in a Server Component:
+// Reads ctx.req.query to fetch filtered data from the DB on the server.
+// Because it reads query, wrap it in <Suspense> in page.tsx so the post shell stays static!
+export async function RelatedPosts() {
+  const searchParams = useSearchParams();
+  const tag = searchParams.get("tag") ?? "featured";
+  const articles = await db.getPostsByTag(tag);
+
+  return (
+    <section className="related-posts">
+      <h3>Articles matching "?tag={tag}"</h3>
+      <ul>
+        {articles.map((item) => (
+          <li key={item.id}>{item.title}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+```
+
+```tsx
+// src/blog/[slug]/search-filter.tsx (Client Component)
+"use client";
+
+import { useSearchParams } from "dinou";
+
+// Universal hook in a Client Component:
+// Reads URL params on the browser for reactive input state without contacting the server
+export function SearchFilter() {
+  const searchParams = useSearchParams();
+  const currentTag = searchParams.get("tag") ?? "";
+
+  return (
+    <input
+      type="search"
+      defaultValue={currentTag}
+      placeholder="Filter by tag (?tag=...)..."
+      className="text-xs border rounded px-2 py-1"
+    />
+  );
+}
+```
+
+| Data Layer | Handled In | Lifecycle & Strategy |
+| :--- | :--- | :--- |
+| **1. Route Data (Params)** | `getProps` in `page_functions.ts` | Pure and cacheable for all visitors (SSG / ISR). |
+| **2. Cookies & Headers** | Server Components wrapped in `<Suspense>` | Streams dynamically without bailing out the static page shell. |
+| **3. Universal useSearchParams()** | Server or Client Components with `<Suspense>` | Works in **Server Components** (streamed) and **Client Components** (instant UI). |
+
+---
+
+### 2. getStaticPaths (Static Generation)
+
+Defines which dynamic parameter combinations should be pre-rendered at build time (SSG). By default, any dynamic path not returned is generated on-demand when first requested and cached statically for all subsequent visitors (Incremental Static Generation / ISG), unless disabled via `allowISG: false` (which strictly restricts routes to the pre-rendered list and returns 404 for any other path).
+
+#### 2.1. Constant Array vs Function Export
+
+In Dinou v7, `getStaticPaths` supports both a **constant array export** (for known, fixed paths) and a **synchronous or asynchronous function export** (for dynamic data sources like databases or headless CMSs):
+
+```typescript
+// 1. Constant Array Export (Zero runtime overhead, ideal for fixed routes or locales)
+// src/blog/[slug]/page_functions.ts
+import type { PageFunctions, RouteParams } from "dinou";
+
+export const getStaticPaths: PageFunctions<RouteParams<"/blog/[slug]">]["getStaticPaths"] = [
+  "welcome",
+  "getting-started",
+  "release-notes",
+];
+```
+
+```typescript
+// 2. Async Function Export (Queries databases or headless CMSs at build time)
+// src/blog/[slug]/page_functions.ts
+import type { PageFunctions, RouteParams } from "dinou";
+import { db } from "@/lib/db";
+
+export const getStaticPaths: PageFunctions<RouteParams<"/blog/[slug]">]["getStaticPaths"] = async () => {
+  const posts = await db.post.findMany({ select: { slug: true } });
+  return posts.map((p) => p.slug);
+};
+```
+
+#### 2.2. Return Formats
+
+Dinou accommodates simple, catch-all, and multi-segment architectures with flexible item formats:
+
+| Route Type | Accepted Format | Example Return | Pre-rendered URLs |
+| :--- | :--- | :--- | :--- |
+| **Simple (`[id]` or `[slug]`)** | `string[]` | `number[]` | `["foo", "bar"]` or `[1, 2, 3]` | `/blog/foo`, `/blog/bar` |
+| **Optional Simple (`[[id]]`)** | `(string | number | undefined)[]` | `[undefined, "foo", "bar"]` | `/shop`, `/shop/foo`, `/shop/bar` |
+| **Catch-all (`[...slug]`)** | `string[][]` | `[["a", "b"], ["c"]]` | `/docs/a/b`, `/docs/c` |
+| **Optional Catch-all (`[[...slug]]`)** | `(string[] | undefined)[]` | `[undefined, ["a"], ["a", "b"]]` | `/docs`, `/docs/a`, `/docs/a/b` |
+| **Multi-Segment / Nested (`[cat]/[id]`)** | `Record<string, string | string[]>[]` | `[{ cat: "shoes", id: "100" }]` | `/shop/shoes/100` |
+
+#### 2.3. Simple Dynamic Routes
+
+Simple dynamic routes match a single URL segment. Dinou supports both required segments (`[id]`) and optional segments (`[[category]]`):
+
+```typescript
+// src/blog/[id]/page_functions.ts (Required segment [id])
+import type { PageFunctions, RouteParams } from "dinou";
+
+export const getStaticPaths: PageFunctions<RouteParams<"/blog/[id]">]["getStaticPaths"] = [
+  "1",
+  "2",
+  "3",
+]; // Generates: /blog/1, /blog/2, /blog/3
+```
+
+```typescript
+// src/shop/[[category]]/page_functions.ts (Optional segment [[category]])
+import type { PageFunctions, RouteParams } from "dinou";
+
+// Pass undefined to pre-render the root route (/shop) without a parameter
+export const getStaticPaths: PageFunctions<RouteParams<"/shop/[[category]]">]["getStaticPaths"] = [
+  undefined, // Generates: /shop
+  "shoes",   // Generates: /shop/shoes
+  "shirts",  // Generates: /shop/shirts
+];
+```
+
+#### 2.4. Catch-all Routes
+
+Catch-all routes match multiple dynamic path segments. Dinou supports both standard catch-alls (`[...slug]`) and optional catch-alls (`[[...slug]]`):
+
+```typescript
+// src/docs/[...slug]/page_functions.ts (Required catch-all [...slug])
+import type { PageFunctions, RouteParams } from "dinou";
+
+export const getStaticPaths: PageFunctions<RouteParams<"/docs/[...slug]">]["getStaticPaths"] = [
+  ["intro"],              // Generates: /docs/intro
+  ["api", "v1", "auth"],  // Generates: /docs/api/v1/auth
+];
+```
+
+```typescript
+// src/docs/[[...slug]]/page_functions.ts (Optional catch-all [[...slug]])
+import type { PageFunctions, RouteParams } from "dinou";
+
+export const getStaticPaths: PageFunctions<RouteParams<"/docs/[[...slug]]">]["getStaticPaths"] = [
+  undefined,              // Generates: /docs (root)
+  ["intro"],              // Generates: /docs/intro
+  ["api", "v1", "auth"],  // Generates: /docs/api/v1/auth
+];
+```
+
+#### 2.5. Automatic Route Propagation (Recursion)
+
+Static parameters automatically propagate downwards through the directory tree. If you define values for a segment, Dinou will recursively generate all nested static sub-pages under those values.
+
+```
+src/blog/[slug]/
+├── page.tsx          # Page: /blog/[slug]
+├── page_functions.ts # Returns ["post-a", "post-b"]
+└── details/
+    └── page.tsx      # Nested static page
+```
+
+If `getStaticPaths` in `blog/[slug]` returns `["post-a", "post-b"]`, Dinou generates 4 static pages:
+1. `/blog/post-a`
+2. `/blog/post-a/details`
+3. `/blog/post-b`
+4. `/blog/post-b/details`
+
+#### 2.6. Nested Pages & The "Chain of Responsibility"
+
+When nesting routes where both the parent and the child segment have their own `page.tsx`, static generation follows a strict top-down "chain of responsibility":
+
+```
+src/shop/[category]/
+├── page.tsx              # Parent page: /shop/[category]
+├── page_functions.ts     # Parent gatekeeper
+└── [id]/
+    ├── page.tsx          # Child page: /shop/[category]/[id]
+    └── page_functions.ts # Child generator
+```
+
+Because the parent folder contains a `page.tsx`, Dinou must generate valid parent pages first before it can traverse down to the child level. The parent acts as a mandatory gatekeeper:
+
+1. **If parent returns `[]`:** Dinou halts at the parent level and never invokes the child `[id]/page_functions.ts`. No product pages are generated.
+2. **When parent resolves its categories:** It unlocks the child level:
+
+```typescript
+// 1. Parent: src/shop/[category]/page_functions.ts
+import type { PageFunctions, RouteParams } from "dinou";
+
+export const getStaticPaths: PageFunctions<RouteParams<"/shop/[category]">]["getStaticPaths"] = [
+  "shoes",
+  "shirts",
+];
+
+// 2. Child: src/shop/[category]/[id]/page_functions.ts
+import type { PageFunctions, RouteParams } from "dinou";
+
+export const getStaticPaths: PageFunctions<RouteParams<"/shop/[category]/[id]">]["getStaticPaths"] = [
+  "100",
+  "200",
+];
+
+// Automatically generates 4 static pages:
+// /shop/shoes/100, /shop/shoes/200
+// /shop/shirts/100, /shop/shirts/200
+```
+
+> [!TIP]
+> **Rule of Thumb:**
+> - If an intermediate folder has its own `page.tsx`, define a `page_functions.ts` at that folder level with scalar arrays (`string[]`).
+> - If an intermediate folder does **not** have a `page.tsx`, you can define all nested parameters together in the leaf `page_functions.ts` using an Object Array.
+
+#### 2.7. Nested & Pass-through Segments
+
+When you have multiple dynamic segments in a path without intermediate pages (the intermediate folders do not have a `page.tsx`), the leaf segment returns an **Object** mapping all parameter names at once:
+
+```
+src/shop/[category]/[brand]/[...specs]/
+└── page.tsx # Only leaf has a page.tsx
+```
+
+```typescript
+// src/shop/[category]/[brand]/[...specs]/page_functions.ts
+import type { PageFunctions, RouteParams } from "dinou";
+
+export const getStaticPaths: PageFunctions<RouteParams<"/shop/[category]/[brand]/[...specs]">]["getStaticPaths"] = [
+  {
+    category: "electronics",
+    brand: "apple",
+    specs: ["m3", "16gb"], // → Pre-renders: /shop/electronics/apple/m3/16gb
+  },
+  {
+    category: "clothing",
+    brand: "nike",
+    specs: ["running", "shoes", "size-10"], // → Pre-renders: /shop/clothing/nike/running/shoes/size-10
+  },
+];
+```
+
+#### 2.8. Async Support (CMS & DB)
+
+`getStaticPaths` can be an `async` function, allowing you to query external headless CMSs, databases, or REST APIs during the build:
+
+```typescript
+// src/products/[id]/page_functions.ts
+import type { PageFunctions, RouteParams } from "dinou";
+import { db } from "@/lib/db";
+
+export const getStaticPaths: PageFunctions<RouteParams<"/products/[id]">]["getStaticPaths"] = async () => {
+  // Queries your database at build time (npm run build)
+  const products = await db.products.findMany({ select: { id: true } });
+  return products.map((product) => String(product.id));
+};
+```
+
+---
+
+### 3. validateParams (Route Parameter Validation)
+
+Validates dynamic parameters (such as `[id]` or `[...slug]`) on the server prior to rendering. If `validateParams` returns `false` (or a falsy value), Dinou immediately terminates request processing and issues a **404 Not Found** response.
+
+- **Arguments:** `params?: TParams` (The normalized route parameters object)
+- **Returns:** `boolean | Promise<boolean>` (Return `false` to abort and render 404)
+
+```typescript
+// src/products/[id]/page_functions.ts
+import type { PageFunctions, RouteParams } from "dinou";
+
+type ProductParams = RouteParams<"/products/[id]">;
+
+// 1. Synchronous validation: guarantees id is purely numeric
+export const validateParams: PageFunctions<ProductParams>["validateParams"] = (params) => {
+  return /^[0-9]+$/.test(params?.id ?? "");
+};
+```
+
+```typescript
+// src/blog/[slug]/page_functions.ts
+import type { PageFunctions, RouteParams } from "dinou";
+import { db } from "@/lib/db";
+
+type BlogParams = RouteParams<"/blog/[slug]">;
+
+// 2. Asynchronous validation: verifies record existence before rendering
+export const validateParams: PageFunctions<BlogParams>["validateParams"] = async (params) => {
+  if (!params?.slug) return false;
+  const exists = await db.posts.exists({ slug: params.slug });
+  return exists;
+};
+```
+
+> [!NOTE]
+> **Execution Timing:** `validateParams` executes **before** `getProps`. If validation fails, `getProps` will never run, preventing unnecessary database lookups.
+
+---
+
+### 4. allowISG (Incremental Static Opt-Out)
+
+Controls whether dynamic paths that were not pre-rendered at build time (via `getStaticPaths` during `dinou build`) are allowed to be generated on-demand on the first incoming user request.
+
+In Dinou v7, pre-rendering happens strictly during the build phase, ensuring production server startup is instantaneous.
+
+- **Default (`true`):** Any valid path not pre-generated at build time is generated on-demand when the first visitor requests it, and subsequently cached statically (Incremental Static Generation / ISG).
+- **Opt-Out (`false`):** Strictly restricts accessible routes to those explicitly returned by `getStaticPaths`. Any request for a path not pre-rendered immediately returns a **404 Not Found** without invoking `getProps` or running SSR.
+
+```typescript
+// src/docs/[slug]/page_functions.ts
+import type { PageFunctions, RouteParams } from "dinou";
+
+// Strict SSG: only these two articles exist; all other /docs/[slug] return 404
+export const getStaticPaths: PageFunctions<RouteParams<"/docs/[slug]">]["getStaticPaths"] = [
+  "installation",
+  "architecture",
+];
+
+// Disallows on-demand generation for unlisted slugs
+export const allowISG: PageFunctions["allowISG"] = false;
+```
+
+---
+
+### 5. revalidate (ISR & Dynamic SSR Escape)
+
+The `revalidate` export is Dinou's single source of truth for route caching and rendering behavior. It is measured in **seconds (s)**.
+
+| Revalidate Value | Strategy | Lifecycle & Behavior |
+| :--- | :--- | :--- |
+| **`revalidate < 1` (or `0`)** | **Dynamic SSR** | Escapes static generation. The page is rendered dynamically on every incoming request with live database reads. |
+| **`revalidate >= 1`** | **Incremental Static Regeneration (ISR)** | The page is cached statically for `N` seconds. Requests within the window receive instant cached HTML (`0ms` TTFB). After `N` seconds, a background regeneration is triggered. |
+| **`revalidate = false`** | **Pure SSG (Default)** | The page is rendered once at build time and cached indefinitely until the next build or manual purge. |
+
+```typescript
+// src/metrics/page_functions.ts - Real-time dynamic SSR
+import type { PageFunctions } from "dinou";
+
+// Escapes SSG: executes getProps on every request
+export const revalidate: PageFunctions["revalidate"] = 0;
+```
+
+```typescript
+// src/store/[id]/page_functions.ts - 60-second ISR
+import type { PageFunctions, RouteParams } from "dinou";
+
+export const revalidate: PageFunctions["revalidate"] = 60; // 1 minute ISR
+```
+
+```typescript
+// Conditional revalidation based on environment
+export const revalidate: PageFunctions["revalidate"] = () => {
+  return process.env.NODE_ENV === "development" ? 0 : 3600;
+};
+```
+
+---
+
+### 6. getCacheTags (Cache Tagging)
+
+Assigns custom tags to the static page cache files, allowing the page to be purged and regenerated on-demand using `revalidateTag(tag)` (**On-Demand Revalidation**).
+
+```typescript
+// src/products/[id]/page_functions.ts
+import type { PageFunctions, RouteParams } from "dinou";
+
+type ProductParams = RouteParams<"/products/[id]">;
+
+// 1. Constant Array
+export const getCacheTags: PageFunctions["getCacheTags"] = ["catalog", "products"];
+
+// 2. Synchronous Function (derives tags from route parameters)
+export const getCacheTags: PageFunctions<ProductParams>["getCacheTags"] = (params) => {
+  return ["catalog", `product-${params?.id}`];
+};
+
+// 3. Asynchronous Function (queries external tags or taxonomy)
+export const getCacheTags: PageFunctions<ProductParams>["getCacheTags"] = async (params) => {
+  const categories = await db.categories.forProduct(params?.id);
+  return ["catalog", ...categories.map((c) => `category-${c.slug}`)];
+};
+```
+
+#### On-Demand Invalidation via Server Function
+
+When data changes, call `revalidateTag()` in a Server Function or webhook to instantly invalidate all cached files tagged with that identifier:
+
+```typescript
+// src/actions/products.ts
+"use server";
+
+import { revalidateTag } from "dinou";
+import { db } from "@/lib/db";
+
+export async function updateProduct(id: string, data: any) {
+  await db.products.update({ where: { id }, data });
+  // Instantly invalidates /products/[id] and any catalog pages sharing the tag
+  await revalidateTag(`product-${id}`);
+}
+```
+
+---
+
+### 7. ppr (Partial Prerendering)
+
+Partial Prerendering (PPR) combines the instant TTFB (Time to First Byte) of a static page with the real-time capabilities of dynamic server-side rendering over a single HTTP response.
+
+#### How PPR Works: Instant Shell + Progressive Streaming
+
+PPR eliminates the traditional trade-off between static and dynamic rendering by dividing the page into two phases over a single HTTP connection:
+1. **Instant Static Shell:** Delivered immediately (`0ms` TTFB) from CDN edge or server cache. Includes layouts, navigation, and fallback skeletons.
+2. **Dynamic Progressive Streaming:** Live components wrapped in React `<Suspense>` execute concurrently on the server and stream their resolved HTML chunks directly into the page.
+
+```typescript
+// src/dashboard/page_functions.ts
+import type { PageFunctions } from "dinou";
+
+// Enables Partial Prerendering for this route segment
+export const ppr: PageFunctions["ppr"] = true;
+```
+
+```tsx
+// src/dashboard/page.tsx
+import { Suspense } from "react";
+import { UserGreeting, UserGreetingSkeleton } from "./user-greeting";
+import { LiveMetrics, MetricsSkeleton } from "./live-metrics";
+
+export default function DashboardPage() {
+  return (
+    <div className="dashboard-layout">
+      {/* Static Shell: Pre-rendered at build time (0ms TTFB) */}
+      <header className="dashboard-header">
+        <h1>Management Console</h1>
+      </header>
+
+      {/* Dynamic Holes: Streamed progressively over the open HTTP connection */}
+      <Suspense fallback={<UserGreetingSkeleton />}>
+        <UserGreeting />
+      </Suspense>
+
+      <Suspense fallback={<MetricsSkeleton />}>
+        <LiveMetrics />
+      </Suspense>
+    </div>
+  );
+}
+```
+
+---
+
+### 8. End-to-End Type-Safe Example
+
+To achieve complete type safety, autocompletion, and compile-time validation in your routes, import `PageFunctions` and `LayoutFunctions` from `"dinou"` and pass your parameter and props types:
+
+#### 1. Defining `src/blog/[slug]/page_functions.ts`
+
+```typescript
+// src/blog/[slug]/page_functions.ts
+import type { PageFunctions, RouteParams } from "dinou";
+import { db, type Post } from "@/lib/db";
+
+// 1. Strict route parameters derived from URL pattern
+export type BlogParams = RouteParams<"/blog/[slug]">;
+
+// 2. Define data contract passed to the component
+export interface BlogPageProps {
+  post: Post;
+  views: number;
+}
+
+// 3. Page configuration with full type inference
+export const ppr: PageFunctions["ppr"] = true;
+export const revalidate: PageFunctions["revalidate"] = 60; // 1 min ISR
+
+export const getStaticPaths: PageFunctions<BlogParams>["getStaticPaths"] = [
+  "welcome",
+  "announcement",
+];
+
+export const getProps: PageFunctions<BlogParams, BlogPageProps>["getProps"] = async (params) => {
+  const post = await db.posts.findUnique({ where: { slug: params?.slug } });
+  if (!post) throw new Error("Post not found");
+  return { post, views: 100 };
+};
+
+export const validateParams: PageFunctions<BlogParams>["validateParams"] = (params) => {
+  return Boolean(params?.slug && params.slug.length > 2);
+};
+
+export const getCacheTags: PageFunctions<BlogParams>["getCacheTags"] = (params) => {
+  return ["blog", `post-${params?.slug}`];
+};
+```
+
+#### 2. Consuming Props in `src/blog/[slug]/page.tsx`
+
+```tsx
+// src/blog/[slug]/page.tsx
+import { Suspense } from "react";
+import type { PageProps } from "dinou";
+import type { BlogPageProps } from "./page_functions";
+import { RealtimeViews, ViewsSkeleton } from "./components";
+
+// Extend PageProps to receive both route params and loader data with full type safety
+interface BlogPostPageProps extends PageProps<"/blog/[slug]">, BlogPageProps {}
+
+export default function BlogPostPage({ params, post }: BlogPostPageProps) {
+  return (
+    <article className="max-w-2xl mx-auto py-8">
+      {/* 1. Static shell (pre-rendered at build time, delivered with 0ms TTFB) */}
+      <span className="text-xs text-muted-foreground font-mono">/blog/{params.slug}</span>
+      <h1 className="text-3xl font-bold">{post.title}</h1>
+      <div className="text-sm text-muted-foreground my-2">
+        By {post.author} • published {post.publishedAt}
+      </div>
+      <div className="prose mt-6">{post.content}</div>
+
+      {/* 2. PPR Dynamic Stream: Real-time analytics streamed in via Suspense */}
+      <Suspense fallback={<ViewsSkeleton />}>
+        <RealtimeViews slug={params.slug} />
+      </Suspense>
+    </article>
+  );
+}
+```
+
+#### 3. Defining `src/blog/layout_functions.ts`
+
+```typescript
+// src/blog/layout_functions.ts
+import type { LayoutFunctions, RouteParams } from "dinou";
+import { db } from "@/lib/db";
+
+// 1. Layout parameters for /blog (static route segment without dynamic params = {})
+type BlogLayoutParams = RouteParams<"/blog">;
+
+// 2. Define layout data contract
+export interface BlogCategory {
+  id: string;
+  name: string;
+  count: number;
+}
+
+export interface BlogLayoutData {
+  categories: BlogCategory[];
+  featuredSlug: string;
+}
+
+// 3. Dedicated layout loader typed via LayoutFunctions
+export const getProps: LayoutFunctions<BlogLayoutParams, BlogLayoutData>["getProps"] = async () => {
+  const categories = await db.categories.findMany();
+  const featured = await db.posts.findFirst({ where: { featured: true } });
+
+  // Injected directly as props into layout.tsx
+  return {
+    categories,
+    featuredSlug: featured?.slug ?? "welcome",
+  };
+};
+
+// 4. Segment-level caching strategy for the layout shell
+export const revalidate: LayoutFunctions["revalidate"] = 300; // Layout revalidates every 5 mins
+export const ppr: LayoutFunctions["ppr"] = true;
+```
+
+#### 4. Consuming Props in `src/blog/layout.tsx`
+
+```tsx
+// src/blog/layout.tsx
+import type { LayoutProps } from "dinou";
+import type { BlogLayoutData } from "./layout_functions";
+
+// Extend LayoutProps to receive children, segment params, and layout loader data
+interface BlogLayoutComponentProps extends LayoutProps<"/blog">, BlogLayoutData {}
+
+export default function BlogLayout({
+  children,
+  categories,
+  featuredSlug,
+}: BlogLayoutComponentProps) {
+  return (
+    <div className="blog-container">
+      <aside className="blog-sidebar">
+        <h3>Categories</h3>
+        <ul>
+          {categories.map((c) => (
+            <li key={c.id}>
+              {c.name} ({c.count})
+            </li>
+          ))}
+        </ul>
+      </aside>
+      <main className="blog-content">
+        {children}
+      </main>
+    </div>
+  );
+}
+```
+
+#### Alternative Object Destructuring Pattern
+
+If you prefer defining all configurations in a single typed object before exporting, use object destructuring:
+
+```typescript
+// 1. Page Config Object in src/blog/[slug]/page_functions.ts
+const pageConfig: PageFunctions<BlogParams, BlogPageProps> = {
+  ppr: true,
+  revalidate: 60,
+  getStaticPaths: ["welcome", "announcement"],
+  getProps: async (params) => {
+    const post = await fetchPost(params?.slug);
+    return { post, views: 100 };
+  },
+  validateParams: (params) => Boolean(params?.slug),
+  getCacheTags: (params) => ["blog", `post-${params?.slug}`],
+};
+
+export const { ppr, revalidate, getStaticPaths, getProps, validateParams, getCacheTags } = pageConfig;
+
+// 2. Layout Config Object in src/blog/layout_functions.ts
+const layoutConfig: LayoutFunctions<any, BlogLayoutData> = {
+  revalidate: 300,
+  ppr: true,
+  getProps: async () => ({
+    categories: await fetchCategories(),
+    featuredSlug: "welcome",
+  }),
+};
+
+export const { revalidate, ppr, getProps } = layoutConfig;
+```
 
 ---
 
