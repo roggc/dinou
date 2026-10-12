@@ -229,6 +229,17 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [3.1. Why StrictMode is Vital for the React Compiler](#31-why-strictmode-is-vital-for-the-react-compiler)
     - [3.2. Configuring reactStrictMode in dinou.config.mjs](#32-configuring-reactstrictmode-in-dinouconfigmjs)
   - [4. Guidelines for Compiler Purity](#4-guidelines-for-compiler-purity)
+- [Public Directory (`public/`)](#public-directory-public)
+  - [1. Overview & Architecture](#1-overview--architecture)
+    - [Bypassing Bundlers (.dinou/dist3)](#bypassing-bundlers-dinoudist3)
+    - [Recommended Directory Structure](#recommended-directory-structure)
+  - [2. URL Mapping & Serving](#2-url-mapping--serving)
+  - [3. Common Use Cases](#3-common-use-cases)
+    - [Favicons & App Icons](#favicons--app-icons)
+    - [robots.txt & sitemap.xml (SEO)](#robotstxt--sitemapxml-seo)
+    - [Domain Verification & .well-known](#domain-verification--well-known)
+    - [OpenGraph & Social Share Cards](#opengraph--social-share-cards)
+  - [4. public/ vs. Imported Assets (src/)](#4-public-vs-imported-assets-src)
 - [Configuration API (`dinou.config.js`)](#configuration-api-dinouconfigjs)
   - [1. Universal Middleware (`onRequest`)](#1-universal-middleware-onrequest)
   - [2. SWC Disk-Mirror (`useSwcDiskMirror`)](#2-swc-disk-mirror-useswcdiskmirror)
@@ -5651,6 +5662,196 @@ To get the maximum benefit from the React Compiler and StrictMode in Dinou, foll
 1. **Keep Component Render Functions Pure:** Given the same inputs (props, state, context), a component should always return the same JSX. Never mutate global variables or arguments passed to the component during render.
 2. **Treat Props and State as Immutable:** Never mutate `props.user.name = "new"` directly. Always create new object references when updating state (e.g. `{ ...user, name: "new" }`).
 3. **Isolate Side Effects to `useEffect` or Server Functions:** Timers, DOM subscriptions, and network mutations belong inside event handlers or `useEffect`, never in the component body.
+
+---
+
+## Public Directory (`public/`)
+
+Static asset delivery in Dinou. The `public/` directory serves favicons, `robots.txt`, sitemaps, domain verification files, and unbundled media directly from `.dinou/dist3` without passing through bundlers.
+
+### 1. Overview & Architecture
+
+Dinou provides a dedicated `public/` folder located at the root of your project (parallel to `src/` and `package.json`). This directory is the single home for all static files that must be accessible at fixed, unhashed URLs on the root path (`/`).
+
+#### Bypassing Bundlers (`.dinou/dist3`)
+
+Unlike application code, stylesheets, or imported media which are parsed and bundled by Webpack, Rollup, or Esbuild, files placed in `public/` **completely bypass the bundler pipeline**:
+
+- **Development Mode (`dinou dev`):** Dinou's dev server intercepts static file requests matching paths in `public/` and streams them instantly from disk with zero build step, hot-reloading, or cache latency.
+- **Production Build (`dinou build`):** During the build process, Dinou executes a direct recursive copy from `./public` into `.dinou/dist3`. The runtime web engine serves these files directly with optimal HTTP headers (ETag, Content-Type, Cache-Control).
+
+**The Dinou Static Asset Pipeline Flow:**
+
+```
+./public/ (robots.txt, favicon.ico, images/)
+  ── Direct Copy (No Bundler: zero AST parse, no hash renaming) ──>
+.dinou/dist3/ (Served at root URL path /)
+```
+
+> [!NOTE]
+> **Why Bypassing the Bundler Matters:**
+> Third-party crawlers, browsers, and verification bots require exact, unchanging file paths like `/robots.txt`, `/favicon.ico`, or `/google12345.html`. If these passed through a bundler, they would be renamed with content hashes (e.g. `robots.a7b9c.txt`) or inlined as data URIs, breaking external protocol compliance.
+
+#### Recommended Directory Structure
+
+Here is the standard layout of a production Dinou project using the `public/` folder:
+
+```bash
+my-dinou-app/
+├── public/
+│   ├── favicon.ico                 # Legacy & fallback browser favicon
+│   ├── favicon-16x16.png           # Small tab icon
+│   ├── favicon-32x32.png           # Standard tab icon
+│   ├── apple-touch-icon.png        # iOS home screen bookmark icon (180x180)
+│   ├── site.webmanifest            # Progressive Web App (PWA) manifest
+│   ├── robots.txt                  # Web crawler instructions
+│   ├── sitemap.xml                 # Search engine sitemap index
+│   ├── googlea1b2c3d4e5f6.html     # Google Search Console domain verification
+│   ├── .well-known/                # Mobile app links & security metadata
+│   │   ├── assetlinks.json         # Android App Links
+│   │   └── apple-app-site-association # iOS Universal Links
+│   └── images/
+│       ├── og-image.png            # OpenGraph / Twitter social card
+│       └── logo-transparent.png    # Unbundled high-res brand marks
+├── src/
+│   └── app/
+│       ├── layout.tsx              # Root HTML shell linking public assets
+│       └── page.tsx
+├── dinou.config.mjs
+└── package.json
+```
+
+### 2. URL Mapping & Serving
+
+Every file and nested folder inside `public/` is served directly from the root URL (`/`). **You must never include `/public/` in the URL path**.
+
+| Filesystem Path | Public URL Path | Status |
+| :--- | :--- | :--- |
+| `public/favicon.ico` | `/favicon.ico` | ✓ Correct |
+| `public/robots.txt` | `/robots.txt` | ✓ Correct |
+| `public/images/og-image.png` | `/images/og-image.png` | ✓ Correct |
+| `public/favicon.ico` | ~~/public/favicon.ico~~ | ✗ **404 Not Found** |
+
+### 3. Common Use Cases
+
+#### Favicons & App Icons
+
+To provide branding across desktop browsers, mobile devices, and PWA home-screen bookmarks:
+
+1. Generate your icon bundle using a standard tool (like favicon.io or RealFaviconGenerator).
+2. Place the generated icon files directly in `public/`.
+3. Reference them in your Root Layout (`src/app/layout.tsx`) inside the `<head>` element:
+
+```tsx
+// src/app/layout.tsx
+import type { ReactNode } from "react";
+
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en">
+      <head>
+        <title>My Dinou Application</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        
+        {/* Favicon & Multi-Resolution App Icons */}
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+        <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+        <link rel="manifest" href="/site.webmanifest" />
+        
+        {/* Global Styles */}
+        <link href="/styles.css" rel="stylesheet" precedence="default" />
+      </head>
+      <body>{children}</body>
+    </html>
+  );
+}
+```
+
+#### robots.txt & sitemap.xml (SEO)
+
+Search engine bots like Googlebot expect crawler instructions and sitemaps at standard URLs. Create `public/robots.txt`:
+
+```txt
+# public/robots.txt
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /api/private/
+
+# Sitemap location
+Sitemap: https://mydinouapp.com/sitemap.xml
+```
+
+And create your static sitemap index at `public/sitemap.xml`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://mydinouapp.com/</loc>
+    <lastmod>2026-10-01</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://mydinouapp.com/docs</loc>
+    <lastmod>2026-10-01</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+</urlset>
+```
+
+#### Domain Verification & .well-known
+
+Domain ownership verification files (Google Search Console, Apple Pay, Pinterest, Bing) can be dropped straight into `public/`:
+
+```bash
+# Google Search Console verification:
+# Placed in: public/google1a2b3c4d5e6f.html
+# Accessible at: https://mydinouapp.com/google1a2b3c4d5e6f.html
+```
+
+For mobile deep-linking protocols (Universal Links on iOS and App Links on Android), create a `.well-known` directory inside `public/`:
+
+```bash
+# Apple Universal Links:
+public/.well-known/apple-app-site-association -> https://mydinouapp.com/.well-known/apple-app-site-association
+
+# Android App Links:
+public/.well-known/assetlinks.json -> https://mydinouapp.com/.well-known/assetlinks.json
+```
+
+#### OpenGraph & Social Share Cards
+
+Social platforms (Twitter/X, LinkedIn, Discord, Facebook) scrape static images when links to your site are shared. Store your social preview cards in `public/images/` and link them in your HTML `<head>`:
+
+```tsx
+// Inside your root layout <head>
+<meta property="og:title" content="Dinou - High Performance Full-Stack Framework" />
+<meta property="og:description" content="Next-generation React framework with 2D micro-segmentation and in-process execution." />
+<meta property="og:image" content="https://mydinouapp.com/images/og-image.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="https://mydinouapp.com/images/og-image.png" />
+```
+
+### 4. public/ vs. Imported Assets (src/)
+
+Dinou provides two distinct mechanisms for handling assets. Choose the right pattern for your use case:
+
+| Feature | Static Directory (`public/`) | Imported Assets (`src/`) |
+| :--- | :--- | :--- |
+| **Filesystem Location** | `public/**/*` | `src/**/*` |
+| **Bundler Processing** | None (Bypasses bundlers entirely) | Processed by Webpack, Rollup, or Esbuild |
+| **Production Destination** | `.dinou/dist3/**/*` | `.dinou/dist3/assets/*` |
+| **URL Path & Naming** | **Fixed, exact filename** (e.g. `/favicon.ico`) | **Path-hashed filename** (e.g. `/assets/logo-a9f2bc.png`) |
+| **Referencing Syntax** | `<img src="/images/hero.png" />` | `import hero from "./hero.png";`<br />`<img src={hero} />` |
+| **Best For** | Favicons, robots.txt, sitemaps, verification files, PDFs, OpenGraph cards | Component UI icons, bundled CSS background images, media imported in JS/TSX |
 
 ---
 
