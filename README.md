@@ -315,6 +315,18 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [Static HTML Export (dinou export-static)](#static-html-export-dinou-export-static)
   - [Recommended package.json Setup](#recommended-packagejson-setup)
   - [Which Bundler & Target Should You Choose?](#which-bundler--target-should-you-choose)
+- [Deployment Guide](#deployment-guide)
+  - [Deploy Everywhere with Dinou v7](#deploy-everywhere-with-dinou-v7)
+  - [Supported Deployment Targets](#supported-deployment-targets)
+    - [1. Node.js (Docker, Fly.io, Railway, Render)](#1-nodejs-docker-flyio-railway-render)
+    - [2. Netlify (Serverless Functions v2)](#2-netlify-serverless-functions-v2)
+    - [3. Cloudflare Workers & Pages](#3-cloudflare-workers--pages)
+    - [4. Deno Deploy (deno-edge) & Standalone Binaries](#4-deno-deploy-deno-edge--standalone-binaries)
+    - [5. Bun Runtime & Standalone Executables](#5-bun-runtime--standalone-executables)
+    - [6. Static Export (GitHub Pages, S3, CDN)](#6-static-export-github-pages-s3-cdn)
+  - [Production Docker Setup](#production-docker-setup)
+  - [Managing Production Environment Secrets](#managing-production-environment-secrets)
+  - [Production Pre-Flight Checklist](#production-pre-flight-checklist)
 - [📜 Changelog](#-changelog)
 - [📄 License](#-license)
 
@@ -7348,6 +7360,296 @@ Copy and paste the complete `"scripts"` block directly into your project's `pack
 - **Edge Deployments → Rollup:** For Cloudflare Workers or serverless edge targets where cold start and payload size matter most, `dinou build:cloudflare:rollup` yields optimal tree-shaking.
 - **Enterprise & React Compiler → Webpack:** If testing React Compiler memoization in dev or migrating enterprise code with non-standard CommonJS modules, `dinou dev:webpack` is your best choice.
 - **Self-Contained Shipments → Deno / Bun Compile:** To deploy to bare-metal servers or minimal Docker containers without installing Node.js, run `dinou build:deno:compile` or `dinou build:bun:compile` to produce a single binary file.
+
+---
+
+## Deployment Guide
+
+Dinou v7 features universal deployment flexibility: deploy as a standalone Node.js server, on Netlify Serverless Functions v2, at the edge with Cloudflare Workers, on Deno or Bun, or compiled into single native binaries.
+
+### Deploy Everywhere with Dinou v7
+
+Before Dinou v7, deploying React Server Components to serverless platforms (like Netlify) was impossible due to the need to pass the `--conditions react-server` flag. While on a VPS or custom server (like DigitalOcean) you could configure Node runtime flags, serverless and edge environments offered no control over them.
+
+**Dinou v7 solves this completely**: through its pre-bundled dual-engine architecture, server bundles are compiled with all React Server conditions pre-resolved at build time. You can now deploy Dinou to virtually any infrastructure:
+
+| Platform | Runtime Type | Description |
+| :--- | :--- | :--- |
+| **Node.js & Containers** | Standalone Server | Standalone servers on Railway, Fly.io, Render, DigitalOcean, AWS, or Docker. |
+| **Netlify Serverless v2** | Serverless Functions v2 | Native Functions v2 adapter with zero-config edge routing and static CDN caching. |
+| **Cloudflare Workers** | Edge V8 Engine | Global sub-millisecond cold starts on Cloudflare Workers and Pages with KV & D1. |
+| **Deno Deploy (Edge)** | Global Edge Cloud | Multi-region edge runtime targeting `deno-edge` with built-in Deno KV persistence. |
+
+---
+
+### Supported Deployment Targets
+
+Dinou provides dedicated build commands and adapters for each target runtime:
+
+| Deployment Target | Build Command | Start / Output |
+| :--- | :--- | :--- |
+| **Node.js Server** | `dinou build:node` | `dinou start:node` |
+| **Netlify (Functions v2)** | `dinou build:node` | Automated via `netlify.toml` |
+| **Cloudflare Workers** | `dinou build:cloudflare` | `wrangler deploy` |
+| **Deno Deploy (Edge / Cloud)** | `dinou build:deno` | `deno deploy --project=<app> .dinou/deno/main.js` |
+| **Deno Standalone Server** | `dinou build:deno` | `dinou start:deno` |
+| **Deno Standalone Binary** | `dinou build:deno:compile` | `./dist/deno-server` |
+| **Bun Runtime** | `dinou build:bun` / `dinou build:bun:pure` | `dinou start:bun` |
+| **Bun Standalone Binary** | `dinou build:bun:compile` / `dinou build:bun:pure:compile` | `./dist/server` |
+| **Static HTML Export (SSG)** | `dinou export-static` | `out/` (Static HTML & Assets) |
+
+#### 1. Node.js (Docker, Fly.io, Railway, Render)
+
+The Node.js target compiles your application into a pre-bundled, standalone production server in `.dinou/node/server.mjs`:
+
+```bash
+# 1. Compile for Node.js
+dinou build:node
+
+# 2. Start the production server (defaults to PORT 3000)
+dinou start:node
+```
+
+**PaaS & Cloud Hosts (Railway, Render, Fly.io, DigitalOcean App Platform):**
+Set **Build Command** to `npm run build:node` and **Start Command** to `npm run start:node`. All platform-assigned ports (`PORT`) are detected automatically, and Dinou's pre-bundled architecture eliminates any need for manual Node flags.
+
+#### 2. Netlify (Serverless Functions v2)
+
+In **Dinou v7**, Netlify is a first-class supported serverless target. During `npm run build`, Dinou automatically pre-bundles a specialized **Netlify Functions v2 Adapter** directly into `.dinou/dist3/server/netlify.js`.
+
+**Step 1:** Configure your project with a `netlify.toml` file in the repository root:
+
+```toml
+# netlify.toml
+[build]
+  command = "npm run build"
+  publish = ".dinou/dist3"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[environment]
+  NODE_ENV = "production"
+
+[functions]
+  directory = ".dinou/dist3/server"
+  node_bundler = "none"
+  included_files = [
+    "package.json",
+    "tsconfig.json",
+    "dinou.config.*",
+    "src/**",
+    "dinou/**",
+    ".dinou/**",
+    "node_modules/**",
+    "!node_modules/@swc/**",
+    "!node_modules/typescript/**",
+    "!node_modules/webpack*/**",
+    "!node_modules/@esbuild/**",
+    "!node_modules/esbuild/**",
+    "!node_modules/@rollup/**",
+    "!node_modules/rollup/**",
+    "!node_modules/.cache/**",
+    "!node_modules/@types/**"
+  ]
+```
+
+**Step 2:** Deploy to Netlify:
+
+```bash
+# Option A: Automatic Git-based CI/CD (Recommended)
+git push origin main
+
+# Option B: Manual deployment using Netlify CLI (requires local build)
+npm run build
+npx netlify deploy --prod
+```
+
+> [!NOTE]
+> **How Netlify Functions v2 Works in Dinou:**
+> The pre-bundled adapter in `.dinou/dist3/server/netlify.js` exports `config = { path: "/*", preferStatic: true }`. Because `preferStatic: true` is active, Netlify serves all client assets, CSS, images, and pre-rendered pages directly from `.dinou/dist3` through its global edge CDN with zero compute cost. Dynamic routes, SSR streaming, and React Server Functions are routed to the serverless function automatically. With `node_bundler = "none"`, Netlify runs the pre-bundled adapter cleanly without double-bundling conflicts.
+
+#### 3. Cloudflare Workers & Pages
+
+Dinou provides native ahead-of-time compilation for Cloudflare's V8-based `workerd` edge runtime. It compiles Server Components and SSR into standard W3C Web Streams with sub-millisecond cold starts across 300+ cities:
+
+**Step 1:** Compile your application for Cloudflare Workers:
+
+```bash
+# Build edge worker bundle (.dinou/cloudflare/worker.js)
+npm run build:cloudflare
+```
+
+**Step 2:** Configure your project with a `wrangler.toml` file in the repository root:
+
+```toml
+# wrangler.toml
+name = "my-dinou-app"
+main = ".dinou/cloudflare/worker.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Serve client bundles, CSS, and static assets directly via Cloudflare CDN
+[assets]
+directory = ".dinou/dist3"
+
+# Optional: Bind KV namespace for persistent ISR route caching
+# [[kv_namespaces]]
+# binding = "DINOU_CACHE"
+# id = "<your-kv-namespace-id>"
+```
+
+**Step 3:** Test locally or deploy to Cloudflare:
+
+```bash
+# Preview locally with Wrangler (defaults to port 3000)
+npx wrangler dev
+
+# Deploy to Cloudflare Workers edge network
+npx wrangler deploy
+```
+
+> [!NOTE]
+> **How Cloudflare Workers Works in Dinou v7:**
+> Dinou generates a self-contained Dual-Bundle orchestrator at `.dinou/cloudflare/worker.js`. Static assets and pre-rendered pages are served instantly by Cloudflare's global CDN through `env.ASSETS`. When bound to `env.DINOU_CACHE`, Dinou automatically activates `CloudflareKVStorage` to persist Incremental Static Regeneration (ISR) route caches across the edge. Secrets, D1 databases, and R2 buckets are injected seamlessly into Server Components via `getContext().env`.
+
+#### 4. Deno Deploy (deno-edge) & Standalone Binaries
+
+Dinou provides native compilation for the **Deno Deploy** global edge cloud (targeting the `deno-edge` runtime), standalone Deno server execution, and **zero-dependency single-file binary compilation**:
+
+**A. Deno Deploy (Serverless Global Edge - `deno-edge`):**
+When running `dinou build:deno`, Dinou packages your RSC and SSR engines specifically optimized for the `deno-edge` runtime into `.dinou/deno/main.js`. Dinou integrates natively with **Deno KV** (`Deno.openKv()`), allowing ISR-cached pages, dynamic KV stores, and sessions to persist across Deno's global edge network (35+ regions) with zero database configuration.
+
+```bash
+# 1. Build bundle targeting Deno Edge (deno-edge)
+dinou build:deno
+
+# 2. Deploy directly to Deno Deploy using native Deno CLI (Deno 2+):
+deno deploy --project=<my-project> .dinou/deno/main.js
+```
+
+**B. Deno Standalone Server (VPS / Docker):**
+To run your application using the standard Deno runtime locally or in self-hosted Linux containers:
+
+```bash
+# Build and run with standard Deno runtime
+dinou build:deno
+dinou start:deno
+```
+
+**C. Zero-Dependency Standalone Binaries (`deno compile`):**
+Compile your entire Dinou application, the V8 JavaScript engine, Deno runtime, and embedded Deno KV database into a single self-contained executable file. The target server does not need Node, Deno, or Bun installed:
+
+```bash
+# Compile standalone binary for current OS
+dinou build:deno:compile
+./dist/deno-server
+
+# Cross-compile for any operating system / architecture:
+dinou build:deno:compile:linux      # x86_64 Linux
+dinou build:deno:compile:linux_arm  # ARM64 Linux (AWS Graviton, Raspberry Pi)
+dinou build:deno:compile:mac        # Apple macOS binary
+dinou build:deno:compile:win        # Microsoft Windows executable
+```
+
+#### 5. Bun Runtime & Standalone Executables
+
+Run your application under the high-performance Bun JavaScript runtime:
+
+```bash
+# 1. Standard Bun build and execution
+dinou build:bun
+dinou start:bun
+
+# 2. Pure Bun (100% Bun execution, 0 Node.js on the machine)
+dinou build:bun:pure
+dinou start:bun
+
+# 3. Standalone Bun single-file binary compilation
+dinou build:bun:compile
+./dist/server
+
+# 4. Pure Bun standalone binary compilation (100% Bun from build to exe)
+dinou build:bun:pure:compile
+./dist/server
+
+# Cross-compilation targets:
+dinou build:bun:compile:linux      # x86_64 Linux
+dinou build:bun:compile:linux_arm  # ARM64 Linux (AWS Graviton)
+dinou build:bun:compile:mac        # Apple macOS (Apple Silicon)
+dinou build:bun:compile:win        # Windows executable (.exe)
+```
+
+#### 6. Static Export (GitHub Pages, S3, CDN)
+
+If your application consists purely of static or pre-rendered pages without dynamic server-side computation, you can export 100% static HTML:
+
+```bash
+# Generates complete static site in out/
+dinou export-static
+```
+
+Deploy the generated `out/` directory directly to GitHub Pages, Cloudflare Pages, Amazon S3, Surge, or any static file server (Nginx/Apache).
+
+---
+
+### Production Docker Setup
+
+Here is an optimized, multi-stage production `Dockerfile` for deploying Dinou on any container orchestration platform:
+
+```dockerfile
+# Multi-Stage Production Dockerfile for Dinou
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+# Install dependencies
+COPY package*.json ./
+RUN npm ci
+
+# Copy source code and build
+COPY . .
+RUN npm run build:node
+
+# Production Runner Stage
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+
+# Copy minimal production artifacts
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/.dinou ./.dinou
+# (Optional) Only include if your project is ejected:
+# COPY --from=builder /app/dinou ./dinou
+
+# Run as non-root user for security
+USER node
+
+EXPOSE 3000
+CMD ["npm", "run", "start:node"]
+```
+
+---
+
+### Managing Production Environment Secrets
+
+In production, never ship a `.env` file inside your Docker container or git repository. Configure secrets directly in your hosting provider's dashboard or CLI:
+
+- **Railway:** Project Settings → Variables.
+- **Fly.io:** `fly secrets set DATABASE_URL="..."`.
+- **Netlify:** Site Configuration → Environment variables.
+- **Cloudflare:** `wrangler secret put MY_SECRET`.
+- **Deno Deploy:** Project Settings → Environment Variables (or via `deno deploy`).
+
+---
+
+### Production Pre-Flight Checklist
+
+- **Validate Build Locally:** Run `npm run build:node && npm run start:node` locally to verify clean compilation before pushing to CI/CD.
+- **Environment Variables Configured:** Verify database connection strings and third-party API keys are set in your platform dashboard.
+- **Static Asset Caching:** Fast browser caching for instant subsequent loads (handled automatically by Dinou for all hashed bundles in `/assets/*`).
+- **SSL / HTTPS Active:** Ensure your production domain uses HTTPS (automatic on Netlify, Cloudflare, Railway, and Fly.io; configure via Caddy or Nginx with Let's Encrypt if using a self-hosted VPS).
 
 ---
 
