@@ -10,17 +10,18 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
 
 ## Key Features
 
-- **React Server Components & Progressive Streaming:** Native React 19 RSC architecture streaming HTML and RSC payloads progressively via Web Streams (`renderToReadableStream`) on Edge/Bun and Node.js with instant shell flushing.
-- **0-Fork Single-Process Dev Server:** Zero-fork dev engine eliminating `concurrently`, port race conditions, and zombie processes, featuring a live interactive Braille activity spinner and clean serialized logs.
+- **Universal 3-Pass AOT Dual-Bundle Pipeline (0-Fork):** High-performance single-process architecture compiling discrete `"react-server"` and standard client bundles, completely eliminating `child_process.fork()` and inter-process serialization. Delivers an **82% memory reduction** (~22 MB flat idle footprint) and sub-millisecond TTFB.
+- **React Server Components & Progressive Streaming:** Native React 19 RSC architecture streaming HTML and Flight RPC payloads progressively via Web Streams (`renderToReadableStream`) on Edge/Bun and Node.js with instant shell flushing.
+- **Compile-Time Type-Safe Routing:** Bidirectional type safety with zero runtime overhead. Level 1 validates `<Link href="...">` and `useRouter().push(...)`, while Level 2 strictly types route parameters with `PageProps<T>`, `LayoutProps<T>`, `RouteParams<T>`, and `ErrorProps<T>`.
+- **Layered Segmentation & Zero-Remount Layouts:** Layouts are compiled as independent endpoints with isolated data lifecycles (`layout_functions.ts`). Parent layouts never unmount or lose DOM/audio/input state during client-side SPA transitions.
+- **Vertical Micro-ISR (`<DinouCacheSlot>`):** Embed high-frequency reactive sections with micro-revalidation intervals (e.g. 5s) inside long-lived static pages without evicting the surrounding shell.
 - **Hardened State-Preserving Fast Refresh:** Near-instant component hot-reloading in development powered by Rust (`@swc/core`) in Esbuild and scoped ESM HMR in Rollup that preserves component and form state across edits.
+- **Universal W3C Web Middleware (`onRequest`):** Zero vendor lock-in middleware in `dinou.config.js` executing native Web Standard `Request` and `Response` objects across Node.js, Bun, Deno, Cloudflare Workers, and Netlify.
 - **Standalone Native Binary Compilation:** Compiles your entire application into a single, self-contained executable binary server via `bun build --compile` and `deno compile` with zero runtime dependencies.
-- **Server Functions:** Functions marked with `"use server"` that execute on the server and can be called from client components. Supports returning rendered React components (Server or Client) directly to the client with dynamic header and cookie mutation support.
-- **Automatic Static Bailout:** Static by default (SSG). Bypasses static files and evaluates dynamically at request time if the request accesses headers, cookies, or query parameters.
-- **Client Router:** Client-side soft navigation (`push`, `replace`, `back`, `forward`, `refresh`) with a `useNavigationLoading` hook to track transition loading states.
-- **Generation Strategies:** Support for background Incremental Static Regeneration (ISR) and on-demand Incremental Static Generation (ISG) which generates and caches pages on their very first request.
-- **Bundler Agnostic:** Supports Webpack, Rollup, and Esbuild as build engines, chosen by executing the corresponding npm or npx script (e.g., `dev:rollup`, `build:webpack`).
-- **Navigation Prefetching:** `<Link>` component with automatic prefetching on hover, and an opt-in `fresh` prop to bypass the client cache.
-- **File-System Routing:** Routing based on `page.{jsx,tsx}` file paths, supporting optional segments, catch-all paths, Route Groups, and Parallel Route slots (with layout error containment).
+- **Server Functions & "Dinou Pattern":** Functions marked with `"use server"` that execute on the server and can return rendered React components (Server or Client) over Flight RPC, enabling zero-dependency reactive state stores.
+- **Single Source of Truth Caching:** Strict seconds-based `revalidate` API (`false` = SSG, `0` = dynamic SSR, `N` = time-based ISR in seconds).
+- **Client Router:** Client-side soft navigation (`push`, `replace`, `back`, `forward`, `refresh`) with `<Link fresh>` and `useNavigationLoading` hook.
+- **Bundler Agnostic:** 100% feature parity across Esbuild (default), Rollup, and Webpack.
 
 ## Table of contents
 
@@ -29,11 +30,14 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [Manual Setup](#manual-setup)
 - [Routing](#routing)
   - [Basic & Dynamic Routes](#basic--dynamic-routes)
+  - [Type-Safe Routing (Level 1 & Level 2)](#type-safe-routing-level-1--level-2)
   - [Important: Optional Segments Rules](#important-optional-segments-rules)
   - [Advanced Routing](#advanced-routing)
   - [Navigation](#navigation)
 - [Layouts & Hierarchical Rendering](#layouts--hierarchical-rendering)
   - [Layouts (`layout.jsx`)](#layouts-layoutjsx)
+  - [Independent Layout Lifecycles (`layout_functions.ts`)](#independent-layout-lifecycles-layout_functionsts)
+  - [Zero-Remount Layout Preservation](#zero-remount-layout-preservation)
   - [Error Handling (`error.jsx`)](#error-handling-errorjsx)
   - [Not Found (`not_found.jsx`)](#not-found-not_foundjsx)
   - [Advanced Layout Control (Flags)](#advanced-layout-control-flags)
@@ -49,6 +53,8 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [Static Site Generation (SSG at Build Time)](#static-site-generation-ssg-at-build-time)
   - [Incremental Static Regeneration (ISR)](#incremental-static-regeneration-isr)
   - [Incremental Static Generation (ISG)](#incremental-static-generation-isg)
+  - [Vertical Segmentation: Micro-ISR (`<DinouCacheSlot>`)](#vertical-segmentation-micro-isr-dinoucacheslot)
+  - [Partial Prerendering (PPR)](#partial-prerendering-ppr)
 - [Server Functions (`"use server"`) & Suspense](#server-functions-use-server--suspense)
   - [Usage in Server Components (Streaming)](#usage-in-server-components-streaming)
   - [Usage in Client Components (Reactive)](#usage-in-client-components-reactive)
@@ -57,23 +63,26 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [The Concept](#the-concept)
   - [Implementation](#implementation)
 - [Page Configuration (`page_functions.ts`)](#page-configuration-page_functionsts)
-  - [1. `getProps` (Static/Layout Data Injection)](#1-getprops-staticlayout-data-injection)
+  - [1. `getProps` (Direct Props Return)](#1-getprops-direct-props-return)
   - [2. `getStaticPaths` (Static Generation)](#2-getstaticpaths-static-generation)
-  - [3. `revalidate` (ISR)](#3-revalidate-isr)
-  - [4. `dynamic` (Force SSR)](#4-dynamic-force-ssr)
-  - [5. `validateParams` (Route Parameter Validation)](#5-validateparams-route-parameter-validation)
-  - [6. `allowISG` (Control On-Demand Generation)](#6-allowisg-control-on-demand-generation)
-  - [7. `getCacheTags` (Route Caching Tags)](#7-getcachetags-route-caching-tags)
+  - [3. `revalidate` (Strict Seconds: SSG, SSR, ISR)](#3-revalidate-strict-seconds-ssg-ssr-isr)
+  - [4. `validateParams` (Route Parameter Validation)](#4-validateparams-route-parameter-validation)
+  - [5. `allowISG` (Control On-Demand Generation)](#5-allowisg-control-on-demand-generation)
+  - [6. `getCacheTags` (Route Caching Tags)](#6-getcachetags-route-caching-tags)
+- [Layout Configuration (`layout_functions.ts`)](#layout-configuration-layout_functionsts)
+- [Configuration API (`dinou.config.js`)](#configuration-api-dinouconfigjs)
+  - [1. Universal Middleware (`onRequest`)](#1-universal-middleware-onrequest)
+  - [2. SWC Disk-Mirror (`useSwcDiskMirror`)](#2-swc-disk-mirror-useswcdiskmirror)
 - [⚡ React Compiler & Automatic Optimizations](#-react-compiler--automatic-optimizations)
   - [Integration Strategy](#integration-strategy)
   - [Code Example](#code-example)
 - [📖 API Reference](#-api-reference)
-  - [1. Components (`dinou`)](#1-components-dinou)
+  - [1. Components (`dinou` & `dinou/server`)](#1-components-dinou--dinouserver)
   - [2. Utilities (`dinou`)](#2-utilities-dinou)
   - [3. Client Hooks (`dinou` - Client Components Only)](#3-client-hooks-dinou---client-components-only)
-  - [4. Server-Only Utilities (`dinou` & `dinou/server`)](#4-server-only-utilities)
-  - [5. Runtime Adapters (`dinou/adapters/*`)](#5-runtime-adapters-dinouadapters)
-  - [6. Page Configuration (`page_functions.ts`)](#6-page-configuration-page_functionsts)
+  - [4. Server-Only Invalidation Primitives (`dinou/server`)](#4-server-only-invalidation-primitives-dinouserver)
+  - [5. Server Context (`getContext`)](#5-server-context-getcontext)
+  - [6. Runtime Adapters (`dinou/adapters/*`)](#6-runtime-adapters-dinouadapters)
   - [7. File Conventions Cheatsheet](#7-file-conventions-cheatsheet)
 - [📁 Static Assets & Public Folder (`public/`)](#-static-assets--public-folder-public)
 - [🔐 Environment Variables (`.env`)](#-environment-variables-env)
@@ -89,6 +98,7 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [Edge Application Bundling (Cloudflare & Deno Deploy)](#edge-application-bundling-cloudflare--deno-deploy)
   - [Standalone Native Binary Compilation](#standalone-native-binary-compilation-zero-node-deployment)
   - [Standalone Static Export](#standalone-static-export)
+  - [Complete CLI Scripts Catalog (100 Scripts Reference)](#complete-cli-scripts-catalog-100-scripts-reference)
 - [📦 Eject Dinou](#-eject-dinou)
 - [🚀 Deployment Guide](#-deployment-guide)
   - [1. Node.js Platforms (DigitalOcean, Render, Railway, Fly.io, Docker)](#1-nodejs-platforms-digitalocean-render-railway-flyio-docker)
@@ -153,6 +163,91 @@ Dinou uses a file-system based router. Files named `page.{jsx,tsx,js,ts}` inside
 | **Optional Catch-all** | `src/blog/[[...slug]]/page.jsx` | `/blog`       | `{ slug: [] }`              |
 
 > **Note:** To access query parameters (e.g. `?q=hello`), use the `useSearchParams()` hook. They are NOT passed as props.
+
+### Type-Safe Routing (Level 1 & Level 2)
+
+Dinou v7 features an automatic, bidirectional, compile-time type-safe routing engine with **zero runtime overhead**. During development and build time, the route scanner watches `src/` and generates `.dinou/types/routes.d.ts`.
+
+#### Level 1: Outward Navigation (`<Link>`, `useRouter`, `DinouRoute`)
+
+The `<Link>` component and `router.push()` / `router.replace()` strictly validate that the destination `href` exists in your application routes, providing instant IDE autocompletion and compile errors on typos:
+
+```tsx
+import { Link, useRouter } from "dinou";
+
+export default function Nav() {
+  const router = useRouter();
+
+  return (
+    <nav>
+      {/* Autocompletes valid routes; TypeScript errors if the route does not exist */}
+      <Link href="/about">About Us</Link>
+
+      {/* Dynamic routes can be cast with 'as const' */}
+      <Link href={`/blog/${slug}` as const}>Read Post</Link>
+
+      <button onClick={() => router.push("/dashboard")}>
+        Dashboard
+      </button>
+    </nav>
+  );
+}
+```
+
+To create reusable design-system buttons or navigation links, use the exported `DinouRoute` type:
+
+```tsx
+import type { DinouRoute } from "dinou";
+
+interface ActionButtonProps {
+  label: string;
+  to: DinouRoute;
+}
+
+export function ActionButton({ label, to }: ActionButtonProps) {
+  return <Link href={to}>{label}</Link>;
+}
+```
+
+#### Level 2: Inward Consumption (`PageProps`, `LayoutProps`, `RouteParams`, `ErrorProps`)
+
+Pages, layouts, and error components use strongly-typed generics to infer route parameters automatically:
+
+```tsx
+// src/blog/[category]/[slug]/page.tsx
+import type { PageProps, RouteParams } from "dinou";
+
+// Strongly type params by passing the route template string:
+type BlogPostProps = PageProps<"/blog/[category]/[slug]">;
+
+export async function getProps(params: RouteParams<"/blog/[category]/[slug]">) {
+  // params.category: string
+  // params.slug: string
+  const post = await db.fetchPost(params.category, params.slug);
+  return { post }; // Direct props return in Dinou v7!
+}
+
+export default function BlogPostPage({ params, post }: BlogPostProps) {
+  return (
+    <article>
+      <h1>{post.title}</h1>
+      <p>Category: {params.category} | Slug: {params.slug}</p>
+    </article>
+  );
+}
+```
+
+#### Parameter Mapping Reference
+
+| Filesystem Path Pattern | Normalized Route Pattern | Resolved TypeScript `params` Type | Description |
+| :--- | :--- | :--- | :--- |
+| `src/page.tsx` | `"/"` | `{}` | Root homepage |
+| `src/about/page.tsx` | `"/about"` | `{}` | Static segment |
+| `src/users/[id]/page.tsx` | `"/users/[id]"` | `{ id: string }` | Single dynamic parameter |
+| `src/shop/[cat]/[item]/page.tsx` | `"/shop/[cat]/[item]"` | `{ cat: string; item: string }` | Multiple dynamic parameters |
+| `src/docs/[...slug]/page.tsx` | `"/docs/[...slug]"` | `{ slug: string[] }` | Catch-all dynamic segments |
+| `src/settings/[[tab]]/page.tsx` | `"/settings/[[tab]]"` | `{ tab?: string }` | Optional dynamic segment |
+| `src/archive/[[...slug]]/page.tsx` | `"/archive/[[...slug]]"` | `{ slug?: string[] }` | Optional catch-all segments |
 
 ### Important: Optional Segments Rules
 
@@ -234,7 +329,7 @@ export default function Menu() {
       {/* Prefetches data automatically on hover/viewport */}
       <Link href="/about">About Us</Link>
 
-      {/* Opt-in for fresh data (bypasses cache) */}
+      {/* Opt-in for fresh data (bypasses client cache) */}
       <Link href="/dashboard" fresh>
         Dashboard
       </Link>
@@ -263,7 +358,7 @@ export default function Controls() {
       <button onClick={() => router.back()}>Go Back</button>
       <button onClick={() => router.forward()}>Go Forward</button>
 
-      {/* Soft Reload: Refetches server data without a browser refresh */}
+      {/* Soft Reload: Refetches server data without losing component state */}
       <button onClick={() => router.refresh()}>Refresh Data</button>
     </div>
   );
@@ -294,9 +389,15 @@ A layout component receives a `children` prop, `params` (route parameters), and 
 
 > **Note:** `searchParams` are NOT passed to layouts.
 
-```jsx
-// src/dashboard/layout.jsx
-export default async function Layout({ children, params, sidebar }) {
+```tsx
+// src/dashboard/layout.tsx
+import type { LayoutProps } from "dinou";
+
+export default async function Layout({
+  children,
+  params,
+  sidebar
+}: LayoutProps<"/dashboard"> & { sidebar?: React.ReactNode }) {
   return (
     <div className="dashboard-grid">
       <aside>{sidebar}</aside>
@@ -315,41 +416,68 @@ Layouts are **nested** by default. A page at `src/dashboard/settings/page.jsx` w
 2. `src/dashboard/layout.jsx` (Dashboard Layout)
 3. `src/dashboard/settings/page.jsx` (The Page)
 
-**Fetching data in Layouts:**
-The Root Layout that applies to a specific page can receive additional props by defining a `getProps` function in a `page_functions.ts` file located alongside the page:
+### Independent Layout Lifecycles (`layout_functions.ts`)
+
+In Dinou v7, layout data fetching is **completely decoupled from pages**. Instead of defining layout data inside `page_functions.ts`, layouts have their own independent lifecycle file named **`layout_functions.ts`** in the same directory:
 
 ```typescript
-// src/foo/bar/page_functions.ts
-export async function getProps(params) {
-  // fetch data using route params
-  const data = await fetchData(params.id);
-  // 'layout' props are injected into the Root Layout for this page
-  return { page: { data }, layout: { title: data.name } };
+// src/dashboard/layout_functions.ts
+export const revalidate = 300; // Cache this layout independently for 5 minutes (strict seconds)
+
+export async function getProps() {
+  const notifications = await fetchUnreadNotifications();
+  return { notifications };
 }
 ```
 
-### Error Handling (`error.jsx`)
+```tsx
+// src/dashboard/layout.tsx
+import type { LayoutProps } from "dinou";
 
-Create an `error.jsx` file to define an error page for a route segment. If a page throws an error (Server or Client not controlled by an Error Boundary), Dinou looks for the closest `error.jsx` in the directory hierarchy (bubbling up).
-
-`error.jsx` receives `error` (object) and `params` as props.
-
-```jsx
-// Error pages can be Client Components or Server Components
-"use client";
-
-export default function Page({ error, params }) {
+export default function DashboardLayout({
+  children,
+  notifications
+}: LayoutProps<"/dashboard"> & { notifications: any[] }) {
   return (
-    <div>
-      <h2>Something went wrong in {params.slug}!</h2>
-      <p>{`${error.name}: ${error.message}`}</p>
-      {/* error.stack is only defined in development, not in production */}
-      {error.stack && (
-        <pre style={{ background: "#eee", padding: "1rem" }}>{error.stack}</pre>
-      )}
+    <div className="dashboard-shell">
+      <aside>Unread notifications: {notifications.length}</aside>
+      <main>{children}</main>
     </div>
   );
 }
+```
+
+- **Horizontal Segmentation:** Navigating between sibling pages (e.g. `/dashboard/analytics` to `/dashboard/settings`) requests **only the inner page slot RSC stream**. The parent layout is neither re-rendered on the server nor remounted on the client.
+
+### Zero-Remount Layout Preservation
+
+In Dinou v7, parent layouts remain mounted in the React DOM during client-side navigation. This preserves:
+- Audio/video playback state
+- Open sidebar/modal/drawer states
+- Scroll positions of sub-containers
+- Client-side form input values
+
+### Error Handling (`error.jsx`)
+
+Create an `error.jsx` (or `error.tsx`) file to define an error page for a route segment. In Dinou v7, `error.tsx` is rendered as a **Server Component** by default and wrapped in a two-level resilience boundary:
+1. **`SlotErrorBoundary`:** If a page crashes during SSR or streaming, the error is isolated inside `<DinouPageSlot>`. Parent layouts and navigations remain fully interactive.
+2. **`InnerErrorBoundary`:** Catches root-level layout crashes without crashing the process.
+
+```tsx
+// src/error.tsx
+import type { ErrorProps } from "dinou";
+
+export default function ErrorPage({ error, params }: ErrorProps) {
+  return (
+    <div className="error-container">
+      <h2>Something went wrong!</h2>
+      <p className="error-message">{error.message}</p>
+      {/* In development, error.stack is available. In production, error.stack is automatically sanitized to undefined */}
+      {error.stack && (
+        <pre className="error-stack">{error.stack}</pre>
+      )}
+    </div>
+  );
 ```
 
 ### Not Found (`not_found.jsx`)
@@ -599,24 +727,64 @@ In Dinou v7, static pre-rendering runs automatically during the production build
 
 Incremental Static Regeneration allows you to serve pre-rendered static pages while periodically refreshing them in the background when content changes.
 
-Export a `revalidate` function from your route's `page_functions.ts`:
+In Dinou v7, `revalidate` is the **single source of truth** for route rendering behavior, and all time units are **strictly in seconds**:
+
+| Value of `revalidate` | Strategy | Description |
+| :--- | :--- | :--- |
+| `false` | **Pure Static (SSG)** | Pre-rendered once at build time. Cached indefinitely until manual invalidation. |
+| `0` | **Dynamic SSR** | Rendered on every incoming HTTP request on the fly. |
+| `N` (number > 0) | **Time-Based ISR** | Pre-rendered, served instantly from cache, and revalidated in the background every `N` seconds (stale-while-revalidate). |
+
+Export `revalidate` from your route's `page_functions.ts`:
 
 ```typescript
 // src/blog/page_functions.ts
 
 // This page will regenerate in the background at most once every 60 seconds
-export function revalidate() {
-  return 60000; // time in milliseconds
-}
+export const revalidate = 60; // Strict seconds (1 minute)
 ```
 
 - **How it works:** When a request arrives after the revalidation window has elapsed, the cached page is served immediately (stale-while-revalidate), while Dinou regenerates the new page in the background.
-- **On-Demand Revalidation:** You can also trigger immediate cache purging from Server Functions or webhooks using `revalidatePath("/blog")` or `revalidateTag("posts")` (see [On-Demand Revalidation](#on-demand-revalidation-from-dinouserver)).
-- **Edge ISR:** On edge platforms like Deno Deploy, ISR seamlessly uses distributed key-value storage (`DenoKVStorage`) without needing a persistent disk.
+- **On-Demand Revalidation:** You can also trigger immediate cache purging from Server Functions or webhooks using `revalidatePage("/blog/post-1")`, `revalidatePath("/blog")`, or `revalidateTag("posts")` (see [On-Demand Revalidation](#4-server-only-invalidation-primitives-dinouserver)).
+- **Edge ISR:** On edge platforms like Deno Deploy and Cloudflare Workers, ISR seamlessly uses distributed key-value storage (`DenoKVStorage`, `CloudflareKVStorage`) without needing a persistent disk.
 
 ### Incremental Static Generation (ISG)
 
 For dynamic routes with millions of potential pages (e.g. `/products/[id]`), generating every single page at build time is impractical. Dinou supports **ISG**: pages not pre-rendered at build time are rendered and cached on their very first request, and served as static files for all subsequent requests.
+
+### Vertical Segmentation: Micro-ISR (`<DinouCacheSlot>`)
+
+When a page contains both static content and rapidly changing components, wrapping the high-frequency component in `<DinouCacheSlot>` enables independent caching:
+
+```tsx
+import { DinouCacheSlot } from "dinou/server";
+
+export const revalidate = 3600; // Whole page shell cached for 1 hour
+
+export default function MarketOverviewPage() {
+  return (
+    <div>
+      <h1>Global Stock Exchange</h1>
+      <p>This static analysis refreshes once per hour.</p>
+
+      {/* This specific slot refreshes every 10 seconds independently */}
+      <DinouCacheSlot id="live-stock-ticker" revalidate={10}>
+        <LiveTicker />
+      </DinouCacheSlot>
+    </div>
+  );
+}
+```
+
+- When the page is requested, Dinou stitches together the cached page shell with the current cache state of the slot.
+- Invalidation can target the slot directly without evicting the surrounding page.
+
+### Partial Prerendering (PPR)
+
+Partial Prerendering combines the speed of static pre-rendering with the real-time capabilities of dynamic SSR.
+1. **Build Time:** The static shell of the page is rendered to static HTML. Dynamic components wrapped in `Suspense` are assigned a deterministic placeholder hole (`<div data-ppr-hole="slot-id">...fallback...</div>`).
+2. **First Byte:** The edge server immediately streams the static shell (0ms TTFB).
+3. **PPR Stream:** While the client paints the shell, the server resolves dynamic promises and streams replacement chunks down the open HTTP connection without blocking navigation.
 
 ---
 
@@ -1030,30 +1198,27 @@ export default function PatternTasksList({ tasks }: { tasks: PatternTaskItem[] }
 
 For advanced control over rendering behavior, data fetching, and static generation, you can create a `page_functions.ts` (or `.js`) file next to your `page.jsx`.
 
-### 1. `getProps` (Static/Layout Data Injection)
+### 1. `getProps` (Direct Props Return)
 
-Use this function to fetch data based on the **route parameters** and inject it into your Page and Layout.
+Use this function to fetch data based on the **route parameters** and inject it directly into your Page component.
 
-> **Design Note:** While `getProps` only receives the route `params` as its parameter, you can still read cookies, headers, or query parameters by calling `getContext()` since the function executes on the server.
-> Because `getProps` blocks the rendering process at request time, keep it fast for dynamic routes. Note that this does not affect pre-rendered static pages (SSG) since their data is fetched at server startup. In Incremental Static Generation (ISG), it only blocks the very first request by the first visitor before the page is cached. If you need slow dynamic fetches on dynamic routes, defer them to a `Suspense` boundary wrapping a Server Function.
+> **Design Note:** In Dinou v7, `getProps` returns props directly without wrapping them in `{ page: ... }`. To provide data to layouts, use the independent `layout_functions.ts` file in the layout's folder.
+> While `getProps` receives strongly-typed route `params`, you can also read cookies, headers, or query parameters by calling `getContext()` on the server.
+> Because `getProps` blocks rendering at request time for dynamic routes, keep it fast. If you need slow dynamic fetches, defer them to a `Suspense` boundary wrapping a Server Function.
 
-- **Arguments:** `params` (The dynamic route parameters).
-- **Returns:** An object with `page` and `layout` keys containing the props.
+- **Arguments:** `params: RouteParams<T>` (The dynamic route parameters).
+- **Returns:** An object containing props passed directly to `page.tsx`.
 
 ```typescript
 // src/blog/[slug]/page_functions.ts
+import type { RouteParams } from "dinou";
 
-export async function getProps(params) {
+export async function getProps(params: RouteParams<"/blog/[slug]">) {
   // 1. Fetch data based on the URL path (e.g., /blog/my-post)
   const post = await db.getPost(params.slug);
 
-  // 2. Return data.
-  // 'page' props go to page.jsx
-  // 'layout' props go to layout.jsx (useful for setting document titles dynamically)
-  return {
-    page: { post },
-    layout: { title: post.title },
-  };
+  // 2. Return props directly to page.tsx
+  return { post };
 }
 ```
 
@@ -1185,34 +1350,26 @@ Dinou ensures that `params` are consistent between SSG and SSR:
 - **Catch-all** segments will always be an `Array` (e.g., `undefined` becomes `[]`, `"val"` becomes `["val"]`).
 - **Optional Single** segments remain `undefined` if omitted.
 
-### 3. `revalidate` (ISR)
+### 3. `revalidate` (Strict Seconds: SSG, SSR, ISR)
 
-Enables Incremental Static Regeneration. Defines the cache lifetime of a static page in milliseconds.
+In Dinou v7, `revalidate` is the **single source of truth** for route rendering behavior. The legacy `dynamic` export has been eliminated in favor of unified `revalidate` semantics with **strict seconds (`s`)**:
 
-- **Returns:** `number` (milliseconds).
-- If it returns `0` (or is not defined), the page remains static indefinitely (unless rebuilt).
+| Value of `revalidate` | Rendering Mode | Behavior |
+| :--- | :--- | :--- |
+| `false` | **Pure Static (SSG)** | Pre-rendered once at build time. Cached indefinitely until manual invalidation. |
+| `0` | **Dynamic SSR** | Rendered on every incoming HTTP request on the fly. Replaces legacy `dynamic()`. |
+| `N` (number > 0) | **Time-Based ISR** | Pre-rendered, served instantly from cache, and revalidated in the background every `N` seconds. |
+
+- **Type:** `number | false` (or a function returning `number | false`). Time is strictly in **seconds**.
 
 ```typescript
 // src/dashboard/page_functions.ts
-export function revalidate() {
-  return 60000; // Regenerate at most once every 60 seconds
-}
+
+// Revalidates in the background at most once every 60 seconds
+export const revalidate = 60; // Strict seconds (1 minute)
 ```
 
-### 4. `dynamic` (Force SSR)
-
-Forces a page to be rendered dynamically (Server-Side Rendering) on every request, bypassing static generation.
-
-- **Returns:** `boolean`.
-
-```typescript
-// src/profile/page_functions.ts
-export function dynamic() {
-  return true; // Always render on demand (SSR)
-}
-```
-
-### 5. `validateParams` (Route Parameter Validation)
+### 4. `validateParams` (Route Parameter Validation)
 
 Allows validating dynamic parameters on the server prior to rendering or static generation. Returning `false` blocks rendering and returns a 404 response.
 
@@ -1227,7 +1384,7 @@ export function validateParams(params) {
 }
 ```
 
-### 6. `allowISG` (Control On-Demand Generation)
+### 5. `allowISG` (Control On-Demand Generation)
 
 Enables or disables Incremental Static Generation (ISG) on-demand for dynamic routes. If disabled (returns `false`), routes not pre-rendered at server startup via `getStaticPaths` will return a 404 instead of generating dynamically on-demand.
 
@@ -1242,7 +1399,7 @@ export function allowISG() {
 }
 ```
 
-### 7. `getCacheTags` (Route Caching Tags)
+### 6. `getCacheTags` (Route Caching Tags)
 
 Associates invalidation tags with the pre-rendered or dynamic route for tag-based on-demand revalidation.
 
@@ -1256,6 +1413,72 @@ export async function getCacheTags(params) {
   return ["posts", `post-${params.id}`];
 }
 ```
+
+---
+
+## Layout Configuration (`layout_functions.ts`)
+
+In Dinou v7, layouts have their own dedicated lifecycle configuration file named **`layout_functions.ts`** placed alongside `layout.tsx`. This keeps layout data fetching and caching completely independent from nested pages:
+
+```typescript
+// src/dashboard/layout_functions.ts
+
+// Layout caching interval (strict seconds)
+export const revalidate = 300; // 5 minutes
+
+export async function getProps() {
+  const [user, notifications] = await Promise.all([
+    fetchCurrentUser(),
+    fetchUnreadNotifications()
+  ]);
+
+  // Props returned here are passed directly to layout.tsx
+  return { user, notifications };
+}
+```
+
+---
+
+## Configuration API (`dinou.config.js`)
+
+Dinou projects can be customized via a `dinou.config.js` (or `.ts`) file in the project root:
+
+```javascript
+// dinou.config.js
+import { defineConfig } from "dinou/config";
+
+export default defineConfig({
+  // Default bundler: 'esbuild' | 'rollup' | 'webpack'
+  bundler: "esbuild",
+
+  // Default dev server port (auto-prompts if port is in use)
+  port: 3000,
+
+  // Global W3C Web Middleware (Node.js, Bun, Deno, Cloudflare Workers, Netlify)
+  async onRequest(req, next) {
+    const url = new URL(req.url);
+    if (url.pathname.startsWith("/api/protected")) {
+      const auth = req.headers.get("Authorization");
+      if (!auth) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+    return next();
+  },
+
+  // Enable SWC disk-mirror caching for instant cold starts in large codebases (500+ routes)
+  useSwcDiskMirror: false
+});
+```
+
+### 1. Universal Middleware (`onRequest`)
+Unlike legacy Node frameworks tied to Express or Koa, Dinou's `onRequest` operates on standard W3C Web APIs (`Request` and `Response`). It runs universally before any Dinou internal handler across Node.js, Bun, Deno, Cloudflare Workers, and Netlify.
+
+### 2. SWC Disk-Mirror (`useSwcDiskMirror`)
+In development, Dinou compiles everything 100% in-memory into RAM. For enterprise projects with hundreds of routes, setting `useSwcDiskMirror: true` caches AST transforms in `.dinou/dev-cache/` for instant cold starts.
 
 ## ⚡ React Compiler & Automatic Optimizations
 
@@ -1308,7 +1531,7 @@ function ExpensiveComponent({ data }) {
 
 ## 📖 API Reference
 
-### 1. Components (`dinou`)
+### 1. Components (`dinou` & `dinou/server`)
 
 #### `<Link>`
 
@@ -1360,6 +1583,36 @@ import { ClientRedirect } from "dinou";
 return <ClientRedirect to="/" />;
 ```
 
+#### `<DinouCacheSlot>` (from `"dinou/server"`)
+
+A React Server Component primitive for **Micro-ISR (Vertical Segmentation)**. Isolates high-frequency dynamic sub-trees inside long-lived static or ISR pages with dedicated micro-caching lifecycles, eliminating full-page cache invalidations and saving costly database queries:
+
+- **Props:**
+  - `id` (string): Unique identifier for this slot (required for targeted slot refreshes).
+  - `revalidate` (number, optional): Time-to-live cache duration in **seconds** (e.g. `revalidate={10}`).
+  - `tag` / `tags` (string | string[], optional): Cache tags for targeted invalidation via `revalidateTag`.
+  - `children` (ReactNode): The server component tree to cache independently.
+
+```jsx
+import { DinouCacheSlot } from "dinou/server";
+import { StockTicker } from "./stock-ticker";
+
+export default function FinanceDashboard() {
+  return (
+    <div className="dashboard-grid">
+      <StaticSidebar />
+      <main>
+        {/* High-frequency component cached for 10 seconds independently */}
+        <DinouCacheSlot id="live-stock-ticker" tag="stocks" revalidate={10}>
+          <StockTicker />
+        </DinouCacheSlot>
+        <StaticAnalyticsCharts />
+      </main>
+    </div>
+  );
+}
+```
+
 ---
 
 ### 2. Utilities (`dinou`)
@@ -1378,6 +1631,21 @@ Immediately halts rendering/execution and redirects the user. Works in Server Co
   import { redirect } from "dinou";
   if (!user) return redirect("/login");
   ```
+
+#### `refreshSlot(slotId, options?)`
+
+Programmatic utility function (can be imported directly from `"dinou"`) to refresh a specific `<DinouCacheSlot>` in the browser without reloading or re-evaluating the surrounding page.
+
+- **Arguments:**
+  - `slotId` (string): The identifier or tag of the `<DinouCacheSlot>`.
+  - `options` (object, optional): `{ fresh?: boolean }`. When `fresh: true`, bypasses the slot cache and requests a brand new render from the server.
+
+```javascript
+import { refreshSlot } from "dinou";
+
+// Trigger surgical slot update from a client-side button or event
+refreshSlot("live-stock-ticker", { fresh: true });
+```
 
 ---
 
@@ -1424,14 +1692,24 @@ Provides programmatic navigation methods.
   - `.replace(href)`: Replace the current history entry. Supports relative pathnames.
   - `.back()`: Navigate back in history.
   - `.forward()`: Navigate forward in history.
-  - `.refresh()`: Soft reload. Re-fetches Server Component data without reloading the browser.
+  - `.refresh(options?)`: Soft reload. Re-fetches Server Component data without reloading the browser. By default refreshes the page; pass `{ layout: true }` to also invalidate and re-fetch the layout.
+  - `.refreshSlot(slotId, options?)`: Surgical refresh. Re-fetches and updates a specific `<DinouCacheSlot>` in the browser without re-evaluating the rest of the page. Pass `{ fresh: true }` to bypass cache.
 
 ```javascript
 import { useRouter } from "dinou";
 
-export default function BackButton() {
+export default function NavigationControls() {
   const router = useRouter();
-  return <button onClick={() => router.back()}>Back</button>;
+
+  return (
+    <div>
+      <button onClick={() => router.back()}>Back</button>
+      <button onClick={() => router.refresh()}>Refresh Page</button>
+      <button onClick={() => router.refreshSlot("live-stock-ticker")}>
+        Refresh Ticker Only
+      </button>
+    </div>
+  );
 }
 ```
 
@@ -1450,7 +1728,75 @@ export default function LoadingBar() {
 
 ---
 
-### 4. Server-Only Utilities
+### 4. Server-Only Invalidation Primitives (`dinou/server`)
+
+Dinou v7 introduces a three-tiered invalidation hierarchy to give you exact control over what gets revalidated:
+
+| Function | Scope | Impact | When to Use |
+| :--- | :--- | :--- | :--- |
+| `revalidatePage(path)` | **Surgical Page** | Regenerates `page.rsc` and `index.html` only. Does NOT touch layouts. | When page data changes but layout remains intact. |
+| `revalidatePath(path, options?)` | **Cascading Path** | Regenerates route files. With `{ cascade: true }`, cascades to all child pages. | When updating route structure or cascading layout changes. |
+| `revalidateTag(tag, options?)` | **Cross-Cutting Tag** | Revalidates all routes and `<DinouCacheSlot>` instances tagged with `tag`. | When a database mutation affects multiple routes or slots. |
+
+#### `revalidatePage(path)`
+
+Surgically revalidates only the page component (`page.rsc`) and its HTML (`index.html`) for a specific route path, without re-rendering or touching any layout.
+
+- **Arguments:** `path` (string): The route path to revalidate.
+- **Returns:** `Promise<void>`.
+
+```javascript
+import { revalidatePage } from "dinou/server";
+
+export async function updatePostAction(id, content) {
+  "use server";
+  await db.updatePost(id, content);
+  // Revalidates ONLY the blog post page without touching header/footer/sidebar layouts
+  await revalidatePage(`/blog/${id}`);
+}
+```
+
+#### `revalidatePath(path, options?)`
+
+Triggers background regeneration of cached static files for the targeted route path. Supports relative paths (e.g. `./` or `details`), resolved relative to the request referer context at runtime.
+
+- **Arguments:**
+  - `path` (string): The route to revalidate.
+  - `options` (object | "layout", optional): `{ cascade?: boolean }`. When `{ cascade: true }`, if a layout is present, revalidation cascades to all child routes to ensure zero hydration mismatch.
+- **Returns:** `Promise<void>`.
+
+```javascript
+import { revalidatePath } from "dinou/server";
+
+export async function publishCategoryAction(category) {
+  "use server";
+  // Cascades invalidation through all pages nested inside /shop/[category]
+  await revalidatePath(`/shop/${category}`, { cascade: true });
+}
+```
+
+#### `revalidateTag(tag, options?)`
+
+Triggers background regeneration of all routes and `<DinouCacheSlot>` instances registered with the matching cache tag.
+
+- **Arguments:**
+  - `tag` (string): The cache tag to invalidate.
+  - `options` (object | "layout", optional): `{ cascade?: boolean }`. For layout tags, passing `{ cascade: true }` cascades page revalidation down through all descendant pages.
+- **Returns:** `Promise<void>`.
+
+```javascript
+import { revalidateTag } from "dinou/server";
+
+export async function stockPriceUpdateAction() {
+  "use server";
+  // Invalidates all DinouCacheSlot components and pages tagged with "stocks"
+  await revalidateTag("stocks");
+}
+```
+
+---
+
+### 5. Server Context (`getContext`)
 
 #### `getContext()` (from `"dinou"`)
 
@@ -1459,40 +1805,6 @@ Retrieves the request/response context. Available **only** inside server-side ex
 - **Returns:** `{ req, res }`.
 - **req:** `headers`, `cookies`, `query`, `path`, `method`.
 - **res:** `status()`, `setHeader()`, `redirect()`, `cookie()`, `clearCookie()`.
-
-#### On-Demand Revalidation (from `"dinou/server"`)
-
-These server-only utilities must be imported from the `"dinou/server"` entry point.
-
-##### `revalidatePath(path)`
-
-Triggers background regeneration of static files for the targeted route path. Supports relative paths (e.g. `./` or `detalles`), resolved relative to the request referer context at runtime.
-
-- **Arguments:** `path` (a string representing the route to revalidate).
-- **Returns:** `void`.
-
-```javascript
-import { revalidatePath } from "dinou/server";
-
-export async function action() {
-  revalidatePath("/blog/posts");
-}
-```
-
-##### `revalidateTag(tag)`
-
-Triggers background regeneration of all routes registered with the matching cache tag.
-
-- **Arguments:** `tag` (a string representing the tag to invalidate).
-- **Returns:** `void`.
-
-```javascript
-import { revalidateTag } from "dinou/server";
-
-export async function action() {
-  revalidateTag("posts");
-}
-```
 
 #### ⚠️ Security Warning: `getContext` in Client Components
 
@@ -1512,8 +1824,8 @@ export default function UserProfile() {
 
 **Risks:**
 
-1.  **Data Leak:** Any data read from `getContext` during SSR is serialized into the initial HTML. If you mistakenly render sensitive data (like tokens or internal headers), it will be visible in the page source (`View Source`), even if React hydration fails later.
-2.  **Hydration Mismatch:** The browser execution will fail because `getContext` is not available in the browser, causing the UI to break or flicker.
+1. **Data Leak:** Any data read from `getContext` during SSR is serialized into the initial HTML. If you mistakenly render sensitive data (like tokens or internal headers), it will be visible in the page source (`View Source`), even if React hydration fails later.
+2. **Hydration Mismatch:** The browser execution will fail because `getContext` is not available in the browser, causing the UI to break or flicker.
 
 **✅ Correct Pattern:**
 Fetch sensitive data in a **Server Component** and pass only the necessary, safe fields as props.
@@ -1532,10 +1844,9 @@ export default function Page() {
 }
 ```
 
-
 ---
 
-### 5. Runtime Adapters (`dinou/adapters/*`)
+### 6. Runtime Adapters (`dinou/adapters/*`)
 
 Dinou provides dedicated, zero-dependency adapters that map native platform requests into Dinou's universal Web Standards request handler (`(Request) => Promise<Response>`):
 
@@ -1559,123 +1870,33 @@ Deno.serve(fetch);
 export { default, config } from "dinou/adapters/netlify";
 ```
 
-### 6. Page Configuration (`page_functions.ts`)
-
-Export these functions from `page_functions.{ts,js}` to configure the associated `page.tsx`.
-
-#### `getStaticPaths()`
-
-Defines paths for Static Site Generation (SSG).
-
-- **Returns:** `Array<string | string[] | Object>`.
-
-```typescript
-export function getStaticPaths() {
-  return [{ slug: "foo", id: "bar" }];
-}
-```
-
-#### `getProps(params)`
-
-**Async** function to fetch data on the server and pass it as props to the Page component and to the Root Layout (if exists).
-
-- **Receives:** Resolved `params` object.
-- **Returns:** Object with the props.
-
-```typescript
-export async function getProps(params) {
-  const data = await db.getItem(params.id);
-  return { page: { item: data }, layout: { title: data.title } }; // Available as props in page.tsx and Root Layout of this particular page.
-}
-```
-
-#### `revalidate()`
-
-Sets the Incremental Static Regeneration (ISR) time in **milliseconds**.
-
-- **Returns:** Number (ms). `0` means no revalidate (always the same static page).
-
-```typescript
-export function revalidate() {
-  return 60000;
-} // Regenerate static page every 1 minute
-```
-
-#### `dynamic()`
-
-Whether to bypass static generation or not (e.g. use dynamic rendering).
-
-- **Returns:** `true`, `false`.
-
-```typescript
-export function dynamic() {
-  return true;
-}
-```
-
-#### `validateParams(params)`
-
-Validates dynamic parameters on the server prior to rendering or static generation. Returning `false` blocks the request and returns a 404 response.
-
-- **Receives:** Resolved `params` object.
-- **Returns:** `boolean` or `Promise<boolean>`.
-
-```typescript
-export function validateParams(params) {
-  return /^\d+$/.test(params.id);
-}
-```
-
-#### `allowISG()`
-
-Controls on-demand Incremental Static Generation (ISG) for routes not generated at server startup.
-
-- **Returns:** `boolean` or `Promise<boolean>`.
-
-```typescript
-export function allowISG() {
-  return false; // Only serve getStaticPaths, return 404 for others
-}
-```
-
-#### `getCacheTags(params)`
-
-Defines cache tags associated with the pre-rendered page for tag-based invalidation.
-
-- **Receives:** Resolved `params` object.
-- **Returns:** `string[]` or `Promise<string[]>` (an array of cache tag strings).
-
-```typescript
-export function getCacheTags(params) {
-  return ["posts", `post-${params.id}`];
-}
-```
-
 ---
 
 ### 7. File Conventions Cheatsheet
 
-Dinou recognizes specific filenames to build the routing hierarchy.
+Dinou recognizes specific filenames to build the routing and lifecycle hierarchy.
 
-#### Route Components
+#### Route Components & Functions
 
-| Filename                    | Environment      | Description                                    |
-| :-------------------------- | :--------------- | :--------------------------------------------- |
-| `page.{jsx,tsx,js,ts}`      | Server or Client | The unique UI for a route.                     |
-| `layout.{jsx,tsx,js,ts}`    | Server or Client | Wraps the page and children segments.          |
-| `error.{jsx,tsx,js,ts}`     | Server or Client | UI for 500 errors within the segment.          |
+| Filename | Environment | Description |
+| :--- | :--- | :--- |
+| `page.{jsx,tsx,js,ts}` | Server or Client | The unique UI for a route. |
+| `layout.{jsx,tsx,js,ts}` | Server or Client | Wraps the page and children segments. Preserved across child navigations. |
+| `page_functions.{ts,js}` | Server-Only | Lifecycle hooks for page: `getProps`, `getStaticPaths`, `revalidate`, etc. |
+| `layout_functions.{ts,js}` | Server-Only | Independent lifecycle hooks for layout: dedicated `getProps`, etc. |
+| `error.{jsx,tsx,js,ts}` | Server (Default) | UI for runtime errors within the segment. Supports `<ErrorProps<T>>`. |
 | `not_found.{jsx,tsx,js,ts}` | Server or Client | UI for 404 not found pages within the segment. |
 
 #### Layout Control Flags (Empty Files)
 
-Create these empty files to alter how layouts apply to a specific route directory.
+Create these empty files to alter how layouts apply to a specific route directory:
 
-| Filename              | Effect                                                                                               |
-| :-------------------- | :--------------------------------------------------------------------------------------------------- |
-| `no_layout`           | The `page.tsx` in this folder will **NOT** be applied any layout.                                    |
-| `reset_layout`        | Resets the layout hierarchy. The first layout found from within this folder becomes the Root Layout. |
-| `no_layout_error`     | The `error.tsx` in this folder will render without any layout.                                       |
-| `no_layout_not_found` | The `not-found.tsx` in this folder will render without any layout.                                   |
+| Filename | Effect |
+| :--- | :--- |
+| `no_layout` | The `page.tsx` in this folder will **NOT** be wrapped in any layout. |
+| `reset_layout` | Resets the layout hierarchy. The first layout found inside this folder becomes the Root Layout. |
+| `no_layout_error` | The `error.tsx` in this folder will render without any layout. |
+| `no_layout_not_found` | The `not_found.tsx` in this folder will render without any layout. |
 
 ## 📁 Static Assets & Public Folder (`public/`)
 
@@ -1904,63 +2125,200 @@ Starts the development server with hot module reloading. In Dinou v7, developmen
 
 Compiles client/server bundles into `.dinou/dist3` and **automatically pre-renders all static pages (SSG) into `.dinou/dist2`** at build time:
 
-| Command                 | Bundler / Runtime      | Description                                       |
-| :---------------------- | :--------------------- | :------------------------------------------------ |
-| `npm run build`         | **Node.js** (Default)  | Builds production bundle & pre-renders SSG pages. |
-| `npm run build:node`    | **Node.js**            | Explicit Node.js AOT Dual-Bundle build.           |
-| `npm run build:bun`     | **Bun**                | Generates standalone Bun AOT bundle (`.dinou/bun/server.js`). |
-| `npm run build:bun:pure`| **Bun (Pure)**         | Pure Bun-native build pipeline (no Node.js required). |
-| `npm run build:esbuild` | **esbuild**            | Compiles client and server bundles via esbuild.   |
-| `npm run build:rollup`  | **Rollup**             | Full tree-shaking production build.               |
-| `npm run build:webpack` | **Webpack**            | Enterprise Webpack production build.              |
+| Command | Bundler / Runtime | Description |
+| :--- | :--- | :--- |
+| `npm run build` | **Node.js** (Default) | Production build & SSG with default bundler (`esbuild`). |
+| `npm run build:node` | **Node.js** | Explicit Node.js AOT Dual-Bundle build. |
+| `npm run build:node:esbuild` | **Node.js (esbuild)** | Node.js AOT production build with esbuild. |
+| `npm run build:node:rollup` | **Node.js (Rollup)** | Full tree-shaking Node.js production build with Rollup. |
+| `npm run build:node:webpack` | **Node.js (Webpack)** | Enterprise Node.js production build with Webpack. |
+| `npm run build:bun` | **Bun** | Generates standalone Bun AOT bundle (`.dinou/bun/server.js`). |
+| `npm run build:bun:pure` | **Bun (Pure)** | Pure Bun-native build pipeline (no Node.js required). |
 
 ### Start Production Server (Node, Bun, Deno)
 
 Runs the production server. In Dinou v7, Node.js production start uses the clean AOT pre-bundled server:
 
-| Command                 | Runtime            | Description                                                |
-| :---------------------- | :----------------- | :--------------------------------------------------------- |
-| `npm start`             | **Node.js**        | Runs production AOT server (`npm run start:node`).         |
-| `npm run start:node`    | **Node.js**        | Starts standalone `.dinou/node/server.mjs`.                |
-| `npm run start:bun`     | **Bun**            | High-performance Bun server with zero-copy assets and configurable `IDLE_TIMEOUT`. |
-| `npm run start:deno`    | **Deno**           | Deno standalone server with explicit sandbox permissions.  |
-
-### Standalone Native Binary Compilation (Zero-Node Deployment)
-
-Compiles your entire Dinou application into a single, self-contained native executable binary with zero runtime dependencies on the target host:
-
-| Command                           | Engine   | Output Binary                | Target Platform       |
-| :-------------------------------- | :------- | :--------------------------- | :-------------------- |
-| `npm run build:bun:compile`       | **Bun**  | `dist/server`                | Current Host OS       |
-| `npm run build:bun:compile:linux` | **Bun**  | `dist/server-linux`          | Linux x64             |
-| `npm run build:bun:compile:win`   | **Bun**  | `dist/server-win.exe`        | Windows x64           |
-| `npm run build:deno:compile`      | **Deno** | `dist/deno-server`           | Current Host OS       |
-| `npm run build:deno:compile:linux`| **Deno** | `dist/deno-server-linux`     | Linux x64             |
-| `npm run build:deno:compile:win`  | **Deno** | `dist/deno-server-win.exe`   | Windows x64           |
+| Command | Runtime | Description |
+| :--- | :--- | :--- |
+| `npm start` | **Node.js** | Runs production AOT server (`npm run start:node`). |
+| `npm run start:node` | **Node.js** | Starts standalone `.dinou/node/server.mjs`. |
+| `npm run start:node:esbuild` | **Node.js (esbuild)** | Starts esbuild-compiled Node server. |
+| `npm run start:node:rollup` | **Node.js (Rollup)** | Starts Rollup-compiled Node server. |
+| `npm run start:node:webpack` | **Node.js (Webpack)** | Starts Webpack-compiled Node server. |
+| `npm run start:bun` | **Bun** | High-performance Bun server with zero-copy assets and configurable `IDLE_TIMEOUT`. |
+| `npm run start:deno` | **Deno** | Deno standalone server with explicit sandbox permissions. |
 
 ### Edge Application Bundling (Cloudflare & Deno Deploy)
 
 Packages your entire application into a single self-contained Edge bundle with inlined manifests:
 
-| Command                           | Target                    | Output Artifact                     |
-| :-------------------------------- | :------------------------ | :---------------------------------- |
-| `npm run build:cloudflare`        | **Cloudflare Workers**    | `.dinou/cloudflare/worker.js`       |
-| `npm run build:cloudflare:rollup` | **Cloudflare (Rollup)**   | `.dinou/cloudflare/worker.js`       |
-| `npm run build:cloudflare:webpack`| **Cloudflare (Webpack)**  | `.dinou/cloudflare/worker.js`       |
-| `npm run build:deno`              | **Deno Deploy / Edge**    | `.dinou/deno/main.js`              |
-| `npm run build:deno:rollup`       | **Deno Deploy (Rollup)**  | `.dinou/deno/main.js`              |
-| `npm run build:deno:webpack`      | **Deno Deploy (Webpack)** | `.dinou/deno/main.js`              |
+| Command | Target | Output Artifact |
+| :--- | :--- | :--- |
+| `npm run build:cloudflare` | **Cloudflare Workers** | `.dinou/cloudflare/worker.js` |
+| `npm run build:cloudflare:esbuild` | **Cloudflare (esbuild)** | `.dinou/cloudflare/worker.js` |
+| `npm run build:cloudflare:rollup` | **Cloudflare (Rollup)** | `.dinou/cloudflare/worker.js` |
+| `npm run build:cloudflare:webpack` | **Cloudflare (Webpack)** | `.dinou/cloudflare/worker.js` |
+| `npm run build:deno` | **Deno Deploy / Edge** | `.dinou/deno/main.js` |
+| `npm run build:deno:esbuild` | **Deno Deploy (esbuild)** | `.dinou/deno/main.js` |
+| `npm run build:deno:rollup` | **Deno Deploy (Rollup)** | `.dinou/deno/main.js` |
+| `npm run build:deno:webpack` | **Deno Deploy (Webpack)** | `.dinou/deno/main.js` |
+
+### Standalone Native Binary Compilation (Zero-Node Deployment)
+
+Compiles your entire Dinou application into a single, self-contained native executable binary with zero runtime dependencies on the target host:
+
+| Command | Engine | Output Binary | Target Platform |
+| :--- | :--- | :--- | :--- |
+| `npm run build:bun:compile` | **Bun** | `dist/server` | Current Host OS |
+| `npm run build:bun:compile:linux` | **Bun** | `dist/server-linux` | Linux x64 |
+| `npm run build:bun:compile:linux_arm` | **Bun** | `dist/server-linux-arm` | Linux ARM64 |
+| `npm run build:bun:compile:mac` | **Bun** | `dist/server-mac` | macOS x64/ARM64 |
+| `npm run build:bun:compile:win` | **Bun** | `dist/server-win.exe` | Windows x64 |
+| `npm run build:deno:compile` | **Deno** | `dist/deno-server` | Current Host OS |
+| `npm run build:deno:compile:linux` | **Deno** | `dist/deno-server-linux` | Linux x64 |
+| `npm run build:deno:compile:linux_arm` | **Deno** | `dist/deno-server-linux-arm` | Linux ARM64 |
+| `npm run build:deno:compile:mac` | **Deno** | `dist/deno-server-mac` | macOS x64/ARM64 |
+| `npm run build:deno:compile:win` | **Deno** | `dist/deno-server-win.exe` | Windows x64 |
 
 ### Standalone Static Export
 
 Generates a standalone, serverless static website in the `out/` directory for zero-cost static hosting:
 
-| Command                        | Bundler                | Output Directory |
-| :----------------------------- | :--------------------- | :--------------- |
-| `npm run export-static`        | **esbuild** (Default)  | `out/`          |
-| `npm run export-static:esbuild`| **esbuild**            | `out/`          |
-| `npm run export-static:rollup` | **Rollup**             | `out/`          |
-| `npm run export-static:webpack`| **Webpack**            | `out/`          |
+| Command | Bundler | Output Directory |
+| :--- | :--- | :--- |
+| `npm run export-static` | **esbuild** (Default) | `out/` |
+| `npm run export-static:esbuild` | **esbuild** | `out/` |
+| `npm run export-static:rollup` | **Rollup** | `out/` |
+| `npm run export-static:webpack` | **Webpack** | `out/` |
+
+### Complete CLI Scripts Catalog (100 Scripts Reference)
+
+In Dinou v7, all build, development, compilation, and export operations are unified into the official `dinou` CLI binary. In standard (non-ejected) mode, `package.json` scripts map directly to `dinou <command>`.
+
+Below is the complete catalog of **100 standard scripts** supported by Dinou v7 across all deployment targets and bundlers:
+
+<details>
+<summary><strong>🔍 Click to expand the full 100 scripts <code>package.json</code> catalog</strong></summary>
+
+```json
+{
+  "scripts": {
+    "dev": "dinou dev",
+    "build": "dinou build",
+    "start": "dinou start",
+    "dev:esbuild": "dinou dev:esbuild",
+    "dev:rollup": "dinou dev:rollup",
+    "dev:webpack": "dinou dev:webpack",
+    "build:node": "dinou build:node",
+    "build:node:esbuild": "dinou build:node:esbuild",
+    "build:node:rollup": "dinou build:node:rollup",
+    "build:node:webpack": "dinou build:node:webpack",
+    "start:node": "dinou start:node",
+    "start:node:esbuild": "dinou start:node:esbuild",
+    "start:node:rollup": "dinou start:node:rollup",
+    "start:node:webpack": "dinou start:node:webpack",
+    "build:cloudflare": "dinou build:cloudflare",
+    "build:cloudflare:esbuild": "dinou build:cloudflare:esbuild",
+    "build:cloudflare:rollup": "dinou build:cloudflare:rollup",
+    "build:cloudflare:webpack": "dinou build:cloudflare:webpack",
+    "build:deno": "dinou build:deno",
+    "build:deno:esbuild": "dinou build:deno:esbuild",
+    "build:deno:rollup": "dinou build:deno:rollup",
+    "build:deno:webpack": "dinou build:deno:webpack",
+    "build:deno:compile": "dinou build:deno:compile",
+    "build:deno:compile:esbuild": "dinou build:deno:compile:esbuild",
+    "build:deno:compile:rollup": "dinou build:deno:compile:rollup",
+    "build:deno:compile:webpack": "dinou build:deno:compile:webpack",
+    "build:deno:compile:linux": "dinou build:deno:compile:linux",
+    "build:deno:compile:linux:esbuild": "dinou build:deno:compile:linux:esbuild",
+    "build:deno:compile:linux:rollup": "dinou build:deno:compile:linux:rollup",
+    "build:deno:compile:linux:webpack": "dinou build:deno:compile:linux:webpack",
+    "build:deno:compile:linux_arm": "dinou build:deno:compile:linux_arm",
+    "build:deno:compile:linux_arm:esbuild": "dinou build:deno:compile:linux_arm:esbuild",
+    "build:deno:compile:linux_arm:rollup": "dinou build:deno:compile:linux_arm:rollup",
+    "build:deno:compile:linux_arm:webpack": "dinou build:deno:compile:linux_arm:webpack",
+    "build:deno:compile:mac": "dinou build:deno:compile:mac",
+    "build:deno:compile:mac:esbuild": "dinou build:deno:compile:mac:esbuild",
+    "build:deno:compile:mac:rollup": "dinou build:deno:compile:mac:rollup",
+    "build:deno:compile:mac:webpack": "dinou build:deno:compile:mac:webpack",
+    "build:deno:compile:win": "dinou build:deno:compile:win",
+    "build:deno:compile:win:esbuild": "dinou build:deno:compile:win:esbuild",
+    "build:deno:compile:win:rollup": "dinou build:deno:compile:win:rollup",
+    "build:deno:compile:win:webpack": "dinou build:deno:compile:win:webpack",
+    "start:deno": "dinou start:deno",
+    "build:bun": "dinou build:bun",
+    "build:bun:esbuild": "dinou build:bun:esbuild",
+    "build:bun:rollup": "dinou build:bun:rollup",
+    "build:bun:webpack": "dinou build:bun:webpack",
+    "build:bun:compile": "dinou build:bun:compile",
+    "build:bun:compile:esbuild": "dinou build:bun:compile:esbuild",
+    "build:bun:compile:rollup": "dinou build:bun:compile:rollup",
+    "build:bun:compile:webpack": "dinou build:bun:compile:webpack",
+    "build:bun:compile:linux": "dinou build:bun:compile:linux",
+    "build:bun:compile:linux:esbuild": "dinou build:bun:compile:linux:esbuild",
+    "build:bun:compile:linux:rollup": "dinou build:bun:compile:linux:rollup",
+    "build:bun:compile:linux:webpack": "dinou build:bun:compile:linux:webpack",
+    "build:bun:compile:linux_arm": "dinou build:bun:compile:linux_arm",
+    "build:bun:compile:linux_arm:esbuild": "dinou build:bun:compile:linux_arm:esbuild",
+    "build:bun:compile:linux_arm:rollup": "dinou build:bun:compile:linux_arm:rollup",
+    "build:bun:compile:linux_arm:webpack": "dinou build:bun:compile:linux_arm:webpack",
+    "build:bun:compile:mac": "dinou build:bun:compile:mac",
+    "build:bun:compile:mac:esbuild": "dinou build:bun:compile:mac:esbuild",
+    "build:bun:compile:mac:rollup": "dinou build:bun:compile:mac:rollup",
+    "build:bun:compile:mac:webpack": "dinou build:bun:compile:mac:webpack",
+    "build:bun:compile:win": "dinou build:bun:compile:win",
+    "build:bun:compile:win:esbuild": "dinou build:bun:compile:win:esbuild",
+    "build:bun:compile:win:rollup": "dinou build:bun:compile:win:rollup",
+    "build:bun:compile:win:webpack": "dinou build:bun:compile:win:webpack",
+    "build:bun:pure": "dinou build:bun:pure",
+    "build:bun:pure:esbuild": "dinou build:bun:pure:esbuild",
+    "build:bun:pure:rollup": "dinou build:bun:pure:rollup",
+    "build:bun:pure:webpack": "dinou build:bun:pure:webpack",
+    "build:bun:pure:compile": "dinou build:bun:pure:compile",
+    "build:bun:pure:compile:esbuild": "dinou build:bun:pure:compile:esbuild",
+    "build:bun:pure:compile:rollup": "dinou build:bun:pure:compile:rollup",
+    "build:bun:pure:compile:webpack": "dinou build:bun:pure:compile:webpack",
+    "build:bun:pure:compile:linux": "dinou build:bun:pure:compile:linux",
+    "build:bun:pure:compile:linux:esbuild": "dinou build:bun:pure:compile:linux:esbuild",
+    "build:bun:pure:compile:linux:rollup": "dinou build:bun:pure:compile:linux:rollup",
+    "build:bun:pure:compile:linux:webpack": "dinou build:bun:pure:compile:linux:webpack",
+    "build:bun:pure:compile:linux_arm": "dinou build:bun:pure:compile:linux_arm",
+    "build:bun:pure:compile:linux_arm:esbuild": "dinou build:bun:pure:compile:linux_arm:esbuild",
+    "build:bun:pure:compile:linux_arm:rollup": "dinou build:bun:pure:compile:linux_arm:rollup",
+    "build:bun:pure:compile:linux_arm:webpack": "dinou build:bun:pure:compile:linux_arm:webpack",
+    "build:bun:pure:compile:mac": "dinou build:bun:pure:compile:mac",
+    "build:bun:pure:compile:mac:esbuild": "dinou build:bun:pure:compile:mac:esbuild",
+    "build:bun:pure:compile:mac:rollup": "dinou build:bun:pure:compile:mac:rollup",
+    "build:bun:pure:compile:mac:webpack": "dinou build:bun:pure:compile:mac:webpack",
+    "build:bun:pure:compile:win": "dinou build:bun:pure:compile:win",
+    "build:bun:pure:compile:win:esbuild": "dinou build:bun:pure:compile:win:esbuild",
+    "build:bun:pure:compile:win:rollup": "dinou build:bun:pure:compile:win:rollup",
+    "build:bun:pure:compile:win:webpack": "dinou build:bun:pure:compile:win:webpack",
+    "start:bun": "dinou start:bun",
+    "start:bun:esbuild": "dinou start:bun:esbuild",
+    "start:bun:rollup": "dinou start:bun:rollup",
+    "start:bun:webpack": "dinou start:bun:webpack",
+    "export-static": "dinou export-static",
+    "export-static:esbuild": "dinou export-static:esbuild",
+    "export-static:rollup": "dinou export-static:rollup",
+    "export-static:webpack": "dinou export-static:webpack",
+    "eject": "dinou eject"
+  }
+}
+```
+
+</details>
+
+#### Breakdown by Target & Lifecycle:
+
+- **Unified Dev Servers (4 scripts):** `dev` (runs `dev:esbuild` by default), `dev:esbuild`, `dev:rollup`, `dev:webpack`.
+- **Node.js AOT & Production Start (8 scripts):** `build:node`, `build:node:esbuild`, `build:node:rollup`, `build:node:webpack` with corresponding `start:node`, `start:node:esbuild`, `start:node:rollup`, `start:node:webpack`.
+- **Cloudflare Workers (4 scripts):** `build:cloudflare`, `build:cloudflare:esbuild`, `build:cloudflare:rollup`, `build:cloudflare:webpack`.
+- **Deno Deploy & Standalone Compilation (21 scripts):** `build:deno` (+ bundler variants), `start:deno`, and cross-platform native binary compilation (`build:deno:compile:*` targeting host, `linux`, `linux_arm`, `mac`, `win`).
+- **Bun Runtime, Pure Mode & Compilation (38 scripts):** Node-compatible Bun builds (`build:bun:*`), pure native Bun builds (`build:bun:pure:*`), binary compilation (`build:bun:compile:*` and `build:bun:pure:compile:*`), and runtime runners (`start:bun:*`).
+- **Static Site Generation / Standalone Export (4 scripts):** `export-static`, `export-static:esbuild`, `export-static:rollup`, `export-static:webpack`.
+- **Eject (1 script):** `eject` converts the project from standard CLI delegation to local source ownership.
 
 ## 📦 Eject Dinou
 
