@@ -340,8 +340,8 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
   - [Best Practices for Ejected Projects](#best-practices-for-ejected-projects)
 - [Complete API Reference](#complete-api-reference)
   - [1. Components (dinou)](#components)
-    - [<Link>](#link)
-    - [<ClientRedirect>](#clientredirect)
+    - [`<Link>`](#link)
+    - [`<ClientRedirect>`](#clientredirect)
   - [2. Hooks & Navigation (dinou)](#hooks-navigation)
     - [redirect()](#redirect)
     - [useSearchParams()](#usesearchparams)
@@ -363,11 +363,11 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
       - [Non-Blocking Transitions](#usenavigationloading-architecture)
       - [Production Indicators](#usenavigationloading-examples)
   - [3. Type-Safe Routing (dinou)](#type-safe-routing)
-    - [PageProps<T>](#pageprops)
-    - [LayoutProps<T>](#layoutprops)
-    - [ErrorProps<T>](#errorprops)
+    - [`PageProps<T>`](#pageprops)
+    - [`LayoutProps<T>`](#layoutprops)
+    - [`ErrorProps<T>`](#errorprops)
     - [PageFunctions & LayoutFunctions](#pagefunctions)
-    - [RouteParams<T>](#routeparams)
+    - [`RouteParams<T>`](#routeparams)
     - [DinouRoute](#dinouroute)
     - [DinouRoutePattern](#dinouroutepattern)
   - [4. Server Context & Config (dinou)](#server-context-config)
@@ -384,7 +384,7 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [revalidatePage()](#revalidatepage)
     - [revalidatePath()](#revalidatepath)
     - [revalidateTag()](#revalidatetag)
-    - [<DinouCacheSlot>](#dinoucacheslot)
+    - [`<DinouCacheSlot>`](#dinoucacheslot)
       - [Props & Micro-ISR](#dinoucacheslot-props)
       - [Production Slot Patterns](#dinoucacheslot-examples)
   - [6. Storage Adapters (dinou/server)](#storage-adapters)
@@ -7901,9 +7901,9 @@ Declarative universal and client components exported directly from `dinou`.
 
 ---
 
-#### <Link>
-
 <a id="link"></a>
+
+#### `<Link>`
 
 The primary declarative navigation primitive in Dinou. Renders a semantic HTML `<a>` tag enhanced with client-side SPA soft navigation, automatic background prefetching on hover, relative filesystem path resolution, and optional cache bypassing.
 
@@ -8036,9 +8036,9 @@ export default function SettingsSubNav() {
 
 ---
 
-#### <ClientRedirect>
-
 <a id="clientredirect"></a>
+
+#### `<ClientRedirect>`
 
 A declarative Client Component that triggers an immediate, seamless route replacement upon mounting in the browser. It renders no DOM markup (`null`) and executes a soft router replacement (`replace: true`), ensuring that the redirected URL does not create trap loops in the user's browser back history.
 
@@ -8652,9 +8652,9 @@ Dinou v7 introduces zero-runtime type safety with auto-generated declaration fil
 
 ---
 
-#### PageProps<T>
-
 <a id="pageprops"></a>
+
+#### `PageProps<T>`
 
 Official TypeScript interface for typing React Page components (`page.tsx`). Takes the route pattern string (constrained by `DinouRoutePattern`) as a generic parameter and automatically infers the strongly typed `params` object.
 
@@ -8676,9 +8676,9 @@ export function DocsPage({ params }: PageProps<"/docs/[...slug]">) {
 
 ---
 
-#### LayoutProps<T>
-
 <a id="layoutprops"></a>
+
+#### `LayoutProps<T>`
 
 Official TypeScript interface for typing React Layout components (`layout.tsx`). In addition to inferred `params`, it strictly types `children: React.ReactNode`.
 
@@ -8697,9 +8697,9 @@ export default function BlogLayout({ children, params }: LayoutProps<"/blog/[slu
 
 ---
 
-#### ErrorProps<T>
-
 <a id="errorprops"></a>
+
+#### `ErrorProps<T>`
 
 Official TypeScript interface for typing React Error Page components (`error.tsx`). In addition to inferred `params`, it strictly types the caught `error: Error`.
 
@@ -8742,9 +8742,9 @@ export const revalidate: LayoutFunctions["revalidate"] = 3600;
 
 ---
 
-#### RouteParams<T>
-
 <a id="routeparams"></a>
+
+#### `RouteParams<T>`
 
 A standalone utility type representing the inferred parameters dictionary of a given route pattern. While `PageProps` and `PageFunctions` resolve route strings directly, `RouteParams` is ideal for typing Server Actions, services, or custom helper functions that do not inherit framework props automatically.
 
@@ -9208,9 +9208,9 @@ export async function restockProduct(productId: string, quantity: number) {
 
 ---
 
-#### <DinouCacheSlot>
-
 <a id="dinoucacheslot"></a>
+
+#### `<DinouCacheSlot>`
 
 A server-side component primitive enabling independent, localized Micro-ISR caching for sub-trees of React Server Components within a page or layout. Allows high-velocity sections (like stock tickers or notification badges) to have their own cache lifetimes and invalidation tags independent of parent page caching.
 
