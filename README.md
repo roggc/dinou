@@ -220,6 +220,15 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [6. Putting It All Together in the Page](#6-putting-it-all-together-in-the-page)
   - [Zero-Dependency Option: Native useSyncExternalStore](#zero-dependency-option-native-usesyncexternalstore)
   - [Comparison & Key Advantages](#comparison--key-advantages)
+- [React Compiler & StrictMode](#react-compiler--strictmode)
+  - [Overview: Automatic Memoization](#overview-automatic-memoization)
+  - [1. Code Comparison: Plain React vs Hooks](#1-code-comparison-plain-react-vs-hooks)
+  - [2. Bundler Integration Matrix](#2-bundler-integration-matrix)
+    - [2.1. Why Dev vs Prod Bundler Behavior Differs](#21-why-dev-vs-prod-bundler-behavior-differs)
+  - [3. React StrictMode (Default: true)](#3-react-strictmode-default-true)
+    - [3.1. Why StrictMode is Vital for the React Compiler](#31-why-strictmode-is-vital-for-the-react-compiler)
+    - [3.2. Configuring reactStrictMode in dinou.config.mjs](#32-configuring-reactstrictmode-in-dinouconfigmjs)
+  - [4. Guidelines for Compiler Purity](#4-guidelines-for-compiler-purity)
 - [Configuration API (`dinou.config.js`)](#configuration-api-dinouconfigjs)
   - [1. Universal Middleware (`onRequest`)](#1-universal-middleware-onrequest)
   - [2. SWC Disk-Mirror (`useSwcDiskMirror`)](#2-swc-disk-mirror-useswcdiskmirror)
@@ -5534,6 +5543,114 @@ Comparing the Dinou Pattern against traditional client-side data fetching (REST 
 
 - **Surgical Reactivity:** Only the targeted component re-fetches and re-renders. Inputs, local states, and other UI sections remain completely untouched.
 - **Zero Friction State Management:** Pairs seamlessly with your existing global store (Zustand, Jotai, or Redux) or native `useSyncExternalStore` alongside React 19's Flight RPC and `<Suspense>`.
+
+---
+
+## React Compiler & StrictMode
+
+Forget about manual `useMemo` and `useCallback`. Dinou integrates the React Compiler (React 19+) to automatically optimize component renders at build time, backed by `reactStrictMode` by default to ensure seamless parity between development and production.
+
+### Overview: Automatic Memoization
+
+Dinou comes with the **React Compiler** enabled out of the box. The compiler understands JavaScript semantics and the Rules of React. It automatically memoizes values, JSX subtrees, and function references, preventing unnecessary re-renders across your application.
+
+- **Cleaner Codebase:** Write idiomatic, plain React. Eliminates manual dependency arrays, hook boilerplate, and premature memoization mistakes.
+- **Surgical Runtime Performance:** Applies fine-grained memoization at the statement level, frequently outperforming manual optimizations by deeply tracking internal data flow.
+
+### 1. Code Comparison: Plain React vs Hooks
+
+**Legacy React (Manual Optimization with Hooks):**
+
+```tsx
+function OrderSummary({ items, filter }: { items: Item[]; filter: string }) {
+  // Manual memoization with fragile dependency arrays
+  const filtered = useMemo(() => {
+    return items.filter((item) => item.category === filter);
+  }, [items, filter]);
+
+  // Manual callback to prevent breaking child component memoization
+  const handleSelect = useCallback((id: string) => {
+    trackSelection(id);
+  }, []);
+
+  return <OrderList items={filtered} onSelect={handleSelect} />;
+}
+```
+
+**Dinou: Plain Idiomatic React (React Compiler Active):**
+
+```tsx
+function OrderSummary({ items, filter }: { items: Item[]; filter: string }) {
+  // ✨ Automatically memoized by the React Compiler
+  const filtered = items.filter((item) => item.category === filter);
+
+  // ✨ Function reference automatically stabilized
+  const handleSelect = (id: string) => {
+    trackSelection(id);
+  };
+
+  return <OrderList items={filtered} onSelect={handleSelect} />;
+}
+```
+
+### 2. Bundler Integration Matrix
+
+Dinou adopts a targeted compilation model across supported bundlers to optimize the balance between **instant developer iteration (HMR)** and **maximum production performance**:
+
+| Bundler | Development | Production | Compilation Strategy |
+| :--- | :---: | :---: | :--- |
+| **Webpack** | ✅ **Enabled** | ✅ **Enabled** | Executes React Compiler in both Dev and Prod for identical AST transformation. |
+| **Rollup** | ❌ *Disabled* | ✅ **Enabled** | **Fast Iteration Priority:** Bypasses compiler overhead in dev for fast iteration; fully optimizes production builds. |
+| **Esbuild** | ❌ *Disabled* | ✅ **Enabled** | **Sub-millisecond HMR:** Maintains native sub-millisecond Rust SWC HMR in dev; compiles with React Compiler in production. |
+
+#### 2.1. Why Dev vs Prod Bundler Behavior Differs
+
+The React Compiler performs intensive Static Analysis and Abstract Syntax Tree (AST) parsing via Babel:
+
+- **For Esbuild & Rollup in Dev:** Injecting Babel AST transformation into Esbuild or Rollup during development would negate their primary advantage: sub-millisecond Hot Module Replacement (HMR). Dinou disables the compiler in dev mode for these tools to preserve instantaneous live reloading.
+- **For Webpack:** Webpack already operates a pipeline amenable to AST plugins, allowing the React Compiler to run consistently in development and production.
+- **For Production:** All bundlers (Webpack, Rollup, and Esbuild) run with the React Compiler enabled to guarantee maximum production runtime efficiency.
+
+### 3. React StrictMode (Default: `true`)
+
+Dinou introduces `reactStrictMode: true` by default in development mode.
+
+#### 3.1. Why StrictMode is Vital for the React Compiler
+
+A critical challenge with disabling the React Compiler during development (as with Esbuild and Rollup) is ensuring that **what works in development behaves identically in production**.
+
+The React Compiler assumes that your components follow the **Rules of React**—specifically, that component rendering is pure and free of side effects.
+
+When `reactStrictMode` is enabled in development, React **intentionally double-invokes** component renders, initializer functions, and updater callbacks:
+
+- **Exposes Impure Renders:** If a component mutates external variables or performs side effects during render, the double invocation immediately breaks the UI in dev mode, alerting you.
+- **Guarantees Production Safety:** Because impurities are caught early in development, your code is proven to be pure. When Esbuild or Rollup enables the React Compiler in production, the compiled memoization output is guaranteed to behave 100% identically to development!
+
+#### 3.2. Configuring `reactStrictMode` in `dinou.config.mjs`
+
+`reactStrictMode` is enabled by default in Dinou. You can configure it explicitly in your configuration file:
+
+```javascript
+// dinou.config.mjs
+import { defineConfig } from "dinou";
+
+export default defineConfig({
+  /**
+   * React StrictMode configuration for development mode.
+   * Double-invokes render and effect functions in development to catch side-effects.
+   * @default true
+   */
+  reactStrictMode: true,
+});
+```
+
+### 4. Guidelines for Compiler Purity
+
+To get the maximum benefit from the React Compiler and StrictMode in Dinou, follow these core principles:
+
+1. **Keep Component Render Functions Pure:** Given the same inputs (props, state, context), a component should always return the same JSX. Never mutate global variables or arguments passed to the component during render.
+2. **Treat Props and State as Immutable:** Never mutate `props.user.name = "new"` directly. Always create new object references when updating state (e.g. `{ ...user, name: "new" }`).
+3. **Isolate Side Effects to `useEffect` or Server Functions:** Timers, DOM subscriptions, and network mutations belong inside event handlers or `useEffect`, never in the component body.
 
 ---
 
