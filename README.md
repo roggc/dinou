@@ -73,6 +73,23 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [4.3. Comparison: When to Use Which Mechanism](#43-comparison-when-to-use-which-mechanism)
   - [5. Route Transitions (useNavigationLoading)](#5-route-transitions-usenavigationloading)
   - [6. Relative Routing Rules](#6-relative-routing-rules)
+- [Type-Safe Routing](#type-safe-routing)
+  - [1. Overview & Zero-Runtime Guarantee](#1-overview--zero-runtime-guarantee)
+    - [1.1. Outward Navigation vs. Inward Consumption](#11-outward-navigation-vs-inward-consumption)
+    - [1.2. Zero-Runtime Cost (0 Extra Bytes)](#12-zero-runtime-cost-0-extra-bytes)
+  - [2. Quick Start for Developers](#2-quick-start-for-developers)
+    - [2.1. Level 1: Links & Navigation](#21-level-1-links--navigation)
+    - [2.2. Level 2: Typed Pages, Layouts & Server Functions](#22-level-2-typed-pages-layouts--server-functions)
+    - [2.3. Quick Reference: Core Types](#23-quick-reference-core-types)
+  - [3. Parameter Mapping Reference Table](#3-parameter-mapping-reference-table)
+  - [4. Advanced Usage & Real-World Recipes](#4-advanced-usage--real-world-recipes)
+    - [4.1. IDE Autocomplete Workflow (Ctrl + Space)](#41-ide-autocomplete-workflow-ctrl--space)
+    - [4.2. Typed Error Pages with ErrorProps](#42-typed-error-pages-with-errorprops)
+    - [4.3. Custom Navigation Components with DinouRoute](#43-custom-navigation-components-with-dinouroute)
+    - [4.4. Dynamic Navigation with Typed Interpolation](#44-dynamic-navigation-with-typed-interpolation)
+  - [5. Technical Architecture: Under the Hood](#5-technical-architecture-under-the-hood)
+  - [6. Lifecycle: Dev Server & Production Builds](#6-lifecycle-dev-server--production-builds)
+  - [7. Backward Compatibility Guarantee](#7-backward-compatibility-guarantee)
 - [Component Architecture: Server and Client Components](#component-architecture-server-and-client-components)
   - [1. The RSC Mental Model](#1-the-rsc-mental-model)
   - [2. Server Components (RSC)](#2-server-components-rsc)
@@ -1117,6 +1134,260 @@ In Dinou, every route is treated as a directory because physically, each page is
 | `/blog/hello` | `../about` | `/blog/about` |
 
 This rule applies uniformly across all navigation methods, including the `<Link>` component and programmatic calls like `router.push()`.
+
+## Type-Safe Routing
+
+Dinou v7 introduces a built-in, compile-time Type-Safe Routing engine with **zero runtime overhead**. During development and build time, Dinou automatically inspects your `src/` directory and generates ambient TypeScript definitions in `.dinou/types/routes.d.ts`.
+
+---
+
+### 1. Overview & Zero-Runtime Guarantee
+
+Unlike traditional routing setups that require external schema validators or proprietary bundler plugins, Dinou generates strict TypeScript definitions directly from your file system.
+
+#### 1.1. Outward Navigation vs. Inward Consumption
+
+The system operates across two complementary architectural planes:
+
+1. **Outward Navigation (Level 1):** Protects outbound transitions. When using `<Link href="...">`, `router.push("...")`, or passing routes to reusable UI components with `DinouRoute`, TypeScript autocompletes valid routes, verifies dynamic template strings, and raises compile-time errors on dead links or typos.
+2. **Inward Consumption (Level 2):** Enforces inbound parameter safety. Pages, layouts, error boundaries, and server data loaders consume parameters strongly typed by route template strings via `PageProps<T>`, `LayoutProps<T>`, `ErrorProps<T>`, and `RouteParams<T>`.
+
+#### 1.2. Zero-Runtime Cost (0 Extra Bytes)
+
+All route type validation occurs entirely within the TypeScript compiler. The emitted `.dinou/types/routes.d.ts` file contains ambient type declarations and is never bundled into your client JavaScript or server execution bundle:
+
+- **0 bytes added** to production client bundles.
+- **0 runtime performance overhead** on route matching or transitions.
+- **0 external dependencies** required for type validation.
+
+---
+
+### 2. Quick Start for Developers
+
+#### 2.1. Level 1: Links & Navigation
+
+Import `<Link>` or `useRouter` from `"dinou"`. Your IDE will immediately suggest all valid static routes, parameterized dynamic routes, relative paths, queries, and hashes:
+
+```tsx
+import { Link, useRouter } from "dinou";
+
+export default function Navigation({ post }: { post: { slug: string } }) {
+  const router = useRouter();
+
+  return (
+    <nav className="flex gap-4">
+      {/* ✅ Instant autocompletion in your IDE */}
+      <Link href="/docs/routing">Routing Guide</Link>
+
+      {/* ✅ Dynamic routes with typed template strings */}
+      <Link href={`/blog/${post.slug}`}>View Post</Link>
+
+      {/* ✅ Seamless support for queries, hashes, relative paths, and external URLs */}
+      <Link href="/demo?tab=settings#section-1">Settings</Link>
+      <Link href="../contact">Relative</Link>
+      <Link href="https://github.com/roggc/dinou">GitHub</Link>
+
+      {/* ❌ TypeScript compile-time error when pointing to a non-existent route */}
+      {/* <Link href="/unknown-route" /> */}
+
+      <button onClick={() => router.push("/docs/api-reference")}>
+        View API Reference
+      </button>
+    </nav>
+  );
+}
+```
+
+#### 2.2. Level 2: Typed Pages, Layouts & Server Functions
+
+Type your components and data fetching functions by passing the route template string as a generic:
+
+```tsx
+import type { PageProps, LayoutProps, RouteParams } from "dinou";
+
+// 1. src/blog/[slug]/page.tsx
+export default function BlogPost({ params }: PageProps<"/blog/[slug]">) {
+  // ✅ params.slug is strongly typed as string
+  return <h1>Post: {params.slug}</h1>;
+
+  // ❌ TypeScript error: Property 'id' does not exist on type '{ slug: string }'
+  // return <h1>{params.id}</h1>;
+}
+
+// 2. src/blog/[slug]/layout.tsx
+export function BlogLayout({ children, params }: LayoutProps<"/blog/[slug]">) {
+  // ✅ params.slug is strongly typed; children is typed as ReactNode
+  return (
+    <section>
+      <header>Category: {params.slug}</header>
+      <main>{children}</main>
+    </section>
+  );
+}
+
+// 3. src/blog/[slug]/page_functions.ts
+export async function getProps(params: RouteParams<"/blog/[slug]">) {
+  // ✅ Directly types the raw params object without params: any
+  return {
+    postTitle: `Post: ${params.slug}`,
+  };
+}
+```
+
+#### 2.3. Quick Reference: Core Types
+
+| Exported Type | Primary Purpose | Canonical Example |
+| :--- | :--- | :--- |
+| `PageProps<T>` | React Page components (`page.tsx`) | `Page({ params }: PageProps<"/blog/[slug]">)` |
+| `LayoutProps<T>` | React Layout components (`layout.tsx`) | `Layout({ children, params }: LayoutProps<"/blog/[slug]">)` |
+| `ErrorProps<T>` | React Error Page components (`error.tsx`) | `Error({ error, params }: ErrorProps<"/blog/[slug]">)` |
+| `RouteParams<T>` | Pure functions, data loaders & services (`getProps`, API helpers) | `getProps(params: RouteParams<"/blog/[slug]">)` |
+| `DinouRoute` | URL props, `<Link>`, `router.push()` & custom navigation components | `interface NavProps { href: DinouRoute }` |
+
+---
+
+### 3. Parameter Mapping Reference Table
+
+Dinou deterministically transforms your file-system folder naming conventions into strict TypeScript definitions:
+
+| Filesystem Convention | Inferred Parameter Type | Route Example | Type of `params` |
+| :--- | :--- | :--- | :--- |
+| **Static Route** | No parameters | `src/about/page.tsx` | `Record<string, never>` |
+| **Single Dynamic `[id]`** | `string` | `src/blog/[id]/page.tsx` | `{ id: string }` |
+| **Catch-All `[...slug]`** | `string[]` | `src/docs/[...slug]/page.tsx` | `{ slug: string[] }` |
+| **Optional Dynamic `[[lang]]`** | `string \| undefined` | `src/[[lang]]/page.tsx` | `{ lang?: string }` |
+| **Optional Catch-All `[[...opt]]`** | `string[] \| undefined` | `src/shop/[[...opt]]/page.tsx` | `{ opt?: string[] }` |
+| **Multiple Dynamic Segments** | Combined by segment | `src/users/[uId]/posts/[pId]/page.tsx` | `{ uId: string; pId: string }` |
+| **Nested Optionals** | Positional dependent | `src/inv/[[wh]]/[[aisle]]/page.tsx` | `{ wh?: string; aisle?: string }` |
+
+> [!WARNING]
+> **Be cautious with trailing slashes in dynamic links!**
+> Ensure route pattern strings in `PageProps<T>` match your folder structure exactly (e.g. `PageProps<"/blog/[slug]">`, without trailing slashes) for accurate parameter inference.
+
+---
+
+### 4. Advanced Usage & Real-World Recipes
+
+#### 4.1. IDE Autocomplete Workflow (Ctrl + Space)
+
+When typing a component, type `PageProps<"">` and press **Ctrl + Space** (or **Cmd + Space** on macOS). Your editor will list every registered route pattern in the project:
+
+```tsx
+import type { PageProps } from "dinou";
+
+// Trigger Ctrl + Space inside "" to pick from project routes
+export default function BlogPost({ params }: PageProps<"/blog/[slug]">) {
+  return <h1>{params.slug}</h1>;
+}
+```
+
+#### 4.2. Typed Error Pages with ErrorProps
+
+Error boundaries in Dinou v7 strongly type both the captured `error` and the current route's parameters:
+
+```tsx
+"use client";
+
+import { useRouter, type ErrorProps } from "dinou";
+
+export default function BlogPostError({ params, error }: ErrorProps<"/blog/[slug]">) {
+  const router = useRouter();
+
+  return (
+    <div className="error-card p-6 border rounded-xl bg-destructive/10">
+      <h2>Failed to load post: {params.slug}</h2>
+      <p className="text-sm text-muted-foreground">{error.message}</p>
+      {/* Soft reload via Dinou client router */}
+      <button onClick={() => router.refresh()}>Try Again</button>
+    </div>
+  );
+}
+```
+
+#### 4.3. Custom Navigation Components with DinouRoute
+
+When creating design-system components (e.g., custom buttons, sidebar items, dropdown menus), use the exported `DinouRoute` union type to pass through autocomplete and validation:
+
+```tsx
+import type { DinouRoute } from "dinou";
+import { Link } from "dinou";
+
+interface NavButtonProps {
+  href: DinouRoute; // 👈 Inherits full autocompletion and route validation
+  label: string;
+}
+
+export function NavButton({ href, label }: NavButtonProps) {
+  return (
+    <Link href={href} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-medium">
+      {label}
+    </Link>
+  );
+}
+
+// In your application code:
+const menu: { label: string; href: DinouRoute }[] = [
+  { label: "Overview", href: "/docs" },              // ✅ Autocompleted
+  { label: "Routing", href: "/docs/routing" },        // ✅ Autocompleted
+  // { label: "Broken", href: "/non-existent-page" }, // ❌ TypeScript compile error!
+];
+```
+
+#### 4.4. Dynamic Navigation with Typed Interpolation
+
+Dinou types template literal strings against dynamic route definitions, catching broken template strings while accepting valid parameters:
+
+```tsx
+import { Link, useRouter } from "dinou";
+
+interface Product {
+  id: string;
+  name: string;
+}
+
+export function ProductCard({ product }: { product: Product }) {
+  const router = useRouter();
+
+  return (
+    <div className="card p-4 border rounded-xl">
+      {/* String interpolation verified against `/products/${string | number}` */}
+      <Link href={`/products/${product.id}`}>{product.name}</Link>
+
+      <button onClick={() => router.push(`/products/${product.id}`)}>
+        View Details
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+### 5. Technical Architecture: Under the Hood
+
+Dinou coordinates compilation, route scanning, and TypeScript declarations through a zero-dependency architecture:
+
+1. **Filesystem `src/` Directory:** Synchronous read and structural crawl of all page and layout files.
+2. **Scanner (`generate-route-types`):** Low-overhead in-memory scanner completes in under 2ms.
+3. **Type Emission (`.dinou/types/routes.d.ts`):** Emits ambient module declarations extending the `"dinou"` package interface with exact union types (`DinouRoute`) and parameter maps (`DinouRouteParams`).
+4. **IDE & TypeScript Consumption:** VS Code, Cursor, and the TypeScript compiler immediately read the declarations via `tsconfig.json` without requiring editor restarts or language server reboots.
+
+---
+
+### 6. Lifecycle: Dev Server & Production Builds
+
+How Dinou keeps route typings strictly synchronized across local development and deployment pipelines:
+
+- **6.1. Local Dev (Hot Watcher):** During `npm run dev`, Dinou arms a low-overhead filesystem watcher on `src/`. Whenever a `page.(tsx|jsx|ts|js)` file is added, renamed, or deleted, `.dinou/types/routes.d.ts` regenerates in under 2ms.
+- **6.2. Production Builds:** Running `npm run build` runs route type generation as step 0 before bundling. If code references a non-existent route, TypeScript type checking fails the build before deploying.
+- **6.3. CI / Type Checkers:** Run `npx tsc --noEmit` in CI pipelines to validate link integrity across the entire project deterministically.
+
+---
+
+### 7. Backward Compatibility Guarantee
+
+- **100% Backward Compatible:** Existing components without explicit generic parameters continue to work without modification. You can continue using `export default function Page({ params }: any)` or generic `PageProps` during progressive migrations.
+- **Graceful Fallback Mode:** If `.dinou/types/routes.d.ts` has not yet been generated (e.g., fresh clone prior to `npm run dev` or `npm run build`), types gracefully fallback to permissive strings (`string & {}`), ensuring clean `git checkout` and initial install steps without blocking developer workflows.
 
 ## Component Architecture: Server and Client Components
 
