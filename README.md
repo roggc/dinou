@@ -327,6 +327,17 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
   - [Production Docker Setup](#production-docker-setup)
   - [Managing Production Environment Secrets](#managing-production-environment-secrets)
   - [Production Pre-Flight Checklist](#production-pre-flight-checklist)
+- [Eject Dinou](#eject-dinou)
+  - [Ejecting Dinou: Framework Sovereignty](#ejecting-dinou-framework-sovereignty)
+  - [How to Eject (CLI & Scripts)](#how-to-eject-cli--scripts)
+  - [What Happens When You Eject?](#what-happens-when-you-eject)
+  - [Anatomy of the Ejected dinou/ Directory](#anatomy-of-the-ejected-dinou-directory)
+  - [When to Consider Ejecting](#when-to-consider-ejecting)
+  - [Ejection in the Agentic Era](#ejection-in-the-agentic-era)
+  - [Practical Customization Examples](#practical-customization-examples)
+    - [1. Adding Custom Server Middleware & Guards](#1-adding-custom-server-middleware--guards)
+    - [2. Extending the Bundler Pipeline](#2-extending-the-bundler-pipeline)
+  - [Best Practices for Ejected Projects](#best-practices-for-ejected-projects)
 - [📜 Changelog](#-changelog)
 - [📄 License](#-license)
 
@@ -7650,6 +7661,170 @@ In production, never ship a `.env` file inside your Docker container or git repo
 - **Environment Variables Configured:** Verify database connection strings and third-party API keys are set in your platform dashboard.
 - **Static Asset Caching:** Fast browser caching for instant subsequent loads (handled automatically by Dinou for all hashed bundles in `/assets/*`).
 - **SSL / HTTPS Active:** Ensure your production domain uses HTTPS (automatic on Netlify, Cloudflare, Railway, and Fly.io; configure via Caddy or Nginx with Let's Encrypt if using a self-hosted VPS).
+
+---
+
+## Eject Dinou
+
+Gain complete ownership over your technology stack. Eject Dinou to unpack the entire dual-engine React 19 compiler, runtime adapters, and server runtime logic directly into your repository.
+
+### Ejecting Dinou: Framework Sovereignty
+
+In most modern web frameworks, the server runtime, bundling logic, and React Server Component compiler are hidden behind opaque `node_modules` dependencies. If you encounter an edge-case bug, need a bespoke compilation transform, or want to deploy to an unsupported infrastructure, you are forced to wait for upstream releases or battle monkey-patching hacks.
+
+Ejecting extracts the entire framework into a `dinou/` folder at the root of your project, making your tech stack 100% configurable and hackable—while continuing to work seamlessly out of the box.
+
+---
+
+### How to Eject (CLI & Scripts)
+
+You can eject Dinou at any point in your project lifecycle with a single command:
+
+```bash
+# Using the Dinou CLI directly
+npx dinou eject
+
+# Or using an npm script (if defined in your package.json)
+npm run eject
+```
+
+Ejection is instantaneous and leaves your existing application code in `src/` completely untouched.
+
+---
+
+### What Happens When You Eject?
+
+When you execute `dinou eject`, the framework performs four automated steps:
+
+1. **Framework Source Extraction:** Copies the complete, production-grade Dinou engine into a local `dinou/` folder at the root of your project. This includes the universal HTTP handler, the RSC streaming engine, SSR HTML renderer, all three bundlers (esbuild, Rollup, Webpack), and all platform adapters.
+2. **Direct Script Re-routing:** Updates your `package.json` scripts so they point directly to your local files (e.g. `node dinou/node/dev.mjs` and `node dinou/node/build.mjs`) instead of opaque global CLI binary shims.
+3. **Automatic Ejected Mode Detection (`isEjected`):** All bundler configurations automatically check for the existence of the local `dinou/` directory. When detected, imports like `import { Link } from "dinou"` resolve directly to your local `./dinou` code rather than `node_modules/dinou`.
+4. **Zero Application Disruption:** Your application components, pages, layouts, API routes, and styles in `src/` remain 100% identical. Your app boots and builds immediately with zero regressions.
+
+---
+
+### Anatomy of the Ejected dinou/ Directory
+
+Once ejected, your project root contains a clean, well-organized `dinou/` folder:
+
+```bash
+dinou/
+├── core/                           # Universal Framework Engine
+│   ├── handler.js                  # Web Standards HTTP request pipeline
+│   ├── rsc-renderer.js             # React 19 Server Components wire-format serializer
+│   ├── render-html.js              # Server-Side Rendering (SSR) HTML streaming
+│   ├── get-file-path-and-dynamic-params.js  # File-system router & param extractor
+│   ├── slot.js                     # Parallel routes (@slot) & layout resolution
+│   ├── storage-adapter.js          # Multi-backend ISR & KV caching abstraction
+│   ├── generate-static.js          # SSG pre-generation & static export
+│   └── revalidating.js             # Background ISR revalidator & cache purger
+│
+├── adapters/                       # Deployment Runtime Adapters
+│   ├── node.mjs                    # Standalone Node.js HTTP server (Docker, VPS)
+│   ├── bun.js                      # High-speed Bun runtime adapter
+│   ├── deno.js                     # Multi-region Deno & Deno Deploy (deno-edge) adapter
+│   ├── cloudflare.js               # Cloudflare Workers & Pages edge worker
+│   └── netlify.js                  # Netlify Functions v2 serverless adapter
+│
+├── esbuild/                        # esbuild compilation & dev configurations
+│   ├── build.mjs                   # Dual-bundle production build pipeline
+│   └── build-client.mjs            # Client-side bundle orchestrator
+│
+├── rollup/                         # Rollup production bundler setup
+│   └── rollup.config.js            # Dual-bundle Tree-shaking pipeline
+│
+├── webpack/                        # Webpack bundler setup
+│   └── webpack.config.js           # Enterprise-grade Webpack 5 pipeline
+│
+└── node/                           # Node.js development & build scripts
+    ├── dev.mjs                     # Multi-engine development server & HMR
+    └── build.mjs                   # Production bundle compiler
+```
+
+> [!TIP]
+> **Eject and explore with your AI agent:** Every module inside the `dinou/` directory is clean, standard JavaScript written with native Web Standards. Have your AI coding assistant (like Gemini Antigravity, Cursor, or Claude) explore the architecture, explain execution flows, or implement custom runtime features directly in your repo.
+
+---
+
+### When to Consider Ejecting
+
+Ejection is not required for typical applications; Dinou v7 out of the box provides multi-bundler compilation, edge adapters, and plugin support. However, ejecting is invaluable when you need:
+
+- **Custom Compilers & Assets:** Add support for custom file types, specialized loaders (SVGs, WebAssembly, 3D models), or custom bundler plugins directly into `dinou/esbuild/`, `dinou/rollup/`, or `dinou/webpack/`.
+- **Server Logic Control:** Inspect and customize how HTTP requests are handled, add low-level metrics, or modify streaming responses directly in `dinou/core/handler.js`.
+- **Run on Any Platform:** Deploy Dinou anywhere—from Electron and Tauri desktop apps to custom AWS Lambda microVMs—by creating a custom runtime adapter in `dinou/adapters/`.
+- **Transparent Error Diagnosis:** Stack traces point directly to readable source files in your repo instead of minified `node_modules`. You and your AI agent can inspect the exact code that failed and fix it immediately.
+
+---
+
+### Ejection in the Agentic Era
+
+In the era of autonomous coding agents (such as **Gemini Antigravity**, **Claude Code**, **Cursor**, and **Copilot**), framework ejection transitions from a legacy last resort to a **core architectural advantage**:
+
+- **Breaking the node_modules Boundary:** Autonomous agents only have read/write access within your repository boundaries. In closed frameworks, agents hit a hard wall whenever a requirement involves server internals, bundling pipelines, or runtime flags. Ejecting places your entire stack inside the agent's actionable workspace.
+- **Grounded Reasoning, Zero Hallucinations:** Instead of guessing how a proprietary, black-box framework routes requests or serializes state under the hood, your agent reads clean, readable Web Standards source code. Transparent files eliminate LLM hallucinations and enable surgical, confident refactoring.
+- **Autonomous End-to-End Problem Solving:** Your AI partner can evolve the framework alongside your application—adapting streaming pipelines, crafting custom caching layers, or writing new runtime adapters on the fly without waiting for upstream releases.
+
+---
+
+### Practical Customization Examples
+
+Here are two common ways teams customize their ejected Dinou framework:
+
+#### 1. Adding Custom Server Middleware & Guards
+
+To intercept incoming traffic, inject custom healthchecks, or authenticate protected routes before waking up React, simply edit `handleRequest` in `dinou/core/handler.js`:
+
+```javascript
+// dinou/core/handler.js
+export async function handleRequest(request, platformContext = {}) {
+  const url = new URL(request.url);
+
+  // 1. Instant zero-compute healthcheck without invoking React
+  if (url.pathname === "/healthz") {
+    return Response.json({ status: "ok", uptime: process.uptime() });
+  }
+
+  // 2. Pre-flight authentication guard before React Server Components run
+  if (url.pathname.startsWith("/admin")) {
+    const token = request.headers.get("x-admin-token");
+    if (!token || token !== process.env.ADMIN_SECRET) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+  }
+
+  // ...continue standard Dinou routing, ISR caching, and RSC/SSR streaming
+}
+```
+
+#### 2. Extending the Bundler Pipeline
+
+To add a custom esbuild plugin (such as a specialized SVG compiler or asset loader), edit `dinou/esbuild/build.mjs`:
+
+```javascript
+// dinou/esbuild/build.mjs
+import { myCustomPlugin } from "./plugins/my-plugin.mjs";
+
+// ...after collecting entryPoints:
+const buildConfig = getConfigEsbuildProd({
+  entryPoints,
+  manifest,
+  outdir,
+});
+
+// Inject your custom plugin into the production build pipeline:
+buildConfig.plugins.push(myCustomPlugin());
+
+await esbuild.build(buildConfig);
+```
+
+---
+
+### Best Practices for Ejected Projects
+
+- **Commit `dinou/` to Git:** Treat your ejected `dinou/` directory as first-class source code in your repository so your entire team shares identical build and runtime logic.
+- **Keep Edits Modular:** When adding custom features, create dedicated files (such as `dinou/core/my-feature.js`) rather than stuffing thousands of lines into single files.
+- **Validate Across Bundlers:** If your project uses multiple bundlers, test that your modifications work cleanly in your target bundler (e.g. `npm run build:node:esbuild`).
 
 ---
 
