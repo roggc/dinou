@@ -2,32 +2,44 @@
 
 [![Documentation](https://img.shields.io/badge/docs-dinou.dev-blue?style=flat-square)](https://dinou.dev) [![Version](https://img.shields.io/badge/version-7.0.0-orange?style=flat-square)](https://www.npmjs.com/package/dinou)
 
-### **Lightweight-Ejectable Full-Stack React 19 Framework**
+### **Full-Stack React 19 Framework**
 
 ---
 
-Support for React Server Components (RSC), Server Functions, Server-Side Rendering (SSR), Static Generation (SSG), Incremental Static Generation (ISG), Incremental Static Regeneration (ISR), and Universal Multi-Platform Deployment (Node.js, Bun, Deno, Cloudflare Workers, Netlify, Static Hosts).
+The ejectable React 19 framework built on web standards. Build full-stack applications with native React Server Components (RSC), progressive streaming SSR, compile-time type-safe routing, dual-dimensional caching, and universal multi-platform deployment (Node.js, Bun, Deno, Cloudflare Workers, Netlify, and pure static hosts) with zero vendor lock-in.
 
 ## Key Features
 
-- **Universal 3-Pass AOT Dual-Bundle Pipeline (0-Fork):** High-performance single-process architecture compiling discrete `"react-server"` and standard client bundles, completely eliminating `child_process.fork()` and inter-process serialization. Delivers an **82% memory reduction** (~22 MB flat idle footprint) and sub-millisecond TTFB.
-- **React Server Components & Progressive Streaming:** Native React 19 RSC architecture streaming HTML and Flight RPC payloads progressively via Web Streams (`renderToReadableStream`) on Edge/Bun and Node.js with instant shell flushing.
-- **Compile-Time Type-Safe Routing:** Bidirectional type safety with zero runtime overhead. Level 1 validates `<Link href="...">` and `useRouter().push(...)`, while Level 2 strictly types route parameters with `PageProps<T>`, `LayoutProps<T>`, `RouteParams<T>`, and `ErrorProps<T>`.
-- **Layered Segmentation & Zero-Remount Layouts:** Layouts are compiled as independent endpoints with isolated data lifecycles (`layout_functions.ts`). Parent layouts never unmount or lose DOM/audio/input state during client-side SPA transitions.
-- **Vertical Micro-ISR (`<DinouCacheSlot>`):** Embed high-frequency reactive sections with micro-revalidation intervals (e.g. 5s) inside long-lived static pages without evicting the surrounding shell.
-- **Hardened State-Preserving Fast Refresh:** Near-instant component hot-reloading in development powered by Rust (`@swc/core`) in Esbuild and scoped ESM HMR in Rollup that preserves component and form state across edits.
-- **Universal W3C Web Middleware (`onRequest`):** Zero vendor lock-in middleware in `dinou.config.js` executing native Web Standard `Request` and `Response` objects across Node.js, Bun, Deno, Cloudflare Workers, and Netlify.
-- **Standalone Native Binary Compilation:** Compiles your entire application into a single, self-contained executable binary server via `bun build --compile` and `deno compile` with zero runtime dependencies.
-- **Server Functions & "Dinou Pattern":** Functions marked with `"use server"` that execute on the server and can return rendered React components (Server or Client) over Flight RPC, enabling zero-dependency reactive state stores.
-- **Single Source of Truth Caching:** Strict seconds-based `revalidate` API (`false` = SSG, `0` = dynamic SSR, `N` = time-based ISR in seconds).
-- **Client Router:** Client-side soft navigation (`push`, `replace`, `back`, `forward`, `refresh`) with `<Link fresh>` and `useNavigationLoading` hook.
-- **Bundler Agnostic:** 100% feature parity across Esbuild (default), Rollup, and Webpack.
+- **Native React 19 RSC & Progressive Web Streams:** Render database queries, markdown parsers, and heavy backend dependencies exclusively on the server with 0kb client JavaScript overhead. Dinou streams progressive React Flight wire payloads and HTML over standard W3C Web Streams (`renderToReadableStream`) directly into the DOM with instant shell flushing.
+- **Universal 3-Pass In-Memory Dual-Bundle Engine (Zero-Fork):** Solves React 19's conflicting module conditions (`"react-server"` vs. `"browser"`) within a single in-process pipeline via standard W3C Web Streams. Completely eliminates `child_process.fork()` and inter-process serialization latency, delivering an **82% memory reduction** (~22 MB flat idle footprint) and enabling native execution on edge isolates.
+- **Compile-Time Type-Safe Routing:** Bidirectional type safety with zero runtime bundle overhead. Generates route definitions in real time: autocompletes and validates `<Link href="...">` and `useRouter().push(...)`, while strictly typing route parameters with `PageProps<T>`, `LayoutProps<T>`, `RouteParams<T>`, and `ErrorProps<T>`.
+- **Persistent Nested Layouts & Zero-Remount:** Folders in `src/` map directly to URLs with nested `layout.tsx` files that wrap child pages without remounting during navigation, preserving client state, form inputs, audio playback, and scroll positions. Layouts feature independent data and cache lifecycles (`layout_functions.ts`).
+- **Dual-Dimensional Caching (Horizontal & Vertical):**
+  - *Horizontal (Route-Level):* Static Site Generation (`revalidate = false`), strict seconds-based Incremental Static Regeneration (`revalidate = N`), and dynamic on-demand Server-Side Rendering (`revalidate = 0`).
+  - *Vertical (Component-Level):* Micro-ISR via `<DinouCacheSlot>` to embed high-frequency reactive sections with micro-revalidation intervals (e.g., 5s) inside long-lived static shells, refreshable independently from the client (`refreshSlot`) or purged globally by tag (`revalidateTag`).
+- **Partial Prerendering (PPR):** Unifies instant static edge delivery with dynamic personalization in a single request. Serves an edge-cached static shell in under 20ms while personalized `<Suspense>` holes concurrently stream over a single HTTP connection.
+- **Server Functions & Direct Suspense Streaming ("Dinou Pattern"):** Asynchronous functions marked with `"use server"` can be called directly from Client Components (`"use client"`) wrapped inside `<Suspense>` boundaries. They can return rendered React components over Flight RPC, eliminating synthetic REST/GraphQL API boilerplate.
+- **Bundler Agnostic with 100% Feature Parity:** Pre-configured, zero-config pipelines for **esbuild** (sub-millisecond dev server & HMR), **Rollup** (pristine ES module output for Cloudflare Workers & Edge), and **Webpack** (React Compiler and legacy npm compatibility) with identical dual-bundle output.
+- **Universal Multi-Platform Deployment:** Build once with React 19 and deploy the exact same application code to Node.js, Bun (standalone single-binary `bun build --compile`), Deno (native single-file binaries `deno compile`), Cloudflare Workers (native workerd + Cloudflare KV for ISR), Netlify, or pure static exports.
+- **Universal W3C Web Middleware (`onRequest`):** Intercept requests and high-frequency webhooks (Stripe, Clerk, GitHub) at the HTTP layer in `dinou.config.mjs` returning native Web `Response` objects in <2ms, completely bypassing React component rendering.
+- **Hardened State-Preserving Fast Refresh:** Under 5ms HMR powered by Rust (`@swc/core`) and WebSockets that patches updates into running applications while preserving active form inputs, counters, and component state across edits.
+- **100% Ejectable & AI-Friendly Architecture:** Run `npx dinou eject` (or `npm run eject`) at any time to extract Dinou's complete compiler, server runtime, and React 19 flight pipeline directly into your project. Transparent, web standards-based, and free of proprietary black-box macros for seamless AI pair programming.
 
 ## Table of contents
 
 - [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
   - [Quick Start (CLI)](#quick-start-cli)
   - [Manual Setup](#manual-setup)
+    - [1. Install Dependencies](#1-install-dependencies)
+    - [2. Project Structure & Files](#2-project-structure--files)
+    - [3. TypeScript Configuration](#3-typescript-configuration)
+    - [4. Package Scripts](#4-package-scripts)
+    - [5. Configure .gitignore](#5-configure-gitignore)
+    - [6. Start Development Server](#6-start-development-server)
+  - [Building for Production & Target Runtimes](#building-for-production--target-runtimes)
+    - [Bundler Flexibility (esbuild, Rollup, Webpack)](#bundler-flexibility-esbuild-rollup-webpack)
+    - [First-Class Multi-Runtime Targets](#first-class-multi-runtime-targets)
 - [Routing](#routing)
   - [Basic & Dynamic Routes](#basic--dynamic-routes)
   - [Type-Safe Routing (Level 1 & Level 2)](#type-safe-routing-level-1--level-2)
@@ -130,43 +142,258 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
 - [📜 Changelog](#-changelog)
 - [📄 License](#-license)
 
+
 ## Getting Started
+
+Start building modern, full-stack React 19 applications in seconds. Choose between the automated CLI generator or manual configuration for full architectural control.
+
+### Prerequisites
+
+Before getting started, ensure your local environment meets the minimum requirements. Dinou is engineered to leverage modern JavaScript standards with zero transpile overhead:
+
+- **Node.js 20.6.0+ (Required):** Dinou utilizes Node's modern native ES module customization hooks (`module.register`) for zero-fork server execution and Web Standard APIs (`Request`, `Response`, `ReadableStream`, `Headers`) natively supported in modern Node.js versions.
+- **Bun 1.1+ (Optional):** If you plan to run on Bun or compile self-contained standalone native executables using `npm run build:bun:compile`.
+- **Deno 2.0+ (Optional):** If you target Deno or cross-compile single-file binaries for Linux, macOS, or Windows using `npm run build:deno:compile`.
+- **Cloudflare Wrangler (Optional):** Required if you deploy to Cloudflare Workers with `npm run build:cloudflare` and preview locally with `wrangler dev`.
 
 ### Quick Start (CLI)
 
-The fastest way to scaffold a new application is using the CLI generator:
+The fastest way to scaffold a ready-to-code Dinou application is using the official CLI starter. It sets up TypeScript, Tailwind CSS, sample Server Components, and the recommended directory layout:
 
 ```bash
+# 1. Initialize a new Dinou application
 npx create-dinou@latest my-app
+# or
+npm create dinou@latest my-app
+
+# 2. Enter project directory
 cd my-app
+
+# 3. Launch development server (default: esbuild)
 npm run dev
 ```
 
+Open [http://localhost:3000](http://localhost:3000) in your browser to view your live application.
+
 ### Manual Setup
 
-Alternatively, you can set up a project manually:
+Prefer to wire up everything manually? Follow these step-by-step instructions to configure Dinou from scratch with complete transparency:
 
-1. **Install dependencies:**
+#### 1. Install Dependencies
 
-   ```bash
-   npm install react react-dom dinou
-   ```
+Initialize your project folder and install React 19, React DOM, and the `dinou` framework package:
 
-2. **Create the structure:**
-   Create a `src` directory in the root of your project and add an entry `page.jsx` file:
+```bash
+# Create and enter directory
+mkdir my-dinou-app
+cd my-dinou-app
 
-   ```jsx
-   // src/page.jsx
-   export default function Page() {
-     return <h1>Hello, Dinou!</h1>;
-   }
-   ```
+# Initialize package.json
+npm init -y
 
-3. **Start the server:**
+# Install React 19 and Dinou
+npm install react react-dom dinou
 
-   ```bash
-   npx dinou dev
-   ```
+# Install TypeScript definitions for IDE intellisense
+npm install -D @types/react @types/react-dom
+```
+
+#### 2. Project Structure & Files
+
+Create the `src` directory with a root page (`src/page.tsx`) and the recommended root document layout (`src/layout.tsx`):
+
+```tsx
+// src/page.tsx - React Server Component (RSC)
+export default function Page() {
+  return (
+    <main className="p-8 max-w-4xl mx-auto space-y-4">
+      <h1 className="text-3xl font-bold tracking-tight">
+        Hello from Dinou!
+      </h1>
+      <p className="text-muted-foreground">
+        Rendered natively on the server with React 19 and zero client JavaScript overhead.
+      </p>
+    </main>
+  );
+}
+```
+
+```tsx
+// src/layout.tsx - Root document layout
+import type { ReactNode } from "react";
+
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en">
+      <head>
+        <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>My Dinou App</title>
+      </head>
+      <body>{children}</body>
+    </html>
+  );
+}
+```
+
+The root `layout.tsx` defines the shared `<html>` and `<body>` document shell, metadata, and global providers so you don't have to repeat them on each page.
+
+##### Recommended Directory Anatomy
+
+```
+my-dinou-app/
+├── public/                # Static root assets (served directly at /)
+│   ├── favicon.ico
+│   ├── robots.txt
+│   └── site.webmanifest
+├── src/
+│   ├── page.tsx           # Root page component (RSC)
+│   ├── layout.tsx         # Root document layout (<html/head/body>)
+│   └── globals.css        # Styles / Tailwind CSS
+├── dinou.config.ts        # Framework configuration (optional: ppr, plugins)
+├── dinou-env.d.ts         # Ambient framework typings
+├── tsconfig.json          # TypeScript configuration
+├── package.json
+└── .gitignore
+```
+
+#### 3. TypeScript Configuration
+
+Dinou does not force you to use TypeScript—you are completely free to write your application in standard JavaScript (`.js` / `.jsx`). However, even for pure JavaScript projects, defining a `tsconfig.json` in your project root is strongly recommended:
+
+- **Import Aliases:** Dinou's build engines (esbuild, Rollup, Webpack) automatically read `compilerOptions.paths` from `tsconfig.json` to resolve clean path aliases like `@/*` into `src/*`.
+- **IDE Autocomplete:** With `"allowJs": true`, code editors (VS Code, Cursor) use `tsconfig.json` to provide full autocomplete, auto-imports, and path resolution across all `.js` and `.jsx` files.
+
+```json
+{
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "allowJs": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler"
+  },
+  "include": [
+    "src",
+    "dinou-env.d.ts"
+  ]
+}
+```
+
+Create `dinou-env.d.ts` in your root directory:
+
+```typescript
+/// <reference types="dinou/env" />
+```
+
+The `dinou/env` reference automatically declares ambient typings for static assets (SVGs, images, web fonts) and CSS modules without manual type boilerplate.
+
+#### 4. Package Scripts
+
+Add the standard Dinou scripts to your `package.json` to control development, multi-runtime production builds (Node, Cloudflare, Deno, Bun), binary compilation, static exports, and ejecting:
+
+```json
+{
+  "scripts": {
+    "dev": "dinou dev",
+    "build": "dinou build",
+    "start": "dinou start",
+    "dev:esbuild": "dinou dev:esbuild",
+    "dev:rollup": "dinou dev:rollup",
+    "dev:webpack": "dinou dev:webpack",
+    "build:node": "dinou build:node",
+    "start:node": "dinou start:node",
+    "build:cloudflare": "dinou build:cloudflare",
+    "build:deno": "dinou build:deno",
+    "build:deno:compile": "dinou build:deno:compile",
+    "start:deno": "dinou start:deno",
+    "build:bun": "dinou build:bun",
+    "build:bun:compile": "dinou build:bun:compile",
+    "start:bun": "dinou start:bun",
+    "export-static": "dinou export-static",
+    "eject": "dinou eject"
+  }
+}
+```
+
+> **Note:** For the complete catalog of targeted platform cross-compilation scripts (such as Windows, macOS, Linux ARM/x64), see the [Complete CLI Scripts Catalog](#complete-cli-scripts-catalog-100-scripts-reference).
+
+#### 5. Configure .gitignore
+
+Create a `.gitignore` file to ignore dependencies, environment variables, build outputs, and Dinou caches:
+
+```gitignore
+node_modules
+.dinou
+out
+dist
+.wrangler
+.env
+```
+
+- `.dinou/` holds internal dev artifacts and runtime builds.
+- `out/` contains pages generated by `export-static`.
+- `dist/` stores compiled single-executable binaries (Deno / Bun).
+- `.wrangler/` stores local state when testing Cloudflare Workers.
+
+#### 6. Start Development Server
+
+Run the development server with the fast esbuild bundler (default), or choose Rollup or Webpack:
+
+```bash
+# Start with default ultra-fast esbuild
+npm run dev
+
+# Or start with Rollup or Webpack
+npm run dev:rollup
+npm run dev:webpack
+```
+
+### Building for Production & Target Runtimes
+
+Dinou provides both bundler freedom (**esbuild**, **Rollup**, **Webpack**) and universal runtime deployment (**Node.js**, **Cloudflare Workers**, **Deno**, **Bun**, or **Static SSG**) from a single codebase in `src/` with zero code changes.
+
+#### Bundler Flexibility (esbuild, Rollup, Webpack)
+
+By default, Dinou uses **esbuild** for sub-second cold starts and in-memory compilation. When enterprise plugins or custom loaders are required, you can switch seamlessly to **Rollup** or **Webpack** with 100% feature parity:
+
+```bash
+# Start development with your preferred bundler
+npm run dev          # Default: esbuild
+npm run dev:rollup   # Dedicated Rollup in-memory engine
+npm run dev:webpack  # Dedicated Webpack engine
+```
+
+For advanced compiler tuning, custom plugins, and SWC options, visit the [Bundlers Guide](#-bundlers--running-the-app).
+
+#### First-Class Multi-Runtime Targets
+
+Compile your application for any execution environment without altering component logic:
+
+- **Node.js Production Server:**
+  ```bash
+  npm run build:node && npm run start:node
+  ```
+- **Cloudflare Workers (Edge):**
+  ```bash
+  npm run build:cloudflare && npx wrangler dev
+  ```
+- **Self-Contained Executable Binary (Deno / Bun):**
+  ```bash
+  npm run build:deno:compile # or build:bun:compile
+  ```
+  Outputs standalone single-file executables directly to `dist/`.
+- **Pure Static Site Export (SSG):**
+  ```bash
+  npm run export-static
+  ```
+  Pre-rendered HTML and RSC Flight payloads output directly to `out/`.
+
+For complete deployment guides, Docker setups, and cloud hosting instructions, see the [Deployment Guide](#-deployment-guide).
 
 ## Routing
 
