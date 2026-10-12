@@ -1084,7 +1084,14 @@ async function handleRequest(request, platformContext = {}) {
         body = await request.json();
       } catch (e) {}
 
-      const clientError = body?.error || { message: "Unknown Error" };
+      const rawClientError = body?.error || { message: "Unknown Error" };
+      const clientError = {
+        message: isDevelopment
+          ? (rawClientError.message || "Unknown Error")
+          : "An error occurred in the Server Components render",
+        name: rawClientError.name || "Error",
+        stack: isDevelopment ? rawClientError.stack : undefined,
+      };
       const context = createRequestContext(simReq, bridge, platformContext);
       copyCustomContextProperties(rootContext, context);
 

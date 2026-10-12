@@ -32,6 +32,26 @@ const scrollCache = new Map();
 
 const getCurrentRoute = () => window.location.pathname + window.location.search;
 
+const scrollToCurrentHash = (rawHash = typeof window !== "undefined" ? window.location.hash : "") => {
+  if (!rawHash) return false;
+  try {
+    const id = decodeURIComponent(rawHash.replace("#", ""));
+    const element = document.getElementById(id) || document.getElementsByName(id)[0];
+    if (element) {
+      element.scrollIntoView({ behavior: "auto" });
+      return true;
+    }
+  } catch (e) {
+    const id = rawHash.replace("#", "");
+    const element = document.getElementById(id) || document.getElementsByName(id)[0];
+    if (element) {
+      element.scrollIntoView({ behavior: "auto" });
+      return true;
+    }
+  }
+  return false;
+};
+
 // ====================================================================
 // 2. PURE HELPERS
 // ====================================================================
@@ -555,16 +575,57 @@ function Router() {
         setNavError(null);
         setNavCount((c) => c + 1);
       });
+
+      if (window.location.hash) {
+        requestAnimationFrame(() => {
+          if (!scrollToCurrentHash()) {
+            let frames = 0;
+            const interval = setInterval(() => {
+              frames++;
+              if (scrollToCurrentHash() || frames > 20) {
+                clearInterval(interval);
+              }
+            }, 50);
+          }
+        });
+      } else if (target === route) {
+        requestAnimationFrame(() => {
+          const savedY = scrollCache.get(target);
+          if (savedY !== undefined) {
+            window.scrollTo(0, savedY);
+          } else {
+            window.scrollTo(0, 0);
+          }
+        });
+      }
+    };
+
+    const onHashChange = () => {
+      if (window.location.hash) {
+        requestAnimationFrame(() => {
+          if (!scrollToCurrentHash()) {
+            let frames = 0;
+            const interval = setInterval(() => {
+              frames++;
+              if (scrollToCurrentHash() || frames > 20) {
+                clearInterval(interval);
+              }
+            }, 50);
+          }
+        });
+      }
     };
 
     window.addEventListener("click", onNavigate);
     window.addEventListener("popstate", onPopState);
+    window.addEventListener("hashchange", onHashChange);
 
     return () => {
       window.removeEventListener("click", onNavigate);
       window.removeEventListener("popstate", onPopState);
+      window.removeEventListener("hashchange", onHashChange);
     };
-  }, []);
+  }, [route]);
 
   // 🔌 EFFECT 3: Scroll Management (Restoration)
   useLayoutEffect(() => {
@@ -585,25 +646,13 @@ function Router() {
 
   // 🔌 EFFECT 4: Scroll Management (Hash on new page)
   useEffect(() => {
-    const hash = window.location.hash;
-    if (!hash) return;
-
-    const id = hash.replace("#", "");
-    const scrollToHash = () => {
-      const element = document.getElementById(id);
-      if (element) {
-        element.scrollIntoView({ behavior: "auto" });
-        return true;
-      }
-      return false;
-    };
-
-    if (scrollToHash()) return;
+    if (!window.location.hash) return;
+    if (scrollToCurrentHash()) return;
 
     let frames = 0;
     const interval = setInterval(() => {
       frames++;
-      if (scrollToHash() || frames > 20) {
+      if (scrollToCurrentHash() || frames > 20) {
         clearInterval(interval);
       }
     }, 50);

@@ -162,9 +162,17 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false, options
   } else {
     const pageModule = await importModule(pagePath);
     const Page = pageModule.default ?? pageModule;
+    const sanitizedError = {
+      ...(typeof error === "object" && error !== null ? error : {}),
+      message: isDevelopment
+        ? (error?.message || "Unknown Error")
+        : (error?.message && !error.stack ? error.message : "An error occurred in the Server Components render"),
+      name: error?.name || "Error",
+      stack: isDevelopment ? error?.stack : undefined,
+    };
     jsx = React.createElement(Page, {
       params: dynamicParams ?? {},
-      error,
+      error: sanitizedError,
     });
   }
 
@@ -263,7 +271,9 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false, options
                 const SlotError = slotErrorModule.default ?? slotErrorModule;
 
                 const serializedError = {
-                  message: e.message || "Unknown Error",
+                  message: isDevelopment
+                    ? (e.message || "Unknown Error")
+                    : "An error occurred in the Server Components render",
                   name: e.name,
                   stack: isDevelopment ? e.stack : undefined,
                 };
