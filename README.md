@@ -1262,7 +1262,18 @@ Dinou deterministically transforms your file-system folder naming conventions in
 
 > [!WARNING]
 > **Be cautious with trailing slashes in dynamic links!**
-> Ensure route pattern strings in `PageProps<T>` match your folder structure exactly (e.g. `PageProps<"/blog/[slug]">`, without trailing slashes) for accurate parameter inference.
+>
+> In TypeScript, template literal types evaluate `${string}` as matching *any* string, including the empty string `""` (because `"" extends string` evaluates to `true`).
+>
+> **The scenario:** Consider a nested route such as `src/posts/[id]/[slug]/page.tsx`, whose generated template literal type is `` `/posts/${string | number}/${string | number}` ``.
+>
+> If a developer accidentally leaves off the second parameter but appends a trailing slash:
+> ```tsx
+> <Link href={`/posts/${id}/`}>View</Link>
+> ```
+> TypeScript matches the first parameter with `id`, the slash with literal `/`, and the second parameter with empty string `""`. However, at runtime Dinou normalizes trailing slashes, requesting `/posts/123` (which results in a **404 Not Found** because no `page.tsx` exists at the parent segment).
+>
+> **Best Practice:** Always avoid trailing slashes when building dynamic URLs. Written without the trailing slash (`` `/posts/${id}` ``), TypeScript accurately flags the missing parameter at compile-time.
 
 ---
 
