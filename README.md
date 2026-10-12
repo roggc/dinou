@@ -399,6 +399,27 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [getStaticPaths](#getstaticpaths)
     - [allowISG](#allowisg)
     - [validateParams()](#validateparams)
+- [⚡ Dinou Complete Cheatsheet](#cheatsheet)
+  - [1. File Conventions](#file-conventions)
+    - [Route Components & Lifecycles](#route-components)
+    - [Layout Control Flags](#layout-flags)
+    - [Route Escaping (_folder)](#route-escaping)
+  - [2. Route Syntax & Types](#route-syntax)
+    - [Route Patterns & Inferred Params](#route-patterns)
+    - [Type-Safe Routing Helpers](#type-helpers)
+  - [3. Server Lifecycle Contracts](#server-contracts)
+    - [Exported Contracts Table](#lifecycle-contracts)
+    - [Revalidation Modes (SSR, ISR, SSG)](#revalidate-modes)
+  - [4. Client Navigation & Hooks](#navigation-hooks)
+    - [Link & Redirection](#client-primitives)
+    - [Router & Navigation Hooks](#location-hooks)
+  - [5. Server Primitives & Cache](#server-primitives)
+    - [getContext & DinouCacheSlot](#context-and-slots)
+    - [On-Demand Invalidation](#cache-invalidation)
+  - [6. Decision Matrix: When to Use What](#decision-matrix)
+    - [Cache Invalidation Matrix](#matrix-cache)
+    - [Redirection Strategy Matrix](#matrix-redirects)
+    - [Route Parameter Access Matrix](#matrix-params)
 - [📜 Changelog](#-changelog)
 - [📄 License](#-license)
 
@@ -9718,6 +9739,228 @@ export const validateParams: LayoutFunctions<"/[organization]">["validateParams"
   return Boolean(tenant?.active);
 };
 ```
+
+---
+
+<a id="cheatsheet"></a>
+## ⚡ Dinou Complete Cheatsheet
+
+`Executive Reference` · `Dinou v7`
+
+At-a-glance high-density desktop reference for file conventions, dynamic route syntax, server lifecycle contracts, client navigation hooks, and architectural decision matrices.
+
+> [!TIP]
+> **Need deep-dive signatures and multi-line snippets?**
+> This cheatsheet provides concise signatures and decision tables. Full implementations are documented in the [Complete API Reference](#complete-api-reference).
+
+---
+
+<a id="file-conventions"></a>
+### 1. File Conventions Cheatsheet
+
+`Filesystem`
+
+Directories inside `src/app/` directly map to URL paths. Standardized file names define UI leaves, layout shells, and decoupled server contracts.
+
+<a id="route-components"></a>
+#### Route Components & Lifecycles
+
+| Filename | Role | Scope | Key Responsibility |
+| :--- | :--- | :--- | :--- |
+| `page.{tsx,jsx,ts,js}` | Route Page UI | `Universal` | Primary UI component rendered for the route segment. Receives server props returned by `getProps`. |
+| `layout.{tsx,jsx,ts,js}` | Layout Shell | `Universal` | Persistent UI wrapper wrapping child segments. Preserves client state across child navigations. |
+| `error.{tsx,jsx,ts,js}` | 500 Error Page | `Universal` | Error UI rendered when an unhandled server or client exception occurs within this route subtree. |
+| `not_found.{tsx,jsx,ts,js}` | 404 Page | `Universal` | Rendered when a segment does not exist or when `validateParams()` returns `false`. Receives `params` and any server props returned by `getProps` if `page_functions` is present. |
+| `page_functions.{ts,js}` | Page Server Lifecycle | `Server Only` | Decoupled server contract for `page.tsx`: `getProps`, `revalidate`, `ppr`, `getStaticPaths`, `getCacheTags`. |
+| `layout_functions.{ts,js}` | Layout Server Lifecycle | `Server Only` | Decoupled server contract for `layout.tsx`: independent `getProps` and `ppr` execution. |
+
+> [!NOTE]
+> **Hierarchical Bubble-Up:** Dinou bubbles unhandled errors and 404s upward to the closest ancestor handler. A nested `src/app/blog/[slug]/not_found.tsx` intercepts 404s before the root `src/app/not_found.tsx`.
+
+<a id="layout-flags"></a>
+#### Layout Control Flags (Empty Files)
+
+Create these **empty files** (zero bytes, no extension) inside a route directory to modify layout inheritance without writing custom wrapper logic:
+
+| Flag File | Target | Architectural Effect |
+| :--- | :--- | :--- |
+| `no_layout` | `page.tsx` | Renders the page completely bare, bypassing all parent layouts. Ideal for print templates, popups, or embeddable iframes. |
+| `reset_layout` | `layout.tsx` | **Resets the layout stack.** Discards all ancestor layouts; this folder's `layout.tsx` becomes the isolated new Root Layout for this branch. |
+| `no_layout_error` | `error.tsx` | Renders the segment's 500 error page without any surrounding layout shells. |
+| `no_layout_not_found` | `not_found.tsx` | Renders the segment's 404 not found page without any surrounding layout shells. |
+
+<a id="route-escaping"></a>
+#### Route Escaping (`_prefix`)
+
+Any directory prefixed with an underscore (`_folder`) is completely ignored by the route compiler.
+
+> [!NOTE]
+> **When to use Underscore Folders:**
+> Standard project folders (e.g. `components/`, `hooks/`, `utils/`) do **NOT** require an underscore prefix; Dinou only treats a folder as a route if it contains a `page.*` file. Use `_` exclusively to quarantine legacy or backup folders containing `page.*` files (e.g., `src/app/_archived-v1/page.tsx`).
+
+---
+
+<a id="route-syntax"></a>
+### 2. Route Syntax & Types
+
+`Type Safety`
+
+Dinou provides zero-runtime type safety by inferring route parameter types directly from folder bracket naming conventions.
+
+<a id="route-patterns"></a>
+#### Route Patterns & Inferred Params
+
+| Folder Pattern | Example URL | Inferred `params` Type | Behavior |
+| :--- | :--- | :--- | :--- |
+| `/about` | `/about` | `{}` | Static segment. Exactly matches literal path. |
+| `/blog/[slug]` | `/blog/hello-world` | `{ slug: string }` | Single required dynamic parameter. |
+| `/docs/[...slug]` | `/docs/api/routing` | `{ slug: string[] }` | Catch-all. Matches 1 or more trailing segments. |
+| `/shop/[[...slug]]` | `/shop`, `/shop/shoes/nike` | `{ slug?: string[] }` | Optional catch-all. Matches 0 or more trailing segments. |
+| `/dash/[[tab]]` | `/dash`, `/dash/billing` | `{ tab?: string }` | Optional single parameter. |
+| `/(auth)/login` | `/login` | `{}` | Route group. Organizes files without adding a URL segment. |
+
+<a id="type-helpers"></a>
+#### Type-Safe Routing Helpers (`dinou`)
+
+| Helper Type | TypeScript Signature | Purpose | API Ref |
+| :--- | :--- | :--- | :---: |
+| `PageProps<T>` | `{ params: RouteParams<T>, searchParams: ... }` | Type signature for `page.tsx` default export component. | [Docs](#pageprops) |
+| `LayoutProps<T>` | `{ children: React.ReactNode, params: RouteParams<T> }` | Type signature for `layout.tsx` default export component. | [Docs](#layoutprops) |
+| `ErrorProps<T>` | `{ error: Error, params: RouteParams<T> }` | Type signature for `error.tsx` page component. | [Docs](#errorprops) |
+| `RouteParams<T>` | Extracted parameter dictionary based on string literal pattern | Typed `params` argument for `getProps`, `getCacheTags`, or `validateParams`. | [Docs](#routeparams) |
+| `DinouRoute` | Union of concrete path strings: `"/about" | "/contact" | ...` | Level 1 type safety: powers IDE autocomplete & link validation for `<Link href="...">`. | [Docs](#dinouroute) |
+| `DinouRoutePattern` | Union of parameterized patterns: `"/blog/[slug]" | ...` | Level 2 type safety: generic constraint for route contract functions and props. | [Docs](#dinouroutepattern) |
+
+---
+
+<a id="server-contracts"></a>
+### 3. Server Lifecycle Contracts
+
+`Server Only`
+
+Contracts declared in `page_functions.ts` (or `layout_functions.ts`). Executed exclusively on the server, completely decoupled from React render passes.
+
+<a id="lifecycle-contracts"></a>
+#### Exported Contracts Table
+
+| Exported Contract | Signature | Default | Execution & Purpose | API Ref |
+| :--- | :--- | :--- | :--- | :---: |
+| `getProps(params)` | `(params) => Promise<T> | T` | `{}` | Server data loader. Return value is directly passed as props to `page.tsx` or `layout.tsx`. | [Docs](#getprops) |
+| `revalidate` | `number | false | (() => ...)` | `false` (SSG) | Cache TTL in seconds. `0` = SSR (dynamic), `>= 1` = ISR, `false` = Static SSG. | [Docs](#revalidate-config) |
+| `ppr` | `boolean | (() => boolean | Promise<boolean>)` | `false` | Enables Partial Prerendering: static shell built at build time, dynamic holes stream via React Suspense. | [Docs](#ppr-config) |
+| `getCacheTags(params)` | `(params) => string[] | Promise<string[]>` | `[]` | Associates cache tags with the route for targeted on-demand invalidation via `revalidateTag(tag)`. | [Docs](#getcachetags) |
+| `getStaticPaths()` | `() => StaticPathItem[] | Promise<...>` | `[]` | Pre-generates dynamic parameter combinations during build time for SSG rendering. | [Docs](#getstaticpaths) |
+| `allowISG` | `boolean | (() => boolean | Promise<boolean>)` | `true` | When `true`, ungenerated paths render on-demand on first visit. When `false`, ungenerated paths return 404. | [Docs](#allowisg) |
+| `validateParams(params)` | `(params) => boolean | Promise<boolean>` | `() => true` | Route parameter gatekeeper. Returning `false` immediately terminates with a 404 before calling `getProps`. | [Docs](#validateparams) |
+
+<a id="revalidate-modes"></a>
+#### Revalidation Modes (SSR vs ISR vs SSG)
+
+| Export Value | Rendering Mode | Cache Behavior | Ideal Use Case |
+| :--- | :--- | :--- | :--- |
+| `export const revalidate = 0;` | **Dynamic SSR** | Evaluated fresh on every HTTP request. Never cached in static storage. | User accounts, checkout pages, real-time analytics. |
+| `export const revalidate = 60;` | **ISR (Regeneration)** | Served from cache for N seconds. Next visit serves stale cache and triggers background re-generation. | E-commerce product pages, news feeds, search result pages. |
+| `export const revalidate = false;` | **Static (SSG)** | Prerendered at build time and cached indefinitely until purged via on-demand invalidation. | Marketing landing pages, documentation, blog posts. |
+
+---
+
+<a id="navigation-hooks"></a>
+### 4. Client Navigation & Hooks
+
+`dinou`
+
+Declarative navigation components and reactive client hooks for routing state and micro-ISR slot manipulation.
+
+<a id="client-primitives"></a>
+#### Link & Redirection Primitives
+
+| Export | Scope | Signature / Props | Behavior | API Ref |
+| :--- | :--- | :--- | :--- | :---: |
+| `<Link>` | `Universal` | `href, fresh?, prefetch?, replace?, target?` | SPA navigation component. Prevents full reloads. Set `fresh` to bypass client cache. | [Docs](#link) |
+| `<ClientRedirect>` | `Client` | `to: string, replace?: boolean` | Declarative redirect rendered inside component tree during render phase. | [Docs](#clientredirect) |
+| `redirect()` | `Universal` | `(path: string, status?: number) => never` | HTTP 307 on server (pre-header flush) or SPA client replace if streaming/client. | [Docs](#redirect) |
+
+<a id="location-hooks"></a>
+#### Router & Navigation Hooks
+
+| Hook / Helper | Scope | Returned Interface | Common Use Case | API Ref |
+| :--- | :--- | :--- | :--- | :---: |
+| `useRouter()` | `Client` | `{ push, replace, refresh, refreshSlot, back, forward }` | Imperative programmatic navigation, page refreshes, and slot updates. | [Docs](#userouter) |
+| `usePathname()` | `Universal` | `string` (e.g. `"/dashboard"`) | Active navigation highlights, breadcrumbs, and layout route branching. | [Docs](#usepathname) |
+| `useSearchParams()` | `Universal` | `ReadonlyURLSearchParams` (`.get()`, `.has()`) | Reading query strings (`?q=react&sort=asc`) in Server or Client components. | [Docs](#usesearchparams) |
+| `useNavigationLoading()` | `Client` | `boolean` | Global top loading bar or spinner indicators during pending transitions. | [Docs](#usenavigationloading) |
+| `refreshSlot(slotId)` | `Client` | `(slotId: string) => Promise<void>` | Re-fetches a specific `<DinouCacheSlot>` without refreshing the rest of the page. | [Docs](#refreshslot) |
+
+---
+
+<a id="server-primitives"></a>
+### 5. Server Primitives & Cache
+
+`dinou & dinou/server`
+
+Server-side context providers, micro-ISR slot primitives, and cluster cache purge APIs.
+
+<a id="context-and-slots"></a>
+#### getContext & DinouCacheSlot
+
+| Export | Package | Signature | Purpose & Mechanics | API Ref |
+| :--- | :--- | :--- | :--- | :---: |
+| `getContext()` | `dinou` | `() => ServerContext | null` | Synchronous HTTP access via AsyncLocalStorage: `req.cookies`, `req.headers`, `res.cookie()`, `res.setHeader()`. | [Docs](#getcontext) |
+| `<DinouCacheSlot>` | `dinou/server` | `id, revalidate?, tag?, tags?` | Micro-ISR server component. Caches an independent sub-tree without re-evaluating parent layouts or siblings. | [Docs](#dinoucacheslot) |
+| `defineConfig(config)` | `dinou` | `(config: DinouConfig) => DinouConfig` | Type helper for `dinou.config.mjs` (reactStrictMode, ppr, storage, plugins). | [Docs](#defineconfig) |
+| `Storage Adapters` | `dinou/server` | `MemoryStorage, RedisStorage` | ISR storage engines for single server or distributed multi-instance clusters. | [Docs](#storage-adapters-list) |
+
+<a id="cache-invalidation"></a>
+#### On-Demand Cache Invalidation (`dinou/server`)
+
+| Function | Target | Signature | Purge Effect | API Ref |
+| :--- | :--- | :--- | :--- | :---: |
+| `revalidateTag(tag)` | Tags (Pages & Slots) | `(tag: string) => Promise<void>` | Purges all pages and `<DinouCacheSlot>` components tagged with the identifier across the cluster. | [Docs](#revalidatetag) |
+| `revalidatePath(path)` | Exact Route Path | `(path: string) => Promise<void>` | Purges the cached HTML and data for a specific pathname and triggers background re-generation. | [Docs](#revalidatepath) |
+| `revalidatePage(pattern)` | Route Pattern | `(pattern: string) => Promise<void>` | Purges all compiled cache instances matching a route pattern or page component. | [Docs](#revalidatepage) |
+
+---
+
+<a id="decision-matrix"></a>
+### 6. Decision Matrix: When to Use What
+
+`Architectural Guide`
+
+Quick comparative decision tables to help you pick the right primitive for caching, navigation, and state access without trial and error.
+
+<a id="matrix-cache"></a>
+#### Cache Invalidation: Which method should you call?
+
+| Method | Caller Environment | Scope of Impact | When to Choose It |
+| :--- | :--- | :--- | :--- |
+| `revalidateTag(tag)` | Server (Action / Webhook / API) | Multi-page & multi-slot cluster | **Recommended for shared data models:** when updating a database record (e.g., product or article) that appears across lists, detail pages, and sidebar widgets. |
+| `revalidatePath(path)` | Server (Action / Webhook / API) | Single static route path | When you know the exact URL that changed and want to purge its HTML/JSON (e.g. `"/pricing"` or `"/about"`). |
+| `refreshSlot(slotId)` | Client Component (Browser) | Single targeted slot on current page | **Zero layout re-render:** when an interactive client widget updates (e.g. cart badge counter or mini ticker) without touching the rest of the page. |
+| `router.refresh()` | Client Component (Browser) | Entire active page | When a client action needs fresh server props for the whole page without losing client state or scrolling to top. |
+
+<a id="matrix-redirects"></a>
+#### Redirection: Which redirection strategy should you use?
+
+| Strategy | Context / Location | HTTP / Browser Mechanism | When to Choose It |
+| :--- | :--- | :--- | :--- |
+| `redirect(path)` in `getProps` | Server (`page_functions.ts`) | Real HTTP 307 Response | **Fastest & cleanest:** Auth guards, permission checks, or missing data redirects executed before any HTML or component rendering begins. |
+| `redirect(path)` in Component | Universal (Server or Client) | HTTP 307 if headers unsent; SPA navigation if stream started | When redirection criteria depend on intermediate component tree logic. |
+| `<ClientRedirect to="..." />` | Client Component (JSX render) | Client-side router push/replace | Declarative fallback rendering in client tabs, wizard step redirections, or empty states. |
+| `router.replace(url)` | Client Event Handler | History replace without entry | Post-submission redirect where clicking browser "Back" should not re-submit the action (e.g. login form, payment checkout). |
+
+<a id="matrix-params"></a>
+#### Route Parameter Access: Where should you read route data?
+
+| Access Pattern | Environment | Return Type | When to Choose It |
+| :--- | :--- | :--- | :--- |
+| `params` in `page.tsx` (`PageProps`) | Universal (Server or Client) | `RouteParams<Pattern>` | Directly rendering route tokens in the page view (e.g. `<h1>Product #{params.id}</h1>`) with compile-time type validation. |
+| `params` in `layout.tsx` (`LayoutProps`) | Universal (Server or Client) | `RouteParams<Pattern>` | Shared navigation headers, dynamic breadcrumbs, or sidebars that wrap child segments for that parameter. |
+| `params` in `getProps(params)` | Server Only (`page_functions.ts`) | `RouteParams<Pattern>` | Fetching database records or querying external APIs based on dynamic route IDs before rendering. |
+| `params` in `not_found.tsx` (`PageProps`) | Universal (Server or Client) | `RouteParams<Pattern>` | Scoped 404 views displaying the missing item ID (e.g. `Item "{params.slug}" not found`). |
+| `params` in `error.tsx` (`ErrorProps`) | Universal (Server or Client) | `RouteParams<Pattern>` | Scoped 500 error pages showing diagnostic context or retry options for that specific resource. |
+| `usePathname()` | Universal (Server or Client) | `string` | Navigation bars, sidebars, or layout components that need to detect the current URL path without relying on child props. |
+| `useSearchParams()` | Universal (Server or Client) | `ReadonlyURLSearchParams` | Reading query string parameters (filters, pagination, search keywords) in either server or client components. |
+
 
 ---
 
