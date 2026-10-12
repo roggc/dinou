@@ -252,6 +252,15 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
   - [Instant CSS Hot Module Replacement](#instant-css-hot-module-replacement)
   - [TypeScript Declarations (dinou/env)](#typescript-declarations-dinouenv)
   - [Complete End-to-End Example](#complete-end-to-end-example)
+- [Assets & Media](#assets--media)
+  - [Assets & Media in Dinou](#assets--media-in-dinou)
+  - [Imported Assets vs. Public Directory](#imported-assets-vs-public-directory)
+  - [Supported Extensions (21 Formats)](#supported-extensions-21-formats)
+  - [Usage in Server & Client Components](#usage-in-server--client-components)
+  - [Path Aliases in Asset Imports](#path-aliases-in-asset-imports)
+  - [Production Build Output (.dinou/dist3/assets/)](#production-build-output-dinoudist3assets)
+  - [TypeScript Declarations (dinou/env)](#typescript-declarations-dinouenv-1)
+  - [Extending Custom Formats (Eject)](#extending-custom-formats-eject)
 - [Configuration API (`dinou.config.js`)](#configuration-api-dinouconfigjs)
   - [1. Universal Middleware (`onRequest`)](#1-universal-middleware-onrequest)
   - [2. SWC Disk-Mirror (`useSwcDiskMirror`)](#2-swc-disk-mirror-useswcdiskmirror)
@@ -6158,6 +6167,187 @@ export default function HomePage() {
   );
 }
 ```
+
+---
+
+## Assets & Media
+
+### Assets & Media in Dinou
+
+In Dinou, media files imported into JavaScript or TypeScript components are treated as first-class module dependencies. When you import an asset (e.g. `import logo from "./logo.png"`), the active bundler (esbuild, rollup, or webpack):
+
+1. **Fingerprints the file:** Generates a deterministic path/name-based hash.
+2. **Emits the asset:** Copies the file to the client distribution directory under `.dinou/dist3/assets/[name]-[hash].[ext]`.
+3. **Returns a string URL:** Resolves the JavaScript import to the final public URL string (e.g. `"/assets/logo-8f1e2a.png"`).
+
+- **RSC & SSR Safe:** Imports resolve to plain URL strings, rendering identically in server SSR HTML and client hydration with zero mismatch.
+- **Zero Name Collisions:** Deterministic path-scoped hashes prevent filename collisions when different components import assets with the same name.
+- **TypeScript Verified:** Built-in ambient declarations in `dinou/env` prevent broken imports and typos at build time.
+
+### Imported Assets vs. Public Directory
+
+In Dinou, files imported inside your code (`src/**/*`) are processed by bundlers, fingerprinted with deterministic path-based hashes, and emitted into `.dinou/dist3/assets/*` with immutable caching. In contrast, files placed in `public/` bypass bundlers entirely and are copied directly into the web root with fixed, unhashed URLs (ideal for `favicon.ico`, `robots.txt`, and verification files).
+
+> [!TIP]
+> For a detailed side-by-side comparison between `public/` static files and bundled assets, see the [Public Directory vs. Imported Assets Matrix](#4-public-vs-imported-assets-src).
+
+### Supported Extensions (21 Formats)
+
+Dinou recognizes 21 media extensions out-of-the-box across images, video, and audio:
+
+| Category | Format Extensions | Common MIME Types |
+| :--- | :--- | :--- |
+| **Images (10)** | `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.avif`, `.ico`, `.mjpeg`, `.mjpg` | `image/png`, `image/jpeg`, `image/webp`, `image/svg+xml`, `image/avif` |
+| **Video (6)** | `.mp4`, `.webm`, `.ogg`, `.mov`, `.avi`, `.mkv` | `video/mp4`, `video/webm`, `video/ogg`, `video/quicktime` |
+| **Audio (5)** | `.mp3`, `.wav`, `.flac`, `.m4a`, `.aac` | `audio/mpeg`, `audio/wav`, `audio/flac`, `audio/aac` |
+
+### Usage in Server & Client Components
+
+Importing media files works identically in both Server Components (RSC) and Client Components (`"use client"`). Imported assets resolve to fingerprinted URL strings that can be passed directly to standard JSX elements like `<img>`, `<video>`, `<audio>`, or Web Audio APIs:
+
+**1. Images in Server / Client Components (`src/components/avatar.tsx`):**
+
+```tsx
+// src/components/avatar.tsx
+import userAvatar from "./avatar.webp";
+import defaultIcon from "./user-placeholder.svg";
+
+export function UserAvatar({ hasCustomPhoto }: { hasCustomPhoto?: boolean }) {
+  const photoSrc = hasCustomPhoto ? userAvatar : defaultIcon;
+
+  return (
+    <div className="relative w-12 h-12 rounded-full overflow-hidden border">
+      <img
+        src={photoSrc}
+        alt="User profile avatar"
+        width={48}
+        height={48}
+        loading="lazy"
+        className="object-cover w-full h-full"
+      />
+    </div>
+  );
+}
+```
+
+**2. Video & Audio in Client Components (`src/components/media-hero.tsx`):**
+
+```tsx
+// src/components/media-hero.tsx
+"use client";
+
+import heroBgVideo from "./hero-ambient.mp4";
+import heroWebmVideo from "./hero-ambient.webm";
+import chimeAudio from "./welcome-chime.mp3";
+
+export function MediaHero() {
+  const playSound = () => {
+    const audio = new Audio(chimeAudio);
+    audio.play().catch(() => {});
+  };
+
+  return (
+    <div className="relative h-96 flex items-center justify-center overflow-hidden rounded-2xl">
+      {/* Background Video with multiple format fallbacks */}
+      <video
+        autoPlay
+        muted
+        loop
+        playsInline
+        className="absolute inset-0 w-full h-full object-cover -z-10"
+      >
+        <source src={heroWebmVideo} type="video/webm" />
+        <source src={heroBgVideo} type="video/mp4" />
+      </video>
+
+      <div className="text-center text-white space-y-4 p-6 bg-black/40 backdrop-blur-sm rounded-xl">
+        <h1 className="text-3xl font-bold">Experience Dinou</h1>
+        <button
+          onClick={playSound}
+          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold transition shadow"
+        >
+          Play Welcome Chime
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+### Path Aliases in Asset Imports
+
+Dinou's bundlers resolve path aliases configured in `tsconfig.json` for media imports as well as code modules. You do not need to use fragile relative paths like `../../assets/logo.png`:
+
+```tsx
+// Clean path alias resolution
+import companyLogo from "@/assets/brand/logo.svg";
+import heroBanner from "@/assets/images/banner.webp";
+```
+
+### Production Build Output (.dinou/dist3/assets/)
+
+When building for production (`dinou build`), Dinou bundles and emits all imported media files into the client distribution directory under `.dinou/dist3/assets/`, assigning each file a scoped, deterministic name:
+
+```text
+.dinou/dist3/assets/
+├── logo-4b2a8f.png
+├── banner-9c1d3e.webp
+└── intro-sound-7e2f1a.mp3
+```
+
+> [!NOTE]
+> This structure ensures that assets imported across different components never collide in filename, while keeping bundled media cleanly separated from root static files.
+
+### TypeScript Declarations (dinou/env)
+
+Ambient type declarations for all 21 media extensions are packaged directly into `dinou/env`. Verify that `dinou-env.d.ts` exists in your project root:
+
+```typescript
+/// <reference types="dinou/env" />
+```
+
+And confirm your `tsconfig.json` includes the reference:
+
+```json
+{
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "allowJs": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler"
+  },
+  "include": [
+    "src",
+    "dinou-env.d.ts"
+  ]
+}
+```
+
+### Extending Custom Formats (Eject)
+
+If your application requires specialized binary formats (e.g. `.hdr`, `.glb`, `.gltf` for 3D graphics, or `.wasm`), you can [eject Dinou](#-eject-dinou) to take full ownership of the pipeline.
+
+In an ejected project, simply add your custom extensions to the array in `dinou/core/asset-extensions.js`:
+
+```javascript
+// dinou/core/asset-extensions.js
+const extensions = [
+  "png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "ico",
+  "mp4", "webm", "ogg", "mov", "avi", "mkv",
+  "mp3", "wav", "flac", "m4a", "aac",
+  "mjpeg", "mjpg",
+  // Custom additions:
+  "glb", "gltf", "hdr"
+];
+```
+
+> [!TIP]
+> All three bundlers (esbuild, rollup, webpack) and the dual-engine runtime will automatically recognize and fingerprint your new file extensions.
 
 ---
 
