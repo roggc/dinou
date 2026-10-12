@@ -151,6 +151,19 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [6.1. On-Demand Path Generation](#61-on-demand-path-generation)
     - [6.2. Governance APIs (validateParams & allowISG)](#62-governance-apis-validateparams--allowisg)
   - [7. Complete Rendering Strategies Matrix](#7-complete-rendering-strategies-matrix)
+- [Server Functions ("use server")](#server-functions-use-server)
+  - [Overview & "use server" Directive](#overview-use-server-directive)
+  - [1. Returning Live React Components (UI Streaming)](#1-returning-live-react-components-ui-streaming)
+  - [2. Server Actions & Form Mutations](#2-server-actions-form-mutations)
+    - [2.1. Server Actions in Forms](#21-server-actions-in-forms)
+    - [2.2. React 19 Hooks: useActionState & useFormStatus](#22-react-19-hooks-useactionstate-useformstatus)
+    - [2.3. Optimistic Updates with useOptimistic](#23-optimistic-updates-with-useoptimistic)
+  - [3. Request Context, Cookies & Headers (getContext)](#3-request-context-cookies-headers-getcontext)
+    - [3.1. Reading Query, Headers & Cookies](#31-reading-query-headers-cookies)
+    - [3.2. Setting & Clearing Cookies](#32-setting-clearing-cookies)
+  - [4. Redirections (redirect)](#4-redirections-redirect)
+    - [4.1. The 4 Execution Contexts (HTTP 302 vs. Client Transition)](#41-the-4-execution-contexts-http-302-vs-client-transition)
+    - [4.2. Universal Redirection Matrix](#42-universal-redirection-matrix)
 - [Data Fetching: The 13 Strategies](#data-fetching-the-13-strategies)
   - [Overview: The 13-Strategy Architecture](#overview-the-13-strategy-architecture)
   - [Data Fetching & Rendering Strategies Matrix](#data-fetching--rendering-strategies-matrix)
@@ -3399,6 +3412,547 @@ Summary of all rendering strategies supported natively by Dinou v7:
 
 > [!TIP]
 > For deep-dive code recipes, runtime execution timing, TTFB charts, and production trade-offs across all 13 rendering and data fetching patterns, see [Data Fetching: The 13 Strategies](#data-fetching-the-13-strategies) below.
+
+---
+
+## Server Functions ("use server")
+
+Server Functions are asynchronous RPC endpoints that run exclusively in the server runtime. In Dinou, you declare them by adding the `"use server"` directive at the top of a dedicated action file (**module-level directive**).
+
+### Overview & "use server" Directive
+
+| Capability | Architectural Benefit |
+| :--- | :--- |
+| **Zero API Boilerplate** | No manual route handlers, `fetch()` boilerplate, or JSON serialization required. Dinou generates typed Flight RPC endpoints (`POST /____server_function____`) automatically. |
+| **JSX & Data Returns** | Unlike standard RPCs that only return JSON, Dinou Server Functions can return fully rendered React components streamed over Flight RPC (*The Dinou Pattern*). |
+| **Security & Secrets** | Secret keys, database connections, and ORM calls are never bundled into the client-side JavaScript chunk. |
+| **Form & Action Synergy** | Native integration with HTML `<form action={...}>` and React 19 primitives (`useActionState`, `useFormStatus`, `useOptimistic`). |
+
+---
+
+### 1. Returning Live React Components (UI Streaming)
+
+Dinou uniquely allows Server Functions to return fully rendered React component trees directly over Flight RPC. In Server Components, the component is awaited directly inside native `<Suspense>`; in Client Components, the returned promise is unwrapped with React 19's `use()` hook:
+
+#### Pattern A: Server Function (Returning Rendered JSX)
+
+```tsx
+// src/actions/get-post-card.tsx
+"use server"; // 👈 Module-level directive in Dinou
+
+import db from "@/lib/db";
+import { PostCard } from "@/components/post-card";
+
+export async function getPostCard(postId: string) {
+  const post = await db.posts.findUnique({ where: { id: postId } });
+  if (!post) throw new Error("Post not found");
+
+  // Returns a rendered JSX component directly over Flight RPC!
+  return <PostCard post={post} />;
+}
+```
+
+#### Pattern B: Consuming in Server Components (Async / Await)
+
+Directly `await` the Server Function inside an async component. React streams HTML progressively as promises resolve:
+
+```tsx
+// src/blog/page.tsx
+// Server Component: directly await the Server Function with React 19 Suspense
+import { Suspense } from "react";
+import { getPostCard } from "@/actions/get-post-card";
+
+async function PostSlot({ id }: { id: string }) {
+  // Directly awaited on the server during SSR / streaming
+  return await getPostCard(id);
+}
+
+export default function BlogPage() {
+  return (
+    <section className="space-y-4">
+      <h1 className="text-2xl font-bold">Featured Story</h1>
+      
+      {/* Native React 19 Suspense fallback */}
+      <Suspense fallback={<div className="skeleton h-48 w-full rounded" />}>
+        <PostSlot id="post-101" />
+      </Suspense>
+    </section>
+  );
+}
+```
+
+#### Pattern C: Consuming in Client Components (with React 19 `use()`)
+
+Dispatches Flight RPC returning a Promise. React 19's native `use(promise)` unrolls it synchronously inside `<Suspense>` without external state libraries, and re-suspends cleanly on promise update:
+
+```tsx
+// src/blog/page.tsx
+// Client Component: unwrap the Flight RPC promise with React 19 use()
+"use client";
+
+import { useState, use, Suspense } from "react";
+import { getPostCard } from "@/actions/get-post-card";
+
+function PostStream({ promise }: { promise: Promise<React.ReactNode> }) {
+  // Pure React 19 'use()' unrolls the promise within Suspense
+  const content = use(promise);
+  return <>{content}</>;
+}
+
+export default function BlogPage() {
+  const [postId, setPostId] = useState("post-1");
+  const [postPromise, setPostPromise] = useState(() => getPostCard("post-1"));
+
+  const loadPost = (id: string) => {
+    setPostId(id);
+    setPostPromise(getPostCard(id));
+  };
+
+  return (
+    <section className="space-y-4">
+      <h1 className="text-2xl font-bold">Featured Story</h1>
+
+      <div className="flex gap-2">
+        <button onClick={() => loadPost("post-1")} className="btn">Post 1</button>
+        <button onClick={() => loadPost("post-2")} className="btn">Post 2</button>
+      </div>
+
+      {/* Re-suspends cleanly on promise update */}
+      <Suspense key={postId} fallback={<p>Streaming post from server...</p>}>
+        <PostStream promise={postPromise} />
+      </Suspense>
+    </section>
+  );
+}
+```
+
+> [!NOTE]
+> **Execution Comparison: Server vs. Client Components**
+> - **In Server Components (Async / Await):** Directly `await` the Server Function inside an async component. React streams HTML progressively as promises resolve.
+> - **In Client Components (with `use()`)**: Dispatches Flight RPC returning a Promise. React 19's native `use(promise)` unrolls it synchronously inside `<Suspense>` without external state libraries.
+
+---
+
+### 2. Server Actions & Form Mutations
+
+Dinou integrates seamlessly with standard HTML forms and React 19 form actions for data mutations.
+
+#### 2.1. Server Actions in Forms
+
+You can pass a Server Action directly to the native HTML `<form action={...}>` attribute:
+
+```tsx
+// src/components/newsletter-page.tsx
+"use client";
+
+import { subscribeNewsletter } from "@/actions/subscribe";
+
+export default function NewsletterPage() {
+  return (
+    <form action={subscribeNewsletter} className="flex gap-2">
+      <input name="email" type="email" placeholder="name@domain.com" required className="input" />
+      <button type="submit" className="btn-primary">Subscribe</button>
+    </form>
+  );
+}
+```
+
+```typescript
+// src/actions/subscribe.ts
+"use server"; // 👈 Required at the module level in Dinou
+
+import db from "@/lib/db";
+
+export async function subscribeNewsletter(formData: FormData) {
+  const email = formData.get("email") as string;
+  await db.subscribers.create({ data: { email } });
+}
+```
+
+> [!NOTE]
+> **Module-Level Directives & Client Execution**
+> Dinou requires the `"use server"` directive to be placed at the **top of the action file** (not inline within function bodies). When a form submits, Dinou's client runtime transparently dispatches a Flight RPC request (`POST /____server_function____`) to execute the server action and receive updated UI state.
+
+> [!TIP]
+> **What does `subscribeNewsletter` return? (Understanding `void` / `undefined`)**
+> This action returns `Promise<void>`, which resolves to **`undefined`**. In pure React 19 form actions (`<form action={subscribeNewsletter}>`), this is completely standard for *fire-and-forget* mutations: the browser submits the form data, the server executes the database write, and no state payload is needed by the UI.
+>
+> **When should a Server Action return a value?** If your UI needs to display interactive feedback (such as *"Subscribed successfully!"* or validation errors), the action should return a serializable payload (e.g. `{ success: true, message: "..." }`) and be wired to React 19's **`useActionState`** hook (as shown below in Section 2.2). Other common patterns include performing a server-side `redirect()` or calling `revalidatePath()` before completing.
+
+---
+
+#### 2.2. React 19 Hooks: useActionState & useFormStatus
+
+For rich interactive forms with validation feedback and loading spinners, use React 19's standard hooks:
+
+- **`useActionState` (React 19)**: Captures the returned state (errors, success payload) and pending status of the Server Action across submissions.
+- **`useFormStatus` (`react-dom`)**: Reads the pending submission status of the parent `<form>` without prop drilling.
+
+```tsx
+// src/components/create-post-form.tsx
+"use client";
+
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
+import { createPostAction, type FormState } from "@/actions/posts";
+
+function SubmitButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button type="submit" disabled={pending} className="btn-primary">
+      {pending ? "Saving..." : "Publish Post"}
+    </button>
+  );
+}
+
+const initialState: FormState = { success: false, message: "" };
+
+export function CreatePostForm() {
+  // useActionState binds the server action to form state and tracks submission
+  const [state, formAction, isPending] = useActionState(createPostAction, initialState);
+
+  return (
+    <form action={formAction} className="flex flex-col gap-4">
+      {state.message && (
+        <div className={state.success ? "text-green-500" : "text-red-500"}>
+          {state.message}
+        </div>
+      )}
+
+      <input name="title" placeholder="Post title" required className="input" />
+      <textarea name="content" placeholder="Write content..." required className="textarea" />
+      
+      <SubmitButton />
+    </form>
+  );
+}
+```
+
+```typescript
+// src/actions/posts.ts
+"use server"; // 👈 Module-level directive required in Dinou
+
+import db from "@/lib/db";
+
+export type FormState = {
+  success: boolean;
+  message: string;
+};
+
+// Server Action receives (prevState, formData) when bound to useActionState
+export async function createPostAction(
+  prevState: FormState,
+  formData: FormData
+): Promise<FormState> {
+  const title = (formData.get("title") as string)?.trim();
+  const content = (formData.get("content") as string)?.trim();
+
+  if (!title || title.length < 3) {
+    return { success: false, message: "Title must be at least 3 characters." };
+  }
+
+  if (!content) {
+    return { success: false, message: "Content cannot be empty." };
+  }
+
+  await db.posts.create({ data: { title, content } });
+  return { success: true, message: "Post published successfully!" };
+}
+```
+
+---
+
+#### 2.3. Optimistic Updates with useOptimistic
+
+With React 19's `useOptimistic`, you can update the user interface immediately before the server responds:
+
+```tsx
+// src/components/like-button.tsx
+"use client";
+
+import { useOptimistic, useTransition } from "react";
+import { toggleLikeAction } from "@/actions/likes";
+
+export function LikeButton({ postId, initialLikes }: { postId: string; initialLikes: number }) {
+  const [isPending, startTransition] = useTransition();
+  const [optimisticLikes, setOptimisticLikes] = useOptimistic(
+    initialLikes,
+    (current, update: number) => current + update
+  );
+
+  const handleClick = () => {
+    startTransition(async () => {
+      setOptimisticLikes(1); // Optimistically increment in 0ms on client
+      await toggleLikeAction(postId); // Dispatches Server Action via Flight RPC
+    });
+  };
+
+  return (
+    <button onClick={handleClick} disabled={isPending} className="btn-like">
+      ❤️ {optimisticLikes}
+    </button>
+  );
+}
+```
+
+```typescript
+// src/actions/likes.ts
+"use server"; // 👈 Module-level directive required in Dinou
+
+import db from "@/lib/db";
+
+export async function toggleLikeAction(postId: string) {
+  // Updates like count on the database
+  await db.posts.update({
+    where: { id: postId },
+    data: { likes: { increment: 1 } },
+  });
+
+  return { success: true };
+}
+```
+
+> [!NOTE]
+> **Why is there no `<Suspense>` boundary here?**
+> `<Suspense>` only activates when a component *suspends* (by throwing a pending Promise, such as with `React.use(promise)` or an async Server Component).
+>
+> In contrast, **`useOptimistic` does the exact opposite of suspending**: it synchronously paints the temporary new value (e.g. switching immediately from `10` to `11`) in **0ms** on the client, avoiding loading spinners or skeleton fallbacks entirely while the Server Action runs in the background. It relies strictly on React 19 transitions (`useTransition` or Form Actions). If the server call succeeds, React seamlessly commits the real server state; if it fails, React automatically rolls back to the initial value with zero boilerplate.
+
+---
+
+### 3. Request Context, Cookies & Headers (getContext)
+
+Dinou provides `getContext()` (exported from `"dinou"`) to access the underlying request and response lifecycle synchronously within any Server Function or SSR component.
+
+**RequestContextStore API Reference:**
+- `context.req.cookies`: Dictionary of incoming client cookies (e.g. `cookies["session_token"]`).
+- `context.req.headers`: Incoming HTTP headers dictionary (e.g. `headers["user-agent"]`).
+- `context.req.query`: URL search parameters.
+- `context.res.cookie(name, value, options)`: Sets an HTTP cookie with options (`httpOnly`, `secure`, `maxAge`, `sameSite`, `path`, etc.).
+- `context.res.clearCookie(name, options)`: Clears a cookie from the client.
+
+#### 3.1. Reading Query, Headers & Cookies
+
+```typescript
+// src/actions/auth-check.ts
+"use server";
+
+import { getContext } from "dinou";
+
+export async function getCurrentUser() {
+  const context = getContext();
+  if (!context) return null;
+
+  const sessionToken = context.req.cookies["session_token"];
+  const userAgent = context.req.headers["user-agent"];
+
+  if (!sessionToken) return null;
+  return await verifySession(sessionToken);
+}
+```
+
+#### 3.2. Setting & Clearing Cookies
+
+```typescript
+// src/actions/login.ts
+"use server";
+
+import { getContext } from "dinou";
+
+export async function loginAction(formData: FormData) {
+  const context = getContext();
+  const email = formData.get("email") as string;
+  const password = formData.get("password") as string;
+
+  const session = await authenticateUser(email, password);
+
+  // Set secure HTTP-only session cookie
+  context?.res.cookie("session_token", session.token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 60 * 60 * 24 * 7, // 7 days in seconds
+    path: "/",
+  });
+
+  return { success: true };
+}
+
+export async function logoutAction() {
+  const context = getContext();
+  // Clear the cookie upon logout
+  context?.res.clearCookie("session_token", { path: "/" });
+  return { success: true };
+}
+```
+
+---
+
+### 4. Redirections (redirect)
+
+Dinou provides a universal `redirect(destination)` utility exported from `"dinou"`:
+
+- **In Server Functions (Soft SPA Navigation):** When called inside a Server Function (e.g. form mutations or RPC calls), Dinou automatically performs a smooth client-side transition to the destination route via the SPA router **without a full page reload**.
+- **In Server Components (Initial SSR):** If headers have not yet been sent, Dinou issues a clean HTTP 302 redirect for SEO and search engine crawlers. If response streaming has already started, it completes the transition on the client upon hydration.
+- **In Client Components (Declarative Redirects):** When called directly in client components during render, it triggers an immediate client router replacement (`router.replace()`) without reloading the page.
+
+```typescript
+// src/actions/checkout.ts
+"use server";
+
+import { redirect } from "dinou";
+import db from "@/lib/db";
+
+export async function completeOrder(orderId: string) {
+  await db.orders.updateStatus(orderId, "PAID");
+
+  // Automatically navigates the client router to the success page
+  return redirect(`/checkout/${orderId}/success`);
+}
+```
+
+#### 4.1. The 4 Execution Contexts (HTTP 302 vs. Client Transition)
+
+A foundational question when handling redirects across hybrid architectures is: *How does Dinou determine whether `redirect()` issues an HTTP 302 vs. a client-side transition, and is calling `redirect()` in a Server Component equivalent to invoking it via a Server Function?*
+
+> [!NOTE]
+> **The Equivalence Principle in Server Components**
+> Calling `redirect()` directly inside a Server Component vs. calling an imported Server Function (e.g., `await verifyUser()`) from that Server Component is **functionally identical**. Because both run inside the same server Node.js process during the same SSR request lifecycle, they share the exact same request context and streaming state.
+
+##### Context 1: SSR Root (page_functions.ts, page.tsx, Plugin) -> HTTP 302
+
+Occurs inside `getProps()` in `page_functions.ts`, at the top level of the root `page.tsx` Server Component (outside any `<Suspense>` boundary), or in a global plugin hook (`onRequest`) in `dinou.config.mjs`. Because zero HTML bytes have reached the wire (`headersSent === false`), Dinou issues a clean **HTTP 302** with a `Location` header. **Crucial for SEO crawlers and search indexers.**
+
+```typescript
+// src/dashboard/page_functions.ts
+import { redirect, getContext } from "dinou";
+
+export async function getProps() {
+  const { req } = getContext();
+  if (!req.cookies.session_token) {
+    // Evaluated before page rendering -> HTTP 302 redirect
+    return redirect("/login");
+  }
+  return { user: { name: "Alex" } };
+}
+```
+
+```tsx
+// src/dashboard/page.tsx (Server Component root)
+import { redirect, getContext } from "dinou";
+
+export default async function DashboardPage() {
+  const { req } = getContext();
+  if (!req.cookies.session_token) {
+    // At root before stream begins -> HTTP 302 redirect
+    return redirect("/login");
+  }
+
+  return <h1>Welcome to Dashboard</h1>;
+}
+```
+
+```javascript
+// dinou.config.mjs (Global Plugin Hook)
+import { defineConfig } from "dinou/config";
+
+export default defineConfig({
+  plugins: [
+    {
+      name: "auth-guard",
+      async onRequest(request, context) {
+        const url = new URL(request.url);
+        const cookieHeader = request.headers.get("cookie") || "";
+        // Runs pre-flight before SSR or route resolution
+        if (url.pathname.startsWith("/dashboard") && !cookieHeader.includes("session_token=")) {
+          return Response.redirect(new URL("/login", request.url), 302);
+        }
+      },
+    },
+  ],
+});
+```
+
+##### Context 2: SSR Deferred (<Suspense>) -> Client Hydration
+
+Occurs inside an async child wrapped in `<Suspense fallback={<Skeleton />}>`. React opens the HTTP connection with status `200 OK` immediately to stream the initial shell. At HTTP protocol level, an open `200 OK` stream cannot turn into a `302`. Dinou safely emits `<ClientRedirect />`, completing the transition upon browser hydration without breaking the stream:
+
+```tsx
+// src/reports/page.tsx (Server Component)
+import { Suspense } from "react";
+import { redirect } from "dinou";
+
+async function RestrictedReport() {
+  const isAllowed = await checkUserAccess();
+  if (!isAllowed) {
+    // 200 OK stream already open -> <ClientRedirect />
+    return redirect("/unauthorized");
+  }
+  return <div>Financial Metrics</div>;
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<p>Loading financial report...</p>}>
+      <RestrictedReport />
+    </Suspense>
+  );
+}
+```
+
+##### Context 3: Server Function from Client -> Soft SPA Navigation
+
+Triggered from browser interactions (form actions or button clicks) via a dedicated `POST` request. Dinou executes the server mutation and intercepts `redirect()` before streaming (headers unsent), returning redirect metadata. The client proxy navigates via the SPA router **without a full page reload**:
+
+```typescript
+// src/actions/cart.ts
+"use server";
+
+import { redirect } from "dinou";
+import db from "@/lib/db";
+
+export async function checkoutAction(formData: FormData) {
+  const order = await db.orders.create({ /* ... */ });
+
+  // Dedicated POST: soft SPA navigation in browser without page reload
+  return redirect(`/orders/${order.id}`);
+}
+```
+
+##### Context 4: Client Component (Render) -> Client Router Replacement
+
+Executes 100% in the browser with zero server roundtrip. Immediately dispatches `router.replace()` in the client SPA router, updating route and UI in 0ms:
+
+```tsx
+// src/components/client-guard.tsx
+"use client";
+
+import { redirect } from "dinou";
+
+export function ClientGuard({ isAllowed }: { isAllowed: boolean }) {
+  if (!isAllowed) {
+    // In-browser render: executes router.replace() in SPA router
+    return redirect("/forbidden");
+  }
+
+  return <button className="btn">Control Panel</button>;
+}
+```
+
+---
+
+#### 4.2. Universal Redirection Matrix
+
+| Invocation Context | Headers Sent? | Resulting Mechanism | Recommended For |
+| :--- | :--- | :--- | :--- |
+| **1. SSR Root**<br>(`page_functions.ts`, root `page.tsx`, Plugin) | **No** | **Hard HTTP Redirect (Status 302)**<br>Server issues an `HTTP/1.1 302 Found` with a `Location` header. The browser or search crawler intercepts it at the protocol level and fetches the new page as a fresh document. | Auth guards (`getProps`), root guards, global middleware plugins, SEO canonicals |
+| **2. SSR: Deferred**<br>(`<Suspense>`) | **Yes**<br>*(200 OK stream open)* | **Streaming Fallback (`<ClientRedirect />`)**<br>Because the `200 OK` chunked stream cannot be rewritten to a `302`, Dinou injects `<ClientRedirect />` into the stream. The browser router transitions upon hydration without aborting the connection. | Deferred conditional access, late data-dependent checks inside Suspense |
+| **3. Server Function**<br>*(from Client Action)* | **No**<br>*(standard POST)* | **Soft SPA Navigation (Status 200)**<br>Server returns HTTP `200 OK` with redirection metadata. Dinou's client runtime intercepts it and navigates via the SPA router without a full page reload or loss of client state. | Form submissions, shopping cart checkout, stateful mutations |
+| **4. Client Component**<br>*(Render)* | **N/A**<br>*(in-browser)* | **Client Router Replacement (`router.replace()`)**<br>Executes 100% in the browser with zero server roundtrip. Immediately dispatches `router.replace()` in the client SPA router, updating route and UI in 0ms. | Pure UI state redirection, client-side permission gates |
+
+> [!TIP]
+> **Looking for Cache Revalidation?**
+> Learn how to purge stale SSG pages and ISR cache slots on-demand using `revalidatePath` and `revalidateTag` in the dedicated revalidation documentation.
 
 ---
 
