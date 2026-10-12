@@ -131,6 +131,26 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
   - [6. getCacheTags (Cache Tagging)](#6-getcachetags-cache-tagging)
   - [7. ppr (Partial Prerendering)](#7-ppr-partial-prerendering)
   - [8. End-to-End Type-Safe Example](#8-end-to-end-type-safe-example)
+- [Static & Dynamic Rendering Strategies](#static--dynamic-rendering-strategies)
+  - [Overview: Static by Default Architecture](#overview-static-by-default-architecture)
+  - [1. Static Site Generation (SSG) & Bailout](#1-static-site-generation-ssg--bailout)
+    - [1.1. Pure Static Pre-rendering](#11-pure-static-pre-rendering)
+    - [1.2. Automatic Static Bailout](#12-automatic-static-bailout)
+  - [2. The Unified revalidate Strategy (Strict Seconds)](#2-the-unified-revalidate-strategy-strict-seconds)
+    - [2.1. Dynamic SSR (revalidate < 1 or 0)](#21-dynamic-ssr-revalidate--1-or-0)
+    - [2.2. Incremental Static Regeneration (revalidate >= 1)](#22-incremental-static-regeneration-revalidate--1)
+  - [3. Partial Prerendering (PPR)](#3-partial-prerendering-ppr)
+    - [3.1. Hybrid Architecture: Static Shell + Dynamic Holes](#31-hybrid-architecture-static-shell--dynamic-holes)
+    - [3.2. Enabling PPR & Specificity Hierarchy](#32-enabling-ppr--specificity-hierarchy)
+  - [4. Vertical Segmentation: Micro-ISR (<DinouCacheSlot>)](#4-vertical-segmentation-micro-isr-dinoucacheslot)
+    - [4.1. Component Caching: Dynamic vs. Static Patterns](#41-component-caching-dynamic-vs-static-patterns)
+    - [4.2. Interactive Revalidation & On-Demand Purging](#42-interactive-revalidation--on-demand-purging)
+    - [4.3. Horizontal vs. Vertical Segmentation & Anti-Patterns](#43-horizontal-vs-vertical-segmentation--anti-patterns)
+  - [5. High-Traffic Synergy: PPR + <DinouCacheSlot>](#5-high-traffic-synergy-ppr--dinoucacheslot)
+  - [6. Incremental Static Generation (ISG on-demand)](#6-incremental-static-generation-isg-on-demand)
+    - [6.1. On-Demand Path Generation](#61-on-demand-path-generation)
+    - [6.2. Governance APIs (validateParams & allowISG)](#62-governance-apis-validateparams--allowisg)
+  - [7. Complete Rendering Strategies Matrix](#7-complete-rendering-strategies-matrix)
 - [Data Fetching: The 13 Strategies](#data-fetching-the-13-strategies)
   - [Overview: The 13-Strategy Architecture](#overview-the-13-strategy-architecture)
   - [Data Fetching & Rendering Strategies Matrix](#data-fetching--rendering-strategies-matrix)
@@ -148,14 +168,6 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
   - [12. Client Calling Server Function (Initial Mount - Dynamic RPC)](#12-client-calling-server-function-initial-mount---dynamic-rpc)
   - [13. Client Server Functions (User Actions & Mutations)](#13-client-server-functions-user-actions--mutations)
   - [Architectural Decision Guide](#architectural-decision-guide)
-- [Static & Dynamic Rendering Strategies](#static--dynamic-rendering-strategies)
-  - [Overview: Static by Default Architecture](#overview-static-by-default-architecture)
-  - [1. Static Site Generation (SSG) & Bailout](#1-static-site-generation-ssg--bailout)
-  - [2. The Unified revalidate Strategy (Strict Seconds)](#2-the-unified-revalidate-strategy-strict-seconds)
-  - [3. Partial Prerendering (PPR)](#3-partial-prerendering-ppr)
-  - [4. Vertical Segmentation: Micro-ISR (`<DinouCacheSlot>`)](#4-vertical-segmentation-micro-isr-dinoucacheslot)
-  - [5. High-Traffic Synergy: PPR + `<DinouCacheSlot>`](#5-high-traffic-synergy-ppr--dinoucacheslot)
-  - [6. Incremental Static Generation (ISG on-demand)](#6-incremental-static-generation-isg-on-demand)
 - [Server Functions (`"use server"`) & Suspense](#server-functions-use-server--suspense)
   - [Usage in Server Components (Streaming)](#usage-in-server-components-streaming)
   - [Usage in Client Components (Reactive)](#usage-in-client-components-reactive)
@@ -2886,6 +2898,494 @@ const layoutConfig: LayoutFunctions<any, BlogLayoutData> = {
 export const { revalidate, ppr, getProps } = layoutConfig;
 ```
 
+## Static & Dynamic Rendering Strategies
+
+Dinou is **Static by Default**. It provides a continuum of rendering strategies—from build-time SSG and stale-while-revalidate ISR to real-time Dynamic SSR, revolutionary **Partial Prerendering (PPR)**, and component-level Micro-ISR with `<DinouCacheSlot>`.
+
+### Overview: Static by Default Architecture
+
+In Dinou, every route is assumed to be static until proven otherwise. During `dinou build`, the compiler analyzes route segments, components, and loader functions to evaluate whether a route can be pre-rendered or requires real-time request data:
+
+1. **Static by Default:** Routes without dynamic dependencies are pre-rendered into immutable HTML and RSC payloads at build time, achieving **0ms TTFB** at the CDN edge.
+2. **Dynamic Bailout:** When a page reads cookies, request headers, or sets `revalidate: 0`, Dinou automatically bails out to Live SSR on every incoming request.
+3. **Hybrid Continuum:** Escape the binary choice: stream dynamic components into a static shell with **PPR**, or isolate component caching with **`<DinouCacheSlot>`**.
+
+---
+
+### 1. Static Site Generation (SSG) & Bailout
+
+Pure static rendering pre-generates HTML and RSC files during the build phase (`npm run build`). Production server startup is instantaneous, and static pages achieve the fastest possible Time to First Byte (TTFB) cached by Edge CDNs globally.
+
+#### 1.1. Pure Static Pre-rendering
+
+Any page that does not consume request-specific headers, cookies, or query parameters and does not set `revalidate < 1` is automatically generated as static HTML:
+
+```tsx
+// src/about/page.tsx
+// Automatically rendered as static HTML during build time ('npm run build')
+export default function AboutPage() {
+  return (
+    <article className="prose">
+      <h1>About Us</h1>
+      <p>This page is pre-rendered once and served statically forever.</p>
+    </article>
+  );
+}
+```
+
+#### 1.2. Automatic Static Bailout
+
+If a Server Component reads request-specific data at render time without wrapping it inside a dynamic streaming boundary (React `<Suspense>` with Partial Prerendering / PPR enabled), Dinou automatically "bails out" of static generation and transitions the entire page into Dynamic SSR for that request:
+
+```tsx
+// src/profile/page.tsx
+import { getContext } from "dinou";
+import db from "@/lib/db";
+
+export default async function ProfilePage() {
+  const context = getContext();
+
+  // ⚠️ Reading cookies outside <Suspense> triggers an Automatic Static Bailout
+  // This page will now be rendered dynamically on every incoming request
+  const sessionToken = context?.req.cookies["session_token"];
+  const user = await db.users.findByToken(sessionToken);
+
+  return <h1>Welcome back, {user?.name}</h1>;
+}
+```
+
+##### Bailout Triggers in Server Components
+
+Automatic bailout occurs when reading `context.req.cookies`, `context.req.headers`, or `context.req.query` (URL search parameters) during server component execution without wrapping the access in a React `<Suspense>` boundary.
+
+##### What about Client Components and `useSearchParams()`?
+
+Client Components (`"use client"`) that call `useSearchParams()` **do not trigger dynamic bailout**. The page remains 100% static (SSG). During build time, the component is pre-rendered with an empty parameter set, and live URL parameters are synchronized in the browser upon hydration.
+
+> [!TIP]
+> **Preventing Hydration Mismatches with Search Parameters:**  
+> If a Client Component immediately renders `searchParams.get("q")` in its initial JSX markup, the server-generated static HTML (where the query was empty at build time) will differ from the live browser DOM (e.g. `?q=react`), triggering a React hydration mismatch error.
+> 
+> **Recommended Fix:** Keep initial render deterministic, then read and apply live search parameters inside `useEffect()` after mounting:
+> ```tsx
+> // src/components/search-filter.tsx
+> "use client";
+> 
+> import { useSearchParams } from "dinou";
+> import { useState, useEffect } from "react";
+> 
+> export function SearchFilter() {
+>   const searchParams = useSearchParams();
+>   const [query, setQuery] = useState<string | null>(null);
+> 
+>   useEffect(() => {
+>     // Synchronize client-side only after mounting -> eliminates hydration mismatch
+>     setQuery(searchParams.get("q") ?? "");
+>   }, [searchParams]);
+> 
+>   if (query === null) {
+>     return <span className="text-muted-foreground">Loading filter...</span>;
+>   }
+> 
+>   return <span>Filter: <strong>{query}</strong></span>;
+> }
+> ```
+> *Alternative (Live SSR):* If the initial HTML sent over the wire must contain search parameters for SEO, switch the page to Live SSR by exporting `export const revalidate = 0;` in `page_functions.ts`.
+
+---
+
+### 2. The Unified `revalidate` Strategy (Strict Seconds)
+
+In Dinou v7, the `revalidate` export in `page_functions.ts` (or `layout_functions.ts`) serves as the single source of truth for route rendering behavior. It is measured **strictly in seconds (s)**:
+
+| Value of `revalidate` | Strategy | Description |
+| :--- | :--- | :--- |
+| `false` (or omitted) | **Pure Static (SSG)** | Pre-rendered once at build time. Cached indefinitely until manual invalidation. |
+| `0` (or number < 1) | **Dynamic SSR** | Rendered on every incoming HTTP request on the fly. |
+| `N` (number >= 1) | **Time-Based ISR** | Pre-rendered, served instantly from cache, and revalidated in the background every `N` seconds. |
+
+#### 2.1. Dynamic SSR (`revalidate < 1` or `0`)
+
+To force a page to render dynamically on every single request (escaping the default static generation), set `revalidate` to `0`:
+
+```typescript
+// src/analytics/live/page_functions.ts
+
+// Escapes static generation: executes dynamic SSR on every request
+export const revalidate = 0;
+```
+
+> [!NOTE]
+> **Migration from Legacy `dynamic` Export:** In older versions of Dinou, dynamic rendering was toggled via `export function dynamic()`. In Dinou v7, the `dynamic` export has been completely removed. Setting `export const revalidate = 0;` is the official unified mechanism to escape static generation.
+
+#### 2.2. Incremental Static Regeneration (`revalidate >= 1`)
+
+When `revalidate >= 1`, Dinou serves pre-rendered static HTML/RSC payloads while regenerating the page in the background at most once every `N` seconds (stale-while-revalidate):
+
+```typescript
+// src/blog/page_functions.ts
+
+// Rebuilds the cached page in the background at most once every 60 seconds
+export const revalidate = 60; // Strict seconds (1 minute)
+```
+
+- **Background Revalidation Flow:** The first request after the 60s window receives the cached page immediately. Dinou re-executes the server render in the background. Subsequent visitors see the freshly generated version.
+- **Edge ISR Storage Adapters:** On edge platforms like Deno Deploy and Cloudflare Workers, ISR seamlessly uses distributed key-value storage (`DenoKVStorage`, `CloudflareKVStorage`, `MemoryStorage`) without needing a persistent disk.
+
+---
+
+### 3. Partial Prerendering (PPR)
+
+Partial Prerendering (PPR) resolves the decades-old dilemma between static and dynamic rendering. Instead of forcing an entire page to be 100% static or 100% dynamic, PPR delivers a **pre-rendered static shell instantly (0ms TTFB)**, while streaming dynamic holes in parallel over the same HTTP response.
+
+#### 3.1. Hybrid Architecture: Static Shell + Dynamic Holes
+
+At build time, Dinou compiles the layout, navigation, and static components into an immutable HTML shell. Any dynamic component wrapped in React `<Suspense>` is saved as a streaming placeholder hole (`<div data-ppr-hole="slot-id">...fallback...</div>`).
+
+##### The Single HTTP Response Timeline
+
+1. **0ms (Instant TTFB):** The browser receives the static shell with skeleton fallbacks directly from Edge CDN cache. Visual layout is painted immediately.
+2. **Request Processing:** Concurrently, Dinou executes the async Server Components inside `<Suspense>` on the server.
+3. **Streaming In-Place:** As each Suspense promise resolves, the HTML chunk and RSC payload are streamed down the same HTTP connection, replacing the skeleton with real content without full page reloads.
+
+##### Data Freshness: Pure SSG vs. Partial Prerendering
+
+- **Without PPR (Frozen Build Data):** Data is baked into the build artifact. Live inventory or user carts are stale upon deployment. Applications historically resorted to legacy client-side `useEffect() + fetch()` anti-patterns, suffering waterfalls, layout shifts, and spinners.
+- **With PPR (Request-Time Fresh Data):** The visual shell is delivered at `0ms` TTFB from the edge, while the component inside `<Suspense>` executes on the server on every incoming request. You get 100% fresh, live database data streamed directly to the browser without client fetch waterfalls.
+
+##### PPR as a Bailout Boundary: Containing Dynamic De-optimization
+
+Without PPR, dynamic data access is infectious: if a single nested component reads request cookies or headers, Dinou triggers an Automatic Static Bailout for the **entire page**, destroying static pre-rendering and edge caching for the whole route.
+
+With PPR enabled (`ppr = true`), React `<Suspense>` acts as an **isolated sandbox**. Dynamic data consumption inside the boundary does not escape to parent or sibling components:
+
+```tsx
+// src/store/page.tsx
+import { Suspense } from "react";
+import { getContext } from "dinou";
+import db from "@/lib/db";
+import { ProductGallery } from "@/components/gallery";
+import { CartBadgeSkeleton } from "@/components/skeletons";
+
+// ⚠️ Dynamic component: reads request-specific session cookie
+async function LiveCartBadge() {
+  const context = getContext();
+  const sessionToken = context?.req.cookies["session_id"];
+  const cart = await db.carts.findActive(sessionToken);
+
+  return <div className="cart-badge">Items: {cart?.itemCount ?? 0}</div>;
+}
+
+export default function StorePage() {
+  return (
+    <main className="container">
+      {/* 1. Static Shell: 0ms TTFB, pre-rendered during build */}
+      <header className="navbar">
+        <h1>Flagship Store</h1>
+        
+        {/* 2. PPR Boundary: Isolates cookie bailout exclusively to this hole */}
+        <Suspense fallback={<CartBadgeSkeleton />}>
+          <LiveCartBadge />
+        </Suspense>
+      </header>
+
+      {/* 3. Static Sibling: Remains 100% static and edge-cached */}
+      <ProductGallery />
+    </main>
+  );
+}
+```
+
+- **❌ Without PPR (Full-Page Bailout):** Reading `cookies["session_id"]` turns the entire page into dynamic SSR. Edge caching is lost, and the visitor waits with a blank screen.
+- **✅ With PPR (Isolated Hole Bailout):** The cookie bailout is quarantined inside `<Suspense>`. The navbar and product gallery are delivered instantly at `0ms` TTFB. Only the cart badge executes on the server and streams into place.
+
+#### 3.2. Enabling PPR & Specificity Hierarchy
+
+Dinou provides granular control over Partial Prerendering across three hierarchical levels:
+
+1. **Page Level (`page_functions.ts`) — Highest Priority:** A page can override any parent layout or global configuration:
+   ```typescript
+   // src/shop/products/[slug]/page_functions.ts
+   export const ppr = true; // Guarantees PPR on product details
+   ```
+2. **Layout Level (`layout_functions.ts`) — Subtree Cascading:** Applies to that layout and cascades to all its descendant subroutes:
+   ```typescript
+   // src/admin/layout_functions.ts
+   export const ppr = false; // Disables PPR for /admin and ALL subroutes
+   ```
+3. **Global Configuration (`dinou.config.mjs`):** Enables PPR globally across all eligible routes:
+   ```javascript
+   // dinou.config.mjs
+   import { defineConfig } from "dinou";
+   export default defineConfig({ ppr: true });
+   ```
+
+---
+
+### 4. Vertical Segmentation: Micro-ISR (`<DinouCacheSlot>`)
+
+Traditional full-stack frameworks only offer **Horizontal Segmentation** (caching an entire URL route or layout shell). When a dynamic page contains an expensive database widget, developers are often forced into an architectural trap: converting the widget to a Client Component with client-side cache libraries (SWR, TanStack Query), introducing bundle bloat, waterfall requests, and layout shifts.
+
+Dinou v7 introduces **Vertical Segmentation** with `<DinouCacheSlot>` from `"dinou/server"`. It keeps components securely on the server as React Server Components (RSC) while caching their rendered serialized Flight payload in server storage with dedicated TTLs and invalidation tags.
+
+#### 4.1. Component Caching: Dynamic vs. Static Patterns
+
+`<DinouCacheSlot>` functions as a universal caching primitive across two core architectural patterns:
+
+##### Implementation Pattern 1: Dynamic SSR Dashboard with Cached Slot
+
+The route runs in Live SSR mode (evaluating user cookies and personal greetings live). The heavy analytics calculation is cached on the server for 300 seconds and wrapped in React `<Suspense>`:
+
+```tsx
+// src/dashboard/page.tsx
+import { Suspense } from "react";
+import { DinouCacheSlot } from "dinou/server";
+import { FastUserProfile, SlowAnalyticsWidget } from "./widgets";
+import { AnalyticsSkeleton } from "./skeletons";
+
+export default function DashboardPage() {
+  return (
+    <main className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6">
+      {/* 1. Dynamic Component: Evaluated live on every request (reads session/cookies) */}
+      <FastUserProfile />
+
+      {/* 2. Micro-ISR Slot: Cached on the server for 300 seconds */}
+      {/* ⚠️ Wrapped in <Suspense> so cache misses stream without blocking TTFB */}
+      <Suspense fallback={<AnalyticsSkeleton />}>
+        <DinouCacheSlot id="analytics-widget" tag="analytics" revalidate={300}>
+          <SlowAnalyticsWidget />
+        </DinouCacheSlot>
+      </Suspense>
+    </main>
+  );
+}
+```
+
+##### Implementation Pattern 2: Static / ISR Product Page with Asymmetric Slot
+
+The parent route has a slow horizontal revalidation of 24 hours (`revalidate: 86400`). Inside it, a volatile inventory counter revalidates vertically every 60 seconds (`revalidate={60}`) or on-demand:
+
+```tsx
+// src/products/[slug]/page_functions.ts
+export const revalidate = 86400; // Slow horizontal revalidation (24h)
+
+// src/products/[slug]/page.tsx
+import { Suspense } from "react";
+import { DinouCacheSlot } from "dinou/server";
+import { ProductHero, ProductDescription } from "./static-widgets";
+import { LiveStockCounter, StockSkeleton } from "./stock-widgets";
+
+export default function ProductDetailPage({ params }: { params: { slug: string } }) {
+  return (
+    <main className="container py-8 space-y-6">
+      {/* 1. Heavy Static Content: Cached at the CDN edge for 24 hours */}
+      <ProductHero slug={params.slug} />
+      <ProductDescription slug={params.slug} />
+
+      {/* 2. Asymmetric Micro-ISR Slot: Revalidates vertically every 60s */}
+      <Suspense fallback={<StockSkeleton />}>
+        <DinouCacheSlot 
+          id={`stock-${params.slug}`} 
+          tag={`stock-${params.slug}`} 
+          revalidate={60}
+        >
+          <LiveStockCounter slug={params.slug} />
+        </DinouCacheSlot>
+      </Suspense>
+    </main>
+  );
+}
+```
+
+> [!IMPORTANT]
+> **Boundary Placement: Why `<Suspense>` Must Wrap `<DinouCacheSlot>`**  
+> `<DinouCacheSlot>` is itself an asynchronous Server Component. When it awaits storage or renders on a cache miss, React encounters a pending promise in the parent page tree. Without an outer `<Suspense>`, suspension bubbles to the root, blocking the entire HTTP response and delaying fast sibling components.
+> 
+> **The Rule of Hierarchy:**
+> 1. `<Suspense fallback={<Skeleton />}>` → Controls browser streaming & instant visual layout.
+> 2. `<DinouCacheSlot revalidate={300}>` → Controls server cache storage, TTL, and cache tags.
+> 3. `<SlowAnalyticsWidget />` → Executes database queries and business logic.
+
+#### 4.2. Interactive Revalidation & On-Demand Purging
+
+Dinou provides specialized mechanisms to refresh or purge `<DinouCacheSlot>` instances without reloading the browser page:
+
+##### Client-Side In-Place Refresh (`refreshSlot`)
+
+Any interactive Client Component can trigger a surgical re-render of only that slot without full page reload or state loss:
+
+```tsx
+"use client";
+import { refreshSlot, useRouter } from "dinou";
+
+export function RefreshButton() {
+  const router = useRouter();
+
+  return (
+    <div className="flex gap-2">
+      {/* Option 1: Standalone (respects server slot TTL) */}
+      <button onClick={() => refreshSlot("analytics-widget")}>
+        Refresh Metrics
+      </button>
+
+      {/* Option 2: Force fresh (bypasses server slot TTL immediately) */}
+      <button onClick={() => router.refreshSlot("analytics-widget", { fresh: true })}>
+        Force Fresh
+      </button>
+    </div>
+  );
+}
+```
+
+- **`refreshSlot(id)` (Default):** Refreshes the client DOM with the server's current state. If the slot's server TTL has not expired, it returns cached server JSX without touching your database (protecting against button spam and traffic spikes).
+- **`refreshSlot(id, { fresh: true })` (Bypass):** Hard revalidation. Forces the server to ignore unexpired TTL, immediately re-run queries against the database, and update both cache and client.
+
+##### Server-Side Tag Invalidation (`revalidateTag`)
+
+Mutations purge slots globally via `revalidateTag()` on the server, while the client immediately pulls the fresh result via `refreshSlot()`:
+
+```tsx
+// src/app/feed/actions.ts
+"use server";
+import { revalidateTag } from "dinou/server";
+import db from "@/lib/db";
+
+export async function publishPost(formData: FormData) {
+  const content = formData.get("content") as string;
+  await db.posts.insert({ content, createdAt: new Date() });
+
+  // Purges cache globally for ALL future visitors across CDNs and Micro-ISR slots
+  await revalidateTag("feed");
+}
+```
+
+##### Zero Skeleton Flash (`startTransition` + Stale-Preserving Fallback)
+
+While the server re-renders an expired slot during an interactive refresh, the user does **NOT** see a blank skeleton flash or layout shift. Dinou's internal client boundary wraps slot updates in `React.startTransition` and sets `fallback: children` (the previous DOM content). The existing widget stays interactive and visible until the new server stream arrives, then swaps seamlessly.
+
+To display an inline loading indicator on the button itself, wrap `refreshSlot` inside React's standard `useTransition()`:
+
+```tsx
+"use client";
+import { useTransition } from "react";
+import { refreshSlot } from "dinou";
+
+export function RefreshAnalyticsButton() {
+  const [isPending, startTransition] = useTransition();
+
+  const handleRefresh = () => {
+    startTransition(() => {
+      refreshSlot("analytics-widget");
+    });
+  };
+
+  return (
+    <button onClick={handleRefresh} disabled={isPending}>
+      {isPending ? "Refreshing Metrics..." : "Refresh Metrics"}
+    </button>
+  );
+}
+```
+
+#### 4.3. Horizontal vs. Vertical Segmentation & Anti-Patterns
+
+| Dimension | Scope | Configuration | Best For |
+| :--- | :--- | :--- | :--- |
+| **Horizontal Segmentation** | Route / Segment Level | `page_functions.ts`, `layout_functions.ts` | Whole-page SSG, ISR, and layout persistence. |
+| **Vertical Segmentation** | Component Subtree Level | `<DinouCacheSlot>` from `dinou/server` | Independent widget TTLs, asymmetric revalidation, and in-place client refreshes. |
+
+##### When NOT to Use `<DinouCacheSlot>`
+
+1. **100% Static Pages (SSG):** If an entire route is pre-rendered at build time with no revalidation, it is already cached as immutable HTML at the CDN. Slots add zero benefit.
+2. **Wrapping the Entire Page:** Wrapping the entire `page.tsx` body inside a slot reinvents horizontal caching. Declare `export const revalidate = 300` in `page_functions.ts` instead.
+3. **Unpartitioned Private User Data:** Never wrap private user data (such as a specific user's cart or session token) with a static slot ID. This would cache user A's private data and leak it to user B.
+
+---
+
+### 5. High-Traffic Synergy: PPR + `<DinouCacheSlot>`
+
+Nesting `<DinouCacheSlot>` inside a React `<Suspense>` boundary on a route with Partial Prerendering (PPR) unlocks the highest performance profile possible: **zero-delay initial delivery (`0ms` TTFB)** paired with **near-zero streaming delay (`~2ms`)** and **99.9% database query offloading**.
+
+- **PPR Alone (Uncached Dynamic Hole):** 0ms static shell from Edge CDN, but the hole waits for live DB execution (e.g. 1.5s) on *every single request*. 10,000 visitors/min = 10,000 live DB queries.
+- **PPR + `<DinouCacheSlot>` (Cached Streamed Hole):** 0ms static shell from Edge CDN + hole resolves from server cache in `~2ms`. 10,000 visitors/min = **1 database query per TTL window** (99.9% database offload).
+
+#### Implementation Pattern: High-Traffic Telemetry Dashboard
+
+```typescript
+// src/telemetry/page_functions.ts
+import type { PageFunctions } from "dinou";
+
+// Enable Partial Prerendering on this high-traffic route
+export const ppr: PageFunctions["ppr"] = true;
+```
+
+```tsx
+// src/telemetry/page.tsx
+import { Suspense } from "react";
+import { DinouCacheSlot } from "dinou/server";
+import { TelemetryHeader, TelemetryFooter } from "./static-shell";
+import { HeavyMetricsGraph, GraphSkeleton } from "./graph-widgets";
+
+export default function TelemetryPage() {
+  return (
+    <main className="container py-8 space-y-6">
+      {/* 1. Static Shell: Delivered instantly in 0ms TTFB from Edge CDN */}
+      <TelemetryHeader />
+
+      {/* 2. PPR Dynamic Hole + Micro-ISR Slot:
+             - Fallback skeleton sent immediately in initial layout
+             - Hole streams from server cache in ~2ms for subsequent visitors
+             - Database query runs only ONCE every 60 seconds */}
+      <Suspense fallback={<GraphSkeleton />}>
+        <DinouCacheSlot id="operations-telemetry" tag="telemetry" revalidate={60}>
+          <HeavyMetricsGraph />
+        </DinouCacheSlot>
+      </Suspense>
+
+      <TelemetryFooter />
+    </main>
+  );
+}
+```
+
+---
+
+### 6. Incremental Static Generation (ISG on-demand)
+
+While ISR updates existing pre-rendered pages, **ISG (Incremental Static Generation)** generates new dynamic paths on demand that were omitted from the build-time `getStaticPaths` list.
+
+#### 6.1. On-Demand Path Generation
+
+Any route path omitted from `getStaticPaths` will be generated dynamically when the first visitor requests it, cached, and then served as static HTML to subsequent visitors:
+
+```typescript
+// src/products/[id]/page_functions.ts
+
+// Pre-render only the top 10 products at build time:
+export const getStaticPaths = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+
+// Any other ID (e.g. /products/452) will be generated on-demand
+// on its first visitor and cached permanently.
+```
+
+#### 6.2. Governance APIs (`validateParams` & `allowISG`)
+
+Dinou provides strict server-side governance exports to secure on-demand generation against cache pollution and DDoS:
+
+- **`validateParams(params)`:** Validates route parameters before generation begins. Returning `false` halts rendering immediately and serves an instant 404:
+  ```typescript
+  export function validateParams(params: { id: string }) {
+    return /^\d+$/.test(params.id); // Only allow numeric IDs
+  }
+  ```
+- **`allowISG`:** Disables on-demand generation entirely. When set to `false`, any path not pre-rendered in `getStaticPaths` returns 404 without querying the server:
+  ```typescript
+  export const allowISG = false; // Strict SSG only
+  ```
+### 7. Complete Rendering Strategies Matrix
+
+Dinou provides a seamless continuum across all rendering and data fetching strategies. For the complete side-by-side comparison matrix, execution lifecycles, TTFB benchmarks, server load profiles, and individual recipes for all 13 patterns, proceed directly to [Data Fetching: The 13 Strategies](#data-fetching-the-13-strategies) below.
+
 ---
 
 ## Data Fetching: The 13 Strategies
@@ -3590,491 +4090,6 @@ When deciding which strategy to apply to a new feature or page, follow this quic
 
 
 ---
-
-## Static & Dynamic Rendering Strategies
-
-Dinou is **Static by Default**. It provides a continuum of rendering strategies—from build-time SSG and stale-while-revalidate ISR to real-time Dynamic SSR, revolutionary **Partial Prerendering (PPR)**, and component-level Micro-ISR with `<DinouCacheSlot>`.
-
-### Overview: Static by Default Architecture
-
-In Dinou, every route is assumed to be static until proven otherwise. During `dinou build`, the compiler analyzes route segments, components, and loader functions to evaluate whether a route can be pre-rendered or requires real-time request data:
-
-1. **Static by Default:** Routes without dynamic dependencies are pre-rendered into immutable HTML and RSC payloads at build time, achieving **0ms TTFB** at the CDN edge.
-2. **Dynamic Bailout:** When a page reads cookies, request headers, or sets `revalidate: 0`, Dinou automatically bails out to Live SSR on every incoming request.
-3. **Hybrid Continuum:** Escape the binary choice: stream dynamic components into a static shell with **PPR**, or isolate component caching with **`<DinouCacheSlot>`**.
-
----
-
-### 1. Static Site Generation (SSG) & Bailout
-
-Pure static rendering pre-generates HTML and RSC files during the build phase (`npm run build`). Production server startup is instantaneous, and static pages achieve the fastest possible Time to First Byte (TTFB) cached by Edge CDNs globally.
-
-#### 1.1. Pure Static Pre-rendering
-
-Any page that does not consume request-specific headers, cookies, or query parameters and does not set `revalidate < 1` is automatically generated as static HTML:
-
-```tsx
-// src/about/page.tsx
-// Automatically rendered as static HTML during build time ('npm run build')
-export default function AboutPage() {
-  return (
-    <article className="prose">
-      <h1>About Us</h1>
-      <p>This page is pre-rendered once and served statically forever.</p>
-    </article>
-  );
-}
-```
-
-#### 1.2. Automatic Static Bailout
-
-If a Server Component reads request-specific data at render time without wrapping it inside a dynamic streaming boundary (React `<Suspense>` with Partial Prerendering / PPR enabled), Dinou automatically "bails out" of static generation and transitions the entire page into Dynamic SSR for that request:
-
-```tsx
-// src/profile/page.tsx
-import { getContext } from "dinou";
-import db from "@/lib/db";
-
-export default async function ProfilePage() {
-  const context = getContext();
-
-  // ⚠️ Reading cookies outside <Suspense> triggers an Automatic Static Bailout
-  // This page will now be rendered dynamically on every incoming request
-  const sessionToken = context?.req.cookies["session_token"];
-  const user = await db.users.findByToken(sessionToken);
-
-  return <h1>Welcome back, {user?.name}</h1>;
-}
-```
-
-##### Bailout Triggers in Server Components
-
-Automatic bailout occurs when reading `context.req.cookies`, `context.req.headers`, or `context.req.query` (URL search parameters) during server component execution without wrapping the access in a React `<Suspense>` boundary.
-
-##### What about Client Components and `useSearchParams()`?
-
-Client Components (`"use client"`) that call `useSearchParams()` **do not trigger dynamic bailout**. The page remains 100% static (SSG). During build time, the component is pre-rendered with an empty parameter set, and live URL parameters are synchronized in the browser upon hydration.
-
-> [!TIP]
-> **Preventing Hydration Mismatches with Search Parameters:**  
-> If a Client Component immediately renders `searchParams.get("q")` in its initial JSX markup, the server-generated static HTML (where the query was empty at build time) will differ from the live browser DOM (e.g. `?q=react`), triggering a React hydration mismatch error.
-> 
-> **Recommended Fix:** Keep initial render deterministic, then read and apply live search parameters inside `useEffect()` after mounting:
-> ```tsx
-> // src/components/search-filter.tsx
-> "use client";
-> 
-> import { useSearchParams } from "dinou";
-> import { useState, useEffect } from "react";
-> 
-> export function SearchFilter() {
->   const searchParams = useSearchParams();
->   const [query, setQuery] = useState<string | null>(null);
-> 
->   useEffect(() => {
->     // Synchronize client-side only after mounting -> eliminates hydration mismatch
->     setQuery(searchParams.get("q") ?? "");
->   }, [searchParams]);
-> 
->   if (query === null) {
->     return <span className="text-muted-foreground">Loading filter...</span>;
->   }
-> 
->   return <span>Filter: <strong>{query}</strong></span>;
-> }
-> ```
-> *Alternative (Live SSR):* If the initial HTML sent over the wire must contain search parameters for SEO, switch the page to Live SSR by exporting `export const revalidate = 0;` in `page_functions.ts`.
-
----
-
-### 2. The Unified `revalidate` Strategy (Strict Seconds)
-
-In Dinou v7, the `revalidate` export in `page_functions.ts` (or `layout_functions.ts`) serves as the single source of truth for route rendering behavior. It is measured **strictly in seconds (s)**:
-
-| Value of `revalidate` | Strategy | Description |
-| :--- | :--- | :--- |
-| `false` (or omitted) | **Pure Static (SSG)** | Pre-rendered once at build time. Cached indefinitely until manual invalidation. |
-| `0` (or number < 1) | **Dynamic SSR** | Rendered on every incoming HTTP request on the fly. |
-| `N` (number >= 1) | **Time-Based ISR** | Pre-rendered, served instantly from cache, and revalidated in the background every `N` seconds. |
-
-#### 2.1. Dynamic SSR (`revalidate < 1` or `0`)
-
-To force a page to render dynamically on every single request (escaping the default static generation), set `revalidate` to `0`:
-
-```typescript
-// src/analytics/live/page_functions.ts
-
-// Escapes static generation: executes dynamic SSR on every request
-export const revalidate = 0;
-```
-
-> [!NOTE]
-> **Migration from Legacy `dynamic` Export:** In older versions of Dinou, dynamic rendering was toggled via `export function dynamic()`. In Dinou v7, the `dynamic` export has been completely removed. Setting `export const revalidate = 0;` is the official unified mechanism to escape static generation.
-
-#### 2.2. Incremental Static Regeneration (`revalidate >= 1`)
-
-When `revalidate >= 1`, Dinou serves pre-rendered static HTML/RSC payloads while regenerating the page in the background at most once every `N` seconds (stale-while-revalidate):
-
-```typescript
-// src/blog/page_functions.ts
-
-// Rebuilds the cached page in the background at most once every 60 seconds
-export const revalidate = 60; // Strict seconds (1 minute)
-```
-
-- **Background Revalidation Flow:** The first request after the 60s window receives the cached page immediately. Dinou re-executes the server render in the background. Subsequent visitors see the freshly generated version.
-- **Edge ISR Storage Adapters:** On edge platforms like Deno Deploy and Cloudflare Workers, ISR seamlessly uses distributed key-value storage (`DenoKVStorage`, `CloudflareKVStorage`, `MemoryStorage`) without needing a persistent disk.
-
----
-
-### 3. Partial Prerendering (PPR)
-
-Partial Prerendering (PPR) resolves the decades-old dilemma between static and dynamic rendering. Instead of forcing an entire page to be 100% static or 100% dynamic, PPR delivers a **pre-rendered static shell instantly (0ms TTFB)**, while streaming dynamic holes in parallel over the same HTTP response.
-
-#### 3.1. Hybrid Architecture: Static Shell + Dynamic Holes
-
-At build time, Dinou compiles the layout, navigation, and static components into an immutable HTML shell. Any dynamic component wrapped in React `<Suspense>` is saved as a streaming placeholder hole (`<div data-ppr-hole="slot-id">...fallback...</div>`).
-
-##### The Single HTTP Response Timeline
-
-1. **0ms (Instant TTFB):** The browser receives the static shell with skeleton fallbacks directly from Edge CDN cache. Visual layout is painted immediately.
-2. **Request Processing:** Concurrently, Dinou executes the async Server Components inside `<Suspense>` on the server.
-3. **Streaming In-Place:** As each Suspense promise resolves, the HTML chunk and RSC payload are streamed down the same HTTP connection, replacing the skeleton with real content without full page reloads.
-
-##### Data Freshness: Pure SSG vs. Partial Prerendering
-
-- **Without PPR (Frozen Build Data):** Data is baked into the build artifact. Live inventory or user carts are stale upon deployment. Applications historically resorted to legacy client-side `useEffect() + fetch()` anti-patterns, suffering waterfalls, layout shifts, and spinners.
-- **With PPR (Request-Time Fresh Data):** The visual shell is delivered at `0ms` TTFB from the edge, while the component inside `<Suspense>` executes on the server on every incoming request. You get 100% fresh, live database data streamed directly to the browser without client fetch waterfalls.
-
-##### PPR as a Bailout Boundary: Containing Dynamic De-optimization
-
-Without PPR, dynamic data access is infectious: if a single nested component reads request cookies or headers, Dinou triggers an Automatic Static Bailout for the **entire page**, destroying static pre-rendering and edge caching for the whole route.
-
-With PPR enabled (`ppr = true`), React `<Suspense>` acts as an **isolated sandbox**. Dynamic data consumption inside the boundary does not escape to parent or sibling components:
-
-```tsx
-// src/store/page.tsx
-import { Suspense } from "react";
-import { getContext } from "dinou";
-import db from "@/lib/db";
-import { ProductGallery } from "@/components/gallery";
-import { CartBadgeSkeleton } from "@/components/skeletons";
-
-// ⚠️ Dynamic component: reads request-specific session cookie
-async function LiveCartBadge() {
-  const context = getContext();
-  const sessionToken = context?.req.cookies["session_id"];
-  const cart = await db.carts.findActive(sessionToken);
-
-  return <div className="cart-badge">Items: {cart?.itemCount ?? 0}</div>;
-}
-
-export default function StorePage() {
-  return (
-    <main className="container">
-      {/* 1. Static Shell: 0ms TTFB, pre-rendered during build */}
-      <header className="navbar">
-        <h1>Flagship Store</h1>
-        
-        {/* 2. PPR Boundary: Isolates cookie bailout exclusively to this hole */}
-        <Suspense fallback={<CartBadgeSkeleton />}>
-          <LiveCartBadge />
-        </Suspense>
-      </header>
-
-      {/* 3. Static Sibling: Remains 100% static and edge-cached */}
-      <ProductGallery />
-    </main>
-  );
-}
-```
-
-- **❌ Without PPR (Full-Page Bailout):** Reading `cookies["session_id"]` turns the entire page into dynamic SSR. Edge caching is lost, and the visitor waits with a blank screen.
-- **✅ With PPR (Isolated Hole Bailout):** The cookie bailout is quarantined inside `<Suspense>`. The navbar and product gallery are delivered instantly at `0ms` TTFB. Only the cart badge executes on the server and streams into place.
-
-#### 3.2. Enabling PPR & Specificity Hierarchy
-
-Dinou provides granular control over Partial Prerendering across three hierarchical levels:
-
-1. **Page Level (`page_functions.ts`) — Highest Priority:** A page can override any parent layout or global configuration:
-   ```typescript
-   // src/shop/products/[slug]/page_functions.ts
-   export const ppr = true; // Guarantees PPR on product details
-   ```
-2. **Layout Level (`layout_functions.ts`) — Subtree Cascading:** Applies to that layout and cascades to all its descendant subroutes:
-   ```typescript
-   // src/admin/layout_functions.ts
-   export const ppr = false; // Disables PPR for /admin and ALL subroutes
-   ```
-3. **Global Configuration (`dinou.config.mjs`):** Enables PPR globally across all eligible routes:
-   ```javascript
-   // dinou.config.mjs
-   import { defineConfig } from "dinou";
-   export default defineConfig({ ppr: true });
-   ```
-
----
-
-### 4. Vertical Segmentation: Micro-ISR (`<DinouCacheSlot>`)
-
-Traditional full-stack frameworks only offer **Horizontal Segmentation** (caching an entire URL route or layout shell). When a dynamic page contains an expensive database widget, developers are often forced into an architectural trap: converting the widget to a Client Component with client-side cache libraries (SWR, TanStack Query), introducing bundle bloat, waterfall requests, and layout shifts.
-
-Dinou v7 introduces **Vertical Segmentation** with `<DinouCacheSlot>` from `"dinou/server"`. It keeps components securely on the server as React Server Components (RSC) while caching their rendered serialized Flight payload in server storage with dedicated TTLs and invalidation tags.
-
-#### 4.1. Component Caching: Dynamic vs. Static Patterns
-
-`<DinouCacheSlot>` functions as a universal caching primitive across two core architectural patterns:
-
-##### Implementation Pattern 1: Dynamic SSR Dashboard with Cached Slot
-
-The route runs in Live SSR mode (evaluating user cookies and personal greetings live). The heavy analytics calculation is cached on the server for 300 seconds and wrapped in React `<Suspense>`:
-
-```tsx
-// src/dashboard/page.tsx
-import { Suspense } from "react";
-import { DinouCacheSlot } from "dinou/server";
-import { FastUserProfile, SlowAnalyticsWidget } from "./widgets";
-import { AnalyticsSkeleton } from "./skeletons";
-
-export default function DashboardPage() {
-  return (
-    <main className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6">
-      {/* 1. Dynamic Component: Evaluated live on every request (reads session/cookies) */}
-      <FastUserProfile />
-
-      {/* 2. Micro-ISR Slot: Cached on the server for 300 seconds */}
-      {/* ⚠️ Wrapped in <Suspense> so cache misses stream without blocking TTFB */}
-      <Suspense fallback={<AnalyticsSkeleton />}>
-        <DinouCacheSlot id="analytics-widget" tag="analytics" revalidate={300}>
-          <SlowAnalyticsWidget />
-        </DinouCacheSlot>
-      </Suspense>
-    </main>
-  );
-}
-```
-
-##### Implementation Pattern 2: Static / ISR Product Page with Asymmetric Slot
-
-The parent route has a slow horizontal revalidation of 24 hours (`revalidate: 86400`). Inside it, a volatile inventory counter revalidates vertically every 60 seconds (`revalidate={60}`) or on-demand:
-
-```tsx
-// src/products/[slug]/page_functions.ts
-export const revalidate = 86400; // Slow horizontal revalidation (24h)
-
-// src/products/[slug]/page.tsx
-import { Suspense } from "react";
-import { DinouCacheSlot } from "dinou/server";
-import { ProductHero, ProductDescription } from "./static-widgets";
-import { LiveStockCounter, StockSkeleton } from "./stock-widgets";
-
-export default function ProductDetailPage({ params }: { params: { slug: string } }) {
-  return (
-    <main className="container py-8 space-y-6">
-      {/* 1. Heavy Static Content: Cached at the CDN edge for 24 hours */}
-      <ProductHero slug={params.slug} />
-      <ProductDescription slug={params.slug} />
-
-      {/* 2. Asymmetric Micro-ISR Slot: Revalidates vertically every 60s */}
-      <Suspense fallback={<StockSkeleton />}>
-        <DinouCacheSlot 
-          id={`stock-${params.slug}`} 
-          tag={`stock-${params.slug}`} 
-          revalidate={60}
-        >
-          <LiveStockCounter slug={params.slug} />
-        </DinouCacheSlot>
-      </Suspense>
-    </main>
-  );
-}
-```
-
-> [!IMPORTANT]
-> **Boundary Placement: Why `<Suspense>` Must Wrap `<DinouCacheSlot>`**  
-> `<DinouCacheSlot>` is itself an asynchronous Server Component. When it awaits storage or renders on a cache miss, React encounters a pending promise in the parent page tree. Without an outer `<Suspense>`, suspension bubbles to the root, blocking the entire HTTP response and delaying fast sibling components.
-> 
-> **The Rule of Hierarchy:**
-> 1. `<Suspense fallback={<Skeleton />}>` → Controls browser streaming & instant visual layout.
-> 2. `<DinouCacheSlot revalidate={300}>` → Controls server cache storage, TTL, and cache tags.
-> 3. `<SlowAnalyticsWidget />` → Executes database queries and business logic.
-
-#### 4.2. Interactive Revalidation & On-Demand Purging
-
-Dinou provides specialized mechanisms to refresh or purge `<DinouCacheSlot>` instances without reloading the browser page:
-
-##### Client-Side In-Place Refresh (`refreshSlot`)
-
-Any interactive Client Component can trigger a surgical re-render of only that slot without full page reload or state loss:
-
-```tsx
-"use client";
-import { refreshSlot, useRouter } from "dinou";
-
-export function RefreshButton() {
-  const router = useRouter();
-
-  return (
-    <div className="flex gap-2">
-      {/* Option 1: Standalone (respects server slot TTL) */}
-      <button onClick={() => refreshSlot("analytics-widget")}>
-        Refresh Metrics
-      </button>
-
-      {/* Option 2: Force fresh (bypasses server slot TTL immediately) */}
-      <button onClick={() => router.refreshSlot("analytics-widget", { fresh: true })}>
-        Force Fresh
-      </button>
-    </div>
-  );
-}
-```
-
-- **`refreshSlot(id)` (Default):** Refreshes the client DOM with the server's current state. If the slot's server TTL has not expired, it returns cached server JSX without touching your database (protecting against button spam and traffic spikes).
-- **`refreshSlot(id, { fresh: true })` (Bypass):** Hard revalidation. Forces the server to ignore unexpired TTL, immediately re-run queries against the database, and update both cache and client.
-
-##### Server-Side Tag Invalidation (`revalidateTag`)
-
-Mutations purge slots globally via `revalidateTag()` on the server, while the client immediately pulls the fresh result via `refreshSlot()`:
-
-```tsx
-// src/app/feed/actions.ts
-"use server";
-import { revalidateTag } from "dinou/server";
-import db from "@/lib/db";
-
-export async function publishPost(formData: FormData) {
-  const content = formData.get("content") as string;
-  await db.posts.insert({ content, createdAt: new Date() });
-
-  // Purges cache globally for ALL future visitors across CDNs and Micro-ISR slots
-  await revalidateTag("feed");
-}
-```
-
-##### Zero Skeleton Flash (`startTransition` + Stale-Preserving Fallback)
-
-While the server re-renders an expired slot during an interactive refresh, the user does **NOT** see a blank skeleton flash or layout shift. Dinou's internal client boundary wraps slot updates in `React.startTransition` and sets `fallback: children` (the previous DOM content). The existing widget stays interactive and visible until the new server stream arrives, then swaps seamlessly.
-
-To display an inline loading indicator on the button itself, wrap `refreshSlot` inside React's standard `useTransition()`:
-
-```tsx
-"use client";
-import { useTransition } from "react";
-import { refreshSlot } from "dinou";
-
-export function RefreshAnalyticsButton() {
-  const [isPending, startTransition] = useTransition();
-
-  const handleRefresh = () => {
-    startTransition(() => {
-      refreshSlot("analytics-widget");
-    });
-  };
-
-  return (
-    <button onClick={handleRefresh} disabled={isPending}>
-      {isPending ? "Refreshing Metrics..." : "Refresh Metrics"}
-    </button>
-  );
-}
-```
-
-#### 4.3. Horizontal vs. Vertical Segmentation & Anti-Patterns
-
-| Dimension | Scope | Configuration | Best For |
-| :--- | :--- | :--- | :--- |
-| **Horizontal Segmentation** | Route / Segment Level | `page_functions.ts`, `layout_functions.ts` | Whole-page SSG, ISR, and layout persistence. |
-| **Vertical Segmentation** | Component Subtree Level | `<DinouCacheSlot>` from `dinou/server` | Independent widget TTLs, asymmetric revalidation, and in-place client refreshes. |
-
-##### When NOT to Use `<DinouCacheSlot>`
-
-1. **100% Static Pages (SSG):** If an entire route is pre-rendered at build time with no revalidation, it is already cached as immutable HTML at the CDN. Slots add zero benefit.
-2. **Wrapping the Entire Page:** Wrapping the entire `page.tsx` body inside a slot reinvents horizontal caching. Declare `export const revalidate = 300` in `page_functions.ts` instead.
-3. **Unpartitioned Private User Data:** Never wrap private user data (such as a specific user's cart or session token) with a static slot ID. This would cache user A's private data and leak it to user B.
-
----
-
-### 5. High-Traffic Synergy: PPR + `<DinouCacheSlot>`
-
-Nesting `<DinouCacheSlot>` inside a React `<Suspense>` boundary on a route with Partial Prerendering (PPR) unlocks the highest performance profile possible: **zero-delay initial delivery (`0ms` TTFB)** paired with **near-zero streaming delay (`~2ms`)** and **99.9% database query offloading**.
-
-- **PPR Alone (Uncached Dynamic Hole):** 0ms static shell from Edge CDN, but the hole waits for live DB execution (e.g. 1.5s) on *every single request*. 10,000 visitors/min = 10,000 live DB queries.
-- **PPR + `<DinouCacheSlot>` (Cached Streamed Hole):** 0ms static shell from Edge CDN + hole resolves from server cache in `~2ms`. 10,000 visitors/min = **1 database query per TTL window** (99.9% database offload).
-
-#### Implementation Pattern: High-Traffic Telemetry Dashboard
-
-```typescript
-// src/telemetry/page_functions.ts
-import type { PageFunctions } from "dinou";
-
-// Enable Partial Prerendering on this high-traffic route
-export const ppr: PageFunctions["ppr"] = true;
-```
-
-```tsx
-// src/telemetry/page.tsx
-import { Suspense } from "react";
-import { DinouCacheSlot } from "dinou/server";
-import { TelemetryHeader, TelemetryFooter } from "./static-shell";
-import { HeavyMetricsGraph, GraphSkeleton } from "./graph-widgets";
-
-export default function TelemetryPage() {
-  return (
-    <main className="container py-8 space-y-6">
-      {/* 1. Static Shell: Delivered instantly in 0ms TTFB from Edge CDN */}
-      <TelemetryHeader />
-
-      {/* 2. PPR Dynamic Hole + Micro-ISR Slot:
-             - Fallback skeleton sent immediately in initial layout
-             - Hole streams from server cache in ~2ms for subsequent visitors
-             - Database query runs only ONCE every 60 seconds */}
-      <Suspense fallback={<GraphSkeleton />}>
-        <DinouCacheSlot id="operations-telemetry" tag="telemetry" revalidate={60}>
-          <HeavyMetricsGraph />
-        </DinouCacheSlot>
-      </Suspense>
-
-      <TelemetryFooter />
-    </main>
-  );
-}
-```
-
----
-
-### 6. Incremental Static Generation (ISG on-demand)
-
-While ISR updates existing pre-rendered pages, **ISG (Incremental Static Generation)** generates new dynamic paths on demand that were omitted from the build-time `getStaticPaths` list.
-
-#### 6.1. On-Demand Path Generation
-
-Any route path omitted from `getStaticPaths` will be generated dynamically when the first visitor requests it, cached, and then served as static HTML to subsequent visitors:
-
-```typescript
-// src/products/[id]/page_functions.ts
-
-// Pre-render only the top 10 products at build time:
-export const getStaticPaths = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
-
-// Any other ID (e.g. /products/452) will be generated on-demand
-// on its first visitor and cached permanently.
-```
-
-#### 6.2. Governance APIs (`validateParams` & `allowISG`)
-
-Dinou provides strict server-side governance exports to secure on-demand generation against cache pollution and DDoS:
-
-- **`validateParams(params)`:** Validates route parameters before generation begins. Returning `false` halts rendering immediately and serves an instant 404:
-  ```typescript
-  export function validateParams(params: { id: string }) {
-    return /^\d+$/.test(params.id); // Only allow numeric IDs
-  }
-  ```
-- **`allowISG`:** Disables on-demand generation entirely. When set to `false`, any path not pre-rendered in `getStaticPaths` returns 404 without querying the server:
-  ```typescript
-  export const allowISG = false; // Strict SSG only
-  ```
 
 ---
 
