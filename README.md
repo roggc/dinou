@@ -299,6 +299,22 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
   - [Real-World Plugin Examples](#real-world-plugin-examples)
   - [Registration & Execution Pipeline Order](#registration--execution-pipeline-order)
   - [Fault Isolation & Error Handling](#fault-isolation--error-handling)
+- [Bundlers & Build Tooling](#bundlers--build-tooling)
+  - [Bundlers in Dinou](#bundlers-in-dinou)
+  - [esbuild, Rollup, & Webpack Compared](#esbuild-rollup--webpack-compared)
+    - [1. esbuild (Default & Lightning Fast)](#1-esbuild-default--lightning-fast)
+    - [2. Rollup (Optimized Tree-Shaking)](#2-rollup-optimized-tree-shaking)
+    - [3. Webpack (Enterprise & React Compiler)](#3-webpack-enterprise--react-compiler)
+  - [The Dual-Bundle Engine Architecture](#the-dual-bundle-engine-architecture)
+  - [Complete Dinou v7 Scripts Matrix](#complete-dinou-v7-scripts-matrix)
+    - [Development Scripts (dinou dev)](#development-scripts-dinou-dev)
+    - [Node.js Build & Start](#nodejs-build--start)
+    - [Cloudflare Workers & Pages](#cloudflare-workers--pages)
+    - [Deno & Standalone Compiles](#deno--standalone-compiles)
+    - [Bun Runtime & Standalone Compiles](#bun-runtime--standalone-compiles)
+    - [Static HTML Export (dinou export-static)](#static-html-export-dinou-export-static)
+  - [Recommended package.json Setup](#recommended-packagejson-setup)
+  - [Which Bundler & Target Should You Choose?](#which-bundler--target-should-you-choose)
 - [📜 Changelog](#-changelog)
 - [📄 License](#-license)
 
@@ -7069,6 +7085,269 @@ Dinou provides built-in try-catch fault isolation for all active plugins:
   [Dinou Plugin Error: "my-plugin"]: TypeError ...
   ```
 - **Graceful Fallback:** If an unhandled exception is thrown by a plugin, Dinou catches it safely and returns a standard `500 Internal Server Error` response, preventing server crash or zombie process states.
+
+---
+
+## Bundlers & Build Tooling
+
+Dinou features first-class multi-bundler architecture supporting **esbuild**, **Rollup**, and **Webpack** across Node.js, Cloudflare, Deno, Bun, and standalone compiled binaries.
+
+### Bundlers in Dinou
+
+Unlike rigid meta-frameworks that lock you into a single proprietary bundler, Dinou is architected with a pluggable, agnostic build core. Dinou provides native, pre-configured pipelines for three premier JavaScript bundlers:
+
+- **esbuild (Default):** Written in Go. Delivers sub-millisecond build cycles and instant HMR feedback loops in local development.
+- **Rollup:** The industry benchmark for clean ES Module output, advanced tree-shaking, and surgical code splitting.
+- **Webpack:** The most battle-tested enterprise bundler with universal package compatibility and built-in React Compiler integration in dev and prod.
+
+| Bundler | Strengths | React Compiler Support | Best Used For |
+| :--- | :--- | :--- | :--- |
+| **esbuild (Default)** | 10×–100× faster startup, sub-millisecond rebuilds, native Go machine code | Active in production builds (skipped in dev for instant speed) | Daily local development and rapid feature building |
+| **Rollup** | Cleanest ESM chunk output, maximum tree-shaking, surgical scope hoisting | Active in production builds | Production builds where bundle size and edge execution efficiency are paramount |
+| **Webpack** | Universal npm compatibility, advanced source maps, granular chunk splitting | Active in **both development and production** | Enterprise projects with diverse npm dependencies or testing React Compiler in dev |
+
+---
+
+### esbuild, Rollup, & Webpack Compared
+
+#### 1. esbuild (Default & Lightning Fast)
+
+`esbuild` is Dinou's default bundler. Because it is compiled to native Go machine code, it avoids JavaScript runtime overhead during compilation.
+
+- **Strengths:** Near-instant cold start, sub-second incremental rebuilds, and low memory usage.
+- **React Compiler Behavior:** In Dinou v7, esbuild skips the React Compiler in development for speed, but runs it during production builds.
+- **Best Used For:** Daily local development and rapid feature building.
+
+#### 2. Rollup (Optimized Tree-Shaking)
+
+`Rollup` excels at analyzing ES Module import/export graphs to eliminate dead code and produce minimal client payloads.
+
+- **Strengths:** Cleanest chunk output, excellent scope hoisting, and strict standard ESM alignment.
+- **React Compiler Behavior:** Runs the React Compiler during production builds.
+- **Best Used For:** Production builds where bundle size and edge execution efficiency are paramount.
+
+#### 3. Webpack (Enterprise & React Compiler)
+
+`Webpack` provides deep compatibility with legacy npm packages, complex module interop, and full compiler transforms.
+
+- **Strengths:** Broadest package compatibility, robust source-map generation, and granular chunk splitting.
+- **React Compiler Behavior:** Runs the React Compiler in **both development and production**. If you want to test React Compiler memoization locally, use `dinou dev:webpack`.
+- **Best Used For:** Enterprise projects with diverse npm dependencies or teams validating React Compiler in dev.
+
+---
+
+### The Dual-Bundle Engine Architecture
+
+React Server Components (RSC) require a specialized build architecture. For every build or development run, Dinou orchestrates two parallel pipelines:
+
+- **1. Server Pipeline (RSC & Runtime):** Compiles Server Components, Server Functions (`"use server"`), and Page Functions for Node.js, Cloudflare, Deno, or Bun runtimes.
+- **2. Client Pipeline (Browser & CSS):** Extracts Client Components (`"use client"`), processes styles into `/styles.css`, fingerprints assets, and produces the React Client Manifest.
+
+The **React Client Manifest** connects the two: when the server encounters a `<ClientComponent />`, it serializes a reference that the client browser hydrates seamlessly over Flight RPC.
+
+---
+
+### Complete Dinou v7 Scripts Matrix
+
+Dinou v7 exposes a complete set of CLI commands. Every command supports specifying your bundler (`:esbuild`, `:rollup`, `:webpack`) or omitting it to use the default:
+
+#### Development Scripts (dinou dev)
+
+Starts the development server with Hot Module Replacement (HMR) and in-memory compilation:
+
+| Command | Bundler Engine | Description |
+| :--- | :--- | :--- |
+| `dinou dev` | esbuild (Default) | Fastest dev server startup with instant Fast Refresh. |
+| `dinou dev:esbuild` | esbuild | Explicit esbuild development command. |
+| `dinou dev:rollup` | Rollup | Rollup-powered development server with ESM HMR. |
+| `dinou dev:webpack` | Webpack | Webpack dev server with React Compiler active in dev. |
+
+#### Node.js Build & Start
+
+Compiles and runs the standalone Node.js server from `.dinou/node/server.mjs`:
+
+| Command | Action | Bundler |
+| :--- | :--- | :--- |
+| `dinou build:node` | Compile for Node.js production server | esbuild (Default) |
+| `dinou build:node:esbuild` | Compile for Node.js production server | esbuild |
+| `dinou build:node:rollup` | Compile for Node.js production server | Rollup |
+| `dinou build:node:webpack` | Compile for Node.js production server | Webpack |
+| `dinou start:node` | Run built Node.js server (PORT=3000) | Default |
+| `dinou start:node:esbuild` | Run built Node.js server (esbuild bundle) | esbuild |
+| `dinou start:node:rollup` | Run built Node.js server (Rollup bundle) | Rollup |
+| `dinou start:node:webpack` | Run built Node.js server (Webpack bundle) | Webpack |
+
+#### Cloudflare Workers & Pages
+
+Compiles your application into an edge-native worker bundle:
+
+| Command | Bundler | Output Target |
+| :--- | :--- | :--- |
+| `dinou build:cloudflare` | esbuild (Default) | `.dinou/cloudflare/` |
+| `dinou build:cloudflare:esbuild` | esbuild | `.dinou/cloudflare/` |
+| `dinou build:cloudflare:rollup` | Rollup | `.dinou/cloudflare/` |
+| `dinou build:cloudflare:webpack` | Webpack | `.dinou/cloudflare/` |
+
+#### Deno & Standalone Compiles
+
+Build for Deno KV runtime, or compile directly into a **self-contained standalone executable binary** with zero system dependencies:
+
+| Command | Description |
+| :--- | :--- |
+| `dinou build:deno` | Builds Deno bundle with KV storage support. (Also `:esbuild`, `:rollup`, `:webpack`) |
+| `dinou start:deno` | Runs the compiled Deno server with `--unstable-kv`. |
+| `dinou build:deno:compile` | Produces a standalone binary (`dist/deno-server`) for your current OS. |
+| `dinou build:deno:compile:linux` | Cross-compiles x86_64 Linux standalone executable. |
+| `dinou build:deno:compile:linux_arm` | Cross-compiles ARM64 Linux standalone executable (Raspberry Pi / Graviton). |
+| `dinou build:deno:compile:mac` | Cross-compiles macOS standalone binary (Apple Silicon / Intel). |
+| `dinou build:deno:compile:win` | Cross-compiles Windows standalone executable (`dist/deno-server-win.exe`). |
+
+> [!TIP]
+> Every compile command supports bundler suffixes (e.g. `dinou build:deno:compile:linux:rollup`).
+
+#### Bun Runtime & Standalone Compiles
+
+Target the ultra-fast Bun JavaScript runtime with standard or pure native modes:
+
+| Category | Commands | Description |
+| :--- | :--- | :--- |
+| **Standard Bun** | `dinou build:bun`<br>`dinou start:bun` | Builds and runs your app with Bun runtime. Supports `:esbuild`, `:rollup`, `:webpack`. |
+| **Bun Standalone Binary** | `dinou build:bun:compile` | Compiles your app into a standalone binary using `bun build --compile`. Supports cross-compilation (`:linux`, `:linux_arm`, `:mac`, `:win"). |
+| **Pure Bun Mode** | `dinou build:bun:pure`<br>`dinou build:bun:pure:compile` | Uses Bun's native pure bundler pipeline and compiles single-file binaries across Linux, Mac, and Windows. |
+
+#### Static HTML Export (dinou export-static)
+
+Crawls and generates a 100% static HTML/CSS/JS export in `out/` ready to host on Surge.sh, GitHub Pages, Cloudflare Pages, AWS S3, Netlify, or Apache/Nginx:
+
+```bash
+# Static export with default bundler (esbuild)
+dinou export-static
+
+# Static export with specific bundlers
+dinou export-static:esbuild
+dinou export-static:rollup
+dinou export-static:webpack
+```
+
+---
+
+### Recommended package.json Setup
+
+Copy and paste the complete `"scripts"` block directly into your project's `package.json`:
+
+```json
+"scripts": {
+  "dev": "dinou dev",
+  "build": "dinou build",
+  "start": "dinou start",
+  "dev:esbuild": "dinou dev:esbuild",
+  "dev:rollup": "dinou dev:rollup",
+  "dev:webpack": "dinou dev:webpack",
+  "build:node": "dinou build:node",
+  "build:node:esbuild": "dinou build:node:esbuild",
+  "build:node:rollup": "dinou build:node:rollup",
+  "build:node:webpack": "dinou build:node:webpack",
+  "start:node": "dinou start:node",
+  "start:node:esbuild": "dinou start:node:esbuild",
+  "start:node:rollup": "dinou start:node:rollup",
+  "start:node:webpack": "dinou start:node:webpack",
+  "build:cloudflare": "dinou build:cloudflare",
+  "build:cloudflare:esbuild": "dinou build:cloudflare:esbuild",
+  "build:cloudflare:rollup": "dinou build:cloudflare:rollup",
+  "build:cloudflare:webpack": "dinou build:cloudflare:webpack",
+  "build:deno": "dinou build:deno",
+  "build:deno:esbuild": "dinou build:deno:esbuild",
+  "build:deno:rollup": "dinou build:deno:rollup",
+  "build:deno:webpack": "dinou build:deno:webpack",
+  "build:deno:compile": "dinou build:deno:compile",
+  "build:deno:compile:esbuild": "dinou build:deno:compile:esbuild",
+  "build:deno:compile:rollup": "dinou build:deno:compile:rollup",
+  "build:deno:compile:webpack": "dinou build:deno:compile:webpack",
+  "build:deno:compile:linux": "dinou build:deno:compile:linux",
+  "build:deno:compile:linux:esbuild": "dinou build:deno:compile:linux:esbuild",
+  "build:deno:compile:linux:rollup": "dinou build:deno:compile:linux:rollup",
+  "build:deno:compile:linux:webpack": "dinou build:deno:compile:linux:webpack",
+  "build:deno:compile:linux_arm": "dinou build:deno:compile:linux_arm",
+  "build:deno:compile:linux_arm:esbuild": "dinou build:deno:compile:linux_arm:esbuild",
+  "build:deno:compile:linux_arm:rollup": "dinou build:deno:compile:linux_arm:rollup",
+  "build:deno:compile:linux_arm:webpack": "dinou build:deno:compile:linux_arm:webpack",
+  "build:deno:compile:mac": "dinou build:deno:compile:mac",
+  "build:deno:compile:mac:esbuild": "dinou build:deno:compile:mac:esbuild",
+  "build:deno:compile:mac:rollup": "dinou build:deno:compile:mac:rollup",
+  "build:deno:compile:mac:webpack": "dinou build:deno:compile:mac:webpack",
+  "build:deno:compile:win": "dinou build:deno:compile:win",
+  "build:deno:compile:win:esbuild": "dinou build:deno:compile:win:esbuild",
+  "build:deno:compile:win:rollup": "dinou build:deno:compile:win:rollup",
+  "build:deno:compile:win:webpack": "dinou build:deno:compile:win:webpack",
+  "start:deno": "dinou start:deno",
+  "build:bun": "dinou build:bun",
+  "build:bun:esbuild": "dinou build:bun:esbuild",
+  "build:bun:rollup": "dinou build:bun:rollup",
+  "build:bun:webpack": "dinou build:bun:webpack",
+  "build:bun:compile": "dinou build:bun:compile",
+  "build:bun:compile:esbuild": "dinou build:bun:compile:esbuild",
+  "build:bun:compile:rollup": "dinou build:bun:compile:rollup",
+  "build:bun:compile:webpack": "dinou build:bun:compile:webpack",
+  "build:bun:compile:linux": "dinou build:bun:compile:linux",
+  "build:bun:compile:linux:esbuild": "dinou build:bun:compile:linux:esbuild",
+  "build:bun:compile:linux:rollup": "dinou build:bun:compile:linux:rollup",
+  "build:bun:compile:linux:webpack": "dinou build:bun:compile:linux:webpack",
+  "build:bun:compile:linux_arm": "dinou build:bun:compile:linux_arm",
+  "build:bun:compile:linux_arm:esbuild": "dinou build:bun:compile:linux_arm:esbuild",
+  "build:bun:compile:linux_arm:rollup": "dinou build:bun:compile:linux_arm:rollup",
+  "build:bun:compile:linux_arm:webpack": "dinou build:bun:compile:linux_arm:webpack",
+  "build:bun:compile:mac": "dinou build:bun:compile:mac",
+  "build:bun:compile:mac:esbuild": "dinou build:bun:compile:mac:esbuild",
+  "build:bun:compile:mac:rollup": "dinou build:bun:compile:mac:rollup",
+  "build:bun:compile:mac:webpack": "dinou build:bun:compile:mac:webpack",
+  "build:bun:compile:win": "dinou build:bun:compile:win",
+  "build:bun:compile:win:esbuild": "dinou build:bun:compile:win:esbuild",
+  "build:bun:compile:win:rollup": "dinou build:bun:compile:win:rollup",
+  "build:bun:compile:win:webpack": "dinou build:bun:compile:win:webpack",
+  "build:bun:pure": "dinou build:bun:pure",
+  "build:bun:pure:esbuild": "dinou build:bun:pure:esbuild",
+  "build:bun:pure:rollup": "dinou build:bun:pure:rollup",
+  "build:bun:pure:webpack": "dinou build:bun:pure:webpack",
+  "build:bun:pure:compile": "dinou build:bun:pure:compile",
+  "build:bun:pure:compile:esbuild": "dinou build:bun:pure:compile:esbuild",
+  "build:bun:pure:compile:rollup": "dinou build:bun:pure:compile:rollup",
+  "build:bun:pure:compile:webpack": "dinou build:bun:pure:compile:webpack",
+  "build:bun:pure:compile:linux": "dinou build:bun:pure:compile:linux",
+  "build:bun:pure:compile:linux:esbuild": "dinou build:bun:pure:compile:linux:esbuild",
+  "build:bun:pure:compile:linux:rollup": "dinou build:bun:pure:compile:linux:rollup",
+  "build:bun:pure:compile:linux:webpack": "dinou build:bun:pure:compile:linux:webpack",
+  "build:bun:pure:compile:linux_arm": "dinou build:bun:pure:compile:linux_arm",
+  "build:bun:pure:compile:linux_arm:esbuild": "dinou build:bun:pure:compile:linux_arm:esbuild",
+  "build:bun:pure:compile:linux_arm:rollup": "dinou build:bun:pure:compile:linux_arm:rollup",
+  "build:bun:pure:compile:linux_arm:webpack": "dinou build:bun:pure:compile:linux_arm:webpack",
+  "build:bun:pure:compile:mac": "dinou build:bun:pure:compile:mac",
+  "build:bun:pure:compile:mac:esbuild": "dinou build:bun:pure:compile:mac:esbuild",
+  "build:bun:pure:compile:mac:rollup": "dinou build:bun:pure:compile:mac:rollup",
+  "build:bun:pure:compile:mac:webpack": "dinou build:bun:pure:compile:mac:webpack",
+  "build:bun:pure:compile:win": "dinou build:bun:pure:compile:win",
+  "build:bun:pure:compile:win:esbuild": "dinou build:bun:pure:compile:win:esbuild",
+  "build:bun:pure:compile:win:rollup": "dinou build:bun:pure:compile:win:rollup",
+  "build:bun:pure:compile:win:webpack": "dinou build:bun:pure:compile:win:webpack",
+  "start:bun": "dinou start:bun",
+  "start:bun:esbuild": "dinou start:bun:esbuild",
+  "start:bun:rollup": "dinou start:bun:rollup",
+  "start:bun:webpack": "dinou start:bun:webpack",
+  "export-static": "dinou export-static",
+  "export-static:esbuild": "dinou export-static:esbuild",
+  "export-static:rollup": "dinou export-static:rollup",
+  "export-static:webpack": "dinou export-static:webpack",
+  "eject": "dinou eject"
+}
+```
+
+---
+
+### Which Bundler & Target Should You Choose?
+
+- **Local Development → esbuild:** Always use `dinou dev` (esbuild) for daily work. Its sub-millisecond compilation and memory caching provide the fastest iteration feedback.
+- **Edge Deployments → Rollup:** For Cloudflare Workers or serverless edge targets where cold start and payload size matter most, `dinou build:cloudflare:rollup` yields optimal tree-shaking.
+- **Enterprise & React Compiler → Webpack:** If testing React Compiler memoization in dev or migrating enterprise code with non-standard CommonJS modules, `dinou dev:webpack` is your best choice.
+- **Self-Contained Shipments → Deno / Bun Compile:** To deploy to bare-metal servers or minimal Docker containers without installing Node.js, run `dinou build:deno:compile` or `dinou build:bun:compile` to produce a single binary file.
 
 ---
 
