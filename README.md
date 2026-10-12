@@ -164,6 +164,32 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
   - [4. Redirections (redirect)](#4-redirections-redirect)
     - [4.1. The 4 Execution Contexts (HTTP 302 vs. Client Transition)](#41-the-4-execution-contexts-http-302-vs-client-transition)
     - [4.2. Universal Redirection Matrix](#42-universal-redirection-matrix)
+- [On-Demand Revalidation](#on-demand-revalidation)
+  - [Overview & Multi-Tier Architecture](#overview-multi-tier-architecture)
+  - [1. revalidatePage (Surgical Page Invalidation)](#1-revalidatepage-surgical-page-invalidation)
+    - [1.1. Usage in Server Functions](#11-usage-in-server-functions)
+  - [2. revalidatePath (Route & Segment Purge)](#2-revalidatepath-route-segment-purge)
+    - [2.1. Cascading Revalidation ({ cascade: true })](#21-cascading-revalidation-cascade-true)
+  - [3. Granularity & Path Resolution (Page vs Segment)](#3-granularity-path-resolution-page-vs-segment)
+    - [3.1. revalidatePage vs revalidatePath](#31-revalidatepage-vs-revalidatepath)
+    - [3.2. Absolute & Relative Route Paths](#32-absolute-relative-route-paths)
+  - [4. revalidateTag (Cross-Cutting Invalidation)](#4-revalidatetag-cross-cutting-invalidation)
+    - [4.1. Tag Assignment (getCacheTags)](#41-tag-assignment-getcachetags)
+    - [4.2. Targeted Resolution (Layout vs Page vs Slot)](#42-targeted-resolution-layout-vs-page-vs-slot)
+    - [4.3. Golden Rules of Invalidation](#43-golden-rules-of-invalidation)
+    - [4.4. Invalidating <DinouCacheSlot> Subtrees](#44-invalidating-dinoucacheslot-subtrees)
+  - [5. Client-Side Surgical Revalidation & Router Caching](#5-client-side-surgical-revalidation-router-caching)
+    - [5.1. The Router Caches (pageCache & layoutCache)](#51-the-router-caches-pagecache-layoutcache)
+    - [5.2. Bypassing Client Cache with <Link fresh>](#52-bypassing-client-cache-with-link-fresh)
+    - [5.3. router.refresh() & Layout Invalidation](#53-routerrefresh-layout-invalidation)
+    - [5.4. refreshSlot & router.refreshSlot](#54-refreshslot-routerrefreshslot)
+  - [6. Pluggable Storage Adapters](#6-pluggable-storage-adapters)
+    - [6.1. Why Adapters Matter for Revalidation](#61-why-adapters-matter-for-revalidation)
+    - [6.2. Supported Storage Adapters & Configuration](#62-supported-storage-adapters-configuration)
+  - [7. Webhook Integrations (Headless CMS)](#7-webhook-integrations-headless-cms)
+  - [8. Strategy Comparison Matrix](#8-strategy-comparison-matrix)
+    - [8.1. Server-Side Invalidation Mechanisms](#81-server-side-invalidation-mechanisms)
+    - [8.2. Client-Side Router Refresh Mechanisms](#82-client-side-router-refresh-mechanisms)
 - [Data Fetching: The 13 Strategies](#data-fetching-the-13-strategies)
   - [Overview: The 13-Strategy Architecture](#overview-the-13-strategy-architecture)
   - [Data Fetching & Rendering Strategies Matrix](#data-fetching--rendering-strategies-matrix)
@@ -3952,7 +3978,539 @@ export function ClientGuard({ isAllowed }: { isAllowed: boolean }) {
 
 > [!TIP]
 > **Looking for Cache Revalidation?**
-> Learn how to purge stale SSG pages and ISR cache slots on-demand using `revalidatePath` and `revalidateTag` in the dedicated revalidation documentation.
+> Learn how to purge stale SSG pages and ISR cache slots on-demand using `revalidatePath` and `revalidateTag` in [On-Demand Revalidation](#on-demand-revalidation) below.
+
+---
+
+## On-Demand Revalidation
+
+High-performance web applications cannot rely exclusively on time-based expiration (TTL). On-Demand Revalidation in Dinou enables instantaneous cache purging and static regeneration across four specialized tiers:
+
+### Overview & Multi-Tier Architecture
+
+| Invalidation Tier | API & Mechanism | Architectural Scope |
+| :--- | :--- | :--- |
+| **Surgical Page** | `revalidatePage(path)` | Regenerates exclusively `page.rsc` and `index.html`, leaving all parent layout shells completely untouched. |
+| **Route Segment** | `revalidatePath(path)` | Purges page RSC, HTML, and any `layout.rsc` in that segment. Supports recursive propagation with `{ cascade: true }`. |
+| **Cross-Cutting Tag** | `revalidateTag(tag)` | Selectively updates layouts, pages, or micro-slots across disparate routes sharing a common metadata tag key. |
+| **Micro-Slot** | `<DinouCacheSlot>` | Isolates volatile component subtrees refreshed independently via `refreshSlot()` or targeted `revalidateTag()`. |
+
+Server revalidation APIs are exported from the server-only endpoint `"dinou/server"`, keeping browser client bundles clean, lightweight, and secure.
+
+> [!CAUTION]
+> **Strict Execution Rules: Where to Call Revalidation APIs**
+> - **Only in Mutative Event Contexts:** Revalidation APIs (`revalidatePage`, `revalidatePath`, `revalidateTag`) are mutative side-effects. They must only be invoked inside **Server Functions** (`"use server"`) or **HTTP Webhook endpoints** (such as Headless CMS publishing events).
+> - **Never Inside Components or `getProps`:** Calling revalidation during the component render phase or within `getProps` creates an **infinite regeneration loop**, causing severe CPU exhaustion and server crashes.
+
+---
+
+### 1. revalidatePage (Surgical Page Invalidation)
+
+Exported from `"dinou/server"`, `revalidatePage(path)` is specifically designed for scenarios where **only the leaf page content has changed**. It provides two critical advantages:
+
+1. **Maximum Performance:** Avoids the CPU and disk/KV I/O costs of re-rendering and recompiling unaffected parent layouts.
+2. **Architectural Safety:** By leaving all `layout.rsc` files untouched, it guarantees that parent layout definitions remain completely stable, eliminating any danger of introducing accidental **Hydration Mismatches** into child routes.
+
+> [!WARNING]
+> **The Layout Revalidation Trap: Preventing Hydration Mismatches**
+> In full-stack React frameworks, revalidating a layout is an operation that carries subtle architectural risks. When a layout (`layout.rsc`) is regenerated, all underlying child routes still have their static pre-rendered `index.html` baked with the **previous layout markup**.
+>
+> If a user performs a **hard reload (F5)** or accesses a child route directly by URL, the browser first displays the stale `index.html` shell. When the incoming streaming RSC resolves with the newly regenerated `layout.rsc`, React 19 detects conflicting DOM trees and triggers a **Hydration Mismatch error** accompanied by visible UI flashes.
+>
+> **Why `revalidatePage` is safe:** It only updates the leaf `page.rsc` and that page's specific `index.html`. Because parent layouts remain completely untouched, zero child routes are put at risk. (When a layout *does* need to change, use `revalidatePath(path, { cascade: true })` to propagate fresh HTML to all children).
+
+#### 1.1. Usage in Server Functions
+
+Call `revalidatePage` directly inside your Server Functions or route handlers:
+
+```typescript
+// src/blog/server-functions.ts
+"use server";
+
+import { revalidatePage } from "dinou/server";
+import db from "@/lib/db";
+
+export async function updateArticle(slug: string, newContent: string) {
+  await db.articles.update({
+    where: { slug },
+    data: { content: newContent, updatedAt: new Date() },
+  });
+
+  // Regenerates ONLY page.rsc and index.html for this blog post
+  // Parent layout.rsc is NOT touched!
+  await revalidatePage(`/blog/${slug}`);
+}
+```
+
+> [!NOTE]
+> **What does `revalidatePage` do internally?**
+> - **Regenerates `page.rsc`:** Runs the server component renderer for that route and atomically promotes the new binary RSC stream.
+> - **Regenerates `index.html`:** Re-renders the complete HTML for initial visits and SEO crawlers.
+> - **Zero Layout Overhead:** Leaves all layout files (`layout.rsc`) completely untouched, saving valuable CPU cycles on complex or shared layouts.
+> - **Full Edge KV Parity:** In Edge runtimes (Cloudflare Workers, Deno KV), it updates the KV keys for `page.rsc` and `index.html` atomically.
+
+---
+
+### 2. revalidatePath (Route & Segment Purge)
+
+Exported from `"dinou/server"`, `revalidatePath` is the comprehensive segment revalidation method. It rebuilds the static files in that directory, including any `layout.tsx` residing in that folder:
+
+```typescript
+// src/dashboard/server-functions.ts
+"use server";
+
+import { revalidatePath } from "dinou/server";
+
+export async function refreshDashboard() {
+  // Revalidates /dashboard (page.rsc, index.html, and layout.rsc if present in that folder)
+  await revalidatePath("/dashboard");
+}
+```
+
+#### 2.1. Cascading Revalidation ({ cascade: true })
+
+When updating a shared layout (such as a dashboard shell with dynamic sidebar menus, breadcrumbs, or notifications), simply revalidating the layout is not enough for full static consistency. Pass `{ cascade: true }`:
+
+```typescript
+// src/dashboard/server-functions.ts
+"use server";
+
+import { revalidatePath } from "dinou/server";
+
+export async function updateDashboardNavigation() {
+  // Revalidates /dashboard and cascades revalidatePage to ALL child routes
+  await revalidatePath("/dashboard", { cascade: true });
+}
+```
+
+> [!NOTE]
+> **How Cascading Revalidation Operates Internally:**
+> 1. **Primary Revalidation:** Dinou revalidates the target route `/dashboard` (`layout.rsc`, `page.rsc`, and `index.html`).
+> 2. **Safety Guard Condition:** The cascade **only activates if a layout in that route was actually revalidated**. If the route contains no layout, no unnecessary cascade is triggered.
+> 3. **Recursive Propagation:** Dinou discovers all child sub-routes (e.g. `/dashboard/analytics`, `/dashboard/settings`, `/dashboard/users`) and automatically invokes `revalidatePage(childPath)` on each one in parallel.
+
+---
+
+### 3. Granularity & Path Resolution (Page vs Segment)
+
+Having introduced both `revalidatePage` and `revalidatePath`, this section contrasts their architectural scopes and details how paths are resolved in server execution contexts.
+
+#### 3.1. revalidatePage vs revalidatePath
+
+| Feature | `revalidatePage(path)` | `revalidatePath(path)` |
+| :--- | :--- | :--- |
+| **Page RSC (`page.rsc`)** | Regenerated | Regenerated |
+| **HTML (`index.html`)** | Regenerated | Regenerated |
+| **Segment Layout (`layout.rsc`)** | **Untouched (0ms CPU)** | Regenerated (if layout exists) |
+| **Cascade Option** | Not applicable (single leaf) | Supported: `{ cascade: true }` |
+| **Ideal Use Case** | Article updates, product price edits, comment additions | Section navigation updates, module-wide changes, layout alterations |
+
+#### 3.2. Absolute & Relative Route Paths
+
+Both `revalidatePage` and `revalidatePath` accept absolute route pathnames or relative paths resolved from the calling browser URL:
+
+```typescript
+// src/products/server-functions.ts
+"use server";
+
+import { revalidatePath, revalidatePage } from "dinou/server";
+import db from "@/lib/db";
+
+export async function updateCategory(categoryId: string, data: any) {
+  await db.categories.update({ where: { id: categoryId }, data });
+
+  // 1. Absolute path: Revalidates /catalog (page.rsc, index.html, layout.rsc)
+  await revalidatePath("/catalog");
+
+  // 2. Relative paths inside Server Functions (resolved via HTTP referer):
+  // Revalidate the current invoking leaf page surgically (e.g. /catalog/edit)
+  await revalidatePage("./");
+
+  // Revalidate an adjacent route segment (e.g. /catalog/featured)
+  await revalidatePath("../featured");
+}
+```
+
+---
+
+### 4. revalidateTag (Cross-Cutting Invalidation)
+
+Purges all static pages, layouts, and component subtrees tagged with a specific key string across your entire application with a single call:
+
+```typescript
+// src/products/server-functions.ts
+"use server";
+
+import { revalidateTag } from "dinou/server";
+import db from "@/lib/db";
+
+export async function syncInventory() {
+  // Invalidates all routes and slots carrying the "products" tag
+  await revalidateTag("products");
+}
+```
+
+#### 4.1. Tag Assignment (getCacheTags)
+
+Tags are assigned in `page_functions.ts` or `layout_functions.ts` via constant arrays or dynamic functions:
+
+##### Pattern 1: Constant Array Export (Fixed Static Tags)
+
+```typescript
+// src/blog/page_functions.ts
+import type { PageFunctions } from "dinou";
+
+export const getCacheTags: PageFunctions["getCacheTags"] = [
+  "blog",
+  "marketing",
+];
+```
+
+##### Pattern 2: Function Export (Dynamic Parameterized Tags)
+
+```typescript
+// src/products/[id]/page_functions.ts
+import type { RouteParams } from "dinou";
+
+export function getCacheTags(params: RouteParams<"/products/[id]">) {
+  return ["products", `product-${params.id}`];
+}
+```
+
+##### Pattern 3: Full Typed Contract with PageFunctions / LayoutFunctions
+
+```typescript
+// src/products/[id]/page_functions.ts
+import type { PageFunctions, RouteParams } from "dinou";
+
+export const getCacheTags: PageFunctions<
+  RouteParams<"/products/[id]">
+>["getCacheTags"] = (params) => {
+  return ["products", `product-${params?.id}`];
+};
+```
+
+> [!NOTE]
+> **Transparent Sync and Async Support**
+> The type declaration remains identical whether `getCacheTags` is synchronous or `async` (such as querying a database or CMS with `await`). Dinou's return contract (`string[] | Promise<string[]>`) and `RouteParams` polymorphically accommodate both forms without requiring separate types.
+
+---
+
+#### 4.2. Targeted Resolution (Layout vs Page vs Slot)
+
+In Dinou, `revalidateTag(tag, options?)` inspects where the tag was defined and executes the most surgical revalidation action possible:
+
+- **Tag in Layout (`layout_functions.ts`):**
+  - **Default (`revalidateTag(tag)`):** Dinou runs internal `revalidateLayout(path)`, regenerating **exclusively `layout.rsc`**. Child pages and HTML remain untouched for maximum speed!
+  - **With cascade (`revalidateTag(tag, { cascade: true })`):** Dinou executes `revalidatePath(path, { cascade: true })`, regenerating `layout.rsc` and cascading to all child pages to bake the new layout into their `index.html` (eliminating hydration mismatches).
+- **Tag in Page (`page_functions.ts`):**
+  - Dinou executes **`revalidatePage(path)`**, regenerating **exclusively `page.rsc` and `index.html`**.
+  - Parent layouts remain completely untouched—even if the page shares a folder with a `layout.tsx`—avoiding unnecessary layout recompilations.
+- **Tag in Slot (`<DinouCacheSlot>`):**
+  - Dinou purges **only the slot directory or KV key** without touching the host page or layouts.
+  - The component fragment is re-rendered on the next visit or updated in-place via client `refreshSlot`.
+
+---
+
+#### 4.3. Golden Rules of Invalidation
+
+1. **Rule 1: Surgical Shell Revalidation:** Declare the tag **only in `layout_functions.ts`** (e.g. `["dashboard-shell"]`). Rebuilding the layout shell regenerates only `layout.rsc` and does not trigger expensive re-rendering of all child pages.
+2. **Rule 2: Surgical Page Revalidation:** Use `revalidatePage("/path")` or declare the tag **only in `page_functions.ts`** (e.g. `["post-view"]`). Only that concrete page and its HTML will recompile.
+3. **Rule 3: Full Module Invalidation (Layout + Children):** Use `revalidatePath("/dashboard", { cascade: true })`, call `revalidateTag("dashboard", { cascade: true })`, or share the same tag in both `layout_functions.ts` and child `page_functions.ts`. This guarantees zero hydration mismatches when structural navigation changes.
+
+> [!CAUTION]
+> **Critical Scale Alert: Hydration Mismatch vs. Server Crash (100k+ Pages)**
+> - **The Hydration Mismatch Hazard:** Because surgical layout revalidation updates only `layout.rsc`, existing static `index.html` files remain unchanged. While SPA client navigation stays instant and perfectly synchronized, a hard browser reload (F5 or direct link) will receive the older static HTML with the prior layout markup, which can trigger a **Hydration Mismatch** when React 19 hydrates against the fresh `layout.rsc` stream.
+> - **Why NOT use `cascade: true` at scale?** If your application features a large product catalog (e.g. 100,000+ pre-rendered pages), running `cascade: true` on a shared or root layout will attempt to regenerate 100,000 static HTML files simultaneously. This causes sudden CPU saturation, memory exhaustion, and catastrophic server crashes or gateway timeouts.
+>
+> **Scale-Safe Architectural Solutions (Without Cascading):**
+> - **Defer Volatile State to Client Components:** Keep the server layout shell structurally invariant. Mutable or fast-changing UI elements (e.g. promo banners, flash deals, cart badges, user session data) should be Client Components (`"use client"`) that render an invariant placeholder or container in SSR and populate fresh data on the client. Because the static HTML never changes, there is zero risk of Hydration Mismatch on hard reloads (F5), and zero child pages need regeneration.
+> - **Leverage Partial Prerendering (PPR) with `<Suspense>`:** Wrap dynamic layout sections in `<Suspense fallback={<Skeleton />}>`. Dinou serves the static shell instantly (0ms TTFB) and streams live, personalized server chunks down the open HTTP connection, avoiding stale baked HTML in `index.html` without re-rendering child pages.
+> - **Scope Cascading Tags to Bounded Sub-Layouts:** Never attach layout revalidation tags to root or large-catalog wrappers. Keep root shells purely static, and reserve layout tagging with `cascade: true` strictly for bounded feature modules (such as `/dashboard` or `/account`) where child routes are limited to a small, predictable number of pages.
+> - **Rely on Lazy Time-Based ISR for Catalog Pages:** When child pages define `revalidate = N`, they naturally re-render their full static HTML on demand upon the next user visit, absorbing layout updates gradually in the background without any upfront mass-regeneration spike.
+
+---
+
+#### 4.4. Invalidating <DinouCacheSlot> Subtrees
+
+`revalidateTag` works seamlessly with micro-cached component subtrees created via `<DinouCacheSlot>`:
+
+```tsx
+// Inside any page or layout Server Component:
+import { Suspense } from "react";
+import { DinouCacheSlot } from "dinou/server";
+import { TrendingProducts, TrendingSkeleton } from "@/components/trending";
+
+<Suspense fallback={<TrendingSkeleton />}>
+  <DinouCacheSlot id="trending-grid" tag="trending" revalidate={600}>
+    <TrendingProducts />
+  </DinouCacheSlot>
+</Suspense>
+```
+
+```typescript
+// In your Server Function:
+"use server";
+
+import { revalidateTag } from "dinou/server";
+
+export async function refreshTrends() {
+  await revalidateTag("trending");
+  // Only the <TrendingProducts> slot payload is purged; the parent page stays cached!
+}
+```
+
+---
+
+### 5. Client-Side Surgical Revalidation & Router Caching
+
+Dinou provides a seamless SPA router experience with in-memory caching and granular refresh capabilities directly in the browser:
+
+#### 5.1. The Router Caches (pageCache & layoutCache)
+
+Dinou maintains two distinct in-memory client caches in the browser:
+- **`pageCache`**: In-memory Map of page-level RSC streams.
+- **`layoutCache`**: In-memory Map of layout shell RSC streams.
+
+#### 5.2. Bypassing Client Cache with <Link fresh>
+
+To ensure immediate freshness during navigation without waiting for server TTLs or router cache eviction, use the `fresh` prop on the `<Link>` component:
+
+```tsx
+import { Link } from "dinou";
+
+// Forces the client router to bypass and evict its in-memory pageCache for /feed,
+// guaranteeing a real HTTP request to fetch fresh data from the server.
+<Link href="/feed" fresh>
+  View Latest Feed
+</Link>
+```
+
+> [!NOTE]
+> `<Link fresh>` deletes the client in-memory cache for that destination; it does not clear static files on the server. If the server route is static, the server will return the compiled static RSC payload.
+
+---
+
+#### 5.3. router.refresh() & Layout Invalidation
+
+The `useRouter()` hook provides a powerful `refresh()` method that reconciles React components without losing ephemeral client state (such as input focus, form draft text, or scroll position):
+
+```tsx
+"use client";
+
+import { useRouter } from "dinou";
+
+export function RefreshControl() {
+  const router = useRouter();
+
+  // 1. Standard Soft Refresh (Default)
+  // Clears only pageCache; leaves layoutCache intact (1 network request, 0 layout flicker)
+  const handlePageRefresh = () => {
+    router.refresh();
+  };
+
+  // 2. Full Refresh (Including Layout Shell)
+  // Clears pageCache AND purges active layoutCache (fetches both fresh layout & page)
+  const handleGlobalRefresh = () => {
+    router.refresh({ layout: true });
+  };
+
+  return (
+    <div className="flex gap-2">
+      <button onClick={handlePageRefresh}>Refresh Page</button>
+      <button onClick={handleGlobalRefresh}>Refresh All (Shell + Page)</button>
+    </div>
+  );
+}
+```
+
+| Method Call | `pageCache` | `layoutCache` | RSC Network Requests | Best For |
+| :--- | :--- | :--- | :--- | :--- |
+| **`router.refresh()`** | Deleted | Preserved | 1 (page only) | Post-mutation updates, comment submissions, data table refreshes |
+| **`router.refresh({ layout: true })`** | Deleted | Deleted | 2 (layout + page) | Tenant switching, avatar changes, global theme or org updates in navbar |
+
+---
+
+#### 5.4. refreshSlot & router.refreshSlot
+
+To refresh an isolated component without re-rendering sibling components or parent pages, use `refreshSlot`:
+
+```tsx
+"use client";
+
+import { refreshSlot, useRouter } from "dinou";
+
+export function LiveAnalyticsButton() {
+  const router = useRouter();
+
+  const handleUpdate = () => {
+    // 1. Direct standalone function:
+    refreshSlot("analytics-summary", { fresh: true });
+
+    // 2. Or via router instance (identical signature and options):
+    // router.refreshSlot("analytics-summary", { fresh: true });
+  };
+
+  return <button onClick={handleUpdate}>Live Refresh Metrics</button>;
+}
+```
+
+- **Default (Omitted or `fresh: false`):** Respects the server storage cache. If the slot has not exceeded its `revalidate` TTL, the server returns the cached JSX directly without re-executing the component.
+- **With `fresh: true` (Forced Server Recomputation):** Bypasses and ignores any unexpired server cache. Forces Dinou to immediately re-evaluate the Server Component, generate new JSX, overwrite the storage cache with the fresh timestamp, and stream it to the client.
+
+---
+
+### 6. Pluggable Storage Adapters
+
+#### 6.1. Why Adapters Matter for Revalidation
+
+Revalidation (`revalidatePage`, `revalidatePath`, `revalidateTag`) is fundamentally the process of **purging and rebuilding static cache artifacts**:
+- **RSC Streams (`page.rsc`, `layout.rsc`):** Pre-rendered Flight binary streams served during client SPA transitions.
+- **Rendered HTML (`index.html`):** Fully hydrated HTML markup served for initial page loads and search crawlers.
+- **Metadata & TTL (`meta.json`):** Expiration timestamps, ISR time-to-live (TTL), and assigned cache tags for surgical resolution.
+
+##### 3 Real-World Challenges Solved by Adapters:
+1. **Clustered Deployments (Single Node vs. Clusters):** By default, Dinou writes to local disk (`FileSystemStorage`). If you scale to multiple Kubernetes pods behind a load balancer, each pod has an isolated disk. Solved by **`RedisStorage`** (shared cluster state).
+2. **Edge & Serverless (Zero-Config):** In serverless runtimes like Cloudflare Workers, there is no writable filesystem. Dinou auto-binds to your `DINOU_CACHE` KV namespace via `wrangler.toml` (or Deno KV via `Deno.openKv()`) with zero manual config in `dinou.config.mjs`.
+3. **Fast Testing & Mocking:** Unit tests, CI pipelines, and ephemeral mock runs require ultra-fast execution without disk clutter. Solved by **`MemoryStorage`** (ephemeral RAM Map).
+
+> [!NOTE]
+> **Zero Code Modifications Across Infrastructures**
+> Because your application code only interacts with high-level revalidation functions like `revalidateTag("products")` or `revalidatePath("/catalog")`, your UI and server components remain 100% identical whether running on local Node.js (`FileSystemStorage`), Kubernetes (`RedisStorage`), or Cloudflare Workers (`CloudflareKVStorage`).
+
+---
+
+#### 6.2. Supported Storage Adapters & Configuration
+
+| Adapter Class | Target Environment | Characteristics |
+| :--- | :--- | :--- |
+| **`FileSystemStorage`** | Node.js / Bun / Docker | **Default.** Zero config, atomic file writes on local disk. |
+| **`RedisStorage`** | Distributed Clusters | Shared cluster cache across Kubernetes pods or multi-container VPS. |
+| **`CloudflareKVStorage`** | Cloudflare Workers | Globally replicated edge key-value storage. Auto-bound via `DINOU_CACHE` in `wrangler.toml` (zero config). |
+| **`DenoKVStorage`** | Deno Deploy / Deno KV | Built-in distributed ACID key-value store. Auto-bound via `Deno.openKv()` (zero config). |
+| **`MemoryStorage`** | Testing / CI / Mocks | In-memory ephemeral Map for unit tests and local mock runs. |
+
+In Node.js / Bun environments, override the default local disk storage by declaring a distributed adapter in `dinou.config.mjs`:
+
+```typescript
+// dinou.config.mjs
+import { defineConfig } from "dinou";
+import { RedisStorage } from "dinou/server";
+import { createClient } from "redis";
+
+const redis = createClient({ url: process.env.REDIS_URL });
+await redis.connect();
+
+export default defineConfig({
+  // Cluster-wide distributed cache storage for ISR and revalidation
+  storage: new RedisStorage(redis, "dinou-cache:"),
+});
+```
+
+##### MemoryStorage: In-Memory Testing & CI Workflows
+
+`MemoryStorage` stores all ISR artifacts inside a JavaScript in-memory `Map`:
+1. **Isolated Testing (Vitest / Jest):** Calling `setStorageAdapter(new MemoryStorage())` gives every test a pristine, isolated store in 0 microseconds without cleaning temp folders.
+2. **Zero-Infra CI Pipelines (GitHub Actions):** Validate full ISR and revalidation lifecycles (`revalidateTag`, `revalidatePath`) in automated CI runners without external Redis containers.
+3. **Hardened Read-Only Docker Containers:** Enables full caching inside container RAM under `docker --read-only` where disk writes fail with `EROFS`.
+4. **Resilient Edge Worker Fallback:** In Cloudflare Workers where `DINOU_CACHE` KV is omitted, Dinou automatically falls back to MemoryStorage inside the isolate RAM without crashing.
+
+```typescript
+// 1. In dinou.config.mjs (conditional for CI / test environment)
+import { defineConfig } from "dinou";
+import { MemoryStorage, RedisStorage } from "dinou/server";
+
+export default defineConfig({
+  storage: process.env.NODE_ENV === "test"
+    ? new MemoryStorage()
+    : new RedisStorage(redisClient, "dinou-cache:"),
+});
+
+// 2. Or directly in your test suite (Vitest / Jest) for total test isolation
+import { setStorageAdapter, MemoryStorage, revalidateTag } from "dinou/server";
+import { beforeEach, test, expect } from "vitest";
+
+beforeEach(() => {
+  // Reset cache state with a clean, isolated in-memory store before every test
+  setStorageAdapter(new MemoryStorage());
+});
+```
+
+---
+
+### 7. Webhook Integrations (Headless CMS)
+
+External events, such as a Headless CMS (Sanity, Strapi, Contentful) publishing content or an e-commerce inventory sync, can trigger on-demand revalidation in Dinou. Webhook endpoints are created via **Web Standards Plugins** using the `onRequest` hook in `dinou.config.mjs`:
+
+```typescript
+// dinou.config.mjs
+import { defineConfig } from "dinou";
+import { revalidateTag, revalidatePage, revalidatePath } from "dinou/server";
+
+export default defineConfig({
+  plugins: [
+    {
+      name: "revalidation-webhook",
+      async onRequest(request) {
+        const url = new URL(request.url);
+
+        // Intercept POST requests to /api/revalidate
+        if (url.pathname === "/api/revalidate" && request.method === "POST") {
+          try {
+            const { tag, page, path, cascade } = await request.json();
+
+            if (tag) {
+              await revalidateTag(tag);
+            }
+            if (page) {
+              // Surgical page-only revalidation
+              await revalidatePage(page);
+            }
+            if (path) {
+              // Route revalidation with optional layout cascade
+              await revalidatePath(path, { cascade: Boolean(cascade) });
+            }
+
+            return Response.json({ revalidated: true, timestamp: Date.now() });
+          } catch (err: any) {
+            return Response.json({ error: err.message }, { status: 500 });
+          }
+        }
+      },
+    },
+  ],
+});
+```
+
+> [!TIP]
+> **Production Tip: Securing Public Webhook Endpoints**
+> In production, verify an authorization header (such as `request.headers.get("authorization") === `Bearer ...``) or a cryptographic HMAC webhook signature from your CMS provider to ensure only authorized callers can trigger revalidation cycles.
+
+---
+
+### 8. Strategy Comparison Matrix
+
+#### 8.1. Server-Side Invalidation Mechanisms
+
+| Strategy | Invocation Context | Revalidation Scope | Recommended For |
+| :--- | :--- | :--- | :--- |
+| **Time-Based ISR** (`revalidate = N`) | Route config (`page_functions.ts`) | Route page + HTML | Automatic background freshness for low-to-medium dynamic content. |
+| **`revalidatePage(path)`** | Server Function / Webhook Plugin | **Target page only (HTML + RSC)** | Surgical route mutation; guarantees zero impact on parent layout shells. |
+| **`revalidatePath(path)`** | Server Function / Webhook Plugin | Target page + layout segment | Standard route mutation when both page content and layout segment update. |
+| **`revalidatePath(path, { cascade: true })`** | Server Function / Webhook Plugin | **Layout shell + all descendant child pages** | Deep structural invalidation; recursively purges and rebuilds all children. |
+| **`revalidateTag(tag)`** | Server Function / Webhook Plugin | Matching layout, page, or `<DinouCacheSlot>` | Surgical multi-route purge without touching parent layout shells. |
+| **`revalidateTag(tag, { cascade: true })`** | Server Function / Webhook Plugin | **Tagged layout shell + all child pages** | Full module invalidation when layout structural dependencies affect all children. |
+
+#### 8.2. Client-Side Router Refresh Mechanisms
+
+Executed inside Client Components and user interactions to invalidate browser router caches without triggering a full browser window reload (F5):
+
+| Mechanism | Invocation Context | Client Cache Impact | Preserves UI State? | Bypasses Server Storage? |
+| :--- | :--- | :--- | :--- | :--- |
+| **`<Link fresh>`** | `<Link>` navigation | Bypasses & evicts `pageCache` | No (navigates to route) | No (serves server storage cache) |
+| **`router.refresh()`** | `useRouter()` hook | Evicts `pageCache` for current URL | **Yes** (inputs, scroll, layout preserved) | No (serves server storage cache) |
+| **`router.refresh({ layout: true })`** | `useRouter()` hook | Evicts both `pageCache` & `layoutCache` | **Yes** (inputs & scroll preserved; layout re-renders) | No (serves server storage cache) |
+| **`refreshSlot(id, [options])`** | `refreshSlot` / `useRouter()` | Re-fetches and replaces slot DOM only | **Yes** (entire page, layout & scroll preserved) | Only with `{ fresh: true }` |
 
 ---
 
