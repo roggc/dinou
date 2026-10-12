@@ -41,13 +41,13 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [Error Handling (`error.jsx`)](#error-handling-errorjsx)
   - [Not Found (`not_found.jsx`)](#not-found-not_foundjsx)
   - [Advanced Layout Control (Flags)](#advanced-layout-control-flags)
-- [Server and Client Components](#server-and-client-components)
-  - [Server Components (Default)](#server-components-default)
-  - [Client Components (`"use client"`)](#client-components-use-client)
-  - [Composition Patterns](#composition-patterns)
-  - [Flight Serialization Boundary & Supported Props](#flight-serialization-boundary--supported-props)
-  - [SSR Execution Safety Rule](#ssr-execution-safety-rule-for-client-components)
-  - [Import Cascading Behavior](#import-cascading-behavior)
+- [Component Architecture: Server and Client Components](#component-architecture-server-and-client-components)
+  - [1. The RSC Mental Model](#1-the-rsc-mental-model)
+  - [2. Server Components (RSC)](#2-server-components-rsc)
+  - [3. Client Components (`"use client"`)](#3-client-components-use-client)
+  - [4. The `"use client"` Directive](#4-the-use-client-directive)
+  - [5. Data Serialization Boundary](#5-data-serialization-boundary)
+  - [6. Architectural Patterns & Best Practices](#6-architectural-patterns--best-practices)
 - [Data Fetching: The 13 Strategies](#data-fetching-the-13-strategies)
   - [Overview: The 13-Strategy Architecture](#overview-the-13-strategy-architecture)
   - [Data Fetching & Rendering Strategies Matrix](#data-fetching--rendering-strategies-matrix)
@@ -65,13 +65,14 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [12. Client Calling Server Function (Initial Mount - Dynamic RPC)](#12-client-calling-server-function-initial-mount---dynamic-rpc)
   - [13. Client Server Functions (User Actions & Mutations)](#13-client-server-functions-user-actions--mutations)
   - [Architectural Decision Guide](#architectural-decision-guide)
-- [Rendering Strategies](#rendering-strategies)
-  - [Zero-Config Hybrid Model](#zero-config-hybrid-model)
-  - [Static Site Generation (SSG at Build Time)](#static-site-generation-ssg-at-build-time)
-  - [Incremental Static Regeneration (ISR)](#incremental-static-regeneration-isr)
-  - [Incremental Static Generation (ISG)](#incremental-static-generation-isg)
-  - [Vertical Segmentation: Micro-ISR (`<DinouCacheSlot>`)](#vertical-segmentation-micro-isr-dinoucacheslot)
-  - [Partial Prerendering (PPR)](#partial-prerendering-ppr)
+- [Static & Dynamic Rendering Strategies](#static--dynamic-rendering-strategies)
+  - [Overview: Static by Default Architecture](#overview-static-by-default-architecture)
+  - [1. Static Site Generation (SSG) & Bailout](#1-static-site-generation-ssg--bailout)
+  - [2. The Unified revalidate Strategy (Strict Seconds)](#2-the-unified-revalidate-strategy-strict-seconds)
+  - [3. Partial Prerendering (PPR)](#3-partial-prerendering-ppr)
+  - [4. Vertical Segmentation: Micro-ISR (`<DinouCacheSlot>`)](#4-vertical-segmentation-micro-isr-dinoucacheslot)
+  - [5. High-Traffic Synergy: PPR + `<DinouCacheSlot>`](#5-high-traffic-synergy-ppr--dinoucacheslot)
+  - [6. Incremental Static Generation (ISG on-demand)](#6-incremental-static-generation-isg-on-demand)
 - [Server Functions (`"use server"`) & Suspense](#server-functions-use-server--suspense)
   - [Usage in Server Components (Streaming)](#usage-in-server-components-streaming)
   - [Usage in Client Components (Reactive)](#usage-in-client-components-reactive)
@@ -526,121 +527,357 @@ If you have a marketing page at `src/marketing/page.jsx` and you don't want it t
 2. Create an empty file named `reset_layout` inside `src/marketing/`.
 3. **Result:** `src/marketing/page.jsx` will only use the marketing layout, ignoring the global root layout.
 
-## Server and Client Components
+## Component Architecture: Server and Client Components
 
-Dinou is built natively on React 19 Server Components (RSC). Understanding the boundary between Server and Client Components is fundamental to building optimal full-stack applications.
+Dinou is built natively on the **React 19 Server Components (RSC)** specification. Rather than treating your entire application as a single monolithic client-side bundle, Dinou partitions components into two distinct execution environments:
+- **Server Components (RSC):** The default component type in Dinou. Rendered to HTML on the server (SSR) with zero client JavaScript. Never hydrated in the browser, eliminating bundle overhead while providing direct access to databases, the filesystem, and private secrets.
+- **Client Components:** Opt-in with `"use client"`. Also pre-rendered to HTML on the server (SSR) for instant first paint, and then hydrated with interactive JavaScript in the browser to enable local state (`useState`, `useActionState`), event listeners (`onClick`), and browser APIs.
 
-### Server Components (Default)
+### 1. The RSC Mental Model
 
-By default, every page, layout, and component inside the `src/` directory is a **Server Component**.
+Think of **Server Components** as the backbone of your application that orchestrates data fetching, layouts, and non-interactive UI (rendering pure HTML with zero client JavaScript). **Client Components** act as interactive "islands" or leaves embedded inside the server tree.
 
-- **Zero Client Bundle Impact:** Server Components execute only on the server/edge. Their code, dependencies, and internal logic are never downloaded by the client browser.
-- **Direct Backend & Database Access:** You can directly query databases, access the filesystem, or communicate with private internal microservices using standard `async/await`.
-- **Security by Default:** Database credentials, secrets, and private tokens stay securely on the server without risk of leaking into client bundles.
-- **Progressive Streaming:** Output is streamed progressively to the client as standard HTML and React Flight RPC payloads.
+The server streams HTML and React Flight JSON representations across an open HTTP connection. The browser consumes this stream without ever downloading the JavaScript source code of your Server Components.
 
-```jsx
-// src/page.jsx (Server Component by default)
-import db from "@/lib/db";
+---
 
-export default async function Page() {
-  const user = await db.users.findFirst();
-  return <h1>Welcome back, {user.name}!</h1>;
+### 2. Server Components (RSC)
+
+In Dinou, every component inside `src/` is a Server Component by default unless explicitly marked with `"use client"`. They execute exclusively on the server and never ship their implementation code to the browser.
+
+#### 2.1. Capabilities & Backend Access
+
+- **Direct Async Execution:** Server Components can be async functions. You can `await` database queries, ORM calls, microservices, or files directly inside the component body.
+- **Zero Client Bundle Impact:** Large dependencies imported into Server Components (e.g. Markdown parsers, SQL drivers, encryption packages) are never downloaded or executed by the browser.
+- **Secure Secret Access:** Database credentials, private API keys, and environment variables stay strictly on the server without risk of client exposure.
+- **Automatic Streaming with `<Suspense>`:** When slow asynchronous operations are wrapped in React `<Suspense>`, the layout shell and fallback UI are delivered immediately, while data streams progressively into the HTTP response.
+
+```tsx
+// src/users/page.tsx (Server Component by default)
+import { getContext } from "dinou";
+import { db } from "@/lib/db"; // Never bundled to the client!
+
+export default async function UsersPage() {
+  // Direct backend query without an intermediary REST API
+  const users = await db.user.findMany({ take: 10 });
+
+  return (
+    <main className="p-8 max-w-4xl mx-auto">
+      <h1 className="text-2xl font-bold">Registered Users</h1>
+      <ul className="mt-4 divide-y">
+        {users.map((user) => (
+          <li key={user.id} className="py-2 flex justify-between">
+            <span>{user.name}</span>
+            <span className="text-xs font-mono text-muted-foreground">{user.email}</span>
+          </li>
+        ))}
+      </ul>
+    </main>
+  );
 }
 ```
 
-### Client Components (`"use client"`)
+> [!NOTE]
+> **TTFB & Execution Timing:** On static routes (SSG), the query runs once during `npm run build`, serving static HTML with `0ms` TTFB. On dynamic routes (`revalidate = 0` or reading cookies), an un-Suspended top-level `await` blocks the entire HTTP response until the query resolves. To preserve fast TTFB on dynamic routes, wrap slow async child components in React `<Suspense>`.
 
-When a component needs browser APIs, React state, or user event listeners, declare it as a **Client Component** by placing the `"use client"` directive at the very top of the file (before any imports).
+#### 2.2. Non-Blocking Streaming with React `<Suspense>`
 
-- **Use cases:** React state and lifecycle hooks (`useState`, `useReducer`, `useEffect`), event handlers (`onClick`, `onChange`, `onSubmit`), browser APIs (`localStorage`, `window`, `navigator`), and Dinou client hooks (`useSearchParams`, `useRouter`, `useNavigationLoading`).
-- **SSR & Hydration:** Client Components are still pre-rendered on the server to fast initial HTML, and then hydrated with interactive JavaScript in the browser.
+By delegating asynchronous queries to child components wrapped in `<Suspense>`, the outer layout and fallback UI are sent immediately:
 
-```jsx
-// src/components/counter.jsx
-"use client";
+```tsx
+// src/users/page.tsx - Non-blocking streaming layout
+import { Suspense } from "react";
+import { db } from "@/lib/db";
+import { UsersSkeleton } from "./skeleton";
+
+export default function UsersPage() {
+  return (
+    <main className="p-8 max-w-4xl mx-auto">
+      {/* 1. The outer shell is sent immediately (instant TTFB) */}
+      <h1 className="text-2xl font-bold">Registered Users</h1>
+
+      {/* 2. Displays fallback while the child query resolves */}
+      <Suspense fallback={<UsersSkeleton />}>
+        <UsersList />
+      </Suspense>
+    </main>
+  );
+}
+
+// Child component handles the async query independently
+async function UsersList() {
+  const users = await db.user.findMany({ take: 10 });
+  return (
+    <ul className="mt-4 divide-y">
+      {users.map((u) => (
+        <li key={u.id} className="py-2 flex justify-between">
+          <span>{u.name}</span>
+          <span className="text-xs font-mono text-muted-foreground">{u.email}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+##### How `<Suspense>` Behaves Across Rendering Strategies
+
+| Strategy | Compiler & Runtime Behavior | Fallback Skeleton Behavior |
+| :--- | :--- | :--- |
+| **Pure SSG (Static)** | The compiler automatically awaits all Suspense boundaries during `npm run build` and writes the resolved HTML directly into the static artifact. | Visitors **never** see the loading skeleton because the fallback is eliminated once the build settles. |
+| **Pure Dynamic SSR** | The server flushes the layout shell and `<Suspense fallback={<Skeleton />}>` immediately over the open HTTP connection. | The user sees the skeleton while waiting, and React streams the resolved HTML chunk when the query finishes. |
+| **Partial Prerendering (PPR)** | The outer layout shell and the fallback skeleton are pre-rendered at build time and served in `0ms` TTFB from Edge CDN. | The skeleton renders instantly from static cache, while the server concurrently executes the dynamic query and streams live data into the hole. |
+
+#### 2.3. Constraints & Limitations of Server Components
+
+Because Server Components execute exclusively on the server, they cannot use browser-specific or client-interactive features:
+- **Cannot use state or lifecycle hooks:** `useState`, `useEffect`, `useReducer`, `useLayoutEffect`.
+- **Cannot attach client DOM event listeners:** `onClick`, `onChange`, `onSubmit`, `onKeyDown`.
+- **Cannot access browser globals:** `window`, `document`, `localStorage`, `navigator`, `geolocation`.
+- **Cannot consume React Context directly:** Server Components cannot call `useContext()` or `use(Context)`. (While Server Components can *render* `<Context.Provider>` components for client children, they cannot read context values themselves).
+
+---
+
+### 3. Client Components (`"use client"`)
+
+Client Components provide rich, real-time client-side interactivity. They enable event handlers, local component state, animations, and access to browser APIs.
+
+#### 3.1. Interactivity & Browser APIs
+
+Client Components have complete access to the client-side React ecosystem:
+- Full state management with `useState`, `useReducer`, and React 19 `useActionState`.
+- Side effects, timers, and DOM subscriptions via `useEffect` and `useLayoutEffect`.
+- DOM event handling (clicks, hovers, drags, keystrokes, form submissions).
+- Browser Web APIs (`localStorage`, Geolocation, `IntersectionObserver`, Audio).
+- Consuming React Context providers created on the client.
+
+#### 3.2. Server Pre-Rendering Notice & SSR Execution Safety Rule
+
+A common point of confusion is assuming Client Components execute exclusively in the browser. In Dinou, Client Components are **pre-rendered on the server to HTML during initial page load** to ensure instant First Contentful Paint (FCP) and optimal SEO indexing before hydrating in the browser.
+
+> [!WARNING]
+> Because Client Components run on the server during pre-rendering, accessing browser globals directly in the component function body (e.g. `const token = localStorage.getItem("token")`) will throw a server runtime error.
+> 
+> **Rule:** Always defer browser-only API access inside `useEffect` or guard it with an environment check:
+> ```tsx
+> if (typeof window !== "undefined") {
+>   const token = localStorage.getItem("auth_token");
+> }
+> ```
+
+---
+
+### 4. The `"use client"` Directive
+
+To declare a component as a Client Component, add the `"use client"` directive at the very top of the file, before any import statements or comments.
+
+#### 4.1. Establishing Module Boundaries
+
+The directive is not a runtime function call—it is an instruction to the bundler (Esbuild, Rollup, Webpack) that defines the network split point:
+
+```tsx
+"use client"; // Must be at the very top of the file!
 
 import { useState } from "react";
 
-export default function Counter() {
-  const [count, setCount] = useState(0);
+export function Counter({ initial = 0 }: { initial?: number }) {
+  const [count, setCount] = useState(initial);
+
   return (
-    <button onClick={() => setCount((c) => c + 1)}>
-      Clicked {count} times
+    <button
+      onClick={() => setCount((c) => c + 1)}
+      className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium"
+    >
+      Count: {count}
     </button>
   );
 }
 ```
 
-### Composition Patterns
+#### 4.2. Import Cascading Behavior
 
-To maximize performance, keep Client Components as leaves at the edges of your component tree.
+Once a file declares `"use client"`, all components, utility modules, and third-party libraries imported by that file are automatically treated as part of the client bundle. You do not need to add `"use client"` to child modules imported by a Client Component.
 
-- **Passing Server Components as Children:** A Client Component can accept Server Components via the `children` prop or custom props. The child Server Component runs on the server and its code is not included in the client bundle:
+---
 
-```jsx
-// src/components/modal.jsx (Client Component)
+### 5. Data Serialization Boundary
+
+When passing props from a Server Component to a Client Component, data crosses the network boundary (serialized as React Flight JSON). Props passed across this boundary must be serializable.
+
+#### 5.1. Supported vs. Unsupported Data Types
+
+- **Supported Data Types (Allowed):**
+  - **Primitives:** `string`, `number`, `boolean`, `null`, `undefined`, `bigint`.
+  - **Plain Objects & Arrays:** Objects with serializable values (e.g. `{ id: 1, name: "Dinou" }`).
+  - **Dates:** `Date` objects are serialized and reconstructed by React on the client.
+  - **React Elements (JSX):** Server Components passed as `children` or named slot props.
+  - **Promises:** Passed directly from Server to Client (read with React 19's native `use()`).
+  - **Server Functions:** Bound action functions declared with `"use server"`.
+- **Non-Serializable (Blocked across boundary):**
+  - **Client Functions:** Cannot pass client callbacks (e.g. `onClick={() => ...}`) from Server Components.
+  - **Class Instances:** Complex prototypes, database connections, and ORM class instances will lose their methods/prototype.
+  - **Symbols & WeakMaps:** Non-enumerable or memory-bound JavaScript data structures.
+  - **Browser DOM Elements:** Native HTML DOM nodes (`window`, `document.body`).
+
+#### 5.2. Passing Promises & React 19 `use()`
+
+React 19 natively supports passing an unresolved Promise as a prop from a Server Component to a Client Component. The Client Component reads the promise synchronously using the `use()` hook, automatically triggering Suspense fallbacks until the promise settles:
+
+```tsx
+// src/user/page.tsx (Server Component)
+import { Suspense } from "react";
+import db from "@/lib/db";
+import { UserProfile } from "./user-profile"; // "use client"
+
+export default function Page() {
+  // Start fetching without awaiting!
+  const userPromise = db.users.findProfile("user_123");
+
+  return (
+    <Suspense fallback={<div>Loading profile skeleton...</div>}>
+      <UserProfile userPromise={userPromise} />
+    </Suspense>
+  );
+}
+```
+
+```tsx
+// src/user/user-profile.tsx (Client Component)
 "use client";
+import { use } from "react";
 
-import { useState } from "react";
+export function UserProfile({ userPromise }: { userPromise: Promise<{ name: string; role: string }> }) {
+  // Unwraps the promise value seamlessly inside Suspense without useEffect
+  const user = use(userPromise);
+  return <h2>Hello, {user.name} ({user.role})</h2>;
+}
+```
 
-export default function Modal({ children }) {
+---
+
+### 6. Architectural Patterns & Best Practices
+
+#### 6.1. Interactive Leaves at the Edges (Recommended)
+
+Keep your layouts, route pages, and static wrappers as Server Components. Only push the `"use client"` boundary down to small, interactive "leaf" components (such as an upvote button, search box, or dropdown menu).
+
+```
+src/dashboard/layout.tsx              → Server Component (zero client JS)
+src/dashboard/page.tsx                → Server Component (fetches data directly)
+src/dashboard/_components/search.tsx  → "use client" (interactive leaf)
+src/dashboard/_components/button.tsx  → "use client" (interactive leaf)
+```
+
+#### 6.2. Composition: Server Components as Children
+
+A Client Component cannot directly import a Server Component (because bundling a Server Component into the client module would defeat the RSC boundary). However, a Client Component can receive Server Components as `children` or via named JSX props!
+
+```tsx
+// src/components/modal.tsx (Client Component)
+"use client";
+import { useState, type ReactNode } from "react";
+
+export function Modal({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
+
   return (
     <div>
-      <button onClick={() => setIsOpen(!isOpen)}>Toggle Dialog</button>
-      {isOpen && <div className="dialog">{children}</div>}
+      <button onClick={() => setIsOpen(true)}>Open Modal</button>
+      {isOpen && (
+        <div className="modal-backdrop">
+          {/* children is rendered on the server and passed as pre-rendered JSX! */}
+          {children}
+        </div>
+      )}
     </div>
   );
 }
 
-// src/page.jsx (Server Component)
-import Modal from "@/components/modal";
-import UserAnalytics from "@/components/user-analytics"; // Server Component
+// src/page.tsx (Server Component)
+import { Modal } from "@/components/modal";
+import { HeavyServerProfile } from "@/components/heavy-profile"; // Server Component
 
 export default function Page() {
   return (
     <Modal>
-      {/* UserAnalytics executes purely on the server */}
-      <UserAnalytics />
+      {/* HeavyServerProfile remains 100% on the server! */}
+      <HeavyServerProfile />
     </Modal>
   );
 }
 ```
 
-### Flight Serialization Boundary & Supported Props
+#### 6.3. Client-First with Server Data (`getProps`)
 
-When passing props from a Server Component to a Client Component, data crosses the network boundary (serialized as React Flight JSON). Props passed across this boundary must be serializable.
+If you are building an interactive canvas, editor, or complex SPA dashboard and prefer traditional React where you can use `useState` and `onClick` anywhere in the page without boundary splitting, use Dinou's **Client-First Model**:
 
-- **Supported Data Types:**
-  - **Primitives:** `string`, `number`, `boolean`, `null`, `undefined`, `bigint`.
-  - **Plain Objects & Arrays:** Objects and collections containing serializable values (e.g. `{ id: 1, name: "Dinou" }`).
-  - **Dates:** `Date` objects are serialized and reconstructed by React on the client.
-  - **React Elements (JSX):** Server Components passed as `children` or named JSX slot props.
-  - **Promises:** Un-awaited promises passed directly from Server to Client (unwrapped synchronously via React 19's native `use()`).
-  - **Server Functions:** Bound action functions marked with `"use server"`.
-- **Non-Serializable / Unsupported Types:**
-  - **Client Callback Functions:** Cannot pass client functions (e.g., `onClick={() => ...}`) from Server Components across the Flight boundary.
-  - **Class Instances:** Class prototypes are stripped; methods are not transferred across the Flight boundary.
-  - **Symbols & WeakMaps:** Non-enumerable or memory-bound JavaScript data structures.
+```tsx
+// src/canvas/page_functions.ts - Runs securely on the server
+import db from "@/lib/db";
 
-### SSR Execution Safety Rule for Client Components
+export async function getProps(params: { id: string }) {
+  const project = await db.projects.findById(params.id);
+  return { project };
+}
 
-Client Components are pre-rendered on the server to HTML during initial page load to guarantee instant First Contentful Paint (FCP) and optimal SEO indexing before hydrating in the browser.
+// src/canvas/page.tsx - Entire page is a Client Component
+"use client";
+import { useState } from "react";
 
-> [!WARNING]
-> Because Client Components execute once on the server during SSR, direct access to browser-only globals (`window`, `document`, `localStorage`, `navigator`) in the component render body will throw an error during server evaluation.
+export default function CanvasPage({ project }: { project: any }) {
+  const [layers, setLayers] = useState(project.initialLayers);
 
-- **Safe Browser Access:** Always guard browser-only APIs inside `useEffect` / `useLayoutEffect`, or behind an environment check:
-  ```tsx
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("auth_token");
-  }
-  ```
+  return (
+    <div>
+      <Toolbar onAddLayer={(l) => setLayers([...layers, l])} />
+      <Stage layers={layers} />
+    </div>
+  );
+}
+```
 
-### Import Cascading Behavior
+#### 6.4. Granular Caching with `<DinouCacheSlot>` (Vertical Micro-ISR)
 
-Once a file declares `"use client"`, all components, helper functions, and third-party libraries imported by that file are automatically included in the client bundle. You do not need to add `"use client"` to child sub-components or utility modules imported by a Client Component.
+A common architectural trap in dynamic RSC applications is converting heavy server widgets into Client Components just to gain client-side memory caching (such as SWR or TanStack Query). In Dinou, `<DinouCacheSlot>` provides component-level server caching (**Vertical Segmentation**) directly in the RSC layer.
+
+##### Can a `<DinouCacheSlot>` Contain Client Components?
+
+**Yes, absolutely.** While `<DinouCacheSlot>` itself is an async Server Component that executes exclusively on the server, its children can freely render interactive Client Components. Dinou caches the Client Component reference along with its pre-computed props. The client hydrates it normally with full interactivity (events, state, animations):
+
+```tsx
+// src/dashboard/page.tsx (Dynamic page with an isolated cached slot)
+import { Suspense } from "react";
+import { DinouCacheSlot } from "dinou/server";
+import { db } from "@/lib/db";
+import { InteractiveChart } from "./interactive-chart"; // "use client"
+import { AnalyticsSkeleton } from "./skeletons";
+
+async function HeavyAnalyticsWidget() {
+  const data = await db.analytics.aggregateBigData(); // 2-second query
+  return <InteractiveChart data={data} />;
+}
+
+export default function DashboardPage() {
+  return (
+    <main className="p-8">
+      {/* Micro-ISR hole: wrapped in Suspense so cache misses stream without blocking TTFB */}
+      <Suspense fallback={<AnalyticsSkeleton />}>
+        <DinouCacheSlot id="analytics-slot" revalidate={300} tag="analytics">
+          <HeavyAnalyticsWidget />
+        </DinouCacheSlot>
+      </Suspense>
+    </main>
+  );
+}
+```
+
+#### 6.5. Common Traps & Anti-Patterns to Avoid
+
+- **Trap 1: Placing `"use client"` on the root layout.** Marking `src/layout.tsx` as a Client Component cascades the client boundary to every single page in your application. Root layouts should always be Server Components to protect secrets and enable streaming.
+- **Trap 2: Direct Server Component imports in Client files.** Never write `import ServerComponent from "./ServerComponent"` inside a file containing `"use client"`. Use the Composition Pattern (Section 6.2) and pass it as `children` instead.
+- **Trap 3: Accessing browser APIs in component body during SSR.** Calling `window.innerWidth` or `localStorage.getItem()` outside of a `useEffect` in a Client Component causes server pre-rendering crashes. Always wrap browser calls in `useEffect` or an environment check.
+- **Trap 4: Passing non-serializable objects across boundaries.** Do not pass callback functions or ORM model class instances with methods as props to Client Components. Extract plain JavaScript objects or use Server Functions (`"use server"`) for actions.
+- **Trap 5: Fetching data in Client Components via `useEffect` on mount.** In modern RSC architectures, fetching on mount via `useEffect` creates network waterfalls, causes layout shifts, and misses server streaming. Pass data from Server Components or use Strategy 9 (RSC Promise) / Strategy 12 (Server Function RPC).
 
 ---
 
@@ -1347,98 +1584,490 @@ When deciding which strategy to apply to a new feature or page, follow this quic
 
 ---
 
-## Rendering Strategies
+## Static & Dynamic Rendering Strategies
 
-Dinou incorporates an intelligent **Zero-Config Hybrid Rendering Engine**. You do not need to manually configure routes as "Static" or "Dynamic"—the framework automatically detects the optimal strategy.
+Dinou is **Static by Default**. It provides a continuum of rendering strategies—from build-time SSG and stale-while-revalidate ISR to real-time Dynamic SSR, revolutionary **Partial Prerendering (PPR)**, and component-level Micro-ISR with `<DinouCacheSlot>`.
 
-### Zero-Config Hybrid Model
+### Overview: Static by Default Architecture
 
-1. **Static by Default (SSG):** If a route does not access request-specific information (cookies, headers, search parameters), Dinou generates static HTML and RSC payloads into `.dinou/dist2/`.
-2. **Dynamic on Demand (SSR):** If a route accesses request-time headers, cookies, or query parameters via `getContext()`, Dinou automatically bails out of static generation and renders the page dynamically per request.
+In Dinou, every route is assumed to be static until proven otherwise. During `dinou build`, the compiler analyzes route segments, components, and loader functions to evaluate whether a route can be pre-rendered or requires real-time request data:
 
-```jsx
-// src/profile/page.jsx
-import { getContext } from "dinou";
-import { fetchUser } from "@/lib/auth";
+1. **Static by Default:** Routes without dynamic dependencies are pre-rendered into immutable HTML and RSC payloads at build time, achieving **0ms TTFB** at the CDN edge.
+2. **Dynamic Bailout:** When a page reads cookies, request headers, or sets `revalidate: 0`, Dinou automatically bails out to Live SSR on every incoming request.
+3. **Hybrid Continuum:** Escape the binary choice: stream dynamic components into a static shell with **PPR**, or isolate component caching with **`<DinouCacheSlot>`**.
 
-export default async function ProfilePage() {
-  const ctx = getContext();
-  
-  // Accessing request cookies automatically switches this page to Dynamic SSR
-  const token = ctx?.req.cookies?.session_token;
-  if (!token) return <p>Please log in</p>;
+---
 
-  const user = await fetchUser(token);
-  return <h1>Welcome, {user.name}</h1>;
+### 1. Static Site Generation (SSG) & Bailout
+
+Pure static rendering pre-generates HTML and RSC files during the build phase (`npm run build`). Production server startup is instantaneous, and static pages achieve the fastest possible Time to First Byte (TTFB) cached by Edge CDNs globally.
+
+#### 1.1. Pure Static Pre-rendering
+
+Any page that does not consume request-specific headers, cookies, or query parameters and does not set `revalidate < 1` is automatically generated as static HTML:
+
+```tsx
+// src/about/page.tsx
+// Automatically rendered as static HTML during build time ('npm run build')
+export default function AboutPage() {
+  return (
+    <article className="prose">
+      <h1>About Us</h1>
+      <p>This page is pre-rendered once and served statically forever.</p>
+    </article>
+  );
 }
 ```
 
-### Static Site Generation (SSG at Build Time)
+#### 1.2. Automatic Static Bailout
 
-In Dinou v7, static pre-rendering runs automatically during the production build (`npm run build`). All static routes and catch-all dynamic paths declared via `getStaticPaths()` in `page_functions.ts` are generated into `.dinou/dist2/` before the server starts. This enables zero cold-start latency and instant static site exports (`npm run export-static`).
+If a Server Component reads request-specific data at render time without wrapping it inside a dynamic streaming boundary (React `<Suspense>` with Partial Prerendering / PPR enabled), Dinou automatically "bails out" of static generation and transitions the entire page into Dynamic SSR for that request:
 
-### Incremental Static Regeneration (ISR)
+```tsx
+// src/profile/page.tsx
+import { getContext } from "dinou";
+import db from "@/lib/db";
 
-Incremental Static Regeneration allows you to serve pre-rendered static pages while periodically refreshing them in the background when content changes.
+export default async function ProfilePage() {
+  const context = getContext();
 
-In Dinou v7, `revalidate` is the **single source of truth** for route rendering behavior, and all time units are **strictly in seconds**:
+  // ⚠️ Reading cookies outside <Suspense> triggers an Automatic Static Bailout
+  // This page will now be rendered dynamically on every incoming request
+  const sessionToken = context?.req.cookies["session_token"];
+  const user = await db.users.findByToken(sessionToken);
+
+  return <h1>Welcome back, {user?.name}</h1>;
+}
+```
+
+##### Bailout Triggers in Server Components
+
+Automatic bailout occurs when reading `context.req.cookies`, `context.req.headers`, or `context.req.query` (URL search parameters) during server component execution without wrapping the access in a React `<Suspense>` boundary.
+
+##### What about Client Components and `useSearchParams()`?
+
+Client Components (`"use client"`) that call `useSearchParams()` **do not trigger dynamic bailout**. The page remains 100% static (SSG). During build time, the component is pre-rendered with an empty parameter set, and live URL parameters are synchronized in the browser upon hydration.
+
+> [!TIP]
+> **Preventing Hydration Mismatches with Search Parameters:**  
+> If a Client Component immediately renders `searchParams.get("q")` in its initial JSX markup, the server-generated static HTML (where the query was empty at build time) will differ from the live browser DOM (e.g. `?q=react`), triggering a React hydration mismatch error.
+> 
+> **Recommended Fix:** Keep initial render deterministic, then read and apply live search parameters inside `useEffect()` after mounting:
+> ```tsx
+> // src/components/search-filter.tsx
+> "use client";
+> 
+> import { useSearchParams } from "dinou";
+> import { useState, useEffect } from "react";
+> 
+> export function SearchFilter() {
+>   const searchParams = useSearchParams();
+>   const [query, setQuery] = useState<string | null>(null);
+> 
+>   useEffect(() => {
+>     // Synchronize client-side only after mounting -> eliminates hydration mismatch
+>     setQuery(searchParams.get("q") ?? "");
+>   }, [searchParams]);
+> 
+>   if (query === null) {
+>     return <span className="text-muted-foreground">Loading filter...</span>;
+>   }
+> 
+>   return <span>Filter: <strong>{query}</strong></span>;
+> }
+> ```
+> *Alternative (Live SSR):* If the initial HTML sent over the wire must contain search parameters for SEO, switch the page to Live SSR by exporting `export const revalidate = 0;` in `page_functions.ts`.
+
+---
+
+### 2. The Unified `revalidate` Strategy (Strict Seconds)
+
+In Dinou v7, the `revalidate` export in `page_functions.ts` (or `layout_functions.ts`) serves as the single source of truth for route rendering behavior. It is measured **strictly in seconds (s)**:
 
 | Value of `revalidate` | Strategy | Description |
 | :--- | :--- | :--- |
-| `false` | **Pure Static (SSG)** | Pre-rendered once at build time. Cached indefinitely until manual invalidation. |
-| `0` | **Dynamic SSR** | Rendered on every incoming HTTP request on the fly. |
-| `N` (number > 0) | **Time-Based ISR** | Pre-rendered, served instantly from cache, and revalidated in the background every `N` seconds (stale-while-revalidate). |
+| `false` (or omitted) | **Pure Static (SSG)** | Pre-rendered once at build time. Cached indefinitely until manual invalidation. |
+| `0` (or number < 1) | **Dynamic SSR** | Rendered on every incoming HTTP request on the fly. |
+| `N` (number >= 1) | **Time-Based ISR** | Pre-rendered, served instantly from cache, and revalidated in the background every `N` seconds. |
 
-Export `revalidate` from your route's `page_functions.ts`:
+#### 2.1. Dynamic SSR (`revalidate < 1` or `0`)
+
+To force a page to render dynamically on every single request (escaping the default static generation), set `revalidate` to `0`:
+
+```typescript
+// src/analytics/live/page_functions.ts
+
+// Escapes static generation: executes dynamic SSR on every request
+export const revalidate = 0;
+```
+
+> [!NOTE]
+> **Migration from Legacy `dynamic` Export:** In older versions of Dinou, dynamic rendering was toggled via `export function dynamic()`. In Dinou v7, the `dynamic` export has been completely removed. Setting `export const revalidate = 0;` is the official unified mechanism to escape static generation.
+
+#### 2.2. Incremental Static Regeneration (`revalidate >= 1`)
+
+When `revalidate >= 1`, Dinou serves pre-rendered static HTML/RSC payloads while regenerating the page in the background at most once every `N` seconds (stale-while-revalidate):
 
 ```typescript
 // src/blog/page_functions.ts
 
-// This page will regenerate in the background at most once every 60 seconds
+// Rebuilds the cached page in the background at most once every 60 seconds
 export const revalidate = 60; // Strict seconds (1 minute)
 ```
 
-- **How it works:** When a request arrives after the revalidation window has elapsed, the cached page is served immediately (stale-while-revalidate), while Dinou regenerates the new page in the background.
-- **On-Demand Revalidation:** You can also trigger immediate cache purging from Server Functions or webhooks using `revalidatePage("/blog/post-1")`, `revalidatePath("/blog")`, or `revalidateTag("posts")` (see [On-Demand Revalidation](#4-server-only-invalidation-primitives-dinouserver)).
-- **Edge ISR:** On edge platforms like Deno Deploy and Cloudflare Workers, ISR seamlessly uses distributed key-value storage (`DenoKVStorage`, `CloudflareKVStorage`) without needing a persistent disk.
+- **Background Revalidation Flow:** The first request after the 60s window receives the cached page immediately. Dinou re-executes the server render in the background. Subsequent visitors see the freshly generated version.
+- **Edge ISR Storage Adapters:** On edge platforms like Deno Deploy and Cloudflare Workers, ISR seamlessly uses distributed key-value storage (`DenoKVStorage`, `CloudflareKVStorage`, `MemoryStorage`) without needing a persistent disk.
 
-### Incremental Static Generation (ISG)
+---
 
-For dynamic routes with millions of potential pages (e.g. `/products/[id]`), generating every single page at build time is impractical. Dinou supports **ISG**: pages not pre-rendered at build time are rendered and cached on their very first request, and served as static files for all subsequent requests.
+### 3. Partial Prerendering (PPR)
 
-### Vertical Segmentation: Micro-ISR (`<DinouCacheSlot>`)
+Partial Prerendering (PPR) resolves the decades-old dilemma between static and dynamic rendering. Instead of forcing an entire page to be 100% static or 100% dynamic, PPR delivers a **pre-rendered static shell instantly (0ms TTFB)**, while streaming dynamic holes in parallel over the same HTTP response.
 
-When a page contains both static content and rapidly changing components, wrapping the high-frequency component in `<DinouCacheSlot>` enables independent caching:
+#### 3.1. Hybrid Architecture: Static Shell + Dynamic Holes
+
+At build time, Dinou compiles the layout, navigation, and static components into an immutable HTML shell. Any dynamic component wrapped in React `<Suspense>` is saved as a streaming placeholder hole (`<div data-ppr-hole="slot-id">...fallback...</div>`).
+
+##### The Single HTTP Response Timeline
+
+1. **0ms (Instant TTFB):** The browser receives the static shell with skeleton fallbacks directly from Edge CDN cache. Visual layout is painted immediately.
+2. **Request Processing:** Concurrently, Dinou executes the async Server Components inside `<Suspense>` on the server.
+3. **Streaming In-Place:** As each Suspense promise resolves, the HTML chunk and RSC payload are streamed down the same HTTP connection, replacing the skeleton with real content without full page reloads.
+
+##### Data Freshness: Pure SSG vs. Partial Prerendering
+
+- **Without PPR (Frozen Build Data):** Data is baked into the build artifact. Live inventory or user carts are stale upon deployment. Applications historically resorted to legacy client-side `useEffect() + fetch()` anti-patterns, suffering waterfalls, layout shifts, and spinners.
+- **With PPR (Request-Time Fresh Data):** The visual shell is delivered at `0ms` TTFB from the edge, while the component inside `<Suspense>` executes on the server on every incoming request. You get 100% fresh, live database data streamed directly to the browser without client fetch waterfalls.
+
+##### PPR as a Bailout Boundary: Containing Dynamic De-optimization
+
+Without PPR, dynamic data access is infectious: if a single nested component reads request cookies or headers, Dinou triggers an Automatic Static Bailout for the **entire page**, destroying static pre-rendering and edge caching for the whole route.
+
+With PPR enabled (`ppr = true`), React `<Suspense>` acts as an **isolated sandbox**. Dynamic data consumption inside the boundary does not escape to parent or sibling components:
 
 ```tsx
-import { DinouCacheSlot } from "dinou/server";
+// src/store/page.tsx
+import { Suspense } from "react";
+import { getContext } from "dinou";
+import db from "@/lib/db";
+import { ProductGallery } from "@/components/gallery";
+import { CartBadgeSkeleton } from "@/components/skeletons";
 
-export const revalidate = 3600; // Whole page shell cached for 1 hour
+// ⚠️ Dynamic component: reads request-specific session cookie
+async function LiveCartBadge() {
+  const context = getContext();
+  const sessionToken = context?.req.cookies["session_id"];
+  const cart = await db.carts.findActive(sessionToken);
 
-export default function MarketOverviewPage() {
+  return <div className="cart-badge">Items: {cart?.itemCount ?? 0}</div>;
+}
+
+export default function StorePage() {
   return (
-    <div>
-      <h1>Global Stock Exchange</h1>
-      <p>This static analysis refreshes once per hour.</p>
+    <main className="container">
+      {/* 1. Static Shell: 0ms TTFB, pre-rendered during build */}
+      <header className="navbar">
+        <h1>Flagship Store</h1>
+        
+        {/* 2. PPR Boundary: Isolates cookie bailout exclusively to this hole */}
+        <Suspense fallback={<CartBadgeSkeleton />}>
+          <LiveCartBadge />
+        </Suspense>
+      </header>
 
-      {/* This specific slot refreshes every 10 seconds independently */}
-      <DinouCacheSlot id="live-stock-ticker" revalidate={10}>
-        <LiveTicker />
-      </DinouCacheSlot>
+      {/* 3. Static Sibling: Remains 100% static and edge-cached */}
+      <ProductGallery />
+    </main>
+  );
+}
+```
+
+- **❌ Without PPR (Full-Page Bailout):** Reading `cookies["session_id"]` turns the entire page into dynamic SSR. Edge caching is lost, and the visitor waits with a blank screen.
+- **✅ With PPR (Isolated Hole Bailout):** The cookie bailout is quarantined inside `<Suspense>`. The navbar and product gallery are delivered instantly at `0ms` TTFB. Only the cart badge executes on the server and streams into place.
+
+#### 3.2. Enabling PPR & Specificity Hierarchy
+
+Dinou provides granular control over Partial Prerendering across three hierarchical levels:
+
+1. **Page Level (`page_functions.ts`) — Highest Priority:** A page can override any parent layout or global configuration:
+   ```typescript
+   // src/shop/products/[slug]/page_functions.ts
+   export const ppr = true; // Guarantees PPR on product details
+   ```
+2. **Layout Level (`layout_functions.ts`) — Subtree Cascading:** Applies to that layout and cascades to all its descendant subroutes:
+   ```typescript
+   // src/admin/layout_functions.ts
+   export const ppr = false; // Disables PPR for /admin and ALL subroutes
+   ```
+3. **Global Configuration (`dinou.config.mjs`):** Enables PPR globally across all eligible routes:
+   ```javascript
+   // dinou.config.mjs
+   import { defineConfig } from "dinou";
+   export default defineConfig({ ppr: true });
+   ```
+
+---
+
+### 4. Vertical Segmentation: Micro-ISR (`<DinouCacheSlot>`)
+
+Traditional full-stack frameworks only offer **Horizontal Segmentation** (caching an entire URL route or layout shell). When a dynamic page contains an expensive database widget, developers are often forced into an architectural trap: converting the widget to a Client Component with client-side cache libraries (SWR, TanStack Query), introducing bundle bloat, waterfall requests, and layout shifts.
+
+Dinou v7 introduces **Vertical Segmentation** with `<DinouCacheSlot>` from `"dinou/server"`. It keeps components securely on the server as React Server Components (RSC) while caching their rendered serialized Flight payload in server storage with dedicated TTLs and invalidation tags.
+
+#### 4.1. Component Caching: Dynamic vs. Static Patterns
+
+`<DinouCacheSlot>` functions as a universal caching primitive across two core architectural patterns:
+
+##### Implementation Pattern 1: Dynamic SSR Dashboard with Cached Slot
+
+The route runs in Live SSR mode (evaluating user cookies and personal greetings live). The heavy analytics calculation is cached on the server for 300 seconds and wrapped in React `<Suspense>`:
+
+```tsx
+// src/dashboard/page.tsx
+import { Suspense } from "react";
+import { DinouCacheSlot } from "dinou/server";
+import { FastUserProfile, SlowAnalyticsWidget } from "./widgets";
+import { AnalyticsSkeleton } from "./skeletons";
+
+export default function DashboardPage() {
+  return (
+    <main className="grid grid-cols-1 md:grid-cols-2 gap-6 p-6">
+      {/* 1. Dynamic Component: Evaluated live on every request (reads session/cookies) */}
+      <FastUserProfile />
+
+      {/* 2. Micro-ISR Slot: Cached on the server for 300 seconds */}
+      {/* ⚠️ Wrapped in <Suspense> so cache misses stream without blocking TTFB */}
+      <Suspense fallback={<AnalyticsSkeleton />}>
+        <DinouCacheSlot id="analytics-widget" tag="analytics" revalidate={300}>
+          <SlowAnalyticsWidget />
+        </DinouCacheSlot>
+      </Suspense>
+    </main>
+  );
+}
+```
+
+##### Implementation Pattern 2: Static / ISR Product Page with Asymmetric Slot
+
+The parent route has a slow horizontal revalidation of 24 hours (`revalidate: 86400`). Inside it, a volatile inventory counter revalidates vertically every 60 seconds (`revalidate={60}`) or on-demand:
+
+```tsx
+// src/products/[slug]/page_functions.ts
+export const revalidate = 86400; // Slow horizontal revalidation (24h)
+
+// src/products/[slug]/page.tsx
+import { Suspense } from "react";
+import { DinouCacheSlot } from "dinou/server";
+import { ProductHero, ProductDescription } from "./static-widgets";
+import { LiveStockCounter, StockSkeleton } from "./stock-widgets";
+
+export default function ProductDetailPage({ params }: { params: { slug: string } }) {
+  return (
+    <main className="container py-8 space-y-6">
+      {/* 1. Heavy Static Content: Cached at the CDN edge for 24 hours */}
+      <ProductHero slug={params.slug} />
+      <ProductDescription slug={params.slug} />
+
+      {/* 2. Asymmetric Micro-ISR Slot: Revalidates vertically every 60s */}
+      <Suspense fallback={<StockSkeleton />}>
+        <DinouCacheSlot 
+          id={`stock-${params.slug}`} 
+          tag={`stock-${params.slug}`} 
+          revalidate={60}
+        >
+          <LiveStockCounter slug={params.slug} />
+        </DinouCacheSlot>
+      </Suspense>
+    </main>
+  );
+}
+```
+
+> [!IMPORTANT]
+> **Boundary Placement: Why `<Suspense>` Must Wrap `<DinouCacheSlot>`**  
+> `<DinouCacheSlot>` is itself an asynchronous Server Component. When it awaits storage or renders on a cache miss, React encounters a pending promise in the parent page tree. Without an outer `<Suspense>`, suspension bubbles to the root, blocking the entire HTTP response and delaying fast sibling components.
+> 
+> **The Rule of Hierarchy:**
+> 1. `<Suspense fallback={<Skeleton />}>` → Controls browser streaming & instant visual layout.
+> 2. `<DinouCacheSlot revalidate={300}>` → Controls server cache storage, TTL, and cache tags.
+> 3. `<SlowAnalyticsWidget />` → Executes database queries and business logic.
+
+#### 4.2. Interactive Revalidation & On-Demand Purging
+
+Dinou provides specialized mechanisms to refresh or purge `<DinouCacheSlot>` instances without reloading the browser page:
+
+##### Client-Side In-Place Refresh (`refreshSlot`)
+
+Any interactive Client Component can trigger a surgical re-render of only that slot without full page reload or state loss:
+
+```tsx
+"use client";
+import { refreshSlot, useRouter } from "dinou";
+
+export function RefreshButton() {
+  const router = useRouter();
+
+  return (
+    <div className="flex gap-2">
+      {/* Option 1: Standalone (respects server slot TTL) */}
+      <button onClick={() => refreshSlot("analytics-widget")}>
+        Refresh Metrics
+      </button>
+
+      {/* Option 2: Force fresh (bypasses server slot TTL immediately) */}
+      <button onClick={() => router.refreshSlot("analytics-widget", { fresh: true })}>
+        Force Fresh
+      </button>
     </div>
   );
 }
 ```
 
-- When the page is requested, Dinou stitches together the cached page shell with the current cache state of the slot.
-- Invalidation can target the slot directly without evicting the surrounding page.
+- **`refreshSlot(id)` (Default):** Refreshes the client DOM with the server's current state. If the slot's server TTL has not expired, it returns cached server JSX without touching your database (protecting against button spam and traffic spikes).
+- **`refreshSlot(id, { fresh: true })` (Bypass):** Hard revalidation. Forces the server to ignore unexpired TTL, immediately re-run queries against the database, and update both cache and client.
 
-### Partial Prerendering (PPR)
+##### Server-Side Tag Invalidation (`revalidateTag`)
 
-Partial Prerendering combines the speed of static pre-rendering with the real-time capabilities of dynamic SSR.
-1. **Build Time:** The static shell of the page is rendered to static HTML. Dynamic components wrapped in `Suspense` are assigned a deterministic placeholder hole (`<div data-ppr-hole="slot-id">...fallback...</div>`).
-2. **First Byte:** The edge server immediately streams the static shell (0ms TTFB).
-3. **PPR Stream:** While the client paints the shell, the server resolves dynamic promises and streams replacement chunks down the open HTTP connection without blocking navigation.
+Mutations purge slots globally via `revalidateTag()` on the server, while the client immediately pulls the fresh result via `refreshSlot()`:
+
+```tsx
+// src/app/feed/actions.ts
+"use server";
+import { revalidateTag } from "dinou/server";
+import db from "@/lib/db";
+
+export async function publishPost(formData: FormData) {
+  const content = formData.get("content") as string;
+  await db.posts.insert({ content, createdAt: new Date() });
+
+  // Purges cache globally for ALL future visitors across CDNs and Micro-ISR slots
+  await revalidateTag("feed");
+}
+```
+
+##### Zero Skeleton Flash (`startTransition` + Stale-Preserving Fallback)
+
+While the server re-renders an expired slot during an interactive refresh, the user does **NOT** see a blank skeleton flash or layout shift. Dinou's internal client boundary wraps slot updates in `React.startTransition` and sets `fallback: children` (the previous DOM content). The existing widget stays interactive and visible until the new server stream arrives, then swaps seamlessly.
+
+To display an inline loading indicator on the button itself, wrap `refreshSlot` inside React's standard `useTransition()`:
+
+```tsx
+"use client";
+import { useTransition } from "react";
+import { refreshSlot } from "dinou";
+
+export function RefreshAnalyticsButton() {
+  const [isPending, startTransition] = useTransition();
+
+  const handleRefresh = () => {
+    startTransition(() => {
+      refreshSlot("analytics-widget");
+    });
+  };
+
+  return (
+    <button onClick={handleRefresh} disabled={isPending}>
+      {isPending ? "Refreshing Metrics..." : "Refresh Metrics"}
+    </button>
+  );
+}
+```
+
+#### 4.3. Horizontal vs. Vertical Segmentation & Anti-Patterns
+
+| Dimension | Scope | Configuration | Best For |
+| :--- | :--- | :--- | :--- |
+| **Horizontal Segmentation** | Route / Segment Level | `page_functions.ts`, `layout_functions.ts` | Whole-page SSG, ISR, and layout persistence. |
+| **Vertical Segmentation** | Component Subtree Level | `<DinouCacheSlot>` from `dinou/server` | Independent widget TTLs, asymmetric revalidation, and in-place client refreshes. |
+
+##### When NOT to Use `<DinouCacheSlot>`
+
+1. **100% Static Pages (SSG):** If an entire route is pre-rendered at build time with no revalidation, it is already cached as immutable HTML at the CDN. Slots add zero benefit.
+2. **Wrapping the Entire Page:** Wrapping the entire `page.tsx` body inside a slot reinvents horizontal caching. Declare `export const revalidate = 300` in `page_functions.ts` instead.
+3. **Unpartitioned Private User Data:** Never wrap private user data (such as a specific user's cart or session token) with a static slot ID. This would cache user A's private data and leak it to user B.
+
+---
+
+### 5. High-Traffic Synergy: PPR + `<DinouCacheSlot>`
+
+Nesting `<DinouCacheSlot>` inside a React `<Suspense>` boundary on a route with Partial Prerendering (PPR) unlocks the highest performance profile possible: **zero-delay initial delivery (`0ms` TTFB)** paired with **near-zero streaming delay (`~2ms`)** and **99.9% database query offloading**.
+
+- **PPR Alone (Uncached Dynamic Hole):** 0ms static shell from Edge CDN, but the hole waits for live DB execution (e.g. 1.5s) on *every single request*. 10,000 visitors/min = 10,000 live DB queries.
+- **PPR + `<DinouCacheSlot>` (Cached Streamed Hole):** 0ms static shell from Edge CDN + hole resolves from server cache in `~2ms`. 10,000 visitors/min = **1 database query per TTL window** (99.9% database offload).
+
+#### Implementation Pattern: High-Traffic Telemetry Dashboard
+
+```typescript
+// src/telemetry/page_functions.ts
+import type { PageFunctions } from "dinou";
+
+// Enable Partial Prerendering on this high-traffic route
+export const ppr: PageFunctions["ppr"] = true;
+```
+
+```tsx
+// src/telemetry/page.tsx
+import { Suspense } from "react";
+import { DinouCacheSlot } from "dinou/server";
+import { TelemetryHeader, TelemetryFooter } from "./static-shell";
+import { HeavyMetricsGraph, GraphSkeleton } from "./graph-widgets";
+
+export default function TelemetryPage() {
+  return (
+    <main className="container py-8 space-y-6">
+      {/* 1. Static Shell: Delivered instantly in 0ms TTFB from Edge CDN */}
+      <TelemetryHeader />
+
+      {/* 2. PPR Dynamic Hole + Micro-ISR Slot:
+             - Fallback skeleton sent immediately in initial layout
+             - Hole streams from server cache in ~2ms for subsequent visitors
+             - Database query runs only ONCE every 60 seconds */}
+      <Suspense fallback={<GraphSkeleton />}>
+        <DinouCacheSlot id="operations-telemetry" tag="telemetry" revalidate={60}>
+          <HeavyMetricsGraph />
+        </DinouCacheSlot>
+      </Suspense>
+
+      <TelemetryFooter />
+    </main>
+  );
+}
+```
+
+---
+
+### 6. Incremental Static Generation (ISG on-demand)
+
+While ISR updates existing pre-rendered pages, **ISG (Incremental Static Generation)** generates new dynamic paths on demand that were omitted from the build-time `getStaticPaths` list.
+
+#### 6.1. On-Demand Path Generation
+
+Any route path omitted from `getStaticPaths` will be generated dynamically when the first visitor requests it, cached, and then served as static HTML to subsequent visitors:
+
+```typescript
+// src/products/[id]/page_functions.ts
+
+// Pre-render only the top 10 products at build time:
+export const getStaticPaths = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+
+// Any other ID (e.g. /products/452) will be generated on-demand
+// on its first visitor and cached permanently.
+```
+
+#### 6.2. Governance APIs (`validateParams` & `allowISG`)
+
+Dinou provides strict server-side governance exports to secure on-demand generation against cache pollution and DDoS:
+
+- **`validateParams(params)`:** Validates route parameters before generation begins. Returning `false` halts rendering immediately and serves an instant 404:
+  ```typescript
+  export function validateParams(params: { id: string }) {
+    return /^\d+$/.test(params.id); // Only allow numeric IDs
+  }
+  ```
+- **`allowISG`:** Disables on-demand generation entirely. When set to `false`, any path not pre-rendered in `getStaticPaths` returns 404 without querying the server:
+  ```typescript
+  export const allowISG = false; // Strict SSG only
+  ```
 
 ---
 
