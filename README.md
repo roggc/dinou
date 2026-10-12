@@ -63,6 +63,16 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [5.2. Escaping Route Scanning with Underscore (_folder)](#52-escaping-route-scanning-with-underscore-_folder)
     - [5.3. Parallel Routes & Slots (@slot)](#53-parallel-routes--slots-slot)
     - [5.4. Slot Error Containment Architecture](#54-slot-error-containment-architecture)
+- [Navigation](#navigation)
+  - [1. Navigation Overview](#1-navigation-overview)
+  - [2. The `<Link>` Component & Prefetching](#2-the-link-component--prefetching)
+  - [3. Programmatic Navigation (useRouter)](#3-programmatic-navigation-userouter)
+  - [4. Client Router Cache & The fresh Prop](#4-client-router-cache--the-fresh-prop)
+    - [4.1. How the Client Router Cache Works](#41-how-the-client-router-cache-works)
+    - [4.2. Cache Invalidation with the fresh Prop](#42-cache-invalidation-with-the-fresh-prop)
+    - [4.3. Comparison: When to Use Which Mechanism](#43-comparison-when-to-use-which-mechanism)
+  - [5. Route Transitions (useNavigationLoading)](#5-route-transitions-usenavigationloading)
+  - [6. Relative Routing Rules](#6-relative-routing-rules)
 - [Component Architecture: Server and Client Components](#component-architecture-server-and-client-components)
   - [1. The RSC Mental Model](#1-the-rsc-mental-model)
   - [2. Server Components (RSC)](#2-server-components-rsc)
@@ -905,6 +915,208 @@ Dinou isolates errors within parallel slots to prevent a single widget failure f
 - **Slot with `error.tsx`:** If the slot fails, only that specific slot renders its local error UI. The rest of the page and sibling slots remain completely operational.
 - **Slot without `error.tsx`:** If an unhandled exception occurs in a slot with no `error.tsx`, Dinou safely falls back to rendering `null` for that slot without taking down the page.
 - **Layout & Sibling Resilience:** Sibling slots, the main `children` page, and parent layouts remain fully mounted and interactive even if an individual slot fails to render.
+
+## Navigation
+
+Master Dinou's client-side SPA navigation: smooth soft transitions, automatic hover prefetching, the Client Router Cache lifecycle, cache busting with the `fresh` prop, imperative `useRouter` controls, and Directory-First relative routing.
+
+> [!TIP]
+> **Looking for Type-Safe Navigation?**
+> Dinou generates automatic route types so `<Link href="...">` and `router.push("...")` provide zero-runtime autocomplete and compile-time error checking.
+
+---
+
+### 1. Navigation Overview
+
+In Dinou, navigating between routes does not trigger a full browser refresh (`window.location.reload`). Instead, Dinou operates as a high-performance single-page application (SPA):
+
+- **Preserved Shell:** Persistent layouts (`layout.tsx`) never unmount, maintaining video playback, active form inputs, scroll positions, and local component state across page changes.
+- **Flight Streaming:** Only the newly navigated route's Server Components are fetched over the wire via React Flight payloads.
+- **Concurrent Transitions:** Transitions execute inside React 19's `startTransition`, ensuring that the current UI stays fully responsive and interactive during data fetching.
+
+---
+
+### 2. The `<Link>` Component & Prefetching
+
+The primary way to navigate between pages is the `<Link>` component imported from `"dinou"`. It intercepts click events, prevents hard reloads, and handles background prefetching:
+
+```tsx
+import { Link } from "dinou";
+
+export function NavigationBar() {
+  return (
+    <nav className="flex gap-4">
+      {/* ✅ Type-Safe href: autocompleted in your IDE via DinouRoute */}
+      <Link href="/dashboard">Dashboard</Link>
+
+      {/* ✅ Dynamic interpolation typed against registered routes */}
+      <Link href={`/blog/${post.slug}`}>Post</Link>
+
+      {/* Disable prefetch for heavy routes or rarely visited pages */}
+      <Link href="/analytics" prefetch={false}>
+        Analytics
+      </Link>
+
+      {/* ❌ TypeScript compile error on invalid/dead links when using type-safe routing */}
+      {/* <Link href="/broken-link">Broken</Link> */}
+    </nav>
+  );
+}
+```
+
+> [!NOTE]
+> **Native HTML `<a>` Anchor Elements:**
+> In Dinou, standard HTML `<a>` tags also automatically trigger client-side soft navigation via global event delegation. However, `<Link>` is recommended because it provides compile-time type safety, background prefetching on hover, and the `fresh` prop.
+
+---
+
+### 3. Programmatic Navigation (useRouter)
+
+To navigate imperatively from event handlers, timers, or form submissions, use the `useRouter()` hook inside Client Components (`"use client"`):
+
+```tsx
+"use client";
+
+import { useRouter } from "dinou";
+
+export default function LoginButton() {
+  const router = useRouter();
+
+  const handleLogin = async () => {
+    await loginUser();
+    
+    // Navigate programmatically
+    router.push("/dashboard");
+    
+    // Or force fresh data after mutation:
+    // router.push("/dashboard", { fresh: true });
+  };
+
+  return <button onClick={handleLogin}>Log In</button>;
+}
+```
+
+#### Method Reference
+
+| Method | Behavior & Description |
+| :--- | :--- |
+| `router.push(href, options)` | Navigates to the route and adds a new entry to the browser history stack. Supports `{ fresh: true }`. |
+| `router.replace(href, options)` | Navigates to the route, replacing the current history entry without pushing a new history state. Supports `{ fresh: true }`. |
+| `router.back()` | Navigates back to the previous page in history (equivalent to clicking the browser Back button). |
+| `router.forward()` | Navigates forward to the next page in the history stack. |
+| `router.refresh()` | **Soft Reload:** Re-fetches the current route data from the server and updates server components without losing client React state or scroll position. |
+| `router.refreshSlot(slotId)` | Re-fetches and updates an individual `<DinouCacheSlot>` component without re-rendering the surrounding page. |
+
+---
+
+### 4. Client Router Cache & The fresh Prop
+
+To deliver instant page transitions without unnecessary server requests, Dinou features an in-memory Client Router Cache. Understanding how this cache operates is key to knowing when and why to use the `fresh` prop.
+
+#### 4.1. How the Client Router Cache Works
+
+During client execution, Dinou maintains three dedicated in-memory caches in the browser tab:
+
+1. **`pageCache`:** Stores prefetched and visited RSC promises keyed by `pathname + search`.
+2. **`scrollCache`:** Retains exact window and container scroll coordinates keyed by history state ID.
+3. **`popstate`:** Reads from `pageCache` and restores scroll without network requests on back/forward.
+
+##### The Navigation Lifecycle
+1. **On Hover:** When the mouse enters a `<Link href="/pricing">`, Dinou automatically prefetches the route payload in the background and stores the pending RSC promise directly into `pageCache`.
+2. **On Click:** The router initiates navigation to `"/pricing"`. Because the payload was already prefetched into `pageCache`, the transition renders instantly with 0ms network latency.
+3. **On Back / Forward:** Browser `popstate` events read from `pageCache` and restore the previous scroll position from `scrollCache` without making any network requests.
+
+#### 4.2. Cache Invalidation with the fresh Prop
+
+While caching provides instantaneous navigation, pages with volatile data or pages visited immediately after a mutation (e.g., checkout, profile updates, or inventory counters) need fresh server state. The `fresh` prop provides explicit, predictable cache busting:
+
+##### What happens under the hood when fresh is true:
+- **No Stale Prefetch:** Hovering over a `<Link fresh>` does not prefetch potentially stale data before the user actually clicks.
+- **Cache Eviction:** Upon navigation, the router explicitly runs `pageCache.delete(targetUrl)`, removing any prior cached RSC promise.
+- **Live Re-Execution:** Issues a fresh HTTP request directly to the server, re-executing server components and page functions with latest data.
+
+##### Usage Examples:
+```tsx
+// Ideal for live feeds, stock tickers, or carts
+<Link href="/live-feed" fresh>
+  Live Feed
+</Link>
+```
+
+```tsx
+// Navigate after a mutation to force fresh server data
+const handleUpdate = async () => {
+  await updateProfile(data);
+  router.push("/profile", { fresh: true });
+};
+```
+
+#### 4.3. Comparison: When to Use Which Mechanism
+
+| Mechanism / Scope | Cache Behavior | Network Request | Typical Use Case |
+| :--- | :--- | :--- | :--- |
+| **Standard `<Link>`** | Uses `pageCache` if prefetched or visited | 0ms if in cache; single request on first visit | General navigation, blogs, docs, marketing pages |
+| **`<Link fresh>` / `{ fresh: true }`** | Purges `pageCache.delete(url)` | Always fetches live RSC payload from server | Post-mutation redirects, active carts, volatile feeds |
+| **`router.refresh()`** | Purges `pageCache.delete(currentPath)` | Re-fetches current route in-place | Polling, server function response handling, reload button |
+| **Hard Reload (F5)** | Destroys all memory (all caches lost) | Full HTML document download + re-hydration | Emergency fallback; loses all client state |
+
+---
+
+### 5. Route Transitions (useNavigationLoading)
+
+In Dinou, all client-side navigations execute concurrently inside React 19's `startTransition`. This ensures that the current view remains fully interactive and visible while the target page's Server Components stream in from the server.
+
+To inform users that a transition is occurring behind the scenes, Dinou provides the `useNavigationLoading()` hook:
+
+- Returns `true` while a route payload is actively streaming or preparing in the background, and resets to `false` the moment React 19 commits the new page tree.
+- Evaluates to `false` during server-side rendering (SSR), preventing hydration mismatches and flickering when the document first mounts.
+
+#### Example: Global Top Navigation Progress Bar
+
+Mount a client loading indicator in your root layout to provide visual feedback (similar to GitHub or YouTube) whenever a route transition is pending:
+
+```tsx
+"use client";
+
+import { useNavigationLoading } from "dinou";
+
+export function NavigationProgressBar() {
+  const isNavigating = useNavigationLoading();
+
+  if (!isNavigating) return null;
+
+  return (
+    <div
+      role="progressbar"
+      aria-label="Page loading"
+      className="fixed top-0 left-0 right-0 z-50 h-1 bg-blue-500/20 overflow-hidden pointer-events-none"
+    >
+      <div className="h-full bg-blue-600 dark:bg-blue-400 animate-pulse w-full transition-all duration-300" />
+    </div>
+  );
+}
+```
+
+> [!TIP]
+> Because prefetched links resolve instantly in 0ms directly from `pageCache`, this progress bar only surfaces on fresh fetches (such as navigation with `fresh: true` or un-prefetched dynamic routes), keeping transitions ultra snappy.
+
+---
+
+### 6. Relative Routing Rules
+
+Dinou resolves relative navigation paths (such as `about`, `./about`, or `../dashboard`) using a **Directory-First Convention**. This provides intuitive navigation that accurately mirrors your file system.
+
+In a standard web browser, a URL like `/blog/hello` (without a trailing slash) treats `hello` as a file name, so a link to `about` resolves to `/blog/about`.
+
+In Dinou, every route is treated as a directory because physically, each page is a folder containing a `page.tsx` component (e.g. `src/blog/hello/page.tsx`). Resolving relatively from a page navigates relative to that route's folder:
+
+| Current Path | Relative Target | Resolved Path |
+| :--- | :--- | :--- |
+| `/blog/hello` | `about` | `/blog/hello/about` |
+| `/blog/hello` | `./about` | `/blog/hello/about` |
+| `/blog/hello` | `../about` | `/blog/about` |
+
+This rule applies uniformly across all navigation methods, including the `<Link>` component and programmatic calls like `router.push()`.
 
 ## Component Architecture: Server and Client Components
 
