@@ -240,6 +240,18 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [Domain Verification & .well-known](#domain-verification--well-known)
     - [OpenGraph & Social Share Cards](#opengraph--social-share-cards)
   - [4. public/ vs. Imported Assets (src/)](#4-public-vs-imported-assets-src)
+- [Styles & CSS Architecture](#styles--css-architecture)
+  - [Styling in Dinou](#styling-in-dinou)
+  - [Linking /styles.css](#linking-stylescss)
+    - [React 19 precedence Attribute](#react-19-precedence-attribute)
+  - [Tailwind CSS (v4 Engine)](#tailwind-css-v4-engine)
+    - [Custom @theme & Directives](#custom-theme--directives)
+  - [CSS Modules (*.module.css)](#css-modules-modulecss)
+    - [Scoped Class Names & Resolution](#scoped-class-names--resolution)
+  - [Global CSS & Path Aliases](#global-css--path-aliases)
+  - [Instant CSS Hot Module Replacement](#instant-css-hot-module-replacement)
+  - [TypeScript Declarations (dinou/env)](#typescript-declarations-dinouenv)
+  - [Complete End-to-End Example](#complete-end-to-end-example)
 - [Configuration API (`dinou.config.js`)](#configuration-api-dinouconfigjs)
   - [1. Universal Middleware (`onRequest`)](#1-universal-middleware-onrequest)
   - [2. SWC Disk-Mirror (`useSwcDiskMirror`)](#2-swc-disk-mirror-useswcdiskmirror)
@@ -5852,6 +5864,300 @@ Dinou provides two distinct mechanisms for handling assets. Choose the right pat
 | **URL Path & Naming** | **Fixed, exact filename** (e.g. `/favicon.ico`) | **Path-hashed filename** (e.g. `/assets/logo-a9f2bc.png`) |
 | **Referencing Syntax** | `<img src="/images/hero.png" />` | `import hero from "./hero.png";`<br />`<img src={hero} />` |
 | **Best For** | Favicons, robots.txt, sitemaps, verification files, PDFs, OpenGraph cards | Component UI icons, bundled CSS background images, media imported in JS/TSX |
+
+---
+
+## Styles & CSS Architecture
+
+### Styling in Dinou
+
+Dinou provides built-in, out-of-the-box support for the modern CSS ecosystem without requiring complex bundler setup. Under the hood, Dinou orchestrates PostCSS, `@tailwindcss/postcss`, Autoprefixer, and `postcss-modules` to:
+
+- **Extract all styles** across Server and Client Components into a single, optimized production bundle served at `/styles.css`.
+- **Eliminate CSS specificity conflicts** by compiling CSS Modules with cryptographic scoped hashing.
+- **Provide sub-millisecond Hot Module Replacement (HMR)** in development, updating styles in place without full page reloads or React state loss.
+- **Resolve TypeScript path aliases** (such as `@/styles/tokens.css`) directly inside your CSS `@import` rules.
+
+- **Tailwind CSS v4:** Modern CSS-first engine. No `tailwind.config.js` required; configured with native `@theme` blocks.
+- **CSS Modules:** Locally scoped classes for component-level isolation with automatic TypeScript ambient declarations.
+- **Single-File Extraction:** All styles coalesce into `/styles.css`, eliminating Flash of Unstyled Content (FOUC).
+
+### Linking /styles.css
+
+Because Dinou bundles all global styles, Tailwind classes, and CSS module rules into a unified stylesheet, you **must manually link** the stylesheet in your root layout or document `<head>`:
+
+```html
+<link href="/styles.css" rel="stylesheet" precedence="default" />
+```
+
+#### React 19 precedence Attribute
+
+In React 19 and React Server Components (RSC), `<link rel="stylesheet">` tags accept a special `precedence` attribute (e.g. `precedence="default"`). This tells the React runtime:
+
+1. **Resource Hoisting:** React hoists the link tag into the document `<head>` automatically, even if rendered inside a nested sub-component or layout.
+2. **Suspense & Streaming Synchronization:** React pauses rendering of stream-dependent HTML until the critical stylesheet has finished loading in the browser, preventing Flash of Unstyled Content (FOUC).
+3. **Deduplication:** If multiple components request `/styles.css` with the same precedence, React ensures only a single link tag is rendered in the final DOM.
+
+### Tailwind CSS (v4 Engine)
+
+Dinou incorporates the official **Tailwind CSS v4** engine via `@tailwindcss/postcss`. Tailwind v4 is fundamentally CSS-native: there is no JavaScript config file (`tailwind.config.js`) required by default.
+
+To enable Tailwind CSS across your application, simply import it at the top of your global CSS file (typically `src/globals.css`):
+
+```css
+/* src/globals.css */
+@import "tailwindcss";
+```
+
+#### Custom @theme & Directives
+
+In Tailwind v4, custom colors, fonts, spacing, and breakpoints are defined directly in CSS using the `@theme` directive:
+
+```css
+/* src/globals.css */
+@import "tailwindcss";
+
+@theme {
+  --color-brand-primary: #3b82f6;
+  --color-brand-dark: #1e293b;
+  --font-display: "Inter", system-ui, sans-serif;
+  --radius-badge: 0.375rem;
+}
+
+/* Custom utility definitions */
+@utility text-balance {
+  text-wrap: balance;
+}
+
+/* Base style overrides */
+@layer base {
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
+```
+
+> [!NOTE]
+> Classes like `bg-brand-primary`, `font-display`, and `text-balance` are generated automatically by Tailwind v4 during compilation.
+
+### CSS Modules (*.module.css)
+
+When you want component-scoped styling without utility classes or global selector collisions, use **CSS Modules**. Any file ending in `.module.css` is processed automatically by Dinou's PostCSS module compiler.
+
+#### Scoped Class Names & Resolution
+
+During compilation, Dinou transforms local class names into globally unique identifiers using its internal `createScopedName` generator:
+
+```css
+/* src/components/card.module.css */
+.card {
+  padding: 1.5rem;
+  border-radius: 0.75rem;
+  background-color: var(--card-bg, #ffffff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+.badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #3b82f6;
+}
+```
+
+Import the module object in your component and apply the scoped keys:
+
+```tsx
+// src/components/card.tsx
+"use client";
+
+import styles from "./card.module.css";
+
+export function FeatureCard({ title, badge }: { title: string; badge: string }) {
+  return (
+    <div className={styles.card}>
+      <span className={styles.badge}>{badge}</span>
+      <h3 className="text-lg font-bold mt-2">{title}</h3>
+    </div>
+  );
+}
+```
+
+> [!TIP]
+> The compiled DOM renders classes like `_card__card___a1b2c`, guaranteeing zero styling overlap with any other card component in the application.
+
+### Global CSS & Path Aliases
+
+You can import CSS files anywhere in your application tree:
+
+- **Root Layout:** Import `./globals.css` in your root `src/layout.tsx` to establish base reset rules, design tokens, and Tailwind directives.
+- **Component Files:** Import local stylesheets or third-party library CSS (e.g. `import "katex/dist/katex.min.css";`) directly inside the component that uses them.
+- **CSS `@import` with Path Aliases:** Dinou integrates `postcss-import` with its internal path alias resolver. You can reference paths configured in your `tsconfig.json` inside CSS files:
+
+```css
+/* src/styles/main.css */
+@import "@/styles/tokens.css";
+@import "@/styles/typography.css";
+@import "tailwindcss";
+```
+
+### Instant CSS Hot Module Replacement
+
+> [!TIP]
+> **Sub-Millisecond HMR & Zero State Loss:** During development, Dinou incrementally recompiles modified `.css` and `.module.css` files and updates `/styles.css` in place via WebSocket. Styles refresh instantly with **zero full page reloads**, keeping component state, form inputs, dialogs, and scroll positions intact.
+
+### TypeScript Declarations (dinou/env)
+
+Built-in ambient type declarations for CSS Modules and static media assets are provided directly via `dinou/env`. Create or verify a `dinou-env.d.ts` file at the root of your project:
+
+```typescript
+/// <reference types="dinou/env" />
+```
+
+Ensure your `tsconfig.json` includes the declaration file and specifies `"moduleResolution": "bundler"`:
+
+```json
+{
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "allowJs": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler"
+  },
+  "include": [
+    "src",
+    "dinou-env.d.ts"
+  ]
+}
+```
+
+### Complete End-to-End Example
+
+The following cohesive example shows how the root layout, Tailwind v4 global CSS, CSS modules, and page components function together harmoniously:
+
+**1. Root Layout (`src/layout.tsx`):**
+
+```tsx
+// src/layout.tsx
+"use client";
+
+import type { ReactNode } from "react";
+import "./globals.css"; // Imports Tailwind v4 & global tokens
+
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="en">
+      <head>
+        <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>My Dinou App</title>
+        {/* Critical single-bundle stylesheet with React 19 precedence */}
+        <link href="/styles.css" rel="stylesheet" precedence="default" />
+      </head>
+      <body className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased">
+        {children}
+      </body>
+    </html>
+  );
+}
+```
+
+**2. Global Styles & Tailwind v4 (`src/globals.css`):**
+
+```css
+/* src/globals.css */
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #10b981;
+  --color-brand-hover: #059669;
+  --radius-panel: 1rem;
+}
+
+:root {
+  --card-bg: #ffffff;
+  --border-color: #e2e8f0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --card-bg: #0f172a;
+    --border-color: #1e293b;
+  }
+}
+
+.custom-gradient {
+  background: linear-gradient(135deg, var(--color-brand) 0%, #f59e0b 100%);
+}
+```
+
+**3. CSS Module (`src/card.module.css`):**
+
+```css
+/* src/card.module.css */
+.card {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-panel);
+  padding: 1.5rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-brand);
+}
+```
+
+**4. Page Component (`src/page.tsx`):**
+
+```tsx
+// src/page.tsx
+"use client";
+
+import styles from "./card.module.css";
+
+export default function HomePage() {
+  return (
+    <main className="container max-w-2xl mx-auto py-12 px-4 space-y-6">
+      <header className="space-y-2">
+        <h1 className="text-3xl font-extrabold tracking-tight">
+          Styling with Dinou
+        </h1>
+        <p className="text-slate-600 dark:text-slate-400">
+          Combines Tailwind utility classes with locally scoped CSS Modules.
+        </p>
+      </header>
+
+      {/* Using scoped CSS Module styles alongside Tailwind utilities */}
+      <div className={styles.card}>
+        <span className={styles.badge}>Modular Component</span>
+        <h2 className="text-xl font-bold mt-2">Zero Style Bleed</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+          Scoped classes are automatically hashed and isolated by Dinou PostCSS.
+        </p>
+        <button className="mt-4 px-4 py-2 custom-gradient text-white rounded-lg font-medium shadow hover:opacity-90 transition">
+          Interactive Button
+        </button>
+      </div>
+    </main>
+  );
+}
+```
 
 ---
 
