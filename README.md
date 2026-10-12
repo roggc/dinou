@@ -338,6 +338,67 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [1. Adding Custom Server Middleware & Guards](#1-adding-custom-server-middleware--guards)
     - [2. Extending the Bundler Pipeline](#2-extending-the-bundler-pipeline)
   - [Best Practices for Ejected Projects](#best-practices-for-ejected-projects)
+- [Complete API Reference](#complete-api-reference)
+  - [1. Components (dinou)](#components)
+    - [<Link>](#link)
+    - [<ClientRedirect>](#clientredirect)
+  - [2. Hooks & Navigation (dinou)](#hooks-navigation)
+    - [redirect()](#redirect)
+    - [useSearchParams()](#usesearchparams)
+      - [in Server Components](#usesearchparams-server)
+      - [in Client Components](#usesearchparams-client)
+    - [usePathname()](#usepathname)
+      - [in Server Components](#usepathname-server)
+      - [in Client Components](#usepathname-client)
+    - [useRouter()](#userouter)
+      - [Methods Reference](#userouter-methods)
+      - [Client Cache & Options](#userouter-caching)
+      - [Production Patterns](#userouter-examples)
+    - [refreshSlot()](#refreshslot)
+      - [Parameters & Wildcard](#refreshslot-parameters)
+      - [Targeted Revalidation](#refreshslot-architecture)
+      - [Production Patterns](#refreshslot-examples)
+    - [useNavigationLoading()](#usenavigationloading)
+      - [Trigger Events & SSR](#usenavigationloading-behavior)
+      - [Non-Blocking Transitions](#usenavigationloading-architecture)
+      - [Production Indicators](#usenavigationloading-examples)
+  - [3. Type-Safe Routing (dinou)](#type-safe-routing)
+    - [PageProps<T>](#pageprops)
+    - [LayoutProps<T>](#layoutprops)
+    - [ErrorProps<T>](#errorprops)
+    - [PageFunctions & LayoutFunctions](#pagefunctions)
+    - [RouteParams<T>](#routeparams)
+    - [DinouRoute](#dinouroute)
+    - [DinouRoutePattern](#dinouroutepattern)
+  - [4. Server Context & Config (dinou)](#server-context-config)
+    - [getContext()](#getcontext)
+      - [Request & Response Store](#getcontext-store)
+      - [Production Patterns](#getcontext-examples)
+    - [defineConfig()](#defineconfig)
+      - [Configuration Schema](#defineconfig-schema)
+      - [Production Configuration](#defineconfig-examples)
+    - [DinouPlugin](#dinouplugin)
+      - [Lifecycle & Early Exit](#dinouplugin-lifecycle)
+      - [Production Plugins](#dinouplugin-examples)
+  - [5. Server Cache & Revalidation (dinou/server)](#server-cache-revalidation)
+    - [revalidatePage()](#revalidatepage)
+    - [revalidatePath()](#revalidatepath)
+    - [revalidateTag()](#revalidatetag)
+    - [<DinouCacheSlot>](#dinoucacheslot)
+      - [Props & Micro-ISR](#dinoucacheslot-props)
+      - [Production Slot Patterns](#dinoucacheslot-examples)
+  - [6. Storage Adapters (dinou/server)](#storage-adapters)
+    - [Built-In Adapters](#storage-adapters-list)
+    - [StorageAdapter Interface](#storage-adapters-interface)
+    - [Custom Storage Engine](#storage-adapters-custom)
+  - [7. Route Lifecycles & Config](#route-segment-contracts)
+    - [getProps()](#getprops)
+    - [revalidate](#revalidate-config)
+    - [ppr](#ppr-config)
+    - [getCacheTags](#getcachetags)
+    - [getStaticPaths](#getstaticpaths)
+    - [allowISG](#allowisg)
+    - [validateParams()](#validateparams)
 - [📜 Changelog](#-changelog)
 - [📄 License](#-license)
 
@@ -7825,6 +7886,1757 @@ await esbuild.build(buildConfig);
 - **Commit `dinou/` to Git:** Treat your ejected `dinou/` directory as first-class source code in your repository so your entire team shares identical build and runtime logic.
 - **Keep Edits Modular:** When adding custom features, create dedicated files (such as `dinou/core/my-feature.js`) rather than stuffing thousands of lines into single files.
 - **Validate Across Bundlers:** If your project uses multiple bundlers, test that your modifications work cleanly in your target bundler (e.g. `npm run build:node:esbuild`).
+
+---
+
+## Complete API Reference
+
+Explore all exports across `dinou`, `dinou/server`, and route lifecycle contracts (`page_functions.ts` & `layout_functions.ts`) with TypeScript signatures, runtime behavior, and practical usage patterns.
+
+### 1. Components (`dinou`)
+
+<a id="components"></a>
+
+Declarative universal and client components exported directly from `dinou`.
+
+---
+
+#### <Link>
+
+<a id="link"></a>
+
+The primary declarative navigation primitive in Dinou. Renders a semantic HTML `<a>` tag enhanced with client-side SPA soft navigation, automatic background prefetching on hover, relative filesystem path resolution, and optional cache bypassing.
+
+| Prop | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **href** | `DinouRoute \| string` | — | Primary destination URL. Strongly typed with `DinouRoute` for compile-time validation and IDE autocomplete. Supports absolute paths (`/dashboard`), relative paths (`./settings`, `../billing`), query strings, and external URLs. |
+| **to** | `DinouRoute \| string` | — | Alias for `href` provided for compatibility with React Router and Remix codebases (evaluated as `href \|\| to`). |
+| **prefetch** | `boolean` | `true` | Whether to prefetch the destination RSC payload and code bundle on `onMouseEnter`. Ignored when `fresh={true}` or when targeting external URLs. |
+| **fresh** | `boolean` | `false` | Forces an on-demand server roundtrip upon navigation, bypassing any client-side router cache. Automatically skips hover prefetching when set to `true`. |
+| **...props** | `AnchorHTMLAttributes` | — | All standard HTML anchor attributes (`className`, `target`, `rel`, `style`, `aria-*`, `onClick`). Custom `onClick` handlers execute first; calling `e.preventDefault()` prevents soft navigation. |
+
+##### Key Features
+
+- **Client-Side Soft Navigation:** Intercepts link clicks to fetch RSC flight payloads in the background, updating views without destroying React client state or triggering full browser reloads.
+- **Automatic Hover Prefetching:** Pre-fetches the destination's RSC payload and JavaScript chunk on `onMouseEnter`, ensuring near-instantaneous page transitions upon click.
+- **Relative Filesystem Pathing:** Resolves links analogously to filesystem paths based on the current URL pathname:
+  - **Absolute (`/`):** Resolves from the application root (e.g. `/dashboard`).
+  - **Relative Child (`./`):** Resolves under the current segment (e.g. from `/products`, navigating to `./details` resolves to `/products/details`).
+  - **Relative Sibling (`../`):** Navigates up one directory level (e.g. from `/users/settings`, navigating to `../profile` resolves to `/users/profile`).
+- **Cache Busting with `fresh`:** Setting `fresh={true}` commands the client router to bypass local memory caches and request an authoritative fresh RSC stream from the server.
+
+##### Usage Patterns
+
+```tsx
+// src/components/nav-bar.tsx (Client Component)
+"use client";
+
+import { Link, usePathname } from "dinou";
+
+export function NavigationBar() {
+  const pathname = usePathname();
+
+  const navItems = [
+    { href: "/dashboard", label: "Dashboard" },
+    { href: "/orders", label: "Orders" },
+    { href: "/analytics", label: "Analytics" },
+    { href: "/settings", label: "Settings" },
+  ];
+
+  return (
+    <nav className="flex items-center gap-4 p-4 border-b">
+      {navItems.map((item) => {
+        const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              isActive
+                ? "bg-primary text-primary-foreground font-semibold"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            {item.label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+```
+
+```tsx
+// src/components/order-actions.tsx (Client Component)
+"use client";
+
+import { Link } from "dinou";
+
+export function OrderQuickActions() {
+  return (
+    <div className="flex items-center gap-3">
+      {/* Normal soft navigation with hover prefetch */}
+      <Link href="/orders/archive" className="text-xs text-muted-foreground hover:underline">
+        View Archive
+      </Link>
+
+      {/* Forced server round-trip: bypasses client RSC cache */}
+      <Link
+        href="/orders/live"
+        fresh
+        prefetch={false}
+        className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-600 text-white text-xs rounded hover:bg-emerald-700"
+      >
+        <span>Live Monitor (Force Fresh)</span>
+      </Link>
+    </div>
+  );
+}
+```
+
+```tsx
+// src/app/dashboard/settings/page.tsx
+"use client";
+
+import { Link } from "dinou";
+
+export default function SettingsSubNav() {
+  const handleAuditClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    // Custom logging or analytics before navigation
+    console.log("Navigating to security audit");
+    // Calling e.preventDefault() here would cancel soft navigation
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      {/* Relative Child navigation: resolves to /dashboard/settings/security */}
+      <Link href="./security" onClick={handleAuditClick} className="text-sm font-medium">
+        Security Settings
+      </Link>
+
+      {/* Relative Sibling navigation: resolves to /dashboard/billing */}
+      <Link href="../billing" className="text-sm text-muted-foreground">
+        Billing & Subscriptions
+      </Link>
+
+      {/* External Link: automatically falls back to native browser navigation */}
+      <Link
+        href="https://status.example.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-xs text-blue-500 underline"
+      >
+        System Status
+      </Link>
+    </div>
+  );
+}
+```
+
+---
+
+#### <ClientRedirect>
+
+<a id="clientredirect"></a>
+
+A declarative Client Component that triggers an immediate, seamless route replacement upon mounting in the browser. It renders no DOM markup (`null`) and executes a soft router replacement (`replace: true`), ensuring that the redirected URL does not create trap loops in the user's browser back history.
+
+| Prop | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **to** | `string` | Required | The destination path to navigate to. Supports absolute internal paths (`"/auth/sign-in"`), relative paths (`"./onboarding"`), and query parameters (`"/pricing?plan=pro"`). |
+
+##### Architecture: Declarative Companion & History Replacement
+
+- **Declarative Companion to `redirect()`:** While `redirect()` is the imperative function typically used with early returns (e.g. `return redirect("/login")`), `<ClientRedirect>` is the underlying JSX component returned by `redirect()`. It allows expressing redirections declaratively directly inside your JSX tree.
+- **History Replacement (`replace: true`):** When executed, `<ClientRedirect>` performs a `router.replace()` rather than a `push()`. This replaces the current entry in the browser's history stack so users clicking the browser Back button are not bounced forward again in an infinite redirect loop.
+
+##### Usage Patterns
+
+```tsx
+// src/components/billing-gate.tsx (Client Component)
+"use client";
+
+import { ClientRedirect } from "dinou";
+
+interface BillingGateProps {
+  hasActiveSubscription: boolean;
+  children: React.ReactNode;
+}
+
+export function BillingGate({ hasActiveSubscription, children }: BillingGateProps) {
+  // Declarative ternary redirection directly inside JSX
+  return hasActiveSubscription ? (
+    <>{children}</>
+  ) : (
+    <ClientRedirect to="/pricing?upgrade=required" />
+  );
+}
+```
+
+```tsx
+// src/components/client-guard.tsx (Client Component)
+"use client";
+
+import { ClientRedirect } from "dinou";
+import { useAuth } from "@/hooks/use-auth";
+
+export function ClientAuthGuard({ children }: { children: React.ReactNode }) {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <div className="p-6 text-sm text-muted-foreground">Loading session...</div>;
+  }
+
+  if (!user) {
+    // Replaces browser history with /sign-in immediately upon mount
+    return <ClientRedirect to="/auth/sign-in?from=/dashboard" />;
+  }
+
+  return <>{children}</>;
+}
+```
+
+```tsx
+// Pattern A: Imperative function return (Universal: Server & Client)
+import { redirect } from "dinou";
+
+export default function PageA({ isAllowed }: { isAllowed: boolean }) {
+  if (!isAllowed) {
+    return redirect("/unauthorized");
+  }
+  return <div>Welcome to Page A</div>;
+}
+
+// Pattern B: Declarative JSX Component (Client Component)
+import { ClientRedirect } from "dinou";
+
+export function PageB({ isAllowed }: { isAllowed: boolean }) {
+  if (!isAllowed) {
+    return <ClientRedirect to="/unauthorized" />;
+  }
+  return <div>Welcome to Page B</div>;
+}
+```
+
+
+---
+
+### 2. Hooks & Navigation (`dinou`)
+
+<a id="hooks-navigation"></a>
+
+Universal and client navigation hooks exported directly from `dinou`.
+
+---
+
+#### redirect()
+
+<a id="redirect"></a>
+
+Dinou's universal, polymorphic redirection primitive. It safely interrupts the current execution pipeline and redirects the browser or crawler to the destination path. Rather than relying on rigid browser-only APIs or uncatchable exceptions, `redirect()` automatically adapts its transport mechanism to the active runtime context (Initial SSR, Active Streaming, RSC Flight, Server Functions, or Client Components).
+
+> **Contract: Always Use `return redirect(...)`**
+>
+> In Dinou, always write `return redirect("/path");` rather than calling `redirect("/path");` bare.
+> - **Clean TypeScript types:** Satisfies `Promise<ReactNode>` in async Server Components without casting.
+> - **Safe inside `try/catch`:** Because it returns a standard declarative element rather than throwing an exception, application error boundaries won't accidentally catch and cancel navigation.
+> - **Works inside `<Suspense>`:** When an async component redirects after the HTTP stream has already started (`200 OK`), Dinou safely streams `<ClientRedirect />` down to the browser to navigate upon hydration without crashing.
+
+##### The 5 Polymorphic Runtime Execution Modes
+
+| Mode | Invocation Context | Headers Sent? | HTTP Status / Header | Client Transition | Primary Use Case |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **1. Root SSR / Pre-flight** | `page_functions.ts`, Root SSR, Plugins | No | **HTTP 302 Found** (`Location: /url`) | Full browser reload | Auth walls, root route guards, SEO canonicals |
+| **2. RSC Flight Navigation** | Client-side `<Link>` click to guarded route | No | **HTTP 200 OK** (`x-rsc-redirect: /url`) | Soft SPA navigation | In-app guarded route transitions |
+| **3. Server Functions** | Dedicated POST action (`"use server"`) | No | **HTTP 200 OK** (RPC redirect metadata) | Soft SPA (`router.replace`) | Form submissions, checkout flows |
+| **4. Deferred SSR Streaming** | Inside async `<Suspense>` block | Yes (200 stream open) | **HTTP 200 OK (Chunked)** (`<ClientRedirect />`) | SPA transition upon hydration | Late permission checks in streamed UI |
+| **5. Client Components** | Browser in-render | N/A | None (0ms local dispatch) | Immediate `router.replace()` | Declarative state gates, wizards |
+
+##### Usage Patterns
+
+```tsx
+// src/app/admin/page.tsx (React Server Component)
+import { Suspense } from "dinou";
+import { redirect, getContext } from "dinou";
+
+// 1. Root pre-flight check (Headers unsent -> HTTP 302 for crawlers)
+export default async function AdminPage() {
+  const { req } = getContext();
+  if (!req.cookies.auth_token) {
+    return redirect("/login");
+  }
+
+  return (
+    <div>
+      <h1>Admin Management</h1>
+      <Suspense fallback={<p>Verifying advanced permissions...</p>}>
+        <RestrictedMetrics />
+      </Suspense>
+    </div>
+  );
+}
+
+// 2. Deferred check inside Suspense (Headers sent -> <ClientRedirect />)
+async function RestrictedMetrics() {
+  const hasAccess = await checkSuperAdmin();
+  if (!hasAccess) {
+    return redirect("/admin/insufficient-permissions");
+  }
+  return <div>Superadmin Metrics Content</div>;
+}
+```
+
+```typescript
+// src/actions/checkout.ts (Server Function)
+"use server";
+
+import { redirect } from "dinou";
+import db from "@/lib/db";
+
+export async function processPayment(formData: FormData) {
+  const cartId = formData.get("cartId") as string;
+  const order = await db.orders.charge(cartId);
+
+  // Dedicated POST mutation:
+  // Client executes a smooth SPA transition without reloading the browser window!
+  return redirect(`/orders/${order.id}/confirmed`);
+}
+```
+
+```typescript
+// src/app/settings/page_functions.ts (getProps)
+import { redirect, getContext } from "dinou";
+
+export async function getProps() {
+  const { req } = getContext();
+
+  // Evaluated before JSX rendering begins: short-circuits with HTTP 302 Found
+  if (!req.cookies.session_id) {
+    return redirect("/login?from=/settings");
+  }
+
+  const profile = await fetchUserProfile(req.cookies.session_id);
+  return { profile };
+}
+```
+
+```tsx
+// src/components/client-guard.tsx (Client Component)
+"use client";
+
+import { redirect } from "dinou";
+
+export function ClientAuthGuard({ isAuthenticated, children }: { isAuthenticated: boolean; children: React.ReactNode }) {
+  if (!isAuthenticated) {
+    // Evaluates in browser render: dispatches router.replace() in 0ms!
+    return redirect("/auth/sign-in");
+  }
+
+  return <>{children}</>;
+}
+```
+
+---
+
+#### useSearchParams()
+
+<a id="usesearchparams"></a>
+
+A dual-nature hook that provides access to the current URL's query parameters. Works seamlessly in both Server Components and Client Components with specialized performance characteristics for each environment.
+
+##### in Server Components
+
+<a id="usesearchparams-server"></a>
+
+In Server Components, `useSearchParams()` resolves synchronously from the incoming HTTP request context via `AsyncLocalStorage`. It introduces **zero client bundle overhead** and eliminates props drilling across nested server components.
+
+| Aspect | Behavior in Server Components |
+| :--- | :--- |
+| **Execution Environment** | Server runtime (Node.js, Bun, Deno, Cloudflare Workers). |
+| **Client Bundle Impact** | **0 KB** (stripped entirely from client bundles). |
+| **Data Origin** | HTTP request store via `AsyncLocalStorage` (`ctx.req.query`). |
+| **Primary Purpose** | **Server Data Loading:** Direct database filtering, pagination offset calculation, search query execution. |
+| **Props Drilling** | None. Deeply nested server components read query params directly. |
+
+```tsx
+// src/components/product-catalog.tsx (Server Component)
+import { useSearchParams } from "dinou";
+import { db } from "@/lib/db";
+
+export default async function ProductCatalog() {
+  // Resolves query parameters synchronously on the server during SSR or SSG
+  const searchParams = useSearchParams();
+  const category = searchParams.get("category") ?? "all";
+  const page = Number(searchParams.get("page") ?? "1");
+
+  const products = await db.products.findMany({
+    where: category === "all" ? {} : { category },
+    skip: (page - 1) * 20,
+    take: 20,
+  });
+
+  return (
+    <div>
+      <h2>Category: {category} (Page {page})</h2>
+      <ul>
+        {products.map((p) => (
+          <li key={p.id}>{p.name} - ${p.price}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+> **SSG vs Dynamic SSR & PPR for Query Parameters:**
+> Because static pre-rendering (SSG) compiles HTML at build time when no client query string exists, `searchParams` evaluates with empty parameters during build. If your Server Component requires live query parameters per visitor, configure:
+> - **Dynamic SSR:** Set `export const revalidate = 0;` in `page_functions.ts` to render on every request.
+> - **Partial Prerendering (PPR):** Set `export const ppr = true;` and wrap the query-dependent component in `<Suspense>` to serve an instant static shell from Edge CDN (0ms TTFB) while streaming dynamic query results.
+
+##### in Client Components
+
+<a id="usesearchparams-client"></a>
+
+In Client Components, `useSearchParams()` is a reactive hook returning a `URLSearchParams` object. Whenever the URL changes (via `router.push()`, `<Link>`, or browser history), components re-render with updated values while preserving local state.
+
+| Aspect | Behavior in Client Components |
+| :--- | :--- |
+| **Execution Environment** | Browser runtime (with initial SSR hydration). |
+| **Client Bundle Impact** | Included in client JavaScript bundle. |
+| **Data Origin** | Live browser URL (`window.location.search`). |
+| **Primary Purpose** | **UI Interactivity:** Filter inputs, tab switches, triggering URL navigations. |
+| **State Preservation** | Local component state (`useState`, input focus) is preserved during navigation. |
+
+```tsx
+// src/components/search-filter.tsx (Client Component)
+"use client";
+
+import { useSearchParams, useRouter } from "dinou";
+
+export default function SearchFilter() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const currentQuery = searchParams.get("q") ?? "";
+
+  const handleSearch = (newQuery: string) => {
+    const params = new URLSearchParams(searchParams);
+    if (newQuery) {
+      params.set("q", newQuery);
+    } else {
+      params.delete("q");
+    }
+
+    // Updates the URL seamlessly without a full page reload
+    router.push(`?${params.toString()}`);
+  };
+
+  return (
+    <div>
+      <input
+        type="search"
+        defaultValue={currentQuery}
+        placeholder="Search products..."
+        onChange={(e) => handleSearch(e.target.value)}
+      />
+      <p>Active query: {currentQuery}</p>
+    </div>
+  );
+}
+```
+
+> **SSG Hydration Best Practice:**
+> If a Client Component renders query-dependent HTML on a statically pre-rendered route (SSG), synchronize query params after mount via `useEffect` (Pattern A) to prevent hydration mismatches, or switch the route to dynamic SSR (`export const revalidate = 0;` in `page_functions.ts`, Pattern B).
+
+---
+
+#### usePathname()
+
+<a id="usepathname"></a>
+
+A dual-nature hook that provides access to the current URL pathname. Works in both Server Components and Client Components.
+
+##### in Server Components
+
+<a id="usepathname-server"></a>
+
+In Server Components, `usePathname()` resolves synchronously from the active HTTP request context. It adds **0 KB** to the client JavaScript bundle.
+
+| Aspect | Behavior in Server Components |
+| :--- | :--- |
+| **Execution Environment** | Server runtime (Node.js, Bun, Deno, Cloudflare Workers). |
+| **Client Bundle Impact** | **0 KB** (stripped completely from client bundle). |
+| **Data Origin** | HTTP request store via `AsyncLocalStorage` (`ctx.req.path`). |
+| **Primary Purpose** | **Layout Architecture:** Conditional headers, server breadcrumbs, canonical meta tags. |
+| **Static Caching (SSG)** | **100% Deterministic;** path is known at build time per page segment. Zero hydration mismatch risk. |
+
+```tsx
+// src/components/server-header.tsx (Server Component)
+import { usePathname } from "dinou";
+
+export default async function ServerHeader() {
+  const pathname = usePathname();
+  const isAdminSection = pathname.startsWith("/admin");
+
+  return (
+    <header className="border-b px-6 py-4 flex items-center justify-between">
+      <div className="font-bold text-lg">Acme Cloud</div>
+      {isAdminSection ? (
+        <span className="text-xs bg-red-100 text-red-700 px-2.5 py-1 rounded-full font-medium">
+          Admin Console
+        </span>
+      ) : (
+        <span className="text-xs text-muted-foreground">
+          Public Area &bull; {pathname}
+        </span>
+      )}
+    </header>
+  );
+}
+```
+
+##### in Client Components
+
+<a id="usepathname-client"></a>
+
+In Client Components, `usePathname()` is a reactive hook that provides the current browser URL pathname and triggers re-renders on route changes.
+
+```tsx
+// src/components/nav-link.tsx (Client Component)
+"use client";
+
+import { usePathname, Link } from "dinou";
+
+interface NavLinkProps {
+  href: string;
+  children: React.ReactNode;
+  exact?: boolean;
+}
+
+export function NavLink({ href, children, exact = false }: NavLinkProps) {
+  const pathname = usePathname();
+
+  // Exact match for homepage, prefix match for nested sections
+  const isActive = exact
+    ? pathname === href
+    : pathname === href || pathname.startsWith(`${href}/`);
+
+  return (
+    <Link
+      href={href}
+      aria-current={isActive ? "page" : undefined}
+      className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+        isActive
+          ? "bg-primary text-primary-foreground font-semibold"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+      }`}
+    >
+      {children}
+    </Link>
+  );
+}
+```
+
+---
+
+#### useRouter()
+
+<a id="userouter"></a>
+
+The core programmatic navigation hook for Client Components. Provides programmatic methods for navigating, replacing history, soft refreshing server data, and surgically refreshing cache slots.
+
+##### Methods Reference
+
+<a id="userouter-methods"></a>
+
+| Method | Signature | Description |
+| :--- | :--- | :--- |
+| **push()** | `(href: string, options?: RouterOptions) => Promise<void>` | Pushes a new entry onto the browser history stack and navigates to the destination route. |
+| **replace()** | `(href: string, options?: RouterOptions) => Promise<void>` | Replaces the current history entry with the destination URL (avoids back-button trap loops). |
+| **refresh()** | `(options?: RefreshOptions) => Promise<void>` | Soft-reloads the active page by re-fetching fresh RSC flight payloads from the server while preserving client state. |
+| **refreshSlot()** | `(slotId: string, options?: SlotRefreshOptions) => Promise<void>` | Surgically revalidates an isolated `<DinouCacheSlot>` subtree without re-rendering the surrounding page or layout. |
+| **back()** | `() => void` | Navigates back one step in browser history (equivalent to `window.history.back()`). |
+| **forward()** | `() => void` | Navigates forward one step in browser history (equivalent to `window.history.forward()`). |
+
+##### Client Cache & Options
+
+<a id="userouter-caching"></a>
+
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **fresh** | `boolean` | `false` | When `true`, bypasses the client-side router memory cache and forces an authoritative server fetch. |
+| **prefetch** | `boolean` | `true` | Pre-fetches target route RSC payloads into the client cache ahead of navigation. |
+| **layout** | `boolean` | `false` | When passed to `router.refresh({ layout: true })`, forces re-fetching and re-rendering of all ancestor layout segments. |
+| **replace** | `boolean` | `false` | When passed to `router.push(url, { replace: true })`, executes history replacement instead of pushing. |
+
+> **Soft Reload (`router.refresh()`) vs. Hard Reload (`window.location.reload()`):**
+> `router.refresh()` fetches an updated RSC stream directly from the server, preserves React state (`useState`, input focus, open dialogs), and maintains scroll position with zero blank screen flashes.
+
+##### Production Patterns
+
+<a id="userouter-examples"></a>
+
+```tsx
+// src/components/create-product-form.tsx (Client Component)
+"use client";
+
+import { useTransition, useState } from "react";
+import { useRouter } from "dinou";
+import { createProductAction } from "@/actions/products";
+
+export function CreateProductForm() {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+
+    startTransition(async () => {
+      try {
+        const result = await createProductAction(formData);
+        // Navigate with fresh: true to bypass client cache and display live data
+        router.push(`/products/${result.id}`, { fresh: true });
+      } catch (err: any) {
+        setError(err.message || "Failed to create product");
+      }
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input name="title" placeholder="Product name..." required />
+      <button type="submit" disabled={isPending}>
+        {isPending ? "Creating..." : "Create Product"}
+      </button>
+      {error && <p className="text-red-500">{error}</p>}
+    </form>
+  );
+}
+```
+
+---
+
+#### refreshSlot()
+
+<a id="refreshslot"></a>
+
+Imperative client function enabling surgical on-demand revalidation of isolated `<DinouCacheSlot>` components without re-executing the surrounding page Server Component or resetting client UI state. Can be imported and invoked anywhere in client code, including event handlers, WebSocket listeners, or external state stores.
+
+##### Parameters & Wildcard
+
+<a id="refreshslot-parameters"></a>
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **slotId** | `string` | Required | The unique `id` matching the target `<DinouCacheSlot id="...">`. Passing **`"*"`** revalidates all mounted cache slots on the current page simultaneously. |
+| **options.fresh** | `boolean` | `false` | When `true`, bypasses server storage TTLs, forces immediate backend execution, updates cache storage, and delivers fresh UI. |
+
+##### Targeted Revalidation Architecture
+
+<a id="refreshslot-architecture"></a>
+
+- **Surgical Component Updates:** Unlike full route reloads, `refreshSlot()` communicates directly with the specific mounted `<DinouCacheSlot>` sub-tree. Parent layouts and sibling components are untouched.
+- **Client vs. Server Revalidation:** Server functions (`revalidateTag`, `revalidatePath`) purge cached storage records on the backend. `refreshSlot()` actively pulls and updates the live rendered UI in the user's browser session.
+- **Why `refreshSlot("*", { fresh: true })` is Unique:** When `router.refresh()` runs, mounted `<DinouCacheSlot>` components continue serving their cached output if their `revalidate` TTL is unexpired. `refreshSlot("*", { fresh: true })` is the only mechanism that commands every slot on the page to bypass storage and re-render live on the server.
+
+##### Production Patterns
+
+<a id="refreshslot-examples"></a>
+
+```typescript
+// src/services/realtime-socket.ts (Pure TypeScript / Non-React)
+import { refreshSlot } from "dinou";
+
+const socket = new WebSocket("wss://api.example.com/realtime");
+
+socket.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+
+  if (message.type === "PRICE_UPDATE") {
+    // Surgically revalidates only the specific ticker slot in the active page
+    refreshSlot(`ticker-${message.symbol.toLowerCase()}`, { fresh: true });
+  }
+
+  if (message.type === "NOTIFICATION_RECEIVED") {
+    // Updates the unread counter badge slot
+    refreshSlot("notifications-badge", { fresh: true });
+  }
+};
+```
+
+```tsx
+// src/components/dashboard-toolbar.tsx (Client Component)
+"use client";
+
+import { refreshSlot } from "dinou";
+
+export function DashboardToolbar() {
+  const handleRefreshAll = () => {
+    // "*" instructs Dinou to revalidate every mounted <DinouCacheSlot> across the page
+    refreshSlot("*", { fresh: true });
+  };
+
+  return (
+    <button onClick={handleRefreshAll} className="px-3 py-1.5 bg-primary text-primary-foreground rounded-md text-xs font-medium">
+      Refresh All Widgets
+    </button>
+  );
+}
+```
+
+---
+
+#### useNavigationLoading()
+
+<a id="usenavigationloading"></a>
+
+Reactive Client Hook that returns `true` whenever a page navigation, history traversal, or soft router reload is actively in flight, and `false` once the transition completes and the new DOM is painted.
+
+##### Trigger Events & SSR
+
+<a id="usenavigationloading-behavior"></a>
+
+| Navigation Source | Trigger API | Toggles Loading? | Details |
+| :--- | :--- | :--- | :--- |
+| **Link Click** | `<Link href="...">` | **Yes** | Active during RSC payload fetch and code chunk download. |
+| **Programmatic** | `router.push()` / `replace()` | **Yes** | Active during programmatic SPA navigation transitions. |
+| **History Traversal** | Browser Back / Forward | **Yes** | Active during browser popstate history restoration. |
+| **Soft Route Reload** | `router.refresh()` | **Yes** | Active while refetching the active route's RSC payload. |
+| **Targeted Micro-ISR** | `refreshSlot()` | No | Localized slot revalidations use isolated Suspense boundaries. |
+| **Data Streaming** | `<Suspense fallback={...}>` | No | Late-arriving streamed chunks render fallbacks independently. |
+
+##### Non-Blocking Concurrent Transitions
+
+<a id="usenavigationloading-architecture"></a>
+
+- **Responsive UI:** Navigations execute within React's concurrent `startTransition`. The current screen remains interactive and scrollable while the server computes the destination page.
+- **Atomic Screen Replacement:** The existing view is preserved until the server has streamed enough of the new route to render its initial shell. `useNavigationLoading()` flips back to `false` precisely when the new DOM is painted, eliminating blank flashes.
+
+##### Production Indicators
+
+<a id="usenavigationloading-examples"></a>
+
+```tsx
+// src/components/top-progress-bar.tsx (Client Component)
+"use client";
+
+import { useNavigationLoading } from "dinou";
+
+export function TopProgressBar() {
+  const isNavigating = useNavigationLoading();
+
+  if (!isNavigating) return null;
+
+  return (
+    <div
+      role="progressbar"
+      aria-label="Loading page"
+      className="fixed top-0 left-0 right-0 h-0.5 z-50 bg-primary overflow-hidden"
+    >
+      <div className="h-full w-full bg-gradient-to-r from-transparent via-white/50 to-transparent animate-pulse" />
+    </div>
+  );
+}
+```
+
+
+---
+
+### 3. Type-Safe Routing (`dinou`)
+
+<a id="type-safe-routing"></a>
+
+Dinou v7 introduces zero-runtime type safety with auto-generated declaration files and seamless IDE autocompletion for routes and parameters.
+
+---
+
+#### PageProps<T>
+
+<a id="pageprops"></a>
+
+Official TypeScript interface for typing React Page components (`page.tsx`). Takes the route pattern string (constrained by `DinouRoutePattern`) as a generic parameter and automatically infers the strongly typed `params` object.
+
+```tsx
+import type { PageProps } from "dinou";
+
+// 1. Single dynamic route: trigger Ctrl + Space inside "" to pick from registered routes
+export default function BlogPost({ params }: PageProps<"/blog/[slug]">) {
+  // ✅ params.slug is strongly typed as string
+  return <h1>Post: {params.slug}</h1>;
+}
+
+// 2. Catch-all dynamic route
+export function DocsPage({ params }: PageProps<"/docs/[...slug]">) {
+  // ✅ params.slug is strongly typed as string[]
+  return <h1>Document: {params.slug.join("/")}</h1>;
+}
+```
+
+---
+
+#### LayoutProps<T>
+
+<a id="layoutprops"></a>
+
+Official TypeScript interface for typing React Layout components (`layout.tsx`). In addition to inferred `params`, it strictly types `children: React.ReactNode`.
+
+```tsx
+import type { LayoutProps } from "dinou";
+
+export default function BlogLayout({ children, params }: LayoutProps<"/blog/[slug]">) {
+  return (
+    <section>
+      <header>Category: {params.slug}</header>
+      <main>{children}</main>
+    </section>
+  );
+}
+```
+
+---
+
+#### ErrorProps<T>
+
+<a id="errorprops"></a>
+
+Official TypeScript interface for typing React Error Page components (`error.tsx`). In addition to inferred `params`, it strictly types the caught `error: Error`.
+
+```tsx
+import type { ErrorProps } from "dinou";
+
+export default function DashboardError({ error, params }: ErrorProps<"/dashboard/[teamId]">) {
+  return (
+    <div>
+      <h2>Failed to load team {params.teamId}</h2>
+      <p>{error.message}</p>
+    </div>
+  );
+}
+```
+
+---
+
+#### PageFunctions & LayoutFunctions
+
+<a id="pagefunctions"></a>
+
+Canonical TypeScript interfaces for typing server lifecycle files (`page_functions.ts` and `layout_functions.ts`). Exported from `dinou` and re-exported from `dinou/server` for developer convenience. Both interfaces accept either a route pattern string directly (e.g. `"/blog/[slug]"`) or a direct parameters dictionary, providing complete compile-time type safety, IDE autocompletion, and index-access typing (e.g. `PageFunctions["revalidate"]`) without boilerplate.
+
+```typescript
+import type { PageFunctions, LayoutFunctions } from "dinou";
+
+// 1. Direct route string pattern (automatically infers route parameters)
+export const getProps: PageFunctions<
+  "/blog/[slug]",
+  { postTitle: string }
+>["getProps"] = async (params) => {
+  return { postTitle: `Article: ${params.slug}` };
+};
+
+// 2. Strict index-access typing for layout_functions.ts
+export const ppr: LayoutFunctions["ppr"] = true;
+export const revalidate: LayoutFunctions["revalidate"] = 3600;
+```
+
+---
+
+#### RouteParams<T>
+
+<a id="routeparams"></a>
+
+A standalone utility type representing the inferred parameters dictionary of a given route pattern. While `PageProps` and `PageFunctions` resolve route strings directly, `RouteParams` is ideal for typing Server Actions, services, or custom helper functions that do not inherit framework props automatically.
+
+| Pattern Segment | Route Example | Inferred `RouteParams<T>` |
+| :--- | :--- | :--- |
+| **`[id]`** | `/products/[id]` | `{ id: string }` |
+| **`[...slug]`** | `/docs/[...slug]` | `{ slug: string[] }` |
+| **`[[...slug]]`** | `/shop/[[...slug]]` | `{ slug?: string[] }` |
+| **`[[tab]]`** | `/settings/[[tab]]` | `{ tab?: string }` |
+
+```typescript
+import type { RouteParams } from "dinou";
+
+// 1. Single dynamic parameter
+export async function getAuthorBio(params: RouteParams<"/blog/[slug]">) {
+  return fetchBioBySlug(params.slug); // params.slug is string
+}
+
+// 2. Catch-all dynamic parameter
+export async function getDocsContent(params: RouteParams<"/docs/[...slug]">) {
+  return fetchDocsByPath(params.slug.join("/")); // params.slug is string[]
+}
+```
+
+---
+
+#### DinouRoute
+
+<a id="dinouroute"></a>
+
+A union type representing all valid destinations in the application. It powers `<Link href>` and `router.push(href)`, automatically validating internal application routes, queries (`?key=val`), hashes (`#section`), relative paths (`./`, `../`), and external URLs (`https://...`).
+
+```tsx
+import type { DinouRoute } from "dinou";
+import { Link, useRouter } from "dinou";
+
+// 1. Typing custom navigation components
+interface NavButtonProps {
+  href: DinouRoute;
+  label: string;
+}
+
+export function NavButton({ href, label }: NavButtonProps) {
+  return <Link href={href}>{label}</Link>;
+}
+
+// 2. Programmatic navigation with useRouter
+export function ActionPanel() {
+  const router = useRouter();
+
+  const handleNavigate = (destination: DinouRoute) => {
+    router.push(destination);
+  };
+
+  return <button onClick={() => handleNavigate("/docs/api-reference")}>API Reference</button>;
+}
+```
+
+---
+
+#### DinouRoutePattern
+
+<a id="dinouroutepattern"></a>
+
+A union type representing all registered filesystem folder patterns across your application (e.g. `"/blog/[slug]"`, `"/docs/[...slug]"`). It is used as the generic constraint for `PageProps<T>` and `LayoutProps<T>`, enabling instant IDE autocomplete via `Ctrl + Space` and guaranteeing compliance with TypeScript declaration emit rules (TS4058).
+
+```tsx
+import type { DinouRoutePattern, PageProps } from "dinou";
+
+// Creating strongly typed page helper wrappers or metadata generators
+export function definePageMeta<T extends DinouRoutePattern>(
+  route: T,
+  generator: (props: PageProps<T>) => { title: string; description?: string }
+) {
+  return generator;
+}
+
+// ✅ Valid: autocompletes route patterns and infers correct params
+export const postMeta = definePageMeta("/blog/[slug]", ({ params }) => {
+  return { title: `Reading: ${params.slug}` };
+});
+```
+
+
+---
+
+### 4. Server Context & Config (`dinou`)
+
+<a id="server-context-config"></a>
+
+Universal Web Standards context management and root configuration primitives exported directly from `dinou`.
+
+---
+
+#### getContext()
+
+<a id="getContext"></a>
+<a id="getcontext"></a>
+
+Synchronously accesses the active HTTP request and response context store from anywhere within a Server Component, Server Function (`"use server"`), or route lifecycle contract (`page_functions.ts`). Powered by Node.js `AsyncLocalStorage`.
+
+##### Request & Response Store
+
+<a id="getcontext-store"></a>
+
+The returned `RequestContextStore` provides:
+
+- **`req` (Incoming Request Store):**
+  - `req.cookies`: Parsed incoming HTTP cookie key-value dictionary (e.g. `ctx.req.cookies.session_token`).
+  - `req.query`: Parsed URL search parameters dictionary (e.g. `ctx.req.query.tab`).
+  - `req.headers`: Normalized HTTP request headers dictionary (e.g. `ctx.req.headers["user-agent"]`).
+  - `req.path`: Active URL pathname string (e.g. `"/dashboard/orders"`).
+  - `req.method`: Uppercase HTTP request method (`"GET"`, `"POST"`, etc.).
+  - `req.env`: Runtime environment variables or platform host bindings (Cloudflare D1, KV, R2).
+- **`res` (Outgoing Response Mutator):**
+  - `res.cookie(name, value, options?)`: Sets an outgoing HTTP `Set-Cookie` response header.
+  - `res.clearCookie(name, options?)`: Expires and removes an HTTP cookie.
+  - `res.header(name, value)`: Appends or overrides an outgoing HTTP response header before stream flush.
+  - `res.status(statusCode)`: Sets the HTTP status code (defaults to `200 OK`).
+  - `res.redirect(status?, url)`: Executes a native HTTP redirect (defaults to `302`).
+- **`ctx[customKey]` (Plugin State Sharing):**
+  - Any custom data attached to `context` inside a plugin's `onRequest(request, context)` hook (such as `context.user` or `context.session`) is preserved across the request lifecycle and accessible synchronously via `getContext()`.
+
+> **Server-Only Sandbox:**
+> Never invoke `getContext()` inside a Client Component running in the browser. In browser environments, Dinou logs an error and returns an empty object. Always read confidential cookies or database records in Server Components or `getProps`, sanitize the data, and pass only safe props to Client Components.
+
+##### Production Patterns
+
+<a id="getcontext-examples"></a>
+
+```tsx
+// src/app/profile/page.tsx (Server Component)
+import { getContext, redirect } from "dinou";
+import { db } from "@/lib/db";
+
+export default async function ProfilePage() {
+  const ctx = getContext();
+  if (!ctx) return null;
+
+  // Read authenticated session cookie securely on the server
+  const sessionToken = ctx.req.cookies.auth_session;
+  if (!sessionToken) {
+    return redirect("/login?from=/profile");
+  }
+
+  const clientIp = ctx.req.headers["x-forwarded-for"] || "127.0.0.1";
+  const user = await db.users.findByToken(sessionToken);
+
+  return (
+    <div className="p-6">
+      <h1 className="text-2xl font-bold">Welcome, {user.name}</h1>
+      <p className="text-sm text-muted-foreground">Session IP: {clientIp}</p>
+    </div>
+  );
+}
+```
+
+```typescript
+// src/actions/preferences.ts (Server Function)
+"use server";
+
+import { getContext } from "dinou";
+
+export async function updateThemePreference(theme: "light" | "dark" | "system") {
+  const ctx = getContext();
+  if (!ctx) throw new Error("Context unavailable");
+
+  // Mutate an outgoing HTTP response cookie from the server action
+  ctx.res.cookie("preferred_theme", theme, {
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+  });
+
+  return { success: true, theme };
+}
+```
+
+```tsx
+// Retrieving Plugin State in Server Components
+// 1. Plugin attaches authenticated user in dinou.config.mjs:
+//    context.user = await verifySession(token);
+
+// 2. Server Component retrieves plugin state with zero prop-drilling:
+import { getContext } from "dinou";
+
+export default async function DashboardPage() {
+  const ctx = getContext();
+  const currentUser = ctx?.user;
+
+  return (
+    <div>
+      <h1>Welcome back, {currentUser?.name || "Guest"}</h1>
+      <p>Role: {currentUser?.role || "anonymous"}</p>
+    </div>
+  );
+}
+```
+
+---
+
+#### defineConfig()
+
+<a id="defineconfig"></a>
+
+Type-safe configuration helper providing autocomplete, IntelliSense, and schema validation for your application's root configuration file (`dinou.config.mjs`, `dinou.config.js`, or `dinou.config.ts`).
+
+##### Configuration Schema
+
+<a id="defineconfig-schema"></a>
+
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **reactStrictMode** | `boolean` | `true` | Enables React 19 StrictMode double-rendering in development mode. Helps detect unexpected side effects and ensures strict concurrent rendering compatibility with React Compiler. |
+| **ppr** | `boolean` | `false` | Global default for Partial Prerendering. When enabled, static-eligible routes pre-render an instant static HTML shell while streaming dynamic `<Suspense>` holes. Can be overridden per layout or route in `page_functions.ts`. |
+| **storage** | `StorageAdapter` | `FileSystemStorage` | Configures the storage backend for ISR HTML pages, RSC flight payloads, and cache slot records. Accepts built-in adapters (`RedisStorage`, `MemoryStorage`) or custom implementations. |
+| **plugins** | `DinouPlugin[]` | `[]` | Array of Web Standards lifecycle middleware plugins executed on every incoming HTTP request before route matching or React rendering. |
+
+##### Production Configuration
+
+<a id="defineconfig-examples"></a>
+
+```javascript
+// dinou.config.mjs (Production ESM)
+import { defineConfig } from "dinou";
+import { RedisStorage } from "dinou/server";
+import Redis from "ioredis";
+
+export default defineConfig({
+  reactStrictMode: true,
+  ppr: false,
+
+  // Distributed multi-region ISR cache storage
+  storage: new RedisStorage(
+    new Redis(process.env.REDIS_URL, {
+      maxRetriesPerRequest: 3,
+      enableReadyCheck: true,
+    })
+  ),
+
+  // Universal Web Standards request plugins
+  plugins: [
+    {
+      name: "security-headers",
+      async onRequest(request, context) {
+        // Enforce HTTPS in production environments
+        const proto = request.headers.get("x-forwarded-proto");
+        if (process.env.NODE_ENV === "production" && proto === "http") {
+          const httpsUrl = request.url.replace("http://", "https://");
+          return Response.redirect(httpsUrl, 301);
+        }
+      },
+    },
+  ],
+});
+```
+
+---
+
+#### DinouPlugin
+
+<a id="dinouplugin"></a>
+
+TypeScript interface defining middleware plugins for Dinou. Plugins hook into the server request lifecycle using native Web Standards (`Request` and `Response`).
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | Optional | Descriptive plugin identifier used for telemetry, diagnostics, and error reporting in logs. |
+| **onRequest** | `(request: Request, context: RequestContextStore) => Promise<Response \| void> \| Response \| void` | Optional | Universal middleware hook executed sequentially on every incoming HTTP request before React rendering. Returning a standard Web `Response` aborts the request immediately (<1ms). Returning `void` continues execution and preserves any custom properties attached to `context` for downstream Server Components. |
+
+##### Lifecycle & Early Exit
+
+<a id="dinouplugin-lifecycle"></a>
+
+- **Early Exit (`Response` Returned):** If `onRequest` returns a `Response` instance (e.g. `Response.redirect()`, `Response.json()`), Dinou terminates the request immediately (<1ms). It completely bypasses React rendering, routing, and database lookups. Ideal for authentication walls, health checks, and bot blocking.
+- **Pass-Through & Context Enrichment (`void`):** If `onRequest` returns nothing (or `undefined`), execution proceeds to the React rendering pipeline. Any custom properties attached to `context` (e.g. `context.user = session`) are preserved in `AsyncLocalStorage` and accessible synchronously in Server Components via `getContext()`.
+
+##### Production Plugins
+
+<a id="dinouplugin-examples"></a>
+
+```typescript
+// src/plugins/auth-guard.ts (Early Exit Pattern)
+import type { DinouPlugin } from "dinou";
+
+export const authGuardPlugin: DinouPlugin = {
+  name: "auth-guard",
+  async onRequest(request, context) {
+    const url = new URL(request.url);
+
+    // Intercept secured API endpoints before React loads
+    if (url.pathname.startsWith("/api/admin")) {
+      const authHeader = request.headers.get("authorization");
+      if (!authHeader || !authHeader.startsWith("Bearer secret_admin_token")) {
+        // Fast-path early exit: terminates request in <1ms
+        return Response.json(
+          { error: "Forbidden: invalid administrative token" },
+          { status: 403, headers: { "Cache-Control": "no-store" } }
+        );
+      }
+    }
+  },
+};
+```
+
+```typescript
+// src/plugins/geo-enrichment.ts (Context Enrichment Pattern)
+import type { DinouPlugin } from "dinou";
+
+export const geoPlugin: DinouPlugin = {
+  name: "geo-enrichment",
+  async onRequest(request, context) {
+    const country = request.headers.get("cf-ipcountry") || "US";
+    const city = request.headers.get("cf-ipcity") || "San Francisco";
+
+    // Enrich request context object with geo metadata
+    context.geo = {
+      country,
+      city,
+      isEu: ["DE", "FR", "ES", "IT", "NL"].includes(country),
+    };
+
+    // Returns void -> execution proceeds to React rendering.
+    // Downstream Server Components read context.geo via getContext()!
+  },
+};
+```
+
+
+---
+
+### 5. Server Cache & Revalidation (`dinou/server`)
+
+<a id="server-cache-revalidation"></a>
+<a id="server-primitives-storage"></a>
+
+Server-side cache management, on-demand invalidation, and Micro-ISR components exported from `dinou/server`.
+
+---
+
+#### revalidatePage()
+
+<a id="revalidatepage"></a>
+
+Surgically evicts and regenerates the cached artifacts (`index.html` and `page.rsc`) of a single specific route. It leaves shared layout caches (`layout.rsc`), parent routes, and child subroutes completely untouched.
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **path** | `string` | Required | The exact route path to revalidate (e.g. `"/blog/first-post"` or `"/products/123"`). Must start with `/`. |
+
+##### Production Patterns
+
+```typescript
+// src/actions/update-article.ts (Server Action)
+"use server";
+
+import { revalidatePage } from "dinou/server";
+import { db } from "@/lib/db";
+
+export async function updateArticle(slug: string, content: string) {
+  // 1. Update database record
+  await db.articles.update({ where: { slug }, data: { content } });
+
+  // 2. Purge only the article's page.rsc and index.html
+  // Leaves parent /blog layout and global navigation cache untouched
+  await revalidatePage(`/blog/${slug}`);
+
+  return { success: true };
+}
+```
+
+---
+
+#### revalidatePath()
+
+<a id="revalidatepath"></a>
+
+Asynchronously invalidates and regenerates the targeted page **and its segment layout** (`layout.rsc`). When invoked with `{ cascade: true }` on a route that defines a layout, it recursively invalidates all child subroutes beneath that route segment.
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **path** | `string` | Required | The target route path to revalidate (e.g. `"/docs"` or `"/products"`). |
+| **options.cascade** | `boolean` | `false` | When `true` and the targeted route defines a layout (`layout.tsx`), Dinou revalidates that layout and automatically cascades down to all child subroutes inheriting it (e.g. revalidating `/docs` with cascade also purges `/docs/routing`, `/docs/rendering`, etc.). If no layout exists at that segment, it revalidates only the page and skips cascading. |
+
+> **Cascade Invalidation Requires a Segment Layout:**
+> The `cascade: true` option only activates if the specified route segment defines an active `layout.tsx`. Cascading in Dinou is fundamentally tied to invalidating a shared ancestor layout payload. If a targeted path does not contain a layout, Dinou revalidates only that single page and skips traversing child subroutes.
+
+##### Production Patterns
+
+```typescript
+// src/actions/docs-actions.ts (Cascade Invalidation)
+"use server";
+
+import { revalidatePath } from "dinou/server";
+import { cms } from "@/lib/cms";
+
+export async function publishDocSection(sectionId: string) {
+  // 1. Publish new section in CMS
+  await cms.navigation.publish(sectionId);
+
+  // 2. Invalidate /docs layout AND cascade down to all child routes
+  // Purges /docs/routing, /docs/rendering, /docs/api-reference, etc.
+  // Guarantees all nested pages display the updated sidebar with zero hydration mismatch
+  await revalidatePath("/docs", { cascade: true });
+
+  return { success: true };
+}
+```
+
+---
+
+#### revalidateTag()
+
+<a id="revalidatetag"></a>
+
+Cross-cutting cache invalidation primitive that purges cached artifacts across disparate routes, layouts, or `<DinouCacheSlot>` components sharing the specified cache tag.
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **tag** | `string` | Required | Cache tag identifier to purge (e.g. `"products"`, `"inventory"`, or `"user-123"`). Matches tags assigned via `getCacheTags` or the `tag` prop on `<DinouCacheSlot>`. |
+| **options.cascade** | `boolean` | `false` | When `true` and the tag is attached to a layout segment (`layout_functions.ts`), Dinou purges the layout and cascades invalidation down to all child pages inheriting that layout. |
+
+##### Tag Resolution Hierarchy
+
+| Scope | Assignment Point | Invalidation Impact | Cascades to Subroutes? |
+| :--- | :--- | :--- | :--- |
+| **Page Tag** | `page_functions.ts` (`getCacheTags`) | Purges matching `page.rsc` and `index.html`. | No. Isolated strictly to the page segment. |
+| **Layout Tag** | `layout_functions.ts` (`getCacheTags`) | Purges matching `layout.rsc`. | Only if `cascade: true` is explicitly set. |
+| **Slot Tag** | `<DinouCacheSlot tag="...">` | Purges matching slot cache record in storage. | No. Confined to the isolated component slot. |
+
+##### Golden Rules of Tag Invalidation
+
+1. **Page tags never purge parent or child layouts.** A tag assigned in `page_functions.ts` affects only that specific route's page output.
+2. **Layout tags only cascade when targeted.** Invalidate layout tags with `{ cascade: true }` to refresh all pages rendered under a changed shared layout.
+3. **Slot tags are surgical.** Tags assigned to `<DinouCacheSlot>` never trigger full page invalidations; they purge only the slot's stored HTML/JSON in storage.
+
+##### Production Patterns
+
+```typescript
+// src/actions/inventory.ts (Server Action)
+"use server";
+
+import { revalidateTag } from "dinou/server";
+import { db } from "@/lib/db";
+
+export async function restockProduct(productId: string, quantity: number) {
+  // 1. Update inventory in database
+  await db.inventory.increment(productId, quantity);
+
+  // 2. Invalidate all pages and cache slots tagged with this product
+  // Purges /products/[id] page, catalog badges, and inventory counter slots
+  await revalidateTag(`product-${productId}`);
+
+  // 3. Invalidate global catalog listings
+  await revalidateTag("products");
+
+  return { success: true };
+}
+```
+
+---
+
+#### <DinouCacheSlot>
+
+<a id="dinoucacheslot"></a>
+
+A server-side component primitive enabling independent, localized Micro-ISR caching for sub-trees of React Server Components within a page or layout. Allows high-velocity sections (like stock tickers or notification badges) to have their own cache lifetimes and invalidation tags independent of parent page caching.
+
+##### Props & Micro-ISR
+
+<a id="dinoucacheslot-props"></a>
+
+| Prop | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | Optional | Unique identifier for targeted client-side slot refreshing via `refreshSlot(id)` or `router.refreshSlot(id)`. If omitted, Dinou falls back to using the first provided `tag`. |
+| **revalidate** | `number` | `false` (Forever) | Time-based TTL in seconds. Automatically refreshes and persists the slot subtree in the background once the timer expires. |
+| **tag / tags** | `string \| string[]` | `undefined` | Cache tag or array of tags for server-side on-demand invalidation via `revalidateTag(tag)`. |
+| **children** | `ReactNode \| (() => Promise<ReactNode> \| ReactNode)` | Required | The Server Component subtree to isolate, render, and cache independently. |
+
+##### Architecture: Micro-ISR & State Preservation
+
+- **Independent Storage Persistence:** Dinou executes the slot's child components once, caches their rendered output in your storage backend (Redis, Memory, or FileSystem), and serves that cached payload to subsequent visitors. Database queries inside the slot never re-run until its TTL expires or an invalidation is triggered.
+- **Client State Preservation:** When a slot refreshes (either via time-based micro-ISR or `refreshSlot`), only that specific subtree updates in the browser DOM. Outer forms, input focus, scroll position, and client React state remain completely undisturbed.
+
+##### Production Slot Patterns
+
+<a id="dinoucacheslot-examples"></a>
+
+```tsx
+// src/components/crypto-ticker-slot.tsx (Server Component)
+import { DinouCacheSlot } from "dinou/server";
+import { fetchCryptoPrices } from "@/lib/crypto";
+
+export function CryptoTickerSection() {
+  return (
+    <div className="border rounded-lg p-4 bg-card">
+      <h2 className="text-sm font-semibold mb-2">Live Market Watch</h2>
+      
+      {/* Caches ticker independently for 15 seconds */}
+      <DinouCacheSlot id="crypto-ticker" revalidate={15} tag="crypto">
+        <LiveCryptoPrices />
+      </DinouCacheSlot>
+    </div>
+  );
+}
+
+async function LiveCryptoPrices() {
+  const prices = await fetchCryptoPrices();
+  return (
+    <div className="flex gap-4 font-mono text-xs">
+      <span>BTC: ${prices.btc.toLocaleString()}</span>
+      <span>ETH: ${prices.eth.toLocaleString()}</span>
+      <span>SOL: ${prices.sol.toLocaleString()}</span>
+    </div>
+  );
+}
+```
+
+```tsx
+// src/components/cart-badge-slot.tsx (Server Component)
+import { DinouCacheSlot } from "dinou/server";
+import { getContext } from "dinou";
+import db from "@/lib/db";
+
+export function CartBadgeSlot() {
+  const ctx = getContext();
+  const userId = ctx?.req.cookies.user_id || "guest";
+
+  return (
+    // Cached until a mutation calls revalidateTag(`cart-${userId}`)
+    <DinouCacheSlot
+      id="header-cart"
+      tag={[`cart-${userId}`, "cart"]}
+    >
+      <CartCounter userId={userId} />
+    </DinouCacheSlot>
+  );
+}
+
+async function CartCounter({ userId }: { userId: string }) {
+  const count = await db.cart.getItemCount(userId);
+  return <span className="badge font-bold">{count} items</span>;
+}
+```
+
+
+---
+
+### 6. Storage Adapters (`dinou/server`)
+
+<a id="storage-adapters"></a>
+
+Storage abstractions and persistence engines exported from `dinou/server`.
+
+Dinou completely decouples ISR and Micro-ISR caching logic from physical storage media. All pre-rendered HTML, RSC route payloads, segment layouts, and slot fragments are read and written through a unified `StorageAdapter` interface.
+
+- **Physical Decoupling:** Switch between local disk, distributed memory caches, edge KV stores, or custom object storage without modifying application components or data loaders.
+- **Companion Metadata:** Every cached entry preserves associated metadata, including generation timestamps (`generatedAt`), assigned cache tags, and ISR revalidation windows.
+- **Cluster Sharing:** In multi-instance setups (Kubernetes, Cloud Run, Edge workers), adapters like `RedisStorage` or `CloudflareKVStorage` share generated artifacts globally across all nodes.
+
+---
+
+#### Built-In Adapters
+
+<a id="storage-adapters-list"></a>
+
+| Adapter Class | Constructor Signature | Mechanism & Serialization | Recommended Environments |
+| :--- | :--- | :--- | :--- |
+| **FileSystemStorage** | `new FileSystemStorage(baseDir?: string)` | Writes raw HTML/RSC payloads and companion `.meta.json` files directly to local disk. | Local dev, single-node Docker containers, VPS servers (default: `.dinou/dist2`). |
+| **RedisStorage** | `new RedisStorage(redisClient: any, prefix?: string)` | Serializes content and metadata together as JSON strings under configurable key prefix (default: `"dinou:cache:"`). | Multi-container Kubernetes clusters, AWS ECS, Google Cloud Run, distributed Node.js. |
+| **CloudflareKVStorage** | `new CloudflareKVStorage(kvNamespace: any)` | Leverages Cloudflare KV native metadata attributes via `getWithMetadata()` and `put(..., { metadata })`. | Cloudflare Workers & Pages at global edge scale. |
+| **DenoKVStorage** | `new DenoKVStorage(kvInstance?: any)` | Stores atomic key-value records with automatic 16KB payload chunking for large HTML/RSC artifacts. | Deno Deploy & distributed edge runtimes. |
+| **MemoryStorage** | `new MemoryStorage()` | Maintains an in-memory JavaScript `Map` storing `{ content, metadata }` tuples in process memory. | Unit testing, ephemeral CI/CD runners, preview sandboxes. |
+
+> **Global Storage Utilities:**
+> Dinou exports `getStorageAdapter()` to access the active storage instance anywhere on the server, and `setStorageAdapter(adapter)` to dynamically swap the storage engine during initialization or test suites.
+
+---
+
+#### StorageAdapter Interface
+
+<a id="storage-adapters-interface"></a>
+
+Abstract base class defining the contract for all storage engines in Dinou.
+
+| Method | Signature | Required? | Description |
+| :--- | :--- | :--- | :--- |
+| **get(key)** | `(key: string) => Promise<{ content: string; metadata?: any } \| null>` | Yes | Retrieves the cached content string and companion metadata. Returns `null` on cache miss. |
+| **set(key, content, metadata?)** | `(key: string, content: string, metadata?: any) => Promise<void>` | Yes | Persists the rendered HTML, RSC stream, or slot JSON alongside its companion metadata object. |
+| **has(key)** | `(key: string) => Promise<boolean>` | Yes | Fast existence check to verify if a valid cache artifact exists without deserializing full content. |
+| **delete(key)** | `(key: string) => Promise<void>` | Yes | Removes the targeted cached artifact and associated metadata files or keys. |
+| **keys(prefix?)** | `(prefix?: string) => Promise<string[]> \| string[]` | Optional | Enumerates stored artifact keys. Required for `revalidateTag()` scanning and `revalidatePath({ cascade: true })` child discovery in Edge runtimes. |
+
+---
+
+#### Custom Storage Engine
+
+<a id="storage-adapters-custom"></a>
+
+Configure distributed caching with built-in adapters like `RedisStorage` or extend `StorageAdapter` to implement a custom database or object storage backend.
+
+```javascript
+// dinou.config.mjs (Redis Cluster)
+import { defineConfig } from "dinou";
+import { RedisStorage } from "dinou/server";
+import Redis from "ioredis";
+
+// Connect to shared Redis cache (AWS ElastiCache, Upstash, or Redis cluster)
+const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+
+export default defineConfig({
+  // Share ISR pages and <DinouCacheSlot> fragments across all Docker / K8s replicas
+  storage: new RedisStorage(redis, "dinou:cache:"),
+});
+```
+
+```typescript
+// src/lib/storage/sqlite-storage.ts (Custom Engine Example)
+import { StorageAdapter } from "dinou/server";
+import Database from "better-sqlite3";
+
+export class SQLiteStorage extends StorageAdapter {
+  private db: Database.Database;
+
+  constructor(dbPath: string = ".dinou/cache.db") {
+    super();
+    this.db = new Database(dbPath);
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS dinou_cache (
+        key TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        metadata TEXT
+      );
+    `);
+  }
+
+  async get(key: string) {
+    const row = this.db
+      .prepare("SELECT content, metadata FROM dinou_cache WHERE key = ?")
+      .get(key) as { content: string; metadata: string | null } | undefined;
+
+    if (!row) return null;
+
+    return {
+      content: row.content,
+      metadata: row.metadata ? JSON.parse(row.metadata) : null,
+    };
+  }
+
+  async set(key: string, content: string, metadata: any = null): Promise<void> {
+    const metaStr = metadata ? JSON.stringify(metadata) : null;
+    this.db
+      .prepare(
+        "INSERT INTO dinou_cache (key, content, metadata) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET content = excluded.content, metadata = excluded.metadata"
+      )
+      .run(key, content, metaStr);
+  }
+
+  async has(key: string): Promise<boolean> {
+    const row = this.db.prepare("SELECT 1 FROM dinou_cache WHERE key = ?").get(key);
+    return Boolean(row);
+  }
+
+  async delete(key: string): Promise<void> {
+    this.db.prepare("DELETE FROM dinou_cache WHERE key = ?").run(key);
+  }
+
+  async keys(prefix: string = ""): Promise<string[]> {
+    const rows = this.db
+      .prepare("SELECT key FROM dinou_cache WHERE key LIKE ?")
+      .all(`${prefix}%`) as { key: string }[];
+    return rows.map((r) => r.key);
+  }
+}
+```
+
+> **What is the Redis Key Prefix?**
+> The `prefix` parameter in `new RedisStorage(redis, prefix)` defines the namespace prepended to every key stored in Redis (default: `"dinou:cache:"`). For example, when caching `/catalog`, the actual key in Redis is `dinou:cache:catalog/index.html`. This prevents key collisions when Redis is shared with other application caches.
+
+
+---
+
+### 7. Route Lifecycles & Config
+
+<a id="route-segment-contracts"></a>
+<a id="route-lifecycles-config"></a>
+
+Dinou strictly decouples UI components from server-side lifecycle contracts. Route lifecycles are declared in parallel `page_functions.ts` (or `layout_functions.ts`) files.
+
+---
+
+#### getProps()
+
+<a id="getprops"></a>
+
+The primary server-side data loader for route segments. Executed exclusively on the server before JSX component rendering begins. Data returned from `getProps()` is passed directly into the corresponding `page.tsx` or `layout.tsx` component as props.
+
+##### Parameters & Execution
+
+<a id="getprops-params"></a>
+
+| Parameter | Type | Description |
+| :--- | :--- | :--- |
+| **params** | `Record<string, string \| string[]>` | Inferred dynamic route parameters matching filesystem tokens (e.g. `{ id: "123" }` for `[id]` or `{ slug: ["a", "b"] }` for `[...slug]`). |
+| **query** | `Record<string, string \| string[]>` | Parsed incoming HTTP URL search parameters dictionary (e.g. `{ tab: "overview", page: "2" }`). |
+
+```typescript
+// src/app/products/[id]/page_functions.ts
+import type { PageFunctions } from "dinou";
+import { db } from "@/lib/db";
+
+export const getProps: PageFunctions<"/products/[id]">["getProps"] = async (params) => {
+  const product = await db.products.findUnique({
+    where: { id: params.id },
+  });
+
+  return { product };
+};
+```
+
+```tsx
+// src/app/products/[id]/page.tsx (Consuming Loader Props)
+interface ProductPageProps {
+  product: { id: string; name: string; price: number };
+}
+
+export default function ProductPage({ product }: ProductPageProps) {
+  return (
+    <div>
+      <h1>{product.name}</h1>
+      <p>Price: ${product.price}</p>
+    </div>
+  );
+}
+```
+
+---
+
+#### revalidate
+
+<a id="revalidate-config"></a>
+
+Route-level cache lifetime configuration constant in `page_functions.ts` or `layout_functions.ts`. Dictates the Incremental Static Regeneration (ISR) strategy for the segment.
+
+| Value | Strategy | Description |
+| :--- | :--- | :--- |
+| **`false`** (Default) | **Permanent SSG** | Pre-rendered at build time or upon first request; cached permanently in storage until purged on-demand via `revalidateTag()` or `revalidatePath()`. |
+| **`0`** | **Dynamic SSR** | Bypasses storage caches completely; re-executes and streams dynamically on every incoming request. |
+| **`number > 0`** | **Time-Based ISR** | Cached in storage for the specified number of seconds. Once the TTL expires, the next visitor triggers background regeneration. |
+
+```typescript
+// src/app/blog/[slug]/page_functions.ts
+import type { PageFunctions } from "dinou";
+
+// Revalidates this article in the background every 1 hour (3600 seconds)
+export const revalidate: PageFunctions["revalidate"] = 3600;
+```
+
+---
+
+#### ppr
+
+<a id="ppr-config"></a>
+
+Route-level Partial Prerendering (PPR) configuration toggle in `page_functions.ts` or `layout_functions.ts`. Enables or disables hybrid static-shell delivery with streaming dynamic Suspense holes for this route segment, overriding the global `ppr` setting in `dinou.config.mjs`.
+
+| Value | Behavior | Description |
+| :--- | :--- | :--- |
+| **`true`** | **PPR Enabled** | Generates an instant static HTML shell from CDN edge while streaming dynamic `<Suspense>` blocks over the open HTTP connection. |
+| **`false`** | **PPR Disabled** | Disables Partial Prerendering for this route branch, falling back to traditional full-page SSG or SSR. |
+| **Omitted** | **Inherit** | Inherits PPR configuration from the parent layout or global `dinou.config.mjs`. |
+
+```typescript
+// src/app/dashboard/layout_functions.ts
+import type { LayoutFunctions } from "dinou";
+
+// Enables Partial Prerendering for the entire /dashboard branch
+export const ppr: LayoutFunctions["ppr"] = true;
+```
+
+---
+
+#### getCacheTags
+
+<a id="getcachetags"></a>
+
+Route-level cache tagging contract in `page_functions.ts` or `layout_functions.ts`. Associates semantic cache tags with the generated page or layout artifacts, enabling surgical cross-cutting invalidation via `revalidateTag(tag)`.
+
+```typescript
+// src/app/products/[id]/page_functions.ts
+import type { PageFunctions } from "dinou";
+
+// Assigns tags based on dynamic route parameters
+export const getCacheTags: PageFunctions<"/products/[id]">["getCacheTags"] = (params) => {
+  return [
+    "products",
+    `product-${params.id}`,
+  ];
+};
+```
+
+---
+
+#### getStaticPaths
+
+<a id="getstaticpaths"></a>
+
+Build-time static path pre-generation contract for dynamic routes (`[slug]`, `[...slug]`). Defines the set of parameter combinations pre-rendered to static HTML during `dinou build`.
+
+##### Supported Return Signatures
+
+| Return Type | Description | Best Used For |
+| :--- | :--- | :--- |
+| **`string[]`** | Array of string paths (e.g. `["post-1", "post-2"]`). | Single-segment dynamic routes (`[slug]`). |
+| **`Array<Record<string, string>>`** | Array of parameter dictionaries (e.g. `[{ id: "1" }, { id: "2" }]`). | Multi-segment or catch-all routes (`[category]/[slug]`). |
+| **`Array<{ params, props? }>`** | Objects containing `params` and optional pre-computed `props`. | High-performance builds: skips redundant database lookups during build. |
+
+```typescript
+// src/app/blog/[slug]/page_functions.ts
+import type { PageFunctions } from "dinou";
+import { db } from "@/lib/db";
+
+export const getStaticPaths: PageFunctions<"/blog/[slug]">["getStaticPaths"] = async () => {
+  const posts = await db.posts.findMany({ select: { slug: true } });
+  return posts.map((post) => post.slug);
+};
+```
+
+---
+
+#### allowISG
+
+<a id="allowisg"></a>
+
+Defines the fallback policy for dynamic routes when a requested path was **not** pre-generated at build time by `getStaticPaths`.
+
+| Value | Fallback Behavior | Use Case |
+| :--- | :--- | :--- |
+| **`true`** (Default) | **Incremental Static Generation (ISG):** Dinou generates the missing page on-demand upon first visit, serves the generated HTML, and persists it to the storage adapter for subsequent visitors. | Large catalogs, blogs, user-generated content. |
+| **`false`** | **Strict 404:** Immediately returns a clean 404 Not Found HTTP response without invoking `getProps` or rendering the page. | Fixed-path documentation, legal pages, gated routes. |
+
+```typescript
+// src/app/docs/[...slug]/page_functions.ts
+import type { PageFunctions } from "dinou";
+
+// Only pre-rendered paths are valid; unknown slugs immediately return 404
+export const allowISG: PageFunctions["allowISG"] = false;
+```
+
+---
+
+#### validateParams()
+
+<a id="validateparams"></a>
+
+Route perimeter guard that evaluates incoming dynamic route parameters before pipeline execution. Returning `false` immediately terminates the request with a clean 404 Not Found HTTP response without invoking `getProps` or evaluating downstream components.
+
+- **Pre-Execution Perimeter Veto:** Evaluates dynamic parameters at the route boundary before `getProps` executes. Prevents expensive database queries or server load when requests contain malformed, illegal, or malicious parameter inputs.
+- **Sync and Async Evaluation:** Supports both synchronous format assertions (regex pattern checks, numeric boundaries, UUID formats) and asynchronous validations (database lookups, tenant membership verification) returning a Promise resolving to a boolean.
+- **Layout Subtree Protection:** Exporting `validateParams` in `layout_functions.ts` validates segment parameters (such as organization slugs) and guards the entire subtree, halting requests before any child layout or nested page executes.
+
+```typescript
+// src/app/users/[id]/page_functions.ts (Synchronous Numeric Guard)
+import type { PageFunctions } from "dinou";
+
+// Rejects non-numeric parameters immediately (e.g. /users/abc -> 404)
+export const validateParams: PageFunctions<"/users/[id]">["validateParams"] = (params) => {
+  return /^[0-9]+$/.test(params.id);
+};
+
+export const getProps: PageFunctions<"/users/[id]">["getProps"] = async (params) => {
+  // params.id is guaranteed to be a valid numeric string here
+  return { userId: Number(params.id) };
+};
+```
+
+```typescript
+// src/app/[organization]/layout_functions.ts (Async Subtree Perimeter Guard)
+import type { LayoutFunctions } from "dinou";
+import { db } from "@/lib/database";
+
+// Asynchronous perimeter guard protecting an entire organization branch
+export const validateParams: LayoutFunctions<"/[organization]">["validateParams"] = async (params) => {
+  const tenant = await db.organizations.findUnique({
+    where: { slug: params.organization },
+    select: { active: true },
+  });
+
+  return Boolean(tenant?.active);
+};
+```
 
 ---
 
