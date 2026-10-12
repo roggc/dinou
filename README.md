@@ -284,9 +284,21 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
   - [Automatic Extension & Index Resolution](#automatic-extension--index-resolution)
   - [IDE Autocomplete & Refactoring Support](#ide-autocomplete--refactoring-support)
   - [Best Practices & Common Gotchas](#best-practices--common-gotchas)
-- [Configuration API (`dinou.config.js`)](#configuration-api-dinouconfigjs)
-  - [1. Universal Middleware (`onRequest`)](#1-universal-middleware-onrequest)
-  - [2. SWC Disk-Mirror (`useSwcDiskMirror`)](#2-swc-disk-mirror-useswcdiskmirror)
+- [Configuration & Plugins](#configuration--plugins)
+  - [Configuration & Plugin System](#configuration--plugin-system)
+  - [The dinou.config.mjs File](#the-dinouconfigmjs-file)
+  - [Top-Level Configuration Options](#top-level-configuration-options)
+    - [1. Global Partial Prerendering (ppr)](#1-global-partial-prerendering-ppr)
+    - [2. React StrictMode (reactStrictMode)](#2-react-strictmode-reactstrictmode)
+    - [3. Storage Adapter (storage)](#3-storage-adapter-storage)
+    - [4. Plugins Array (plugins)](#4-plugins-array-plugins)
+  - [Dinou Plugin Architecture (onRequest)](#dinou-plugin-architecture-onrequest)
+    - [The context Object (RequestContextStore)](#the-context-object-requestcontextstore)
+    - [Pattern 1: Short-Circuit & Webhooks (Returning Response)](#pattern-1-short-circuit--webhooks-returning-response)
+    - [Pattern 2: Middleware & Context Mutation (getContext)](#pattern-2-middleware--context-mutation-getcontext)
+  - [Real-World Plugin Examples](#real-world-plugin-examples)
+  - [Registration & Execution Pipeline Order](#registration--execution-pipeline-order)
+  - [Fault Isolation & Error Handling](#fault-isolation--error-handling)
 - [📖 API Reference](#-api-reference)
   - [1. Components (`dinou` & `dinou/server`)](#1-components-dinou--dinouserver)
   - [2. Hooks & Navigation (`dinou`)](#2-hooks--navigation-dinou)
@@ -6737,46 +6749,358 @@ Because Dinou uses standard TypeScript compiler configurations, modern developme
 
 ---
 
-## Configuration API (`dinou.config.js`)
+## Configuration & Plugins
 
-Dinou projects can be customized via a `dinou.config.js` (or `.ts`) file in the project root:
+Customize your Dinou application with `dinou.config.mjs`, enable global Partial Prerendering (PPR), configure React StrictMode, and hook into the request lifecycle using Web Standards plugins.
 
-```javascript
-// dinou.config.js
-import { defineConfig } from "dinou/config";
+### Configuration & Plugin System
+
+In **Dinou v7**, the configuration and plugin architecture is built entirely on modern **Web Standards** (the standard `Request` and `Response` interfaces).
+
+Through `dinou.config.mjs`, you can:
+
+- **Enable Global PPR:** Automatically generate static shells with dynamic streaming Suspense holes for all static-eligible routes.
+- **Configure React StrictMode:** Ensure dev-time safety and compiler compatibility across your component tree.
+- **Mount Universal Middlewares:** Intercept incoming HTTP requests, enforce security policies, or handle webhooks without ejecting.
+- **Propagate Server Context:** Attach session, user, or localization data to `context`, instantly accessible in Server Components and Server Functions via `getContext()`.
+
+| Feature | Description |
+| :--- | :--- |
+| **Web Standards First** | Native `Request` & `Response` APIs. Zero dependency on legacy Node.js Express wrappers. |
+| **PPR & Rendering Flags** | Control global Partial Prerendering and React StrictMode from a single configuration source. |
+| **Context Propagation** | Inject authenticated user or tenant data into RSC via `AsyncLocalStorage` and `getContext()`. |
+
+---
+
+### The dinou.config.mjs File
+
+Dinou automatically discovers your configuration file at the root of your project. The recommended format is ES Modules (`dinou.config.mjs` or `dinou.config.ts`) using the `defineConfig` helper:
+
+```typescript
+// dinou.config.mjs
+import { defineConfig } from "dinou";
+// Optional: import storage adapters if running custom ISR persistence
+// import { CloudflareKVStorage } from "dinou/server";
 
 export default defineConfig({
-  // Default bundler: 'esbuild' | 'rollup' | 'webpack'
-  bundler: "esbuild",
+  // Global Partial Prerendering default (can be overridden per route)
+  ppr: false,
 
-  // Default dev server port (auto-prompts if port is in use)
-  port: 3000,
+  // React StrictMode in development (defaults to true in v7)
+  reactStrictMode: true,
 
-  // Global W3C Web Middleware (Node.js, Bun, Deno, Cloudflare Workers, Netlify)
-  async onRequest(req, next) {
-    const url = new URL(req.url);
-    if (url.pathname.startsWith("/api/protected")) {
-      const auth = req.headers.get("Authorization");
-      if (!auth) {
-        return new Response(JSON.stringify({ error: "Unauthorized" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" }
-        });
-      }
-    }
-    return next();
-  },
+  // Custom storage adapter for ISR / route caching (defaults to FileSystemStorage in Node / KV in Deno)
+  // storage: new CloudflareKVStorage(env.MY_KV),
 
-  // Enable SWC disk-mirror caching for instant cold starts in large codebases (500+ routes)
-  useSwcDiskMirror: false
+  // Array of Web Standards plugins
+  plugins: [],
 });
 ```
 
-### 1. Universal Middleware (`onRequest`)
-Unlike legacy Node frameworks tied to Express or Koa, Dinou's `onRequest` operates on standard W3C Web APIs (`Request` and `Response`). It runs universally before any Dinou internal handler across Node.js, Bun, Deno, Cloudflare Workers, and Netlify.
+> [!NOTE]
+> Dinou also supports `dinou.config.js`, `dinou.config.cjs`, and `dinou.config.ts`.
 
-### 2. SWC Disk-Mirror (`useSwcDiskMirror`)
-In development, Dinou compiles everything 100% in-memory into RAM. For enterprise projects with hundreds of routes, setting `useSwcDiskMirror: true` caches AST transforms in `.dinou/dev-cache/` for instant cold starts.
+---
+
+### Top-Level Configuration Options
+
+The `DinouConfig` schema provides top-level controls for runtime behavior and compilation:
+
+#### 1. Global Partial Prerendering (ppr)
+
+**Dinou v7** introduces first-class **Partial Prerendering (PPR)**. When `ppr: true` is configured globally in `dinou.config.mjs`:
+
+- All static-eligible routes pre-render an instant static HTML shell at build/ISR time.
+- Dynamic components wrapped in React `<Suspense>` leave streaming placeholder holes that resume and stream from the server upon request.
+
+```javascript
+// dinou.config.mjs
+export default defineConfig({
+  ppr: true, // Enables Partial Prerendering across all eligible routes
+});
+```
+
+> [!TIP]
+> You can still override PPR on a per-route or per-layout basis inside `page_functions.ts` or `layout_functions.ts` by exporting `export const ppr = false;`.
+
+#### 2. React StrictMode (reactStrictMode)
+
+In Dinou v7, `reactStrictMode` defaults to `true`. When active in development mode, React intentionally invokes components and effects twice to identify unintended side effects and ensure strict compliance with the React Compiler.
+
+```javascript
+// dinou.config.mjs
+export default defineConfig({
+  // Enabled by default (recommended). Set to false to disable:
+  reactStrictMode: false,
+});
+```
+
+#### 3. Storage Adapter (storage)
+
+Dinou's ISR and ISG caching engine uses a pluggable storage adapter. By default, Dinou uses the local filesystem (in Node.js/Bun) or Deno KV (in Deno). You can supply a custom storage adapter (such as Redis or Cloudflare KV) in `dinou.config.mjs`:
+
+```javascript
+// dinou.config.mjs
+import { myCustomRedisStorage } from "./src/lib/storage-redis";
+
+export default defineConfig({
+  storage: myCustomRedisStorage,
+});
+```
+
+#### 4. Plugins Array (plugins)
+
+An array of plugin objects conforming to the `DinouPlugin` interface, executed sequentially on every incoming request.
+
+---
+
+### Dinou Plugin Architecture (onRequest)
+
+In Dinou v7, a plugin is an object containing an optional `name` and the `onRequest` lifecycle hook:
+
+```typescript
+export interface DinouPlugin {
+  name?: string;
+  onRequest?(
+    request: Request,
+    context: RequestContextStore
+  ): Promise<Response | void> | Response | void;
+}
+```
+
+The `onRequest` hook receives the standard Web `Request` object and Dinou's mutable `RequestContextStore`.
+
+#### The context Object (RequestContextStore)
+
+The `context` parameter provides access to parsed request metadata, response mutation helpers, platform edge bindings, and custom shared state:
+
+```typescript
+export interface RequestContextStore {
+  /** Parsed incoming request metadata */
+  req: {
+    path: string;                    // Normalized URL pathname (e.g. "/admin/settings")
+    method: string;                  // HTTP method ("GET", "POST", etc.)
+    cookies: Record<string, string>; // Parsed cookie key-value pairs
+    headers: Record<string, string>; // Lowercased incoming HTTP headers
+    query: Record<string, string>;   // Parsed URL search parameters
+    env?: Record<string, any>;       // Platform environment bindings
+    ctx?: any;                       // Platform execution context
+  };
+
+  /** Outgoing response mutation helpers */
+  res: {
+    cookie(name: string, value: string, options?: CookieOptions): void;
+    clearCookie(name: string, options?: CookieOptions): void;
+    setHeader(name: string, value: string): void;
+    status(code: number): void;
+    redirect(url: string): void;
+    redirect(status: number, url: string): void;
+  };
+
+  /** Direct platform bindings (Cloudflare Workers KV, D1, R2, etc.) */
+  env?: Record<string, any>;
+
+  /** Platform runtime context (e.g. ctx.waitUntil for background execution) */
+  ctx?: { waitUntil(promise: Promise<any>): void };
+
+  /** Custom state attached by plugins (context.user, context.session, etc.) */
+  [key: string]: any;
+}
+```
+
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `context.req` | `Object` | Parsed request helpers: `cookies`, `headers`, `query`, `path`, and `method`. |
+| `context.res` | `ResponseProxy` | Response mutation helpers: `cookie()`, `clearCookie()`, `setHeader()`, `status()`, and `redirect()`. |
+| `context.env` | `Record<string, any>` | Direct platform bindings in serverless/edge runtimes (e.g. Cloudflare KV, D1 databases, R2 buckets). |
+| `context.ctx` | `ExecutionContext` | Platform execution context, allowing `ctx.waitUntil(promise)` for non-blocking background tasks without delaying the HTTP response. |
+| `context[key]` | `any` | Any custom property attached directly to `context` (e.g. `context.user`, `context.session`) is preserved in `AsyncLocalStorage` and accessible anywhere via `getContext()`. |
+
+The `onRequest` hook can execute in two distinct operational patterns:
+
+#### Pattern 1: Short-Circuit & Webhooks (Returning Response)
+
+If `onRequest` returns a Web `Response` instance, Dinou **immediately returns that response to the client** and aborts further processing. React Server Component rendering is completely bypassed:
+
+```typescript
+const healthCheckPlugin = {
+  name: "health-check",
+  onRequest(request) {
+    const url = new URL(request.url);
+    if (url.pathname === "/healthz") {
+      return Response.json({ status: "ok", timestamp: Date.now() });
+    }
+  },
+};
+```
+
+#### Pattern 2: Middleware & Context Mutation (getContext)
+
+If `onRequest` returns `void` (or `undefined`), request processing continues normally. Any property attached to `context` is preserved in `AsyncLocalStorage` and becomes accessible in any server-side module:
+
+```typescript
+const userSessionPlugin = {
+  name: "user-session",
+  async onRequest(request, context) {
+    const sessionCookie = context.req.cookies["session_id"];
+    if (sessionCookie) {
+      // Validate session and attach user object
+      const user = await validateSession(sessionCookie);
+      context.user = user;
+    }
+  },
+};
+```
+
+In your Server Components or Server Functions, consume the attached data using `getContext()`:
+
+```tsx
+// src/app/profile/page.tsx (Server Component)
+import { getContext } from "dinou";
+
+export default function ProfilePage() {
+  const context = getContext();
+  const user = context?.user;
+
+  if (!user) {
+    return <p>Please sign in to view your profile.</p>;
+  }
+
+  return <h1>Welcome back, {user.name}!</h1>;
+}
+```
+
+---
+
+### Real-World Plugin Examples
+
+In production applications, plugins allow you to keep authentication guards, raw webhook endpoints, and pipeline registration cleanly separated and composable:
+
+**1. Authentication Guard (`plugins/auth-guard.ts`):**
+
+```typescript
+// plugins/auth-guard.ts
+import type { DinouPlugin } from "dinou";
+
+export function authGuardPlugin(): DinouPlugin {
+  return {
+    name: "auth-guard",
+    async onRequest(request, context) {
+      const url = new URL(request.url);
+
+      // Protect /admin routes
+      if (url.pathname.startsWith("/admin")) {
+        const token = context.req.cookies["auth_token"];
+        if (!token) {
+          // Redirect unauthorized visitors immediately
+          return Response.redirect(new URL("/login", request.url), 302);
+        }
+
+        const user = await verifyToken(token);
+        if (!user || user.role !== "admin") {
+          return new Response("Forbidden", { status: 403 });
+        }
+
+        // Attach verified user to context
+        context.user = user;
+      }
+    },
+  };
+}
+```
+
+**2. Stripe Webhook Listener (`plugins/stripe-webhook.ts`):**
+
+```typescript
+// plugins/stripe-webhook.ts
+import type { DinouPlugin } from "dinou";
+import Stripe from "stripe";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+
+export function stripeWebhookPlugin(): DinouPlugin {
+  return {
+    name: "stripe-webhook",
+    async onRequest(request) {
+      const url = new URL(request.url);
+      if (url.pathname === "/api/webhooks/stripe" && request.method === "POST") {
+        const sig = request.headers.get("stripe-signature");
+        const rawBody = await request.text();
+
+        try {
+          const event = stripe.webhooks.constructEvent(
+            rawBody,
+            sig!,
+            process.env.STRIPE_WEBHOOK_SECRET!
+          );
+
+          if (event.type === "checkout.session.completed") {
+            // Process payment event
+          }
+
+          return Response.json({ received: true });
+        } catch (err: any) {
+          return new Response(`Webhook Error: ${err.message}`, { status: 400 });
+        }
+      }
+    },
+  };
+}
+```
+
+**3. Composition in `dinou.config.mjs`:**
+
+```typescript
+// dinou.config.mjs
+import { defineConfig } from "dinou";
+import { requestLoggerPlugin } from "./plugins/logger";
+import { stripeWebhookPlugin } from "./plugins/stripe-webhook";
+import { authGuardPlugin } from "./plugins/auth-guard";
+
+export default defineConfig({
+  ppr: true,
+  reactStrictMode: true,
+  plugins: [
+    // 1. Observability: Runs first on every incoming request
+    requestLoggerPlugin(),
+
+    // 2. Webhooks: Intercepts /api/webhooks/* and short-circuits early
+    stripeWebhookPlugin(),
+
+    // 3. Auth Guard: Validates credentials and enriches context.user
+    authGuardPlugin(),
+  ],
+});
+```
+
+---
+
+### Registration & Execution Pipeline Order
+
+To register your plugins, pass them into the `plugins` array of `defineConfig` in `dinou.config.mjs` (as shown in the configuration example above). Dinou executes plugins sequentially according to their position in the array:
+
+1. **Strict Sequential Execution:** Plugins execute top-to-bottom in the exact order they are declared in the array (`plugins[0]` → `plugins[1]` → `plugins[2]`). Dinou awaits each plugin's `onRequest` promise before evaluating the next.
+2. **Short-Circuit Precedence:** If a plugin returns a `Response` instance (e.g. returning `Response.json()` from a webhook or `Response.redirect()` from a guard), the pipeline terminates **immediately**. Subsequent plugins in the array and React page rendering are completely skipped.
+3. **Cumulative Context Sharing:** Context mutations are cumulative. A plugin downstream in the array receives the exact `context` object enriched by previous upstream plugins.
+
+**Recommended Layering Order:**
+
+- **Layer 1 (Global Observability & Headers):** Request logging, performance metrics, and CORS headers.
+- **Layer 2 (Public Webhooks & Health Checks):** Webhook listeners that must bypass authentication (e.g., Stripe, Clerk, `/healthz`).
+- **Layer 3 (Session & Tenant Identification):** Cookie parsers, auth token validation, and multi-tenant resolution that mutate `context`.
+- **Layer 4 (Route Guards & Permissions):** Access-control checks that inspect `context.user` and issue redirects if unauthorized.
+
+---
+
+### Fault Isolation & Error Handling
+
+Dinou provides built-in try-catch fault isolation for all active plugins:
+
+- **Plugin Attribution:** Plugins are identified by their `name` property. If an unhandled exception occurs inside `onRequest`, Dinou logs an informative error attributing the failure to that specific plugin name:
+  ```
+  [Dinou Plugin Error: "my-plugin"]: TypeError ...
+  ```
+- **Graceful Fallback:** If an unhandled exception is thrown by a plugin, Dinou catches it safely and returns a standard `500 Internal Server Error` response, preventing server crash or zombie process states.
 
 ---
 
