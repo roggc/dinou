@@ -8130,37 +8130,79 @@ Universal and client navigation hooks exported directly from `dinou`.
 
 ---
 
-#### redirect()
-
 <a id="redirect"></a>
 
-Dinou's universal, polymorphic redirection primitive. It safely interrupts the current execution pipeline and redirects the browser or crawler to the destination path. Rather than relying on rigid browser-only APIs or uncatchable exceptions, `redirect()` automatically adapts its transport mechanism to the active runtime context (Initial SSR, Active Streaming, RSC Flight, Server Functions, or Client Components).
+#### `redirect()`
 
-> **Contract: Always Use `return redirect(...)`**
+Dinou's universal, polymorphic redirection primitive. It safely interrupts the current execution pipeline and redirects the browser or crawler to the destination path. Rather than relying on rigid browser-only APIs or uncatchable exceptions, `redirect()` automatically adapts its underlying transport mechanism to the active runtime context (Initial SSR, Active Streaming, RSC Flight, Server Functions, or Client Components).
+
+> [!IMPORTANT]
+> **Architectural Contract: Always Use the "return redirect(...)" Pattern**
 >
-> In Dinou, always write `return redirect("/path");` rather than calling `redirect("/path");` bare.
-> - **Clean TypeScript types:** Satisfies `Promise<ReactNode>` in async Server Components without casting.
-> - **Safe inside `try/catch`:** Because it returns a standard declarative element rather than throwing an exception, application error boundaries won't accidentally catch and cancel navigation.
-> - **Works inside `<Suspense>`:** When an async component redirects after the HTTP stream has already started (`200 OK`), Dinou safely streams `<ClientRedirect />` down to the browser to navigate upon hydration without crashing.
+> In Dinou, always return the redirection result:
+>
+> ```typescript
+> // ❌ Anti-pattern: Missing return statement
+> if (!isAuthenticated) {
+>   redirect("/login");
+>   // Execution continues! Component attempts to render unauthorized data
+> }
+>
+> // ✅ Correct:
+> return redirect("/login");
+> // Exits immediately & returns ReactNode (<ClientRedirect />)
+> ```
+>
+> **Why this design?**
+> - **Clean TypeScript types:** Satisfies `Promise<ReactNode>` in async Server Components without requiring type assertions or casting.
+> - **Safe inside `try/catch`:** Because it is a normal declarative element and not an unhandled exception, your application error boundaries and `catch` blocks won't accidentally intercept or cancel the navigation.
+> - **Works inside `<Suspense>`:** When an async component redirects after the HTTP stream has already started (`200 OK`), Dinou safely streams `<ClientRedirect />` down to the browser to navigate upon hydration, avoiding unexpected Error Boundary crashes.
 
 ##### The 5 Polymorphic Runtime Execution Modes
 
-| Mode | Invocation Context | Headers Sent? | HTTP Status / Header | Client Transition | Primary Use Case |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **1. Root SSR / Pre-flight** | `page_functions.ts`, Root SSR, Plugins | No | **HTTP 302 Found** (`Location: /url`) | Full browser reload | Auth walls, root route guards, SEO canonicals |
-| **2. RSC Flight Navigation** | Client-side `<Link>` click to guarded route | No | **HTTP 200 OK** (`x-rsc-redirect: /url`) | Soft SPA navigation | In-app guarded route transitions |
-| **3. Server Functions** | Dedicated POST action (`"use server"`) | No | **HTTP 200 OK** (RPC redirect metadata) | Soft SPA (`router.replace`) | Form submissions, checkout flows |
-| **4. Deferred SSR Streaming** | Inside async `<Suspense>` block | Yes (200 stream open) | **HTTP 200 OK (Chunked)** (`<ClientRedirect />`) | SPA transition upon hydration | Late permission checks in streamed UI |
-| **5. Client Components** | Browser in-render | N/A | None (0ms local dispatch) | Immediate `router.replace()` | Declarative state gates, wizards |
+1. **Initial SSR & Pre-flight (Headers Unsent) — `HTTP 302 Found`**
+   - **Context:** Occurs when called inside `getProps()` in `page_functions.ts`, at the top level of the root `page.tsx` Server Component (before stream initialization), or inside a global plugin hook (`onRequest`).
+   - **Behavior:** Because zero HTML bytes have reached the wire (`headersSent === false`), Dinou issues an immediate **HTTP 302 Found** with a `Location` header. **Critical for SEO crawlers and search indexers.**
 
-##### Usage Patterns
+2. **RSC Flight Navigation — `x-rsc-redirect: /dest`**
+   - **Context:** Occurs during client-side SPA route transitions when the client browser requests a React Server Component flight payload via Dinou's internal flight endpoint.
+   - **Behavior:** Dinou responds with an `x-rsc-redirect: /dest` header with status `200 OK`. Dinou's client router intercepts this header and transitions to the target route smoothly without destroying client application state.
+
+3. **Server Functions (`"use server"`) — `Soft SPA Navigation`**
+   - **Context:** Invoked from browser form actions or event handlers via a dedicated HTTP `POST` request.
+   - **Behavior:** The server executes the mutation and returns redirection metadata. The client RPC proxy intercepts it and drives an SPA router transition (`router.replace()`) **without a full page reload**, preserving client state and scroll position.
+
+4. **Deferred Streaming SSR (`<Suspense>`) — `Hydration Fallback`**
+   - **Context:** Occurs when an async component wrapped in `<Suspense>` redirects after React has already opened the HTTP connection with status `200 OK` to stream the document shell.
+   - **Behavior:** Because an open `200 OK` stream cannot turn into a `302`, Dinou injects `<ClientRedirect />` into the stream and writes an inline script fallback, completing the transition upon browser mount without aborting the connection.
+
+5. **Client Components In-Render (0ms Client Dispatch) — `router.replace() (0ms)`**
+   - **Context:** When called inside a Client Component during browser rendering.
+   - **Behavior:** No network roundtrip is initiated. Dinou returns `<ClientRedirect />` whose `useEffect` hook immediately invokes `router.replace()` in the client SPA router, updating the view instantaneously.
+
+##### Core Architectural Principles
+
+- **The Equivalence Principle in Server Components:** Calling `redirect()` directly inside a Server Component vs. calling an imported Server Function (e.g. `await requireAuth()`) from that Server Component is **functionally identical**. Because both execute inside the exact same Node.js SSR worker during the same request lifecycle, they share the identical `AsyncLocalStorage` context store and streaming pipeline.
+- **Built-in Open-Redirect Protection:** Dinou's runtime includes automatic path sanitization. Target paths must resolve to a valid internal route (starting with a single `/`). Protocol-relative targets (e.g. `//evil.com`) or unauthorized external schemes are sanitized, safeguarding your application against open-redirect phishing vulnerabilities.
+
+##### Runtime Execution Reference Matrix
+
+| Invocation Context | Headers Sent? | HTTP Status / Header | Client Transition | Best Used For |
+| :--- | :--- | :--- | :--- | :--- |
+| **Root SSR / `page_functions.ts` / Plugin** | <span style="color:#10b981;font-weight:600">No</span> | HTTP 302 Found<br>Location: /url | Full browser navigation (hard reload) | Auth walls, root route guards, SEO canonicals |
+| **RSC Flight Navigation** | <span style="color:#10b981;font-weight:600">No</span> | HTTP 200 OK<br>x-rsc-redirect: /url | Soft SPA navigation (zero full reload) | Client-side Link clicks to guarded server routes |
+| **Server Functions (`"use server"`)** | <span style="color:#10b981;font-weight:600">No</span> (dedicated POST) | HTTP 200 OK<br>RPC redirect payload | Soft SPA navigation (`router.replace`) | Form mutations, cart checkout, login actions |
+| **Deferred SSR (Inside `<Suspense>`)** | <span style="color:#f59e0b;font-weight:600">Yes</span> (200 stream open) | HTTP 200 OK (Chunked)<br>`<ClientRedirect />` | SPA transition upon browser hydration | Late permission checks inside streamed async UI |
+| **Client Components (In-render)** | N/A (in-browser) | None (0ms local dispatch) | Immediate `router.replace()` | Declarative client state gates, wizard step navigation |
+
+##### Implementation Examples Across Architectures
 
 ```tsx
-// src/app/admin/page.tsx (React Server Component)
+// 1. React Server Component (src/admin/page.tsx)
 import { Suspense } from "dinou";
 import { redirect, getContext } from "dinou";
 
-// 1. Root pre-flight check (Headers unsent -> HTTP 302 for crawlers)
+// Root pre-flight check (Headers unsent -> HTTP 302 for crawlers)
 export default async function AdminPage() {
   const { req } = getContext();
   if (!req.cookies.auth_token) {
@@ -8177,7 +8219,7 @@ export default async function AdminPage() {
   );
 }
 
-// 2. Deferred check inside Suspense (Headers sent -> <ClientRedirect />)
+// Deferred check inside Suspense (Headers already sent -> <ClientRedirect />)
 async function RestrictedMetrics() {
   const hasAccess = await checkSuperAdmin();
   if (!hasAccess) {
@@ -8188,7 +8230,7 @@ async function RestrictedMetrics() {
 ```
 
 ```typescript
-// src/actions/checkout.ts (Server Function)
+// 2. Server Function (src/actions/checkout.ts)
 "use server";
 
 import { redirect } from "dinou";
@@ -8199,19 +8241,21 @@ export async function processPayment(formData: FormData) {
   const order = await db.orders.charge(cartId);
 
   // Dedicated POST mutation:
-  // Client executes a smooth SPA transition without reloading the browser window!
+  // Dinou returns redirect metadata; client executes a smooth SPA transition
+  // without losing React state or reloading the entire browser window!
   return redirect(`/orders/${order.id}/confirmed`);
 }
 ```
 
 ```typescript
-// src/app/settings/page_functions.ts (getProps)
+// 3. Route Lifecycle Contract (src/settings/page_functions.ts)
 import { redirect, getContext } from "dinou";
 
 export async function getProps() {
   const { req } = getContext();
 
-  // Evaluated before JSX rendering begins: short-circuits with HTTP 302 Found
+  // Evaluated before any JSX rendering begins:
+  // Short-circuits the pipeline with an immediate HTTP 302 Found
   if (!req.cookies.session_id) {
     return redirect("/login?from=/settings");
   }
@@ -8222,12 +8266,17 @@ export async function getProps() {
 ```
 
 ```tsx
-// src/components/client-guard.tsx (Client Component)
+// 4. Client Component (src/components/client-guard.tsx)
 "use client";
 
 import { redirect } from "dinou";
 
-export function ClientAuthGuard({ isAuthenticated, children }: { isAuthenticated: boolean; children: React.ReactNode }) {
+interface GuardProps {
+  isAuthenticated: boolean;
+  children: React.ReactNode;
+}
+
+export function ClientAuthGuard({ isAuthenticated, children }: GuardProps) {
   if (!isAuthenticated) {
     // Evaluates in browser render: dispatches router.replace() in 0ms!
     return redirect("/auth/sign-in");
@@ -8237,11 +8286,43 @@ export function ClientAuthGuard({ isAuthenticated, children }: { isAuthenticated
 }
 ```
 
+```javascript
+// 5. Global Plugin / Middleware (dinou.config.mjs)
+import { defineConfig } from "dinou/config";
+
+export default defineConfig({
+  plugins: [
+    {
+      name: "legacy-redirects",
+      // Universal Web Standards hook (runs on Edge, Workers, Node & Bun)
+      async onRequest(request, context) {
+        const url = new URL(request.url);
+
+        // Permanent 301 SEO redirection for legacy URLs
+        if (url.pathname === "/old-docs" || url.pathname.startsWith("/docs/v1")) {
+          return Response.redirect(new URL("/docs", request.url), 301);
+        }
+
+        // Temporary 307 redirect preserving HTTP method
+        if (url.pathname === "/legacy-api/upload") {
+          return Response.redirect(new URL("/api/v2/upload", request.url), 307);
+        }
+      },
+    },
+  ],
+});
+```
+
+##### Choosing the Right Redirection Mechanism
+
+- **In Plugins & Middlewares (`onRequest` in `dinou.config.mjs`):** Return a native Web Standards `Response.redirect(url, status)`. Dinou detects `result instanceof Response` and terminates the request immediately (<1ms) before route matching, file I/O, or React rendering starts.
+- **In Server Components & `page_functions.ts`:** Use the universal `return redirect("/path")` helper (which automatically defaults to HTTP 302 on unsent headers). If you require an explicit status code (such as a permanent `301 Moved Permanently` for SEO canonical URLs), obtain the context via `const { res } = getContext();` and invoke `res.redirect(301, "/path")`.
+
 ---
 
-#### useSearchParams()
-
 <a id="usesearchparams"></a>
+
+#### `useSearchParams()`
 
 A dual-nature hook that provides access to the current URL's query parameters. Works seamlessly in both Server Components and Client Components with specialized performance characteristics for each environment.
 
@@ -8350,9 +8431,9 @@ export default function SearchFilter() {
 
 ---
 
-#### usePathname()
-
 <a id="usepathname"></a>
+
+#### `usePathname()`
 
 A dual-nature hook that provides access to the current URL pathname. Works in both Server Components and Client Components.
 
@@ -8439,9 +8520,9 @@ export function NavLink({ href, children, exact = false }: NavLinkProps) {
 
 ---
 
-#### useRouter()
-
 <a id="userouter"></a>
+
+#### `useRouter()`
 
 The core programmatic navigation hook for Client Components. Provides programmatic methods for navigating, replacing history, soft refreshing server data, and surgically refreshing cache slots.
 
@@ -8518,9 +8599,9 @@ export function CreateProductForm() {
 
 ---
 
-#### refreshSlot()
-
 <a id="refreshslot"></a>
+
+#### `refreshSlot()`
 
 Imperative client function enabling surgical on-demand revalidation of isolated `<DinouCacheSlot>` components without re-executing the surrounding page Server Component or resetting client UI state. Can be imported and invoked anywhere in client code, including event handlers, WebSocket listeners, or external state stores.
 
@@ -8588,9 +8669,9 @@ export function DashboardToolbar() {
 
 ---
 
-#### useNavigationLoading()
-
 <a id="usenavigationloading"></a>
+
+#### `useNavigationLoading()`
 
 Reactive Client Hook that returns `true` whenever a page navigation, history traversal, or soft router reload is actively in flight, and `false` once the transition completes and the new DOM is painted.
 
