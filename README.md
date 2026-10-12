@@ -40,19 +40,29 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
   - [Building for Production & Target Runtimes](#building-for-production--target-runtimes)
     - [Bundler Flexibility (esbuild, Rollup, Webpack)](#bundler-flexibility-esbuild-rollup-webpack)
     - [First-Class Multi-Runtime Targets](#first-class-multi-runtime-targets)
-- [Routing](#routing)
-  - [Basic & Dynamic Routes](#basic--dynamic-routes)
-  - [Type-Safe Routing (Level 1 & Level 2)](#type-safe-routing-level-1--level-2)
-  - [Important: Optional Segments Rules](#important-optional-segments-rules)
-  - [Advanced Routing](#advanced-routing)
-  - [Navigation](#navigation)
-- [Layouts & Hierarchical Rendering](#layouts--hierarchical-rendering)
-  - [Layouts (`layout.jsx`)](#layouts-layoutjsx)
-  - [Independent Layout Lifecycles (`layout_functions.ts`)](#independent-layout-lifecycles-layout_functionsts)
-  - [Zero-Remount Layout Preservation](#zero-remount-layout-preservation)
-  - [Error Handling (`error.jsx`)](#error-handling-errorjsx)
-  - [Not Found (`not_found.jsx`)](#not-found-not_foundjsx)
-  - [Advanced Layout Control (Flags)](#advanced-layout-control-flags)
+- [Routing & Layouts](#routing--layouts)
+  - [1. Overview & Directory Conventions](#1-overview--directory-conventions)
+    - [1.1. Core File Conventions](#11-core-file-conventions)
+    - [1.2. In-Memory Route Resolution](#12-in-memory-route-resolution)
+  - [2. Route Types & Pattern Matching](#2-route-types--pattern-matching)
+    - [2.1. Static & Dynamic Segments](#21-static--dynamic-segments)
+    - [2.2. Catch-All & Optional Catch-All](#22-catch-all--optional-catch-all)
+    - [2.3. The Strict No-Gap Rule](#23-the-strict-no-gap-rule)
+  - [3. Route Parameters & Validation](#3-route-parameters--validation)
+    - [3.1. Dynamic Params Prop Injection](#31-dynamic-params-prop-injection)
+    - [3.2. Route Validation (validateParams)](#32-route-validation-validateparams)
+    - [3.3. Query Parameters Access](#33-query-parameters-access)
+  - [4. Layouts & Special Files](#4-layouts--special-files)
+    - [4.1. Nested Layouts (layout.tsx)](#41-nested-layouts-layouttsx)
+    - [4.2. Horizontal Segmentation & layout_functions.ts](#42-horizontal-segmentation--layout_functionsts)
+    - [4.3. Layout Control Flags (reset_layout, no_layout)](#43-layout-control-flags-reset_layout-no_layout)
+    - [4.4. Error Pages (error.tsx)](#44-error-pages-errortsx)
+    - [4.5. Custom 404 Pages (not_found.tsx)](#45-custom-404-pages-not_foundtsx)
+  - [5. Route Organization & Parallel Slots](#5-route-organization--parallel-slots)
+    - [5.1. Route Groups (folder)](#51-route-groups-folder)
+    - [5.2. Escaping Route Scanning with Underscore (_folder)](#52-escaping-route-scanning-with-underscore-_folder)
+    - [5.3. Parallel Routes & Slots (@slot)](#53-parallel-routes--slots-slot)
+    - [5.4. Slot Error Containment Architecture](#54-slot-error-containment-architecture)
 - [Component Architecture: Server and Client Components](#component-architecture-server-and-client-components)
   - [1. The RSC Mental Model](#1-the-rsc-mental-model)
   - [2. Server Components (RSC)](#2-server-components-rsc)
@@ -395,261 +405,214 @@ Compile your application for any execution environment without altering componen
 
 For complete deployment guides, Docker setups, and cloud hosting instructions, see the [Deployment Guide](#-deployment-guide).
 
-## Routing
+## Routing & Layouts
 
-Dinou uses a file-system based router. Files named `page.{jsx,tsx,js,ts}` inside the `src` directory automatically become routes.
+Master Dinou's file-system router: nested layouts with independent Horizontal ISR, parallel slots with error isolation, route parameters, and layout control flags.
 
-### Basic & Dynamic Routes
+> [!TIP]
+> **Looking for Type-Safe Routing?**
+> Dinou v7 introduces zero-runtime type safety with auto-generated route definitions, IDE autocomplete, and typed `PageProps` & `<Link>`.
 
-| Pattern                | File Path                       | URL Example   | Params (`params`)           |
-| :--------------------- | :------------------------------ | :------------ | :-------------------------- |
-| **Static**             | `src/page.jsx`                  | `/`           | `{}`                        |
-| **Dynamic**            | `src/blog/[slug]/page.jsx`      | `/blog/hello` | `{ slug: "hello" }`         |
-| **Optional Dynamic**   | `src/blog/[[slug]]/page.jsx`    | `/blog`       | `{ slug: undefined }`       |
-| **Catch-all**          | `src/blog/[...slug]/page.jsx`   | `/blog/a/b/c` | `{ slug: ["a", "b", "c"] }` |
-| **Optional Catch-all** | `src/blog/[[...slug]]/page.jsx` | `/blog`       | `{ slug: [] }`              |
+---
 
-> **Note:** To access query parameters (e.g. `?q=hello`), use the `useSearchParams()` hook. They are NOT passed as props.
+### 1. Overview & Directory Conventions
 
-### Type-Safe Routing (Level 1 & Level 2)
+Every public route in Dinou maps directly to a folder inside `src/` containing an entrypoint file (`page.tsx`, `page.jsx`, `page.ts`, or `page.js`). By default, pages are **React Server Components (RSC)** rendered natively on the server with zero client bundle overhead.
 
-Dinou v7 features an automatic, bidirectional, compile-time type-safe routing engine with **zero runtime overhead**. During development and build time, the route scanner watches `src/` and generates `.dinou/types/routes.d.ts`.
+#### 1.1. Core File Conventions
 
-#### Level 1: Outward Navigation (`<Link>`, `useRouter`, `DinouRoute`)
+- `src/page.tsx` → `/`
+- `src/blog/page.tsx` → `/blog`
+- `src/blog/[slug]/page.tsx` → `/blog/hello-world`
+- `src/dashboard/settings/page.tsx` → `/dashboard/settings`
 
-The `<Link>` component and `router.push()` / `router.replace()` strictly validate that the destination `href` exists in your application routes, providing instant IDE autocompletion and compile errors on typos:
+#### 1.2. In-Memory Route Resolution
+
+You never write central routing tables or configure URL maps manually. The folder structure inside `src/` is your single source of truth.
+
+When a request arrives (for example, `/blog/hello-world`), Dinou matches it entirely in memory:
+
+- **Instant matching:** Directly locates `src/blog/[slug]/page.tsx` in memory with zero subprocess overhead or disk I/O latency.
+- **Parameter extraction:** Automatically parses dynamic segments into typed params (e.g. `{ slug: "hello-world" }`).
+- **Layout nesting:** Automatically wraps the page inside its parent layouts (`src/layout.tsx` → `src/blog/layout.tsx`).
+
+You can use `.tsx`, `.ts`, `.jsx`, or `.js` interchangeably across all pages and layouts.
+
+---
+
+### 2. Route Types & Pattern Matching
+
+Dinou provides expressive pattern matching for static, dynamic, optional, and catch-all URL segments:
+
+#### 2.1. Static & Dynamic Segments
+
+| Pattern | Folder Structure | URL Match Example | Parsed `params` |
+| :--- | :--- | :--- | :--- |
+| **Static** | `src/about/page.tsx` | `/about` | `{}` |
+| **Dynamic** | `src/blog/[slug]/page.tsx` | `/blog/hello` | `{ slug: "hello" }` |
+| **Optional Single** | `src/shop/[[category]]/page.tsx` | `/shop`<br>`/shop/shoes` | `{ category: undefined }`<br>`{ category: "shoes" }` |
+
+#### 2.2. Catch-All & Optional Catch-All
+
+| Pattern | Folder Structure | URL Match Example | Parsed `params` |
+| :--- | :--- | :--- | :--- |
+| **Catch-all (Required)** | `src/docs/[...slug]/page.tsx` | `/docs/routing/params` | `{ slug: ["routing", "params"] }` |
+| **Optional Catch-all** | `src/docs/[[...slug]]/page.tsx` | `/docs`<br>`/docs/a/b` | `{ slug: [] }`<br>`{ slug: ["a", "b"] }` |
+
+Catch-all segments (`[...slug]`) consume all remaining path segments into a string array. Because they consume the remainder of the URL, Catch-all segments must always be the **terminal (last) segment** of a path definition.
+
+#### 2.3. The Strict No-Gap Rule
+
+Dinou enforces a strict No-Gap Rule when resolving nested optional segments such as `/inventory/[[warehouse]]/[[aisle]]`:
+
+##### ✅ Allowed: Trailing Omission
+You can omit optional segments only if they are omitted from the tail end of the URL:
+- `/inventory/main/a1` ✅ (both provided: `{ warehouse: "main", aisle: "a1" }`)
+- `/inventory/main` ✅ (`aisle` omitted: `{ warehouse: "main", aisle: undefined }`)
+- `/inventory` ✅ (both omitted: `{ warehouse: undefined, aisle: undefined }`)
+
+##### ❌ Forbidden: Intercalated Gaps
+You cannot omit an earlier optional parameter while setting a later one:
+- `/inventory//a1` ❌ (empty gap / skipped `warehouse` while setting `aisle`: ambiguous URL structure rejected)
+
+---
+
+### 3. Route Parameters & Validation
+
+Dinou provides a clean, unified data contract. Route parameters are extracted from the URL and injected directly into components and server functions.
+
+#### 3.1. Dynamic Params Prop Injection
+
+In Dinou v7, parameters are strictly typed using `PageProps`, `LayoutProps`, `ErrorProps`, and `RouteParams`:
+
+- `page.tsx` components: `Page({ params }: PageProps<"/blog/[slug]">)`
+- `layout.tsx` components: `Layout({ params, children }: LayoutProps<"/blog/[slug]">)`
+- `error.tsx` pages: `Error({ error, params }: ErrorProps<"/blog/[slug]">)`
+- `not_found.tsx` 404 pages: `NotFound({ params }: PageProps<"/blog/[slug]">)`
+- Parallel slot pages (`@slot/page.tsx`): `SlotPage({ params }: PageProps<"/dashboard/[teamId]">)`
+- Server data fetching: `getProps(params: RouteParams<"/blog/[slug]">)` in `page_functions.ts`
 
 ```tsx
-import { Link, useRouter } from "dinou";
+// src/blog/[slug]/page.tsx
+import type { PageProps } from "dinou";
 
-export default function Nav() {
-  const router = useRouter();
+interface BlogPostProps extends PageProps<"/blog/[slug]"> {
+  post?: { title: string; content: string };
+}
 
+export default function BlogPost({ params, post }: BlogPostProps) {
+  // ✅ params.slug is strongly typed as string automatically
   return (
-    <nav>
-      {/* Autocompletes valid routes; TypeScript errors if the route does not exist */}
-      <Link href="/about">About Us</Link>
-
-      {/* Dynamic routes can be cast with 'as const' */}
-      <Link href={`/blog/${slug}` as const}>Read Post</Link>
-
-      <button onClick={() => router.push("/dashboard")}>
-        Dashboard
-      </button>
-    </nav>
-  );
-}
-```
-
-To create reusable design-system buttons or navigation links, use the exported `DinouRoute` type:
-
-```tsx
-import type { DinouRoute } from "dinou";
-
-interface ActionButtonProps {
-  label: string;
-  to: DinouRoute;
-}
-
-export function ActionButton({ label, to }: ActionButtonProps) {
-  return <Link href={to}>{label}</Link>;
-}
-```
-
-#### Level 2: Inward Consumption (`PageProps`, `LayoutProps`, `RouteParams`, `ErrorProps`)
-
-Pages, layouts, and error components use strongly-typed generics to infer route parameters automatically:
-
-```tsx
-// src/blog/[category]/[slug]/page.tsx
-import type { PageProps, RouteParams } from "dinou";
-
-// Strongly type params by passing the route template string:
-type BlogPostProps = PageProps<"/blog/[category]/[slug]">;
-
-export async function getProps(params: RouteParams<"/blog/[category]/[slug]">) {
-  // params.category: string
-  // params.slug: string
-  const post = await db.fetchPost(params.category, params.slug);
-  return { post }; // Direct props return in Dinou v7!
-}
-
-export default function BlogPostPage({ params, post }: BlogPostProps) {
-  return (
-    <article>
-      <h1>{post.title}</h1>
-      <p>Category: {params.category} | Slug: {params.slug}</p>
+    <article className="p-6">
+      <h1 className="text-2xl font-bold">{post?.title ?? params.slug}</h1>
+      <p className="mt-2 text-muted-foreground">{post?.content}</p>
     </article>
   );
 }
 ```
 
-#### Parameter Mapping Reference
+> [!IMPORTANT]
+> **Strict Signature Rule:**
+> In `page_functions.ts` and `layout_functions.ts`, Dinou passes the parameters dictionary directly as the first argument: use `getProps(params)` and `validateParams(params)` (do not write `getProps({ params })`). However, in React components (`page.tsx`, `layout.tsx`, `error.tsx`, `not_found.tsx`), `params` is passed as a component prop: `export default function Page({ params })`.
 
-| Filesystem Path Pattern | Normalized Route Pattern | Resolved TypeScript `params` Type | Description |
-| :--- | :--- | :--- | :--- |
-| `src/page.tsx` | `"/"` | `{}` | Root homepage |
-| `src/about/page.tsx` | `"/about"` | `{}` | Static segment |
-| `src/users/[id]/page.tsx` | `"/users/[id]"` | `{ id: string }` | Single dynamic parameter |
-| `src/shop/[cat]/[item]/page.tsx` | `"/shop/[cat]/[item]"` | `{ cat: string; item: string }` | Multiple dynamic parameters |
-| `src/docs/[...slug]/page.tsx` | `"/docs/[...slug]"` | `{ slug: string[] }` | Catch-all dynamic segments |
-| `src/settings/[[tab]]/page.tsx` | `"/settings/[[tab]]"` | `{ tab?: string }` | Optional dynamic segment |
-| `src/archive/[[...slug]]/page.tsx` | `"/archive/[[...slug]]"` | `{ slug?: string[] }` | Optional catch-all segments |
+#### 3.2. Route Validation (validateParams)
 
-### Important: Optional Segments Rules
+Exporting a `validateParams(params)` function from `page_functions.ts` or `layout_functions.ts` lets you enforce semantic validation rules before data fetching or rendering begins. Returning `false` (or a Promise that resolves to `false`) immediately aborts the request and issues a clean 404 response:
 
-Dinou supports deep nesting of optional segments (`[[...]]` or `[[slug]]`), but it enforces a strict **No-Gap Rule**.
+```tsx
+// src/product/[id]/page_functions.ts
+import type { RouteParams } from "dinou";
 
-> **The Rule:** You cannot skip an intermediate optional segment. You can only omit parameters if they are at the **end of the URL**.
+export function validateParams(params: RouteParams<"/product/[id]">) {
+  // Ensure the product ID is strictly numeric; otherwise render 404
+  return /^\d+$/.test(params.id);
+}
 
-#### ✅ Allowed: "Trailing Omission"
+export async function getProps(params: RouteParams<"/product/[id]">) {
+  // Only called if validateParams returned true
+  const product = await db.products.findById(params.id);
+  return { product };
+}
+```
 
-You can leave optional segments undefined, but only if they are the last ones in the structure.
+**Guaranteed behavior across all rendering modes:**
+- **Dynamic SSR:** Returns an instant 404 without running `getProps`, preventing wasteful database queries on invalid URLs.
+- **Incremental Static Generation (ISG / ISR):** Prevents invalid URLs from triggering on-demand page generation or polluting edge caches with broken pages.
+- **Static Site Exports (SSG):** Only valid parameter combinations generate HTML files during `dinou export`.
 
-- **Structure:** `src/inventory/[[warehouse]]/[[aisle]]/page.tsx`
+#### 3.3. Query Parameters Access
 
-| URL                  | Result (`params`)                            | Status                          |
-| :------------------- | :------------------------------------------- | :------------------------------ |
-| `/inventory/main/a1` | `{ warehouse: "main", aisle: "a1" }`         | ✅ **Full**                     |
-| `/inventory/main`    | `{ warehouse: "main", aisle: undefined }`    | ✅ **Valid** (Last one omitted) |
-| `/inventory`         | `{ warehouse: undefined, aisle: undefined }` | ✅ **Valid** (All omitted)      |
+Query parameters (e.g. `?search=react&sort=asc`) are deliberately isolated from static route matching to preserve edge cache stability. In Dinou, `useSearchParams()` is a universal hook that works seamlessly in both Server Components and Client Components:
 
-#### ❌ Forbidden: "Intercalated Undefined" (Gaps)
+```tsx
+import { useSearchParams } from "dinou";
 
-It is **not possible** to define a later segment while skipping an earlier one.
+// Works identically in Server Components & "use client"!
+export default function SearchPage() {
+  const searchParams = useSearchParams();
+  const q = searchParams.get("search") ?? "";
+  return <div>Search: {q}</div>;
+}
+```
 
-- **Structure:** `src/inventory/[[warehouse]]/[[aisle]]/page.tsx`
+##### Outside React Components (page_functions.ts & Server Functions)
+Outside React components (where hooks cannot run), access the active query via `getContext().req.query`:
 
-| Goal                                    | Result                                                                                 |
-| :-------------------------------------- | :------------------------------------------------------------------------------------- |
-| **Skip `warehouse` but define `aisle`** | ❌ **Forbidden**: You cannot provide an `aisle` without providing a `warehouse` first. |
+```tsx
+import { getContext } from "dinou";
 
-#### Catch-all Constraints
+// src/search/page_functions.ts
+// getContext() is available in getProps, validateParams, etc.
+export async function getProps() {
+  const { req } = getContext();
+  const search = req.query?.search;
+  return { search };
+}
+```
 
-Due to their "greedy" nature (consuming the rest of the URL), Catch-all segments (`[...]` and `[[...]]`) must always be the **terminal (last) segment** of a route definition. You cannot place other static or dynamic folders inside a Catch-all folder.
+```tsx
+"use server"; // Declared at the top of the file
+import { getContext } from "dinou";
+
+// src/actions/items.ts
+export async function filterItems() {
+  const { req } = getContext();
+  const search = req.query?.search;
+  return db.items.find({ q: search });
+}
+```
 
 ---
 
-### Advanced Routing
+### 4. Layouts & Special Files
 
-#### Route Groups `(folder)`
+Dinou provides special files that cascade down the directory hierarchy. They allow you to compose nested layouts, manage independent ISR lifecycles, isolate errors, and break out of hierarchies using control flags.
 
-Folders wrapped in parentheses are omitted from the URL path. This is useful for organizational purposes.
+#### 4.1. Nested Layouts (layout.tsx)
 
-- `src/(auth)/login/page.jsx` → **`/login`**
-- `src/(marketing)/about/page.jsx` → **`/about`**
-- `src/(marketing)/(nested)/about/page.jsx` → **`/about`**
+A `layout.tsx` wraps all child pages and sub-layouts in its directory. On client navigation between sibling pages, parent layouts preserve their React state, input fields, scroll position, and DOM tree without re-mounting.
 
-**Why use them?**
-Route Groups allow you to keep your project structure logical without affecting the public URL structure. For example, grouping all authentication-related routes together.
-
-#### Parallel Routes `@slot`
-
-You can define slots (e.g., `@sidebar`, `@header`) to render multiple pages in the same layout simultaneously.
-
-- `src/dashboard/@sidebar/page.jsx`
-- `src/dashboard/(group-a)/@bottom/page.jsx`
-- `src/dashboard/layout.jsx` → Receives `sidebar` and `bottom` as props.
-
-> **Note:** Slots must be located in the same logical folder as the layout they serve.
-
-**Why use them?**
-Parallel routes allow independent UI sections and **Error Containment**:
-
-1. **Server Component with `error.jsx`:** If the slot fails, only that specific slot renders the error UI.
-2. **Server Component without `error.jsx`:** If the slot fails, it renders `null` safely.
-3. **Client Component:** Without an explicit React Error Boundary, an unhandled error here will crash the entire page.
-
-### Navigation
-
-#### Using `<Link>` (Recommended)
-
-The `<Link>` component provides optimized client-side transitions with automatic prefetching.
-
-```jsx
-"use client";
-import { Link } from "dinou";
-
-export default function Menu() {
-  return (
-    <nav>
-      {/* Prefetches data automatically on hover/viewport */}
-      <Link href="/about">About Us</Link>
-
-      {/* Opt-in for fresh data (bypasses client cache) */}
-      <Link href="/dashboard" fresh>
-        Dashboard
-      </Link>
-    </nav>
-  );
-}
-```
-
-> **Note:** Standard HTML `<a>` tags also trigger client-side soft navigation via global event delegation in Dinou, but they lack the smart features (prefetching, `fresh` prop) provided by the `<Link>` component.
-
-#### Programmatic Navigation
-
-Use the `useRouter` hook inside Client Components (`"use client"`).
-
-```jsx
-"use client";
-import { useRouter } from "dinou";
-
-export default function Controls() {
-  const router = useRouter();
-
-  return (
-    <div>
-      <button onClick={() => router.push("/home")}>Push</button>
-      <button onClick={() => router.replace("/home")}>Replace</button>
-      <button onClick={() => router.back()}>Go Back</button>
-      <button onClick={() => router.forward()}>Go Forward</button>
-
-      {/* Soft Reload: Refetches server data without losing component state */}
-      <button onClick={() => router.refresh()}>Refresh Data</button>
-    </div>
-  );
-}
-```
-
-#### Relative Routing (Directory-First Convention)
-
-Relative paths in both `<Link>` and programmatic navigation (`router.push`) resolve by treating the current path segment as a directory. The framework internally appends a trailing slash `/` to the current pathname before resolving.
-
-| Current Path | Target Path | Resolves To (Dinou) | Resolves To (Native Browser) |
-| :----------- | :---------- | :------------------ | :--------------------------- |
-| `/blog/post` | `details`   | `/blog/post/details`| `/blog/details`              |
-| `/blog/post` | `./details` | `/blog/post/details`| `/blog/details`              |
-| `/blog/post` | `../about`  | `/blog/about`       | `/about`                     |
-
-To navigate from `/blog/post` to `/blog/about`, use `../about` or the absolute path `/blog/about`.
-
-## Layouts & Hierarchical Rendering
-
-Dinou uses a nested routing system. Layouts, Error pages, and Not Found pages cascade down the directory hierarchy.
-
-### Layouts (`layout.jsx`)
-
-Layouts wrap pages and child layouts. They persist across navigation, preserving state and preventing unnecessary re-renders.
-
-A layout component receives a `children` prop, `params` (route parameters), and any parallel slot (e.g., `sidebar`) defined in the same folder scope.
-
-> **Note:** `searchParams` are NOT passed to layouts.
+A layout component receives `children`, `params`, any parallel slots (e.g. `sidebar`), and props returned by `layout_functions.ts`:
 
 ```tsx
-// src/dashboard/layout.tsx
+// src/dashboard/[teamId]/layout.tsx
+import type { ReactNode } from "react";
 import type { LayoutProps } from "dinou";
 
-export default async function Layout({
+interface DashboardLayoutProps extends LayoutProps<"/dashboard/[teamId]"> {
+  sidebar?: ReactNode; // Parallel slot (@sidebar)
+}
+
+export default function DashboardLayout({
   children,
   params,
-  sidebar
-}: LayoutProps<"/dashboard"> & { sidebar?: React.ReactNode }) {
+  sidebar,
+}: DashboardLayoutProps) {
   return (
-    <div className="dashboard-grid">
-      <aside>{sidebar}</aside>
-      <main>
-        <h1>Dashboard for {params.teamId}</h1>
+    <div className="flex min-h-screen">
+      <aside className="w-64 border-r p-4">{sidebar}</aside>
+      <main className="flex-1 p-6">
+        <h1 className="text-xl font-bold">Team: {params.teamId}</h1>
         {children}
       </main>
     </div>
@@ -657,102 +620,291 @@ export default async function Layout({
 }
 ```
 
-Layouts are **nested** by default. A page at `src/dashboard/settings/page.jsx` will be wrapped by:
+#### 4.2. Horizontal Segmentation & layout_functions.ts
 
-1. `src/layout.jsx` (Root Layout)
-2. `src/dashboard/layout.jsx` (Dashboard Layout)
-3. `src/dashboard/settings/page.jsx` (The Page)
+In traditional SSR frameworks, layout shells and child pages are tightly coupled. Navigating to a dynamic child route often forces the entire layout to re-evaluate, resetting video playback, collapsing open menus, or wiping sidebar search state.
 
-### Independent Layout Lifecycles (`layout_functions.ts`)
+Dinou v7 introduces **Horizontal Layered Segmentation**. Layouts and pages travel on completely separate execution, streaming, and caching pathways:
 
-In Dinou v7, layout data fetching is **completely decoupled from pages**. Instead of defining layout data inside `page_functions.ts`, layouts have their own independent lifecycle file named **`layout_functions.ts`** in the same directory:
+1. **The Layout Plane:** Renders exclusively the outer layout shell and any parallel slots, establishing the boundary where child page content is mounted.
+   - Governed by `layout_functions.ts`
+   - Maintains its own independent cache TTL
+   - Never unmounts or re-executes during sibling navigations
+2. **The Page Plane:** Renders exclusively the active leaf page component (`<Page />`) and streams into the layout's page slot.
+   - Governed by `page_functions.ts`
+   - Can be highly dynamic or real-time SSR
+   - Navigating between siblings updates only this plane
 
-```typescript
-// src/dashboard/layout_functions.ts
-export const revalidate = 300; // Cache this layout independently for 5 minutes (strict seconds)
+##### Decoupled Lifecycles in Practice: layout_functions.ts
 
-export async function getProps() {
-  const notifications = await fetchUnreadNotifications();
-  return { notifications };
-}
-```
-
-```tsx
-// src/dashboard/layout.tsx
-import type { LayoutProps } from "dinou";
-
-export default function DashboardLayout({
-  children,
-  notifications
-}: LayoutProps<"/dashboard"> & { notifications: any[] }) {
-  return (
-    <div className="dashboard-shell">
-      <aside>Unread notifications: {notifications.length}</aside>
-      <main>{children}</main>
-    </div>
-  );
-}
-```
-
-- **Horizontal Segmentation:** Navigating between sibling pages (e.g. `/dashboard/analytics` to `/dashboard/settings`) requests **only the inner page slot RSC stream**. The parent layout is neither re-rendered on the server nor remounted on the client.
-
-### Zero-Remount Layout Preservation
-
-In Dinou v7, parent layouts remain mounted in the React DOM during client-side navigation. This preserves:
-- Audio/video playback state
-- Open sidebar/modal/drawer states
-- Scroll positions of sub-containers
-- Client-side form input values
-
-### Error Handling (`error.jsx`)
-
-Create an `error.jsx` (or `error.tsx`) file to define an error page for a route segment. In Dinou v7, `error.tsx` is rendered as a **Server Component** by default and wrapped in a two-level resilience boundary:
-1. **`SlotErrorBoundary`:** If a page crashes during SSR or streaming, the error is isolated inside `<DinouPageSlot>`. Parent layouts and navigations remain fully interactive.
-2. **`InnerErrorBoundary`:** Catches root-level layout crashes without crashing the process.
+Because layouts and pages are horizontally decoupled, they can declare completely independent caching lifetimes (TTL / ISR). A layout shell can cache for hours while its child pages revalidate every few seconds:
 
 ```tsx
-// src/error.tsx
+// src/dashboard/[teamId]/layout_functions.ts - Independent Layout ISR
+import type { RouteParams } from "dinou";
+
+// 1. Data Fetching for the Layout Shell
+export async function getProps(params: RouteParams<"/dashboard/[teamId]">) {
+  const team = await fetchTeamData(params.teamId);
+  return { team };
+}
+
+// 2. Independent Cache Lifetime (1 hour)
+// Child pages inside this dashboard can update every 5 seconds without invalidating this shell!
+export const revalidate = 3600;
+
+// 3. Granular Invalidation Tags (constant or function getCacheTags)
+// Calling revalidateTag("team-shell") purges only the layout without wiping child page caches.
+export const getCacheTags = ["team-shell"];
+```
+
+Props returned by `getProps` in `layout_functions.ts` are automatically injected into `layout.tsx` as top-level props alongside `children`, `params`, and any parallel slots.
+
+#### 4.3. Layout Control Flags (reset_layout, no_layout)
+
+Dinou allows you to break out of the nested layout hierarchy using empty flag files (files without extensions) placed in the route directory:
+
+| Flag File | Applies To | Architectural Effect |
+| :--- | :--- | :--- |
+| `reset_layout` | `layout.tsx` | **Resets the layout tree.** This layout becomes the new root layout, completely ignoring all parent layouts (including `src/layout.tsx`). Perfect for marketing landing pages or auth portals. |
+| `no_layout` | `page.tsx`, `not_found.tsx`, `error.tsx` | **Bypasses all layouts entirely across the route.** The page, custom 404, and error boundary render raw without any parent layout wrappers (ideal for embeddable widgets, checkout modals, or pure HTML canvas views). |
+| `no_layout_error` | `error.tsx` | **Granular override:** prevents parent layouts from wrapping the error boundary UI only, while preserving layouts for the regular page. |
+| `no_layout_not_found` | `not_found.tsx` | **Granular override:** prevents parent layouts from wrapping the custom 404 page only, while preserving layouts for the regular page. |
+
+##### Example: Standalone Landing Page
+- `src/landing/layout.tsx`
+- `src/landing/reset_layout` (empty file)
+- `src/landing/page.tsx`
+- → The landing page ignores the root `src/layout.tsx` header and navigation bar.
+
+#### 4.4. Error Pages (error.tsx)
+
+Create an `error.tsx` file in any route directory to catch and isolate runtime errors locally. If an exception occurs in a child component, Dinou bubbles up to the closest `error.tsx`, rendering it while keeping all parent layouts interactive:
+
+```tsx
+// src/dashboard/[teamId]/error.tsx
 import type { ErrorProps } from "dinou";
 
-export default function ErrorPage({ error, params }: ErrorProps) {
+// Native: ErrorProps infers params and types the captured error
+export default function DashboardError({
+  error,
+  params,
+}: ErrorProps<"/dashboard/[teamId]">) {
   return (
-    <div className="error-container">
-      <h2>Something went wrong!</h2>
-      <p className="error-message">{error.message}</p>
-      {/* In development, error.stack is available. In production, error.stack is automatically sanitized to undefined */}
+    <div className="p-6 rounded-xl border border-rose-500/20 bg-rose-50/20">
+      <h3 className="text-rose-600 font-bold">Failed to load team {params.teamId}</h3>
+      <p className="text-xs text-muted-foreground mt-1">{error.message}</p>
       {error.stack && (
-        <pre className="error-stack">{error.stack}</pre>
+        <pre className="mt-3 p-3 bg-slate-900 text-slate-100 rounded text-xs overflow-auto">
+          {error.stack}
+        </pre>
       )}
     </div>
   );
+}
 ```
 
-### Not Found (`not_found.jsx`)
+> [!NOTE]
+> **Security Note:** For production deployments, `error.stack` is automatically stripped by Dinou to prevent internal file paths and system details from leaking. In development mode, the full cleaned stack trace is provided.
 
-Create a `not_found.jsx` file to customize the 404 UI. Like errors, Dinou renders the closest `not_found.jsx` found traversing up from the requested URL.
+#### 4.5. Custom 404 Pages (not_found.tsx)
 
-`not_found.jsx` receives `params` as a prop. To access search parameters, use `useSearchParams()`.
+Define custom 404 views by placing `not_found.tsx` in any route directory. When an unmatched URL segment is requested, Dinou bubbles up to render the closest `not_found.tsx` template inside its enclosing layout.
 
-### Advanced Layout Control (Flags)
+##### Scoped to Route Segment
+```tsx
+// src/blog/[slug]/not_found.tsx (Scoped to /blog/[slug])
+import { Link, type PageProps } from "dinou";
 
-Sometimes you need to break out of the standard nested hierarchy (e.g., a Landing Page that shouldn't share the App Layout). Dinou uses **"Flag Files"** (empty files with no extension) to control this behavior.
+// Strongly types params.slug as string
+export default function NotFound({ params }: PageProps<"/blog/[slug]">) {
+  return (
+    <div className="flex flex-col items-center justify-center p-8 text-center">
+      <h2 className="text-3xl font-bold">404 - Article Not Found</h2>
+      <p className="mt-2 text-muted-foreground">
+        The article "{params.slug}" could not be located.
+      </p>
+      <Link
+        href="/"
+        className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium text-sm"
+      > 
+        Back to Home
+      </Link>
+    </div>
+  );
+}
+```
 
-Place these files in the same directory as your component to activate the behavior.
+##### Global Root 404 Fallback
+```tsx
+// src/not_found.tsx (Global Root Fallback)
+import { Link, type PageProps } from "dinou";
 
-| Flag File             | Applies To                               | Description                                                                                                                                       |
-| :-------------------- | :--------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `reset_layout`        | `layout.jsx`                             | **Resets the layout tree.** This layout becomes the new Root, ignoring all parent layouts. Perfect for separating Marketing pages from App pages. |
-| `no_layout`           | `page.jsx`, `error.jsx`, `not_found.jsx` | Prevents the component from being wrapped by _any_ layout in the hierarchy.                                                                       |
-| `no_layout_error`     | `error.jsx`                              | Specifically prevents layouts only for the Error page.                                                                                            |
-| `no_layout_not_found` | `not_found.jsx`                          | Specifically prevents layouts only for the Not Found page.                                                                                        |
+// PageProps<"/"> strictly ensures no dynamic params are accidentally accessed
+export default function GlobalNotFound({ params }: PageProps<"/">) {
+  return (
+    <div className="flex flex-col items-center justify-center p-8 text-center">
+      <h2 className="text-3xl font-bold">404 - Page Not Found</h2>
+      <p className="mt-2 text-muted-foreground">
+        The requested page does not exist on this server.
+      </p>
+      <Link
+        href="/"
+        className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium text-sm"
+      > 
+        Back to Home
+      </Link>
+    </div>
+  );
+}
+```
 
-#### Example: Isolate a Landing Page
+##### Can 404 Pages Receive Server Props via getProps?
+**Yes.** If you define a `page_functions.{ts,js}` file in the same route directory as `not_found.tsx`, Dinou executes its `getProps(params)` server lifecycle and merges the returned data directly into the component's props alongside `params`:
 
-If you have a marketing page at `src/marketing/page.jsx` and you don't want it to inherit the Root Layout:
+```tsx
+// 1. Sibling server contract: src/blog/[slug]/page_functions.ts
+export async function getProps(params: { slug: string }) {
+  const suggestions = await db.posts.findMany({ take: 3 });
+  return { suggestions };
+}
 
-1. Create `src/marketing/layout.jsx` (Your marketing layout).
-2. Create an empty file named `reset_layout` inside `src/marketing/`.
-3. **Result:** `src/marketing/page.jsx` will only use the marketing layout, ignoring the global root layout.
+// 2. 404 Page: src/blog/[slug]/not_found.tsx
+import { Link, type PageProps } from "dinou";
+
+interface NotFoundProps extends PageProps<"/blog/[slug]"> {
+  suggestions: { id: string; title: string; slug: string }[];
+}
+
+export default function NotFound({ params, suggestions }: NotFoundProps) {
+  return (
+    <div className="flex flex-col items-center justify-center p-8 text-center">
+      <h2 className="text-3xl font-bold">404 - Article Not Found</h2>
+      <p className="mt-2 text-muted-foreground">
+        Could not find "{params.slug}". Here are some recommended articles:
+      </p>
+      {suggestions && (
+        <ul className="mt-4 space-y-1">
+          {suggestions.map((item) => (
+            <li key={item.id}>
+              <Link
+                href={`/blog/${item.slug}`}
+                className="text-primary hover:underline text-sm font-medium"
+              >
+                &rarr; {item.title}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+```
+
+> **Difference with `error.tsx`:** While `not_found.tsx` can safely execute `getProps`, `error.tsx` pages never invoke server contracts (they receive strictly `ErrorProps`) to prevent compounding unhandled server exceptions.
+
+---
+
+### 5. Route Organization & Parallel Slots
+
+Dinou provides dedicated directory conventions to organize enterprise codebases cleanly and compose parallel UI slots without impacting URL ergonomics:
+
+#### 5.1. Route Groups (folder)
+
+Folders wrapped in parentheses (e.g. `(auth)`, `(marketing)`) are omitted from the public URL path. They serve two fundamental architectural purposes in Dinou:
+
+- **Logical Organization:** Group related routes together without introducing unwanted segment prefixes in the URL.
+- **Multiple Root Layouts:** Apply completely different top-level layout wrappers to different areas of your application without URL changes.
+
+##### Multiple Root Layouts in Practice
+In conventional file-system routers, a single global layout forces all pages to share the same top navigation bar and footer. With Dinou Route Groups, you can create independent root layouts for marketing pages versus authentication screens:
+
+```
+src/
+├── (marketing)/                # Public layout branch
+│   ├── layout.tsx              # Navbar, Footer, Hero
+│   ├── page.tsx                # → /
+│   ├── about/page.tsx          # → /about
+│   └── pricing/page.tsx        # → /pricing
+└── (auth)/                     # Minimalist auth branch
+    ├── layout.tsx              # Centered card, no Navbar
+    ├── login/page.tsx          # → /login
+    └── register/page.tsx       # → /register
+```
+
+**How Dinou Resolves Layouts:**
+- **Independent Filesystem Paths:** `src/(marketing)/layout.tsx` and `src/(auth)/layout.tsx` live in distinct disk directories, so there is zero file collision.
+- **Request to `/pricing`:** Dinou crawls into `(marketing)`, matches `pricing/page.tsx`, and wraps it exclusively with the marketing layout.
+- **Request to `/login`:** Dinou crawls into `(auth)`, matches `login/page.tsx`, and wraps it exclusively with the auth layout.
+- **Root Hierarchy:** If you also place a top-level `src/layout.tsx`, both groups nest inside it (e.g. for HTML `<head>` or global fonts). If omitted, each group acts as a completely separate root layout.
+
+##### Avoid URL Path Collisions
+Because parenthesized folder names are stripped from the public URL, different route groups cannot define identical URL paths. For example, creating both `src/(marketing)/about/page.tsx` and `src/(auth)/about/page.tsx` would cause a build/resolution collision because both map to `/about`.
+
+#### 5.2. Escaping Route Scanning with Underscore (_folder)
+
+In Dinou, you do not need to prefix folders like `components/`, `hooks/`, or `utils/` with an underscore. Any directory that simply does not contain a `page.tsx` (or `page.jsx`) is already completely ignored by the router and will never register a route.
+
+##### The Real Purpose of "_": Legacy Code & Archived Pages
+The sole and specific purpose of prefixing a directory with an underscore (`_folderName`) is to escape the in-process route scanner when dealing with legacy code, drafts, or archived folders that actually contain `page.tsx` / `page.jsx` files inside them:
+
+```
+src/blog/
+├── page.tsx             → /blog (Active public route)
+├── components/          (No page.tsx → already safe without "_")
+│   └── post-card.tsx
+└── _legacy_v1/          (Contains page.tsx, but "_" forces scanner to skip it!)
+    ├── page.tsx         (SKIPPED — NOT a route)
+    └── [slug]/page.tsx  (SKIPPED — NOT a route)
+```
+
+Whenever Dinou's scanner encounters a folder starting with `_`, it completely bypasses that directory tree, ensuring that stale, archived, or legacy page files are never compiled into the production router.
+
+#### 5.3. Parallel Routes & Slots (@slot)
+
+Parallel routes allow you to render multiple independent pages simultaneously inside the same parent layout (e.g., `@sidebar`, `@analytics`, `@modal`):
+
+**Folder Structure:**
+- `src/dashboard/@sidebar/page.tsx`
+- `src/dashboard/@analytics/page.tsx`
+- `src/dashboard/page.tsx` (main `children`)
+- `src/dashboard/layout.tsx`
+
+**Layout Prop Injection:**
+Slots are passed as named props directly alongside `children`:
+
+```tsx
+import type { ReactNode } from "react";
+import type { LayoutProps } from "dinou";
+
+interface DashboardLayoutProps extends LayoutProps<"/dashboard"> {
+  sidebar?: ReactNode;
+  analytics?: ReactNode;
+}
+
+export default function Layout({
+  children,
+  sidebar,
+  analytics,
+}: DashboardLayoutProps) {
+  return (
+    <div className="flex">
+      <aside>{sidebar}</aside>
+      <main>{children}</main>
+      <section>{analytics}</section>
+    </div>
+  );
+}
+```
+
+#### 5.4. Slot Error Containment Architecture
+
+Dinou isolates errors within parallel slots to prevent a single widget failure from crashing the entire page:
+
+- **Slot with `error.tsx`:** If the slot fails, only that specific slot renders its local error UI. The rest of the page and sibling slots remain completely operational.
+- **Slot without `error.tsx`:** If an unhandled exception occurs in a slot with no `error.tsx`, Dinou safely falls back to rendering `null` for that slot without taking down the page.
+- **Layout & Sibling Resilience:** Sibling slots, the main `children` page, and parent layouts remain fully mounted and interactive even if an individual slot fails to render.
 
 ## Component Architecture: Server and Client Components
 
