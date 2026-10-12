@@ -207,13 +207,19 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
   - [12. Client Calling Server Function (Initial Mount - Dynamic RPC)](#12-client-calling-server-function-initial-mount---dynamic-rpc)
   - [13. Client Server Functions (User Actions & Mutations)](#13-client-server-functions-user-actions-mutations)
   - [Architectural Decision Guide](#architectural-decision-guide)
-- [Server Functions (`"use server"`) & Suspense](#server-functions-use-server--suspense)
-  - [Usage in Server Components (Streaming)](#usage-in-server-components-streaming)
-  - [Usage in Client Components (Reactive)](#usage-in-client-components-reactive)
-  - [Server Actions (Form Mutations)](#server-actions-form-mutations)
-- [Advanced Patterns: The "Dinou Pattern"](#advanced-patterns-the-dinou-pattern)
-  - [The Concept](#the-concept)
-  - [Implementation](#implementation)
+- [The Dinou Pattern](#the-dinou-pattern)
+  - [The Concept & Architecture](#the-concept--architecture)
+    - [Flight RPC & Headless Updaters](#flight-rpc--headless-updaters)
+    - [5-Step Execution Lifecycle](#5-step-execution-lifecycle)
+  - [Step-by-Step Implementation](#step-by-step-implementation)
+    - [1. The Global Store (Zustand)](#1-the-global-store-zustand)
+    - [2. The Headless Client Updater](#2-the-headless-client-updater)
+    - [3. The Server Function Mutation](#3-the-server-function-mutation)
+    - [4. Server Data Query Function](#4-server-data-query-function)
+    - [5. Display Component (Client Component)](#5-display-component-client-component)
+    - [6. Putting It All Together in the Page](#6-putting-it-all-together-in-the-page)
+  - [Zero-Dependency Option: Native useSyncExternalStore](#zero-dependency-option-native-usesyncexternalstore)
+  - [Comparison & Key Advantages](#comparison--key-advantages)
 - [Page Configuration (`page_functions.ts`)](#page-configuration-page_functionsts)
   - [1. `getProps` (Direct Props Return)](#1-getprops-direct-props-return)
   - [2. `getStaticPaths` (Static Generation)](#2-getstaticpaths-static-generation)
@@ -5219,382 +5225,128 @@ When deciding which strategy to apply to a new feature or page, follow this quic
 
 ---
 
-## Server Functions (`"use server"`) & Suspense
+## The Dinou Pattern
 
-Dinou supports **Server Functions**, allowing you to call server-side logic directly from your components like a type-safe Remote Procedure Call (RPC). A standout feature of Dinou is that Server Functions can return **rendered React components** (Server or Client Components), not just JSON data.
+In full-stack React applications, mutations often trigger broad page re-renders or full route re-fetches. This can cause unnecessary re-renders of unrelated components, reset unsaved form inputs, or cause visible layout shifts.
 
-1. Define a function with `"use server"` at the top of the file.
-2. Import and call it from any component.
+The **Dinou Pattern** offers a modern alternative by leveraging the unique ability of Server Functions to return Client Components directly over the React Flight RPC protocol. After executing a mutation securely in Node.js, the server returns an invisible **Headless State Updater** component that:
 
-```jsx
-// src/server-functions/get-post.jsx
-"use server";
-import db from "./db";
-import Post from "@/components/post.jsx";
+1. Mounts on the client (rendering `null`, emitting 0 DOM nodes and 0 layout shifts).
+2. Executes a client-side `useEffect` upon mounting to notify a store.
+3. Selectively invalidates only dependent queries, streaming the updated UI via React 19 `<Suspense>` and `use()` without full-page reloads.
 
-export async function getPost(postId) {
-  const data = await db.query("SELECT * FROM posts WHERE id = ?", [postId]);
+### The Concept & Architecture
 
-  // Returns pre-rendered JSX directly from Node/Edge over Flight RPC
-  return <Post post={data} />;
-}
-```
+#### Flight RPC & Headless Updaters
 
-### Usage in Server Components (Streaming)
+Because Server Functions communicate using the React Flight protocol rather than plain JSON REST endpoints, the server can return serialized references to Client Components with custom props:
 
-In Server Components, you can stream the result directly to the browser as soon as the database operation completes using React's native `<Suspense>`:
+- **Server Authority:** The Server Function owns the business logic, validates inputs, and updates the database in a secure Node.js runtime.
+- **Client Synchronization:** Returning the headless component allows the server to orchestrate client state transitions without coupling to client network listeners.
 
-```jsx
-// src/[id]/page.jsx (Server Component)
-import { Suspense } from "react";
-import { getPost } from "@/server-functions/get-post";
+#### 5-Step Execution Lifecycle
 
-export default async function Page({ params: { id } }) {
-  return (
-    <div>
-      <Suspense fallback={<p>Loading post from server...</p>}>
-        {getPost(id)}
-      </Suspense>
-    </div>
-  );
-}
-```
+The following flow illustrates how the mutation, stream, store update, and surgical re-render operate in unison:
 
-### Usage in Client Components (Reactive)
+1. **Client Invocation:** User submits an action; client invokes the Server Function (e.g. `addPatternTask()`) and sets a mutation promise into a headless boundary.
+2. **Backend Mutation (Node.js):** The Server Function writes changes safely to the database or external services on the server.
+3. **Flight Stream Response:** Rather than raw JSON, the server streams back the invisible `<PatternTaskUpdater />` Client Component.
+4. **Headless Mount & Store Update:** The updater mounts (rendering `null`), and its `useEffect` invalidates the key in the global store (e.g. `useTaskStore.getState().invalidateTasks()`).
+5. **Surgical Stream Re-fetch:** Only the dependent query `<Suspense>` boundary re-fetches and streams the updated list, leaving form focus and scroll untouched.
 
-In Client Components (`"use client"`), Server Functions return a standard JavaScript Promise. You can resolve and stream them using pure React 19 primitives: **`<Suspense>`** and the **`use()`** hook.
+### Step-by-Step Implementation
 
-```tsx
-// src/[id]/page.tsx (Client Component)
-"use client";
+Here is the complete, modular implementation showing how Server Functions, Flight RPC, and Zustand orchestrate surgical reactivity without route revalidations:
 
-import { Suspense, use, useState, type ReactNode } from "react";
-import { getPost } from "@/server-functions/get-post";
+#### 1. The Global Store (Zustand)
 
-// Helper component that unwraps the Server Function promise
-function PostStream({ promise }: { promise: Promise<ReactNode> }) {
-  const content = use(promise);
-  return <>{content}</>;
-}
-
-export default function Page({ params: { id } }: { params: { id: string } }) {
-  // Hold the promise in React state to re-evaluate on demand
-  const [postPromise, setPostPromise] = useState<Promise<ReactNode>>(() => getPost(id));
-
-  return (
-    <div>
-      <button onClick={() => setPostPromise(getPost(id))}>
-        Refresh Post
-      </button>
-
-      {/* Streams the Server Component output as it arrives over Flight RPC */}
-      <Suspense fallback={<p>Streaming post...</p>}>
-        <PostStream promise={postPromise} />
-      </Suspense>
-    </div>
-  );
-}
-```
-
-> **Granular Mutations & Invalidation:** For managing mutations that atomically update global state and re-fetch dependent data queries with zero external dependencies, see [The "Dinou Pattern"](#advanced-patterns-the-dinou-pattern).
-
-### Server Actions (Form Mutations)
-
-Server Functions can also be used as **Server Actions** by passing them to the `action` prop of a `<form>`. This allows you to handle form submissions and data mutations directly on the server without creating API endpoints manually.
-
-1.  **Automatic FormData:** The function receives a `FormData` object containing the input values.
-2.  **Progressive Enhancement:** Forms work even before JavaScript loads.
-3.  **Redirects:** Use `getContext` to redirect after a successful mutation.
-
-```javascript
-// src/actions/create-post.js
-"use server";
-import { getContext } from "dinou";
-import { addPost } from "@/db/posts.js";
-
-export async function createPost(formData) {
-  const context = getContext();
-  const title = formData.get("title");
-  const content = formData.get("content");
-
-  await addPost({ title, content });
-
-  context?.res?.redirect("/posts");
-}
-```
-
-#### 1. In Server Components (Zero-JS Progressive Enhancement)
-
-Server Actions can be used directly inside **Server Components** without needing `"use client"`. This enables true Progressive Enhancement: forms submit and execute on the server even if JavaScript is disabled or still downloading in the browser:
-
-```jsx
-// src/new-post/page.jsx (Server Component)
-import { createPost } from "@/actions/create-post";
-
-export default function NewPostPage() {
-  return (
-    <form action={createPost}>
-      {/* The 'name' attribute is required for FormData extraction */}
-      <input name="title" placeholder="Title" required />
-      <textarea name="content" placeholder="Content" required />
-
-      <button type="submit">Create Post</button>
-    </form>
-  );
-}
-```
-
-#### 2. In Client Components (Interactive with `useFormStatus`)
-
-You can also pass Server Actions to forms inside **Client Components** (`"use client"`). This allows you to integrate client-side interactivity, such as disabling buttons or displaying spinners with React's `useFormStatus` hook:
-
-```jsx
-// src/new-post/page.jsx (Client Component)
-"use client";
-
-import { useFormStatus } from "react-dom";
-import { createPost } from "@/actions/create-post";
-
-function SubmitButton() {
-  const { pending } = useFormStatus();
-  return (
-    <button type="submit" disabled={pending}>
-      {pending ? "Saving..." : "Create Post"}
-    </button>
-  );
-}
-
-export default function Page() {
-  return (
-    <form action={createPost}>
-      <input name="title" placeholder="Title" required />
-      <textarea name="content" placeholder="Content" required />
-
-      <SubmitButton />
-    </form>
-  );
-}
-```
-
-## Advanced Patterns: The "Dinou Pattern"
-
-Dinou introduces a powerful architectural pattern for handling mutations and data synchronization with surgical reactivity and **zero external dependencies**.
-
-### The Concept
-
-In standard React Server Components architectures, mutating data often triggers a full-route revalidation or requires complex client-side cache synchronizers.
-
-In Dinou, **Server Functions can return Client Components over Flight RPC**. The **"Dinou Pattern"** leverages this unique capability:
-
-1. A mutation Server Function executes in the backend (database mutation).
-2. Instead of returning raw JSON or triggering a heavy route refresh, it returns an invisible **Headless Client Component** (an "Updater").
-3. When this updater streams down and mounts in the browser, its `useEffect` triggers a lightweight, native React store (`useSyncExternalStore`).
-4. Any dependent UI listening to that store key automatically refetches and streams its updated Server Component UI into a standard React 19 `<Suspense>` boundary.
-
-> **Zero Dependencies:** This pattern relies entirely on pure React 19 primitives (`useSyncExternalStore`, `use()`, `Suspense`). Optionally, you can substitute the store with any state manager of your choice (Jotai, Zustand, Nanostores, Redux), but no third-party library is required.
-
----
-
-### Architectural Flow
-
-```
-[1. User Form] --(Calls Server Function)--> [2. Node/Edge DB Mutation]
-                                                      |
-                                            (Returns Headless Component)
-                                                      |
-                                                      v
-[5. Refetched UI] <-- (useSyncExternalStore) <-- [3. <PatternTaskUpdater /> mounts]
-      ^                        ^
-      |                        |
-[<Suspense>]             [4. Global Key++]
-```
-
----
-
-### Implementation Example
-
-#### 1. The Global Store (`src/pattern-store.ts`)
-
-A pure React 19 store using `useSyncExternalStore` (0 dependencies, SSR-compatible):
+A minimal store holding a reactive invalidation key. Any global state manager (such as Zustand, Jotai, or Redux) works identically:
 
 ```typescript
-// src/pattern-store.ts
-import { useSyncExternalStore } from "react";
+// src/stores/task-store.ts
+import { create } from "zustand";
 
-let tasksListKey = 0;
-const listeners = new Set<() => void>();
-
-export const patternStore = {
-  getSnapshot: () => tasksListKey,
-  incrementTasksListKey: () => {
-    tasksListKey += 1;
-    listeners.forEach((listener) => listener());
-  },
-  subscribe: (listener: () => void) => {
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
-  },
-};
-
-export function useTasksListKey(): number {
-  return useSyncExternalStore(
-    patternStore.subscribe,
-    patternStore.getSnapshot,
-    patternStore.getSnapshot // SSR compatibility
-  );
+interface TaskStore {
+  tasksKey: number;
+  invalidateTasks: () => void;
 }
+
+export const useTaskStore = create<TaskStore>((set) => ({
+  tasksKey: 0;
+  invalidateTasks: () => set((state) => ({ tasksKey: state.tasksKey + 1 })),
+}));
 ```
 
-> **Note:** If you already use a state management library (such as Jotai or Zustand), you can use an atom or store selector here instead of `useSyncExternalStore`.
+> [!NOTE]
+> **Why it matters:** Calling `invalidateTasks()` increments `tasksKey`, signaling subscribing components to re-fetch their Suspense stream without triggering route-wide re-renders.
 
-#### 2. The Headless Updater (`src/components/pattern-updater.tsx`)
+#### 2. The Headless Client Updater
 
-A tiny Client Component that emits no visual DOM, but executes state synchronization upon mounting in the browser:
+An invisible Client Component that renders `null` (0 DOM elements), but invokes the store's invalidation action when mounted:
 
 ```tsx
 // src/components/pattern-updater.tsx
 "use client";
-
 import { useEffect } from "react";
-import { patternStore } from "../pattern-store";
+import { useTaskStore } from "../stores/task-store";
 
-export default function PatternTaskUpdater({
-  id,
-  taskText,
-}: {
-  id?: string;
-  taskText?: string;
-}) {
+export default function PatternTaskUpdater({ id }: { id?: string }) {
   useEffect(() => {
-    // When mounted on the client after Server Function response,
-    // atomically updates the store key, invalidating dependent queries
-    patternStore.incrementTasksListKey();
-  }, [id, taskText]);
+    // Atomically signal the store outside the render cycle
+    useTaskStore.getState().invalidateTasks();
+  }, [id]);
 
-  return null; // Headless: emits no DOM nodes
+  return null; // Headless component: emits zero DOM nodes and 0 layout shifts
 }
 ```
 
-#### 3. The Server Functions (`src/server-functions/pattern-demo.tsx`)
+#### 3. The Server Function Mutation
 
-Server Functions marked with `"use server"` can perform database operations and return React components:
+Performs the backend mutation in Node.js and returns the Headless Updater component over Flight RPC:
 
 ```tsx
 // src/server-functions/pattern-demo.tsx
 "use server";
-
 import type { ReactNode } from "react";
 import PatternTaskUpdater from "../components/pattern-updater";
-import PatternTasksList from "../components/pattern-tasks-list";
 import { tasksDb } from "./db";
 
-/**
- * 1. Mutation: Executes in Node.js/Edge and returns the Headless updater
- */
 export async function addPatternTask(text: string): Promise<ReactNode> {
   const trimmed = text.trim();
   const id = Math.random().toString(36).substring(2, 9);
   
   if (trimmed) {
-    tasksDb.unshift({ id, text: trimmed, createdAt: new Date().toLocaleTimeString() });
+    tasksDb.unshift({
+      id,
+      text: trimmed,
+      createdAt: new Date().toLocaleTimeString(),
+    });
   }
 
-  // Magic: The server orchestrates the client by returning the updater component
-  return <PatternTaskUpdater key={id} id={id} taskText={trimmed} />;
+  // The server orchestrates the client by returning the Headless Updater!
+  return <PatternTaskUpdater key={id} id={id} />;
 }
+```
 
-/**
- * 2. Query: Returns the data pre-rendered on the server via Flight RPC
- */
+#### 4. Server Data Query Function
+
+Fetches and renders the updated list directly on the server:
+
+```tsx
+// src/server-functions/pattern-demo.tsx (continued)
+"use server";
+import type { ReactNode } from "react";
+import PatternTasksList from "../components/pattern-tasks-list";
+import { tasksDb } from "./db";
+
 export async function fetchPatternTasks(): Promise<ReactNode> {
   return <PatternTasksList tasks={[...tasksDb]} />;
 }
 ```
 
-#### 4. The Client Page (`src/page.tsx`)
+#### 5. Display Component (Client Component)
 
-Consuming the pattern using native React 19 `<Suspense>` and the `use()` hook:
-
-```tsx
-// src/page.tsx
-"use client";
-
-import { useState, useEffect, Suspense, use, type ReactNode } from "react";
-import { addPatternTask, fetchPatternTasks } from "./server-functions/pattern-demo";
-import { useTasksListKey } from "./pattern-store";
-
-// Helper component resolving promises via native React 19 `use()`
-function Stream({ promise }: { promise: Promise<ReactNode> }) {
-  const content = use(promise);
-  return <>{content}</>;
-}
-
-export default function Page() {
-  const tasksListKey = useTasksListKey();
-  const [text, setText] = useState("");
-  const [isMutating, setIsMutating] = useState(false);
-  const [mutationPromise, setMutationPromise] = useState<Promise<ReactNode> | null>(null);
-  const [tasksPromise, setTasksPromise] = useState<Promise<ReactNode>>(() => fetchPatternTasks());
-
-  // When the Headless Updater increments tasksListKey in the store,
-  // we request the fresh list from the server (Flight streaming)
-  useEffect(() => {
-    if (tasksListKey > 0) {
-      setTasksPromise(fetchPatternTasks());
-    }
-  }, [tasksListKey]);
-
-  const handleAddTask = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = text.trim();
-    if (!trimmed || isMutating) return;
-
-    setIsMutating(true);
-    const p = addPatternTask(trimmed);
-    p.finally(() => {
-      setIsMutating(false);
-      setText("");
-    });
-    setMutationPromise(p);
-  };
-
-  return (
-    <div>
-      {/* 1. Mutation Form */}
-      <form onSubmit={handleAddTask}>
-        <input
-          type="text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="New task..."
-          disabled={isMutating}
-        />
-        <button type="submit" disabled={isMutating || !text.trim()}>
-          {isMutating ? "Adding..." : "Add Task"}
-        </button>
-      </form>
-
-      {/* 2. Mutation Stream (Mounts the Headless Updater) */}
-      {mutationPromise && (
-        <Suspense fallback={<div>Executing mutation on server...</div>}>
-          <Stream promise={mutationPromise} />
-        </Suspense>
-      )}
-
-      {/* 3. Reactive Tasks List Stream */}
-      <Suspense fallback={<div>Loading updated list...</div>}>
-        <Stream promise={tasksPromise} />
-      </Suspense>
-    </div>
-  );
-}
-```
-
-#### 5. The Display Component (`src/components/pattern-tasks-list.tsx`)
-
-A standard Client Component rendering the task items:
+Renders the list of tasks received from the server query:
 
 ```tsx
 // src/components/pattern-tasks-list.tsx
@@ -5608,20 +5360,192 @@ export interface PatternTaskItem {
 
 export default function PatternTasksList({ tasks }: { tasks: PatternTaskItem[] }) {
   if (!tasks || tasks.length === 0) {
-    return <p>No tasks found.</p>;
+    return <p className="text-muted-foreground text-sm">No tasks yet.</p>;
   }
 
   return (
-    <ul>
+    <ul className="space-y-2">
       {tasks.map((task) => (
-        <li key={task.id}>
-          <span>{task.text}</span> — <small>{task.createdAt}</small>
+        <li key={task.id} className="p-2.5 rounded-lg border bg-card flex justify-between">
+          <span>{task.text}</span>
+          <span className="text-xs text-muted-foreground">{task.createdAt}</span>
         </li>
       ))}
     </ul>
   );
 }
 ```
+
+#### 6. Putting It All Together in the Page
+
+The view coordinates mutation promises and queries with React 19's native `use()` hook and `<Suspense>`:
+
+```tsx
+// src/page.tsx
+"use client";
+import { useState, useEffect, Suspense, use, type ReactNode } from "react";
+import { addPatternTask, fetchPatternTasks } from "./server-functions/pattern-demo";
+import { useTaskStore } from "./stores/task-store";
+
+function TasksStream({ promise }: { promise: Promise<ReactNode> }) {
+  // Native React 19: unroll the Flight stream promise
+  const content = use(promise);
+  return <>{content}</>;
+}
+
+function MutationStream({ promise }: { promise: Promise<ReactNode> }) {
+  const content = use(promise);
+  return <>{content}</>;
+}
+
+export default function Page() {
+  const tasksKey = useTaskStore((state) => state.tasksKey);
+  const [text, setText] = useState("");
+  const [isMutating, setIsMutating] = useState(false);
+  const [mutationKey, setMutationKey] = useState(0);
+  const [mutationPromise, setMutationPromise] = useState<Promise<ReactNode> | null>(null);
+  const [tasksPromise, setTasksPromise] = useState<Promise<ReactNode>>(() => fetchPatternTasks());
+
+  // Invalidate and re-fetch only when the store increments tasksKey
+  useEffect(() => {
+    if (tasksKey > 0) {
+      setTasksPromise(fetchPatternTasks());
+    }
+  }, [tasksKey]);
+
+  const handleAddTask = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = text.trim();
+    if (!trimmed || isMutating) return;
+
+    setIsMutating(true);
+    setMutationKey((k) => k + 1);
+    const p = addPatternTask(trimmed);
+    p.finally(() => {
+      setIsMutating(false);
+      setText("");
+    });
+    setMutationPromise(p);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* 1. Mutation Form */}
+      <form onSubmit={handleAddTask} className="flex gap-2">
+        <input
+          type="text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="New task..."
+          disabled={isMutating}
+          className="border rounded px-3 py-1.5 flex-1"
+        />
+        <button
+          type="submit"
+          disabled={isMutating || !text.trim()}
+          className="bg-emerald-600 text-white px-4 py-1.5 rounded disabled:opacity-50"
+        >
+          {isMutating ? "Adding..." : "Add Task"}
+        </button>
+      </form>
+
+      {/* 2. Headless Mutation Stream Boundary */}
+      {mutationPromise && (
+        <Suspense key={mutationKey} fallback={null}>
+          <MutationStream promise={mutationPromise} />
+        </Suspense>
+      )}
+
+      {/* 3. Dependent Data Stream Boundary */}
+      <Suspense
+        key={tasksKey}
+        fallback={<p className="text-muted-foreground text-sm">Loading tasks...</p>}
+      >
+        <TasksStream promise={tasksPromise} />
+      </Suspense>
+    </div>
+  );
+}
+```
+
+> [!TIP]
+> **How It Works:**
+> 1. User submits the form, initiating `addPatternTask()` without full-page reloads.
+> 2. The mutation promise is passed to a headless `<Suspense>` boundary.
+> 3. Server mutates the database in Node.js and returns `<PatternTaskUpdater />` over Flight RPC.
+> 4. `PatternTaskUpdater` mounts, executing its `useEffect` to call `useTaskStore.getState().invalidateTasks()`.
+> 5. The store notifies the page, calling `fetchPatternTasks()` to obtain the fresh stream.
+> 6. Only the tasks list `<Suspense>` boundary updates smoothly, keeping inputs, state, and scroll position completely intact.
+
+##### Production Notes: Error Handling & React Lifecycle
+
+- **Server-Side Mutation Errors & Atomic Rollbacks:** Flight RPC streams server errors as rejected promises. If the Server Function throws in Node.js, the promise rejects on the client and the Headless Updater **never mounts**. This guarantees that your client-side store is never corrupted with failed mutation state:
+
+```typescript
+try {
+  const p = addPatternTask(trimmed);
+  setMutationPromise(p);
+  await p; // If Node.js throws, execution jumps to catch
+} catch (error) {
+  // Headless updater never mounted; store was NOT modified!
+  console.error("Mutation failed on server:", error);
+  toast.error("Failed to add task");
+}
+```
+
+- **Consecutive Mutation Keys:** When triggering multiple rapid mutations, incrementing `setMutationKey((k) => k + 1)` on the `<Suspense key=...>` boundary forces React to cleanly unmount the previous updater and mount the new one fresh.
+- **Lightweight Headless Footprint:** Keep Headless Updaters purely functional with zero DOM output (`return null`). They exist solely as the reactive bridge between the Server Function RPC response and the client-side store.
+
+### Zero-Dependency Option: Native useSyncExternalStore
+
+If you prefer not to include any third-party state libraries in your client bundle, you can achieve the exact same surgical reactivity using React 19's native `useSyncExternalStore` hook:
+
+```typescript
+// src/stores/native-store.ts
+import { useSyncExternalStore } from "react";
+
+let tasksKey = 0;
+const listeners = new Set<() => void>();
+
+export const nativeTaskStore = {
+  getSnapshot: () => tasksKey,
+  invalidateTasks: () => {
+    tasksKey += 1;
+    listeners.forEach((listener) => listener());
+  },
+  subscribe: (listener: () => void) => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  },
+};
+
+export function useNativeTasksKey(): number {
+  return useSyncExternalStore(
+    nativeTaskStore.subscribe,
+    nativeTaskStore.getSnapshot,
+    nativeTaskStore.getSnapshot // Server snapshot for SSR hydration safety
+  );
+}
+```
+
+In your Headless Updater, simply invoke `nativeTaskStore.invalidateTasks()` instead of `useTaskStore.getState().invalidateTasks()`. The lifecycle, Flight RPC streaming, and selective re-fetching behavior remain 100% identical.
+
+### Comparison & Key Advantages
+
+Comparing the Dinou Pattern against traditional client-side data fetching (REST / React Query):
+
+| Feature | The Dinou Pattern | REST / React Query (SPA) |
+| :--- | :--- | :--- |
+| **Reactivity Scope** | **Surgical** (targeted boundary only) | Surgical (query key invalidation) |
+| **Form / Input Focus** | **100% Preserved** (zero blur or reset) | Preserved |
+| **Bundle Overhead** | **~1 KB** (Zustand) or **0 KB** (Native) | ~12–15 KB (client query library) |
+| **Backend Architecture** | **Direct Node.js Server Functions** (`"use server"`) | Requires dedicated HTTP API endpoints (`/api/...`) |
+| **Data Transport** | **React Flight RPC** (typed component streaming) | JSON serialization + manual client fetch logic |
+| **Boilerplate** | **Zero** API routes, controllers, or fetch hooks | Manual endpoints, fetch hooks, error states, and types |
+| **DOM Impact** | **0 DOM nodes** emitted by headless updater | N/A (data only) |
+
+- **Surgical Reactivity:** Only the targeted component re-fetches and re-renders. Inputs, local states, and other UI sections remain completely untouched.
+- **Zero Friction State Management:** Pairs seamlessly with your existing global store (Zustand, Jotai, or Redux) or native `useSyncExternalStore` alongside React 19's Flight RPC and `<Suspense>`.
 
 ---
 
