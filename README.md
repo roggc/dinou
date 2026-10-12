@@ -45,9 +45,26 @@ Support for React Server Components (RSC), Server Functions, Server-Side Renderi
   - [Server Components (Default)](#server-components-default)
   - [Client Components (`"use client"`)](#client-components-use-client)
   - [Composition Patterns](#composition-patterns)
-- [Data Fetching](#data-fetching)
-  - [Async Data in Server Components](#async-data-in-server-components)
-  - [Streaming with `<Suspense>`](#streaming-with-suspense)
+  - [Flight Serialization Boundary & Supported Props](#flight-serialization-boundary--supported-props)
+  - [SSR Execution Safety Rule](#ssr-execution-safety-rule-for-client-components)
+  - [Import Cascading Behavior](#import-cascading-behavior)
+- [Data Fetching: The 13 Strategies](#data-fetching-the-13-strategies)
+  - [Overview: The 13-Strategy Architecture](#overview-the-13-strategy-architecture)
+  - [Data Fetching & Rendering Strategies Matrix](#data-fetching--rendering-strategies-matrix)
+  - [1. RSC Direct await (SSG)](#1-rsc-direct-await-ssg)
+  - [2. RSC Direct await (Dynamic SSR)](#2-rsc-direct-await-dynamic-ssr)
+  - [3. RSC with <Suspense> (SSG)](#3-rsc-with-suspense-ssg)
+  - [4. RSC with <Suspense> (Dynamic Streaming SSR)](#4-rsc-with-suspense-dynamic-streaming-ssr)
+  - [5. RSC + <Suspense> + <DinouCacheSlot> (Static SSG / Asymmetric ISR)](#5-rsc--suspense--dinoucacheslot-static-ssg--asymmetric-isr)
+  - [6. RSC + <Suspense> + <DinouCacheSlot> (Dynamic Micro-ISR)](#6-rsc--suspense--dinoucacheslot-dynamic-micro-isr)
+  - [7. RSC with <Suspense> (PPR Hybrid)](#7-rsc-with-suspense-ppr-hybrid)
+  - [8. PPR + <DinouCacheSlot> (Peak Performance Synergy)](#8-ppr--dinoucacheslot-peak-performance-synergy)
+  - [9. RSC Promise ➔ Client use() (React 19)](#9-rsc-promise--client-use-react-19)
+  - [10. Client-First getProps (SSG)](#10-client-first-getprops-ssg)
+  - [11. Client-First getProps (Dynamic SSR)](#11-client-first-getprops-dynamic-ssr)
+  - [12. Client Calling Server Function (Initial Mount - Dynamic RPC)](#12-client-calling-server-function-initial-mount---dynamic-rpc)
+  - [13. Client Server Functions (User Actions & Mutations)](#13-client-server-functions-user-actions--mutations)
+  - [Architectural Decision Guide](#architectural-decision-guide)
 - [Rendering Strategies](#rendering-strategies)
   - [Zero-Config Hybrid Model](#zero-config-hybrid-model)
   - [Static Site Generation (SSG at Build Time)](#static-site-generation-ssg-at-build-time)
@@ -591,107 +608,742 @@ export default function Page() {
 }
 ```
 
+### Flight Serialization Boundary & Supported Props
+
+When passing props from a Server Component to a Client Component, data crosses the network boundary (serialized as React Flight JSON). Props passed across this boundary must be serializable.
+
+- **Supported Data Types:**
+  - **Primitives:** `string`, `number`, `boolean`, `null`, `undefined`, `bigint`.
+  - **Plain Objects & Arrays:** Objects and collections containing serializable values (e.g. `{ id: 1, name: "Dinou" }`).
+  - **Dates:** `Date` objects are serialized and reconstructed by React on the client.
+  - **React Elements (JSX):** Server Components passed as `children` or named JSX slot props.
+  - **Promises:** Un-awaited promises passed directly from Server to Client (unwrapped synchronously via React 19's native `use()`).
+  - **Server Functions:** Bound action functions marked with `"use server"`.
+- **Non-Serializable / Unsupported Types:**
+  - **Client Callback Functions:** Cannot pass client functions (e.g., `onClick={() => ...}`) from Server Components across the Flight boundary.
+  - **Class Instances:** Class prototypes are stripped; methods are not transferred across the Flight boundary.
+  - **Symbols & WeakMaps:** Non-enumerable or memory-bound JavaScript data structures.
+
+### SSR Execution Safety Rule for Client Components
+
+Client Components are pre-rendered on the server to HTML during initial page load to guarantee instant First Contentful Paint (FCP) and optimal SEO indexing before hydrating in the browser.
+
+> [!WARNING]
+> Because Client Components execute once on the server during SSR, direct access to browser-only globals (`window`, `document`, `localStorage`, `navigator`) in the component render body will throw an error during server evaluation.
+
+- **Safe Browser Access:** Always guard browser-only APIs inside `useEffect` / `useLayoutEffect`, or behind an environment check:
+  ```tsx
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("auth_token");
+  }
+  ```
+
+### Import Cascading Behavior
+
+Once a file declares `"use client"`, all components, helper functions, and third-party libraries imported by that file are automatically included in the client bundle. You do not need to add `"use client"` to child sub-components or utility modules imported by a Client Component.
+
 ---
 
-## Data Fetching
+## Data Fetching: The 13 Strategies
 
-Data fetching in Dinou is direct, declarative, and built on native JavaScript promises without external query wrappers.
+A comprehensive case-by-case engineering guide covering each of the **13 data fetching and rendering patterns** available in Dinou. Every strategy is examined with concrete code snippets, runtime lifecycle behavior, TTFB metrics, server load characteristics, and production trade-offs.
 
-### Async Data in Server Components
+Dinou provides unprecedented architectural flexibility by separating:
+1. **Where code executes:** Server Component vs. Client Component.
+2. **When data is fetched:** Build time (SSG) vs. Per-request (SSR) vs. On-demand RPC.
+3. **How data is delivered:** Blocking TTFB vs. Progressive HTTP Streaming vs. Micro-ISR Caching.
 
-Server Components can be declared as `async` functions, allowing you to `await` data directly within your component:
+### Data Fetching & Rendering Strategies Matrix
 
-```jsx
-// src/blog/page.jsx
-import db from "@/lib/db";
+| # | Strategy / Pattern | Execution Context | TTFB (First Byte) | Stream / Content Ready | Server & DB Load | Network Waterfall? | Data Freshness | Ideal Use Case |
+| :-: | :--- | :--- | :--- | :--- | :--- | :-: | :--- | :--- |
+| **1** | **RSC Direct `await` (SSG)**<br>Top-level `await` or `getProps` in Server Component | Build Time (`npm run build`) | `0ms` (CDN Edge) | Instant (`0ms`) | Zero at Runtime | None | Fixed at build | Blogs, documentation, static marketing pages. |
+| **2** | **RSC Direct `await` (Dynamic SSR)**<br>Top-level `await` or `getProps` without `<Suspense>` | Per Request (Server) | Slow (Blocked) | N/A (Blocks TTFB) | Heavy (100% queries) | None | 100% Live | Private views where UI requires a single critical query and waiting is acceptable. |
+| **3** | **RSC with `<Suspense>` (SSG)**<br>Static route with async component boundary | Build Time (Compiler awaits) | `0ms` (CDN Edge) | Instant (`0ms`) | Zero at Runtime | None | Fixed at build | Decoupled async components in static pages; outputs final HTML without showing fallback. |
+| **4** | **RSC with `<Suspense>` (Dynamic Streaming SSR)**<br>Streaming SSR on demand (without PPR) | Per Request (Server streaming) | Fast (Early Layout) | Waits for DB (1-3s) | Heavy (100% queries) | None | 100% Live | Dynamic routes on runtimes without edge caching or when PPR is disabled. |
+| **5** | **RSC + `<Suspense>` + `<DinouCacheSlot>` (Static / Asymmetric ISR)**<br>Pre-rendered static shell with decoupled slot TTL | Build Time (Pre-rendered) + On-Demand Slot Reval | `0ms` (CDN Edge) | Instant (`~0-2ms`) | Near-Zero (Decoupled) | None | Decoupled TTL / `refreshSlot()` | Static/ISR pages containing a widget (stock, pricing) needing fast updates (60s) or surgical in-place client refreshes. |
+| **6** | **RSC + `<Suspense>` + `<DinouCacheSlot>` (Dynamic Micro-ISR)**<br>Dynamic streaming with vertical Micro-ISR | Per Request (Cache hit: `~2ms` / Miss: async query) | Fast (Early Layout) | Instant (`~2ms` Cache) | Near-Zero (99% Offload) | None | TTL / Tag Reval | Dynamic routes (with session/cookies) containing heavy widgets (analytics, feeds). Flushes layout instantly; slot streams from cache. |
+| **7** | **RSC with `<Suspense>` (PPR Hybrid)**<br>Partial Prerendering (Static Shell + Live Uncached Hole) | Static Shell (Build) + Live Hole (Server on every request) | `0ms` (Shell from Edge) | Slow (Hole waits for DB) | Heavy (100% Hole queries) | None | 100% Live | Instant static layout from Edge with zero-delay live streamed data for real-time personalization. |
+| **8** | **PPR + `<DinouCacheSlot>` (Peak Performance Synergy)**<br>Static Edge Shell + Cached Streamed Hole | Edge CDN (Shell) + Server Cache Storage (Slot) | `0ms` (Edge) + `~5ms` (Slot) | Instant (`~2-5ms` Cache) | Near-Zero (99.9% Offload) | None | TTL / Tag Reval | **Peak Performance:** Instant CDN paint (`0ms` TTFB) with 99.9% DB offload. Ideal for high-traffic stores, trending catalogs, and viral portals. |
+| **9** | **RSC Promise ➔ Client `use()` (React 19)**<br>RSC initiates un-awaited Promise; Client unwraps via `use()` | Server starts query; Client suspends | `0ms` (with PPR) / Fast | Waits for Promise | Heavy (Live query) | None | 100% Live | Interactive stateful widgets (charts, canvas, filters) needing fresh streaming data without client fetch waterfalls. |
+| **10** | **Client-First `getProps` (SSG)**<br>`page_functions.ts` + Client Component | Build Time (`npm run build`) | `0ms` (CDN Edge) | Instant (`0ms`) | Zero at Runtime | None | Fixed at build | Dinou Client-First model for highly interactive static web applications with SPA ergonomics. |
+| **11** | **Client-First `getProps` (Dynamic SSR)**<br>`page_functions.ts` + Client Component in SSR | Per Request (Server awaits `getProps`) | Slow (Blocked) | N/A (Blocks TTFB) | Heavy (100% queries) | None | 100% Live | Complex SPAs where developers prefer classic React hooks and tolerate TTFB wait. |
+| **12** | **Client Calling Server Function (Initial Mount - Dynamic RPC)**<br>Client Component calls `"use server"` on initial mount | Client RPC on mount | Fast (Shell Only) | Delayed (Waterfall) | Heavy (100% RPC queries) | **YES** (Waterfall) | 100% Live | Supported for isolated widgets, but sub-optimal compared to Strategy 9 due to the second HTTP round trip. |
+| **13** | **Client Server Functions (User Actions & Mutations)**<br>Invoked on user button click, form submit, or mutation | Client on user action (POST RPC) | N/A (Post-Load) | N/A (User Event) | On-Demand | None | 100% Live | Standard mutation pattern: Server Functions called inside `useTransition` or form action to mutate DB and revalidate cache. |
 
-export default async function BlogPage() {
-  const posts = await db.query("SELECT * FROM posts ORDER BY date DESC");
+---
+
+### 1. RSC Direct await (SSG)
+
+> **Static Site Generation**  
+> **TTFB:** `0ms (CDN Edge)` | **Stream Ready:** `Instant (0ms)` | **Server & DB Load:** `Zero at Runtime` | **Waterfall:** `None` | **Data Freshness:** `Build Time`
+
+**How it works:** The default behavior in Dinou. When a page has no dynamic parameters, headers, or cookies, Dinou executes the top-level `await` query during `npm run build`. The compiler resolves the promise, generates static `index.html`, and bakes the pre-compiled binary RSC payload (`page.rsc`).
+
+```tsx
+// src/blog/page.tsx (Static Route by Default)
+import db from "@/lib/db"; // Stays 100% on the server
+
+export default async function BlogIndexPage() {
+  // Executed ONCE during build time ('npm run build')
+  const posts = await db.posts.findMany({
+    where: { published: true },
+    orderBy: { createdAt: "desc" },
+  });
 
   return (
-    <main>
-      <h1>Latest Posts</h1>
-      <ul>
+    <main className="max-w-3xl mx-auto p-6 space-y-4">
+      <h1 className="text-3xl font-bold">Engineering Blog</h1>
+      <div className="divide-y">
         {posts.map((post) => (
-          <li key={post.id}>
-            <h2>{post.title}</h2>
-            <p>{post.excerpt}</p>
-          </li>
+          <article key={post.id} className="py-4">
+            <h2 className="text-xl font-semibold">{post.title}</h2>
+            <p className="text-muted-foreground text-sm">{post.excerpt}</p>
+          </article>
         ))}
-      </ul>
+      </div>
     </main>
   );
 }
 ```
 
-### Streaming with `<Suspense>`
+- **Zero Database Cost:** Millions of visitors can hit the CDN without a single query reaching your database.
+- **0kb Client JavaScript:** No React client runtime is shipped for this data layer; the browser receives pure semantic HTML.
+- **Ideal For:** Documentation, corporate sites, blogs, release notes, and marketing pages.
 
-For components with slower or delayed data sources, wrap them in React's native `<Suspense>`. Dinou streams the fast shell and static UI immediately using `renderToPipeableStream`, and then streams the deferred Server Component HTML chunk over the wire the instant its promise resolves.
+#### Server Component Equivalence: `getProps` vs Direct `await`
 
-#### 1. The Slow Async Component (`src/components/heavy-analytics.jsx`)
+When a page is a Server Component, fetching data via `getProps` in `page_functions.ts` is functionally equivalent to executing queries directly with top-level `await` inside the component body (Strategies 1 & 2).
 
-A standard asynchronous Server Component that fetches data:
+Both patterns run exclusively on the server prior to rendering, introduce zero client JavaScript bundle overhead, exhibit identical database latency, and produce the exact same static HTML and pre-compiled `.rsc` payload. The primary architectural purpose of `getProps` is when utilizing the **Client-First Model** (Strategies 10 & 11), where it extracts data on the server to feed directly as initial props into interactive Client Component pages (`"use client"`).
 
-```jsx
-// src/components/heavy-analytics.jsx (Server Component)
+---
+
+### 2. RSC Direct await (Dynamic SSR)
+
+> **Blocking Dynamic SSR**  
+> **TTFB:** `Slow (Blocked)` | **Stream Ready:** `N/A (All-or-Nothing)` | **Server & DB Load:** `Heavy (100% queries)` | **Waterfall:** `None` | **Data Freshness:** `100% Live`
+
+**How it works:** The component performs an un-Suspended top-level `await` on a route that is dynamic (e.g., due to reading request headers, cookies, or declaring `export const revalidate = 0` in `page_functions.ts`). The Node.js server halts the HTTP response until the database returns the data.
+
+```typescript
+// src/account/billing/page_functions.ts
+export const revalidate = 0; // Force dynamic SSR on every request
+```
+
+```tsx
+// src/account/billing/page.tsx
+import { cookies } from "dinou/server";
 import db from "@/lib/db";
 
-export default async function HeavyAnalytics() {
-  // Simulates a heavy database query or slow external API
-  const metrics = await db.analytics.aggregate({ timeRange: "30d" });
+export default async function BillingPage() {
+  const sessionId = cookies().get("session_id");
+  if (!sessionId) throw new Error("Unauthorized");
+
+  // BLOCKS TTFB: The browser receives 0 bytes until this query resolves
+  const invoices = await db.invoices.findBySession(sessionId);
 
   return (
-    <div className="analytics-card">
-      <h3>Monthly Visitors: {metrics.totalVisits}</h3>
-      <p>Conversion Rate: {metrics.conversionRate}%</p>
+    <div className="p-6">
+      <h1 className="text-2xl font-bold">Billing History</h1>
+      <table className="w-full mt-4">
+        {invoices.map((inv) => (
+          <tr key={inv.id}>
+            <td>{inv.date}</td>
+            <td>${inv.amount}</td>
+          </tr>
+        ))}
+      </table>
     </div>
   );
 }
 ```
 
-#### 2. The Fast Component (`src/components/quick-stats.jsx`)
+- **Latency Penalty:** If the database query takes 800ms, the visitor stares at a blank screen for 800ms before First Contentful Paint (FCP).
+- **When Acceptable:** Secure internal portals, critical authentication gates, or lightweight single-record lookups where streaming complexity is unnecessary.
 
-A lightweight component that has no async delay:
+---
 
-```jsx
-// src/components/quick-stats.jsx (Server Component)
-export default function QuickStats() {
-  return (
-    <div className="quick-stats">
-      <p>System Status: 🟢 All systems operational</p>
-    </div>
-  );
-}
-```
+### 3. RSC with `<Suspense>` (SSG)
 
-#### 3. The Page Streaming the Components (`src/dashboard/page.jsx`)
+> **Static Compilation Settle**  
+> **TTFB:** `0ms (CDN Edge)` | **Stream Ready:** `Instant (0ms)` | **Server & DB Load:** `Zero at Runtime` | **Waterfall:** `None` | **Data Freshness:** `Fixed at Build`
 
-Wrap the slow async component in `<Suspense>`:
+**How it works:** You wrap asynchronous child components inside React `<Suspense>` on a static route. During `npm run build`, Dinou's compiler automatically waits for all Suspense boundaries to settle. The final emitted HTML includes the resolved markup directly; visitors never see the fallback skeleton.
 
-```jsx
-// src/dashboard/page.jsx (Server Component)
+```tsx
+// src/docs/page.tsx (Static Route with Suspense)
 import { Suspense } from "react";
-import QuickStats from "@/components/quick-stats";
-import HeavyAnalytics from "@/components/heavy-analytics";
+import db from "@/lib/db";
+import { DocSkeleton } from "./skeleton";
 
-export default function DashboardPage() {
+export default function DocsPage() {
   return (
-    <main>
-      <h1>Dashboard Overview</h1>
+    <div className="docs-layout">
+      <header><h1>API Reference</h1></header>
+      {/* Compiler settles this during 'npm run build': */}
+      <Suspense fallback={<DocSkeleton />}>
+        <AsyncChangelog />
+      </Suspense>
+    </div>
+  );
+}
 
-      {/* 1. Renders and streams to the client immediately */}
-      <QuickStats />
+async function AsyncChangelog() {
+  const versions = await db.changelog.findLatest();
+  return <ChangelogList items={versions} />;
+}
+```
 
-      {/* 2. Streams the fallback initially, then streams HeavyAnalytics once resolved */}
-      <Suspense fallback={<p className="loading-badge">Loading real-time analytics...</p>}>
-        <HeavyAnalytics />
+- **Architectural Cleanliness:** Allows writing decoupled async components without worrying whether the page is static or dynamic.
+- **Zero Flash of Skeleton:** Because it is pre-rendered at build time, the browser renders the fully populated UI instantly on initial load.
+
+---
+
+### 4. RSC with `<Suspense>` (Dynamic Streaming SSR)
+
+> **Streaming SSR**  
+> **TTFB:** `Fast (Early Layout)` | **Stream Ready:** `Waits for DB (1-3s)` | **Server & DB Load:** `Heavy (100% queries)` | **Waterfall:** `None` | **Data Freshness:** `100% Live`
+
+**How it works:** The page layout and headers are flushed immediately to the browser (fast TTFB). The slow child component executes its database query concurrently. Once resolved, the server sends an HTML chunk through the open HTTP connection that swaps out the skeleton fallback without refreshing the page.
+
+```typescript
+// src/analytics/page_functions.ts
+export const revalidate = 0; // Dynamic streaming SSR
+```
+
+```tsx
+// src/analytics/page.tsx
+import { Suspense } from "react";
+import db from "@/lib/db";
+import { AnalyticsSkeleton } from "./skeleton";
+
+export default function AnalyticsPage() {
+  return (
+    <div className="space-y-6 p-6">
+      {/* Flushed immediately in chunk 1 (Early TTFB) */}
+      <header>
+        <h1 className="text-2xl font-bold">Revenue Analytics</h1>
+        <p className="text-muted-foreground text-sm">Real-time calculations</p>
+      </header>
+
+      {/* Flushes skeleton in chunk 1, then streams resolved HTML in chunk 2 */}
+      <Suspense fallback={<AnalyticsSkeleton />}>
+        <SlowHeavyMetrics />
+      </Suspense>
+    </div>
+  );
+}
+
+async function SlowHeavyMetrics() {
+  // Heavy 1.5-second aggregation query:
+  const data = await db.analytics.aggregateMonthlyRevenue();
+  return <MetricsTable stats={data} />;
+}
+```
+
+- **UX Advantage:** The visitor immediately sees navigation, page shell, and skeleton placeholders instead of an unresponsive blank screen.
+- **Caveat:** Every single request still runs the full database query. For high traffic, protect this with Strategy 6.
+
+#### Architectural Equivalence: Async Server Component vs Server Function UI Return
+
+Instead of declaring an inline async Server Component (`SlowHeavyMetrics`), you can alternatively execute the query inside an isolated Server Function (tagged with `"use server"`) that directly renders and returns the JSX component tree, and invoke it directly inside `<Suspense>`:
+
+```typescript
+// src/analytics/server-functions.ts
+"use server";
+
+import db from "@/lib/db";
+import { MetricsTable } from "./metrics-table";
+
+export async function getMetricsTable() {
+  const data = await db.analytics.aggregateMonthlyRevenue();
+  return <MetricsTable stats={data} />;
+}
+```
+
+```tsx
+// src/analytics/page.tsx
+import { Suspense } from "react";
+import { AnalyticsSkeleton } from "./skeleton";
+import { getMetricsTable } from "./server-functions";
+
+export default function AnalyticsPage() {
+  return (
+    <div className="space-y-6 p-6">
+      <header>
+        <h1 className="text-2xl font-bold">Revenue Analytics</h1>
+      </header>
+
+      {/* Directly invoke getMetricsTable() inside Suspense (no wrapper component needed!) */}
+      <Suspense fallback={<AnalyticsSkeleton />}>
+        {getMetricsTable()}
+      </Suspense>
+    </div>
+  );
+}
+```
+
+Both patterns are functionally equivalent during dynamic streaming:
+- **Direct Promise Children:** In React Server Components, `<Suspense>` natively accepts a `Promise<ReactNode>` directly as children (`{getMetricsTable()}`), eliminating boilerplate async wrapper components.
+- **Identical HTTP Streaming Behavior:** In both cases, the initial layout shell and `<AnalyticsSkeleton />` are flushed immediately in chunk 1 (fast TTFB). When the query resolves, the server streams the rendered HTML/RSC payload into chunk 2.
+- **Zero Client JavaScript:** Database logic, ORM queries, and credentials remain 100% on the server in both solutions.
+- **Versatility Bonus:** Returning the JSX tree from a Server Function allows the exact same function to be triggered on-demand by Client Components later (e.g., a "Refresh Metrics" button or live filter) via Dinou's UI streaming RPC.
+
+---
+
+### 5. RSC + `<Suspense>` + `<DinouCacheSlot>` (Static SSG / Asymmetric ISR)
+
+> **Static (SSG) + Micro-ISR**  
+> **TTFB:** `0ms (CDN Edge)` | **Stream Ready:** `Instant (~0-2ms)` | **Server & DB Load:** `Near-Zero` | **Waterfall:** `None` | **Data Freshness:** `Decoupled TTL / refreshSlot()`
+
+**How it works:** Solves the "all-or-nothing" revalidation problem. The base outer page and layout are pre-rendered at build time (Static Site Generation - SSG) or configured with long-term ISR (e.g., 24 hours) delivered with `0ms` TTFB from Edge CDN. Meanwhile, an inner volatile component is wrapped in `<DinouCacheSlot>` with a fast TTL (e.g., 60 seconds). The heavy outer page remains immutable at the Edge CDN, while the slot revalidates independently in server memory/KV storage.
+
+```typescript
+// src/products/[slug]/page_functions.ts
+export const revalidate = 86400; // Outer page revalidates once every 24 hours
+```
+
+```tsx
+// src/products/[slug]/page.tsx
+import { Suspense } from "react";
+import { DinouCacheSlot } from "dinou/server";
+import { LivePriceTicker, StaticDescription } from "./components";
+
+export default function ProductDetailPage({ params }: { params: { slug: string } }) {
+  return (
+    <div className="product-view">
+      {/* Static product description: cached at Edge CDN for 24h */}
+      <StaticDescription slug={params.slug} />
+
+      {/* Asymmetric Micro-ISR: revalidates every 60s or via refreshSlot() */}
+      <Suspense fallback={<p>Checking live pricing...</p>}>
+        <DinouCacheSlot id={`price-${params.slug}`} revalidate={60} tag="pricing">
+          <LivePriceTicker slug={params.slug} />
+        </DinouCacheSlot>
+      </Suspense>
+    </div>
+  );
+}
+```
+
+- **Targeted Invalidation:** Calling `refreshSlot("price-prod-1")` or wildcard `refreshSlot("price-*")` from a client button or webhook refreshes only the price widget without rebuilding the 24-hour page cache.
+- **Massive Cost Savings:** Prevents volatile widgets from causing full-page rebuild cascades across thousands of static pages.
+
+---
+
+### 6. RSC + `<Suspense>` + `<DinouCacheSlot>` (Dynamic Micro-ISR)
+
+> **Server Cache Stream**  
+> **TTFB:** `Fast (Early Layout)` | **Stream Ready:** `~2ms (Cache Hit)` | **Server & DB Load:** `Near-Zero (99% Offload)` | **Waterfall:** `None` | **Data Freshness:** `TTL / Tag Reval`
+
+**How it works:** Used on dynamic routes that depend on user sessions, cookies, or headers. The layout shell streams immediately. Inside the page, heavy components are protected by `<DinouCacheSlot>`. On cache hit, the pre-computed RSC binary chunk is pulled from memory/KV in ~2ms and streamed down without querying PostgreSQL/MongoDB.
+
+```typescript
+// src/feed/page_functions.ts
+export const revalidate = 0; // Dynamic route with per-request session
+```
+
+```tsx
+// src/feed/page.tsx
+import { Suspense } from "react";
+import { DinouCacheSlot } from "dinou/server";
+import { UserGreeting, GlobalTrendingWidget } from "./components";
+
+export default function FeedPage() {
+  return (
+    <div className="grid grid-cols-3 gap-6 p-6">
+      {/* 1. Dynamic per-user greeting (computed live on each request) */}
+      <div className="col-span-2">
+        <UserGreeting />
+      </div>
+
+      {/* 2. Global trending feed: cached for 300s in server memory (Micro-ISR) */}
+      <aside className="col-span-1">
+        <Suspense fallback={<p>Loading trends...</p>}>
+          <DinouCacheSlot id="global-trending" revalidate={300} tag="trends">
+            <GlobalTrendingWidget />
+          </DinouCacheSlot>
+        </Suspense>
+      </aside>
+    </div>
+  );
+}
+```
+
+- **Stream Speed:** Instead of waiting 1.5 seconds for the database on every page visit, the slot resolves in `~2ms` from RAM.
+- **Ideal For:** Social feeds, dashboards, recommendations, and search suggestions in authenticated web apps.
+
+---
+
+### 7. RSC with `<Suspense>` (PPR Hybrid)
+
+> **Partial Prerendering**  
+> **TTFB:** `0ms (Shell from Edge)` | **Stream Ready:** `Slow (Waits for DB)` | **Server & DB Load:** `Heavy (100% queries)` | **Waterfall:** `None` | **Data Freshness:** `100% Live`
+
+**How it works:** The page enables Partial Prerendering via `export const ppr = true`. At build time, Dinou pre-renders the navigation bar, footer, and component skeletons into immutable CDN artifacts. When a visitor arrives, the Edge CDN responds in `0ms` with the static shell. Simultaneously, the server executes the dynamic hole and streams the live HTML into the open connection.
+
+```typescript
+// src/catalog/page_functions.ts
+export const ppr = true; // Enables Partial Prerendering
+```
+
+```tsx
+// src/catalog/page.tsx
+import { Suspense } from "react";
+import db from "@/lib/db";
+import { StockSkeleton } from "./skeleton";
+
+export default function CatalogPage() {
+  return (
+    <div className="p-8 max-w-4xl mx-auto space-y-6">
+      {/* 0ms TTFB: Served directly from Edge CDN */}
+      <header>
+        <h1 className="text-3xl font-bold">Catalog & Inventory</h1>
+        <p className="text-muted-foreground">Shell painted in 0ms.</p>
+      </header>
+
+      {/* Dynamic Hole: Executed on request and streamed live */}
+      <Suspense fallback={<StockSkeleton />}>
+        <LiveStockBalance />
+      </Suspense>
+    </div>
+  );
+}
+
+async function LiveStockBalance() {
+  // Query executed on every request:
+  const stock = await db.warehouse.getLiveInventory();
+  return <p className="font-mono text-emerald-600">{stock} units remaining</p>;
+}
+```
+
+- **Eliminates the SSR Bottleneck:** The browser parses stylesheets and scripts in `0ms` while the server computes data in the background.
+- **Notice:** Because the dynamic hole is uncached, heavy traffic will still send 100% of queries to the database. See Strategy 8 for caching the hole.
+
+---
+
+### 8. PPR + `<DinouCacheSlot>` (Peak Performance Synergy)
+
+> **PPR Hybrid Synergy (Recommended)**  
+> **TTFB:** `0ms (Edge CDN)` | **Stream Ready:** `~2-5ms (RAM Cache)` | **Server & DB Load:** `99.9% Offload` | **Waterfall:** `None` | **Data Freshness:** `TTL / Tag Reval`
+
+**How it works:** The gold standard for high-traffic web applications. Combines Partial Prerendering with component-level Micro-ISR. The Edge CDN delivers the static shell in `0ms` TTFB. The server streams the dynamic hole almost instantly (`~2ms`) because the sub-tree is cached in memory/KV storage. Visitors see zero visible skeleton flicker, while database queries are reduced by 99.9%.
+
+```typescript
+// src/trending/page_functions.ts
+export const ppr = true; // Static Edge Shell
+```
+
+```tsx
+// src/trending/page.tsx
+import { Suspense } from "react";
+import { DinouCacheSlot } from "dinou/server";
+import { TrendingGrid, TrendingSkeleton } from "./components";
+
+export default function TrendingPage() {
+  return (
+    <main className="p-8 max-w-5xl mx-auto space-y-6">
+      {/* 1. Static Layout: delivered immediately with 0ms TTFB from CDN Edge */}
+      <header>
+        <h1 className="text-3xl font-bold">Trending Products</h1>
+        <p className="text-muted-foreground text-sm">Ultra-high traffic viral catalog.</p>
+      </header>
+
+      {/* 2. Micro-ISR Slot: resolves in ~2ms from server memory/KV cache without DB query */}
+      <Suspense fallback={<TrendingSkeleton />}>
+        <DinouCacheSlot id="viral-trending" revalidate={120} tag="trending">
+          <TrendingGrid />
+        </DinouCacheSlot>
       </Suspense>
     </main>
   );
 }
 ```
 
-> **Client-Side Data Fetching:** To trigger or refresh data queries from inside Client Components, use [Server Functions](#server-functions-use-server--suspense) with React 19's native `use()` hook and `<Suspense>`.
+- **Benchmarked Throughput:** Under a spike of 50,000 requests/minute, only 1 query hits the database every 120 seconds.
+- **User Experience:** `0ms` TTFB first paint + `~2ms` content resolution = feels like a static page with near-live freshness.
+
+---
+
+### 9. RSC Promise ➔ Client `use()` (React 19)
+
+> **Promise Streaming**  
+> **TTFB:** `0ms (with PPR) / Fast` | **Stream Ready:** `Waits for Promise` | **Server & DB Load:** `Heavy (Live query)` | **Waterfall:** `None` | **Data Freshness:** `100% Live`
+
+**How it works:** In React 19, Server Components can start an asynchronous data fetch without `await`, and pass the raw `Promise` across the flight serialization boundary to a Client Component. The Client Component unwraps it synchronously using the native `use()` hook inside `<Suspense>`. No `useEffect`, no client fetch cascades, and no duplicate network requests!
+
+```tsx
+// src/search/page.tsx (Server Component)
+import { Suspense } from "react";
+import db from "@/lib/db";
+import { SearchResultsClient } from "./search-results-client";
+
+export default function SearchPage({ searchParams }: { searchParams: { q?: string } }) {
+  const query = searchParams.q || "";
+
+  // Start query WITHOUT awaiting! Passes un-awaited Promise to client:
+  const resultsPromise = db.products.search({ query });
+
+  return (
+    <main className="p-6 max-w-4xl mx-auto space-y-4">
+      <h1 className="text-2xl font-bold">Search Catalog</h1>
+      <Suspense key={query} fallback={<p className="text-muted-foreground">Searching catalog...</p>}>
+        <SearchResultsClient promise={resultsPromise} />
+      </Suspense>
+    </main>
+  );
+}
+```
+
+```tsx
+// src/search/search-results-client.tsx
+"use client";
+
+import { use, useState } from "react";
+
+export function SearchResultsClient({ promise }: { promise: Promise<Product[]> }) {
+  // Native React 19 hook: unwraps the Flight RPC promise directly
+  const products = use(promise);
+  const [filterPrice, setFilterPrice] = useState(100);
+
+  return (
+    <div>
+      <input 
+        type="range" 
+        max={500} 
+        value={filterPrice} 
+        onChange={(e) => setFilterPrice(+e.target.value)} 
+      />
+      <ul>
+        {products.filter((p) => p.price <= filterPrice).map((p) => (
+          <li key={p.id}>{p.name} - ${p.price}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+- **Zero Waterfall:** The server initiates the query before the client even finishes parsing JavaScript.
+- **Interactive State:** The client component immediately has access to full client hooks (`useState`, `useMemo`) to filter or mutate UI state.
+
+---
+
+### 10. Client-First `getProps` (SSG)
+
+> **Static Client Model**  
+> **TTFB:** `0ms (CDN Edge)` | **Stream Ready:** `Instant (0ms)` | **Server & DB Load:** `Zero at Runtime` | **Waterfall:** `None` | **Data Freshness:** `Fixed at Build`
+
+**How it works:** The page uses Dinou's Client-First Model. Data is retrieved on the server at build time via `getProps` in `page_functions.ts`, while `page.tsx` is an interactive Client Component marked with `"use client"`. The build generates static HTML with pre-serialized props, which hydrates into a full SPA on load.
+
+```typescript
+// src/whiteboard/page_functions.ts
+import db from "@/lib/db";
+
+export async function getProps() {
+  const defaultTemplates = await db.templates.findDefaults();
+  return { defaultTemplates };
+}
+```
+
+```tsx
+// src/whiteboard/page.tsx
+"use client";
+
+import { useState } from "react";
+import { CanvasStage, ToolPalette } from "@/components/canvas";
+
+export default function WhiteboardPage({ defaultTemplates }: { defaultTemplates: any[] }) {
+  const [selectedTemplate, setSelectedTemplate] = useState(defaultTemplates[0]);
+
+  return (
+    <div className="h-screen flex flex-col">
+      <ToolPalette onSelect={setSelectedTemplate} />
+      <CanvasStage initialData={selectedTemplate} />
+    </div>
+  );
+}
+```
+
+- **Ergonomics:** Perfect for developers migrating from Vite/CRA who want classic React hooks everywhere without losing SSG SEO and `0ms` TTFB.
+
+---
+
+### 11. Client-First `getProps` (Dynamic SSR)
+
+> **Dynamic Client SSR**  
+> **TTFB:** `Slow (Blocked)` | **Stream Ready:** `N/A (Blocks TTFB)` | **Server & DB Load:** `Heavy (100% queries)` | **Waterfall:** `None` | **Data Freshness:** `100% Live`
+
+**How it works:** The same Client-First approach as Strategy 10, but configured for on-demand dynamic execution (e.g., dynamic params or `revalidate = 0`). On every request, the server executes `getProps`, passes the data into the client page component, and renders the initial HTML document.
+
+```typescript
+// src/editor/[docId]/page_functions.ts
+import db from "@/lib/db";
+
+export const revalidate = 0; // Dynamic SSR
+
+export async function getProps(params: { docId: string }) {
+  const document = await db.documents.findById(params.docId);
+  return { document };
+}
+```
+
+```tsx
+// src/editor/[docId]/page.tsx
+"use client";
+
+import { useState } from "react";
+
+export default function DocumentEditor({ document }: { document: any }) {
+  const [content, setContent] = useState(document.initialBody);
+
+  return (
+    <div className="editor-container">
+      <textarea value={content} onChange={(e) => setContent(e.target.value)} />
+    </div>
+  );
+}
+```
+
+- **Trade-off:** Because the server waits for `getProps` before sending the first byte, TTFB is slower compared to streaming patterns.
+- **Advantage:** Eliminates client-side spinner flashing upon initial navigation compared to classic Single Page Apps.
+
+---
+
+### 12. Client Calling Server Function (Initial Mount - Dynamic RPC)
+
+> **Initial Mount RPC**  
+> **TTFB:** `Fast (Shell Only)` | **Stream Ready:** `Delayed (Waterfall)` | **Server & DB Load:** `Heavy (100% RPC)` | **Waterfall:** `YES (Waterfall)` | **Data Freshness:** `100% Live`
+
+**How it works:** A Client Component triggers a Server Function on initial mount via RPC. In Dinou and modern React 19, this is accomplished without legacy `useEffect` hooks; instead, the initial Server Function promise is initialized in state or component instantiation and unwrapped synchronously using React 19's native `use()` hook inside `<Suspense>`.
+
+```typescript
+// src/dashboard/server-functions.ts
+"use server";
+
+import db from "@/lib/db";
+
+export async function fetchDashboardStats() {
+  const count = await db.users.count();
+  const active = await db.users.countActiveSessions();
+  return { count, active };
+}
+```
+
+```tsx
+// src/dashboard/dashboard-stats-widget.tsx
+"use client";
+
+import { useState, use, Suspense } from "react";
+import { fetchDashboardStats } from "./server-functions";
+
+function StatsContent({ promise }: { promise: Promise<{ count: number; active: number }> }) {
+  // Pure React 19 use() unrolls the Flight RPC promise within Suspense (no useEffect!)
+  const data = use(promise);
+
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      <div className="p-3 border rounded-lg bg-card">
+        <span className="text-xs text-muted-foreground block">Total Users</span>
+        <strong className="text-xl">{data.count}</strong>
+      </div>
+      <div className="p-3 border rounded-lg bg-card">
+        <span className="text-xs text-muted-foreground block">Active Sessions</span>
+        <strong className="text-xl text-emerald-600">{data.active}</strong>
+      </div>
+    </div>
+  );
+}
+
+export function DashboardStatsWidget() {
+  // Initiates Server Function RPC on initial mount without useEffect:
+  const [statsPromise] = useState(() => fetchDashboardStats());
+
+  return (
+    <div className="p-4 border rounded-xl space-y-3">
+      <h3 className="font-semibold text-sm">System Overview</h3>
+      <Suspense fallback={<p className="text-xs text-muted-foreground">Loading metrics over RPC...</p>}>
+        <StatsContent promise={statsPromise} />
+      </Suspense>
+    </div>
+  );
+}
+```
+
+- **Modern React 19 Ergonomics:** Unrolls promises synchronously with `use()` inside `<Suspense>`. Eliminates legacy `useEffect` lifecycle hooks, manual loading flags (`isLoading`, `error`), and fetch boilerplate.
+- **Network Round Trip:** Supported and idiomatic for standalone client widgets, but incurs a second client-side HTTP round trip after hydration. When you control the parent route, prefer **Strategy 9 (RSC Promise)** to initiate the promise on the server and eliminate the extra round trip.
+
+---
+
+### 13. Client Server Functions (User Actions & Mutations)
+
+> **Type-Safe RPC Mutations**  
+> **TTFB:** `N/A (Post-Load)` | **Stream Ready:** `N/A (User Event)` | **Server & DB Load:** `On-Demand` | **Waterfall:** `None` | **Data Freshness:** `100% Live`
+
+**How it works:** The official, idiomatic role for Server Functions. Invoked exclusively in response to user-triggered events (button clicks, form submissions, drag-and-drop actions). Server Functions execute securely on the server, mutate state, and trigger on-demand cache revalidation via `revalidateTag` or `revalidatePath`.
+
+```typescript
+// src/cart/server-functions.ts
+"use server";
+
+import db from "@/lib/db";
+import { revalidateTag } from "dinou/server";
+
+export async function addToCart(productId: string, quantity: number) {
+  // Direct server mutation with ORM
+  await db.cart.addItem({ productId, quantity });
+
+  // On-demand invalidation: purges cache tag across CDNs and Micro-ISR slots
+  await revalidateTag("cart");
+
+  return { success: true };
+}
+```
+
+```tsx
+// src/cart/add-to-cart-button.tsx
+"use client";
+
+import { useTransition } from "react";
+import { addToCart } from "./server-functions";
+
+export function AddToCartButton({ productId }: { productId: string }) {
+  const [isPending, startTransition] = useTransition();
+
+  const handleClick = () => {
+    startTransition(async () => {
+      await addToCart(productId, 1);
+    });
+  };
+
+  return (
+    <button onClick={handleClick} disabled={isPending} className="btn-primary">
+      {isPending ? "Adding..." : "Add to Cart"}
+    </button>
+  );
+}
+```
+
+- **Strict Rule:** Only call Server Functions in mutative event contexts. Never invoke them during the render phase or inside components.
+- **Type Safety:** Arguments and return types are inferred end-to-end between client and server without manual fetch boilerplate.
+
+---
+
+### Architectural Decision Guide
+
+When deciding which strategy to apply to a new feature or page, follow this quick decision tree:
+
+- **Is the content public or marketing?**
+  - ➔ **Strategy 1 (RSC SSG):** `0ms` TTFB, 0kb client JS, 100% CDN cached.
+  - ➔ If parts change periodically: **Strategy 5 (Static SSG / Asymmetric ISR)**.
+- **High-traffic store or viral catalog?**
+  - ➔ **Strategy 8 (PPR + CacheSlot):** Instant `0ms` Edge layout + `~2ms` cached hole. 99.9% database query offload.
+- **Interactive tool, canvas, or complex editor?**
+  - ➔ **Strategy 10 / 11 (Client-First):** Server gets data via `getProps`, page is a 100% interactive client component.
+- **Live search filter or client widget?**
+  - ➔ **Strategy 9 (React 19 `use()`):** Start query on server, stream raw promise to client component without waterfalls.
+
 
 ---
 
