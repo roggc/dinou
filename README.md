@@ -261,6 +261,18 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
   - [Production Build Output (.dinou/dist3/assets/)](#production-build-output-dinoudist3assets)
   - [TypeScript Declarations (dinou/env)](#typescript-declarations-dinouenv-1)
   - [Extending Custom Formats (Eject)](#extending-custom-formats-eject)
+- [Environment Variables & Secrets](#environment-variables--secrets)
+  - [Environment Variables in Dinou](#environment-variables-in-dinou)
+  - [The Server-Only Security Model](#the-server-only-security-model)
+    - [Where Environment Variables Work](#where-environment-variables-work)
+    - [Safe Propagation to Client Components](#safe-propagation-to-client-components)
+  - [Defining .env Files](#defining-env-files)
+  - [Multi-Platform Runtimes](#multi-platform-runtimes)
+    - [Node.js & Bun (process.env)](#nodejs--bun-processenv)
+    - [Cloudflare Workers (process.env & Bindings)](#cloudflare-workers-processenv--bindings)
+    - [Deno (process.env & --allow-env)](#deno-processenv----allow-env)
+  - [Type-Safe Environment Validation (Zod)](#type-safe-environment-validation-zod)
+  - [Anti-Leak Security & Bot Shield](#anti-leak-security--bot-shield)
 - [Configuration API (`dinou.config.js`)](#configuration-api-dinouconfigjs)
   - [1. Universal Middleware (`onRequest`)](#1-universal-middleware-onrequest)
   - [2. SWC Disk-Mirror (`useSwcDiskMirror`)](#2-swc-disk-mirror-useswcdiskmirror)
@@ -6348,6 +6360,213 @@ const extensions = [
 
 > [!TIP]
 > All three bundlers (esbuild, rollup, webpack) and the dual-engine runtime will automatically recognize and fingerprint your new file extensions.
+
+---
+
+## Environment Variables & Secrets
+
+### Environment Variables in Dinou
+
+Dinou isolates all environment variables strictly to the server runtime. Values are never automatically bundled, replaced, or inlined into client-side JavaScript chunks, ensuring secrets like database passwords or private API keys remain 100% on the server.
+
+- **Zero Client Inlining:** Bundlers never inject `process.env` into client chunks. Secrets never reach the browser.
+- **Multi-Runtime Ready:** Use `process.env` across Node, Bun, and Deno, and `getContext().env` for Cloudflare Workers bindings.
+- **Bot Shield Protected:** Dinou's core HTTP scanner defense immediately rejects external requests targeting `.env` files.
+
+### The Server-Only Security Model
+
+In Dinou, **Client Components cannot access `process.env` directly**. If a client component needs a configuration value (such as a public analytics ID or Stripe publishable key), pass it explicitly as a prop from a Server Component.
+
+#### Where Environment Variables Work
+
+You can safely access environment variables in any server-side execution context:
+
+- **Server Components (RSC):** Read database URLs or CMS tokens while rendering initial HTML on the server.
+- **Server Functions ("use server"):** Access private payment APIs, database pools, and hashing secrets in RPC mutations.
+- **Page Functions (getProps):** Fetch data before page execution in `page_functions.ts` using backend keys.
+- **Plugins & Server Config:** Read environment variables (such as `PORT` or service keys) in `dinou.config.mjs` and plugins.
+
+```tsx
+// src/server-functions/checkout.ts
+"use server";
+
+import Stripe from "stripe";
+
+// Securely read secret key inside Server Function
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2023-10-16",
+});
+
+export async function createCheckoutSession(amount: number) {
+  const session = await stripe.checkout.sessions.create({
+    payment_method_types: ["card"],
+    line_items: [{ price_data: { currency: "usd", unit_amount: amount }, quantity: 1 }],
+    mode: "payment",
+    success_url: `${process.env.APP_URL}/success`,
+    cancel_url: `${process.env.APP_URL}/cancel`,
+  });
+
+  return session.url;
+}
+```
+
+#### Safe Propagation to Client Components
+
+When a Client Component requires a public configuration value (such as a public client ID or feature flag), pass it down through props from an enclosing Server Component:
+
+```tsx
+// src/page.tsx (Server Component)
+import PaymentWidget from "./components/payment-widget"; // Client Component
+
+export default function CheckoutPage() {
+  // Explicitly extract ONLY the safe public key to send to the browser
+  const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
+
+  return (
+    <main className="container max-w-xl mx-auto py-8">
+      <h1>Complete Your Order</h1>
+      <PaymentWidget publishableKey={publishableKey} />
+    </main>
+  );
+}
+```
+
+> [!NOTE]
+> By making data transfer across the server-client boundary explicit, code reviews immediately flag any sensitive secrets inadvertently sent to the client.
+
+### Defining .env Files
+
+In local development, Dinou loads variables from your project root `.env` file:
+
+```bash
+# .env (Local development template)
+NODE_ENV=development
+PORT=3000
+
+# Database
+DATABASE_URL="postgresql://postgres:password@localhost:5432/my_app_dev"
+
+# Third-party credentials
+STRIPE_SECRET_KEY="sk_test_..."
+STRIPE_PUBLISHABLE_KEY="pk_test_..."
+GITHUB_CLIENT_ID="Iv1..."
+GITHUB_CLIENT_SECRET="ghs_..."
+
+# Application URLs
+APP_URL="http://localhost:3000"
+```
+
+> [!TIP]
+> **Security Best Practices:**
+> - **Never commit .env to git:** Always ensure `.env` and `.env.*` are in your `.gitignore` file (except `.env.example`).
+> - **Commit a .env.example:** Maintain a clean `.env.example` containing required variable names with placeholder values to onboard new team members.
+> - **Production Environments:** In production (Fly.io, Railway, AWS, Docker), inject secrets via the host provider's native environment configuration dashboard rather than shipping a file.
+
+### Multi-Platform Runtimes
+
+Dinou is runtime-agnostic. For standard environment variables and secrets (like `DATABASE_URL` or `API_SECRET`), you can write `process.env` uniformly across all deployment targets:
+
+#### Node.js & Bun (process.env)
+
+In Node.js and Bun server adapters, environment variables reside natively on the global `process.env` object:
+
+```typescript
+const dbUrl = process.env.DATABASE_URL;
+const port = Number(process.env.PORT || 3000);
+```
+
+> Bun also provides `Bun.env` as an alias, but `process.env` is fully supported across both runtimes.
+
+#### Cloudflare Workers (process.env & Bindings)
+
+In Cloudflare Workers, standard text secrets and environment variables configured in `wrangler.toml` or the Cloudflare dashboard are available via `process.env` (when `compatibility_flags = ["nodejs_compat"]` is enabled) or via `getContext().env`:
+
+> [!NOTE]
+> **Cloudflare Resource Bindings vs. Environment Variables:** By definition, `.env` files and `process.env` only store plain text strings. However, Cloudflare also provides **Resource Bindings** (live JavaScript instances with async methods for KV, D1 SQL databases, and R2 buckets) through its runtime `env` object. In Dinou, you can access both text secrets and live resource bindings uniformly anywhere on the server via `getContext().env`.
+
+```typescript
+import { getContext } from "dinou";
+
+// Inside page_functions.ts (getProps), Server Components, or Server Functions:
+export async function getProps(params) {
+  // 1. Text secrets (work via process.env or getContext().env):
+  const apiSecret = process.env.MY_API_SECRET;
+
+  // 2. Cloudflare Resource Bindings (KV, D1, R2 live objects):
+  const { env } = getContext();
+  const kv = env?.MY_KV_NAMESPACE;
+  const user = kv ? await kv.get("user:123") : null;
+
+  return { user };
+}
+```
+
+Inside Server Functions (`"use server"`), call `getContext()` directly to access D1 databases (`env.DB`) or KV namespaces for database queries and mutations.
+
+#### Deno (process.env & --allow-env)
+
+In Deno, environment variable access is protected by Deno's security sandbox. When launching Dinou on Deno, enable the `--allow-env` permission flag:
+
+```bash
+deno run --allow-net --allow-read --allow-write --allow-env dinou/adapters/deno.js
+```
+
+With `--allow-env` active, Deno's native Node compatibility allows you to read variables via `process.env.KEY` uniformly, or via `Deno.env.get("KEY")`.
+
+### Type-Safe Environment Validation (Zod)
+
+Missing environment variables in production are notorious for causing silent failures or runtime crashes. We recommend validating your environment variables at application startup using a lightweight schema validator such as **Zod**:
+
+```typescript
+// src/lib/env.ts
+import { z } from "zod";
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+  PORT: z.coerce.number().default(3000),
+  DATABASE_URL: z.string().url("DATABASE_URL must be a valid connection string"),
+  STRIPE_SECRET_KEY: z.string().min(1, "STRIPE_SECRET_KEY is required"),
+  STRIPE_PUBLISHABLE_KEY: z.string().min(1, "STRIPE_PUBLISHABLE_KEY is required"),
+});
+
+// Parse and validate process.env
+const parsed = envSchema.safeParse(process.env);
+
+if (!parsed.success) {
+  console.error("❌ Invalid environment variables:", parsed.error.format());
+  throw new Error("Invalid configuration. Check terminal output for details.");
+}
+
+export const env = parsed.data;
+```
+
+Now you can import the validated `env` object in your Server Components and Server Functions with full TypeScript autocompletion and compile-time type safety:
+
+```typescript
+// Full TypeScript autocomplete and guaranteed presence:
+import { env } from "@/lib/env";
+
+const db = connectToDatabase(env.DATABASE_URL);
+```
+
+### Anti-Leak Security & Bot Shield
+
+Malicious web crawlers and vulnerability scanners frequently search for exposed `.env` files on web servers by issuing requests like:
+
+```text
+GET /.env
+GET /api/.env
+GET /public/.env
+```
+
+> [!IMPORTANT]
+> **Dinou Core Scanner Defense:** Dinou includes a built-in **Anti-Bot Shield** in `dinou/core/handler.js`. The framework automatically matches incoming request paths against common bot attack patterns (including `/\.env$/i`, `/\.git\b/i`, `/\.sql$/i`, etc.) and immediately terminates them before any static file resolver or server route can be triggered.
+
+**Production Deployment Checklist:**
+- Verify `.env` is listed in `.gitignore` and `.dockerignore`.
+- Configure platform secrets via your host's dashboard or CLI (e.g. `railway variables set`, `fly secrets set`, `wrangler secret put`).
+- Ensure sensitive API credentials are only referenced inside Server Components or Server Functions.
+- Use schema validation (like Zod) to catch missing variables immediately on server boot.
 
 ---
 
