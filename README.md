@@ -192,20 +192,20 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [8.2. Client-Side Router Refresh Mechanisms](#82-client-side-router-refresh-mechanisms)
 - [Data Fetching: The 13 Strategies](#data-fetching-the-13-strategies)
   - [Overview: The 13-Strategy Architecture](#overview-the-13-strategy-architecture)
-  - [Data Fetching & Rendering Strategies Matrix](#data-fetching--rendering-strategies-matrix)
+  - [Data Fetching & Rendering Strategies Matrix](#data-fetching-rendering-strategies-matrix)
   - [1. RSC Direct await (SSG)](#1-rsc-direct-await-ssg)
   - [2. RSC Direct await (Dynamic SSR)](#2-rsc-direct-await-dynamic-ssr)
   - [3. RSC with <Suspense> (SSG)](#3-rsc-with-suspense-ssg)
   - [4. RSC with <Suspense> (Dynamic Streaming SSR)](#4-rsc-with-suspense-dynamic-streaming-ssr)
-  - [5. RSC + <Suspense> + <DinouCacheSlot> (Static SSG / Asymmetric ISR)](#5-rsc--suspense--dinoucacheslot-static-ssg--asymmetric-isr)
-  - [6. RSC + <Suspense> + <DinouCacheSlot> (Dynamic Micro-ISR)](#6-rsc--suspense--dinoucacheslot-dynamic-micro-isr)
+  - [5. RSC + <Suspense> + <DinouCacheSlot> (Static SSG / Asymmetric ISR)](#5-rsc-suspense-dinoucacheslot-static-ssg-asymmetric-isr)
+  - [6. RSC + <Suspense> + <DinouCacheSlot> (Dynamic Micro-ISR)](#6-rsc-suspense-dinoucacheslot-dynamic-micro-isr)
   - [7. RSC with <Suspense> (PPR Hybrid)](#7-rsc-with-suspense-ppr-hybrid)
-  - [8. PPR + <DinouCacheSlot> (Peak Performance Synergy)](#8-ppr--dinoucacheslot-peak-performance-synergy)
-  - [9. RSC Promise ➔ Client use() (React 19)](#9-rsc-promise--client-use-react-19)
+  - [8. PPR + <DinouCacheSlot> (Peak Performance Synergy)](#8-ppr-dinoucacheslot-peak-performance-synergy)
+  - [9. RSC Promise ➔ Client use() (React 19)](#9-rsc-promise-client-use-react-19)
   - [10. Client-First getProps (SSG)](#10-client-first-getprops-ssg)
   - [11. Client-First getProps (Dynamic SSR)](#11-client-first-getprops-dynamic-ssr)
   - [12. Client Calling Server Function (Initial Mount - Dynamic RPC)](#12-client-calling-server-function-initial-mount---dynamic-rpc)
-  - [13. Client Server Functions (User Actions & Mutations)](#13-client-server-functions-user-actions--mutations)
+  - [13. Client Server Functions (User Actions & Mutations)](#13-client-server-functions-user-actions-mutations)
   - [Architectural Decision Guide](#architectural-decision-guide)
 - [Server Functions (`"use server"`) & Suspense](#server-functions-use-server--suspense)
   - [Usage in Server Components (Streaming)](#usage-in-server-components-streaming)
@@ -4516,6 +4516,8 @@ Executed inside Client Components and user interactions to invalidate browser ro
 
 ## Data Fetching: The 13 Strategies
 
+### Overview: The 13-Strategy Architecture
+
 A comprehensive case-by-case engineering guide covering each of the **13 data fetching and rendering patterns** available in Dinou. Every strategy is examined with concrete code snippets, runtime lifecycle behavior, TTFB metrics, server load characteristics, and production trade-offs.
 
 Dinou provides unprecedented architectural flexibility by separating:
@@ -5214,8 +5216,6 @@ When deciding which strategy to apply to a new feature or page, follow this quic
 - **Live search filter or client widget?**
   - ➔ **Strategy 9 (React 19 `use()`):** Start query on server, stream raw promise to client component without waterfalls.
 
-
----
 
 ---
 
