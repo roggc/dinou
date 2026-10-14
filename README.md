@@ -420,8 +420,8 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [Cache Invalidation Matrix](#matrix-cache)
     - [Redirection Strategy Matrix](#matrix-redirects)
     - [Route Parameter Access Matrix](#matrix-params)
-- [📜 Changelog](#-changelog)
-- [📄 License](#-license)
+- [📜 Changelog](#changelog)
+- [📄 License](#license)
 
 
 ## Getting Started
@@ -9964,10 +9964,14 @@ Quick comparative decision tables to help you pick the right primitive for cachi
 
 ---
 
+<a id="changelog"></a>
+<a id="-changelog"></a>
 ## 📜 Changelog
 
 For a detailed list of changes, enhancements, and bug fixes across versions, see the [CHANGELOG.md](./CHANGELOG.md).
 
+<a id="license"></a>
+<a id="-license"></a>
 ## 📄 License
 
 Dinou is licensed under the [MIT License](./LICENSE.md).
