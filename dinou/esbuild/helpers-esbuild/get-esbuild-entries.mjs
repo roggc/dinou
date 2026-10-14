@@ -15,7 +15,7 @@ import { useClientRegex, useServerRegex } from "../../constants.js";
 import { updateManifestForModule } from "./update-manifest-for-module.mjs";
 
 function hashFilePath(absPath) {
-  return crypto.createHash("sha1").update(absPath).digest("hex").slice(0, 8);
+  return crypto.createHash("sha1").update(normalizePath(absPath)).digest("hex").slice(0, 8);
 }
 
 export default async function getEsbuildEntries({
@@ -27,6 +27,7 @@ export default async function getEsbuildEntries({
   const detectedCSSEntries = new Set();
   const detectedAssetEntries = new Set();
   const serverModules = new Set();
+  const serverFunctions = new Set();
 
   // ---------- Helpers (ported mostly verbatim) ----------
   async function getImportsAndAssetsAndCsss(
@@ -49,7 +50,8 @@ export default async function getEsbuildEntries({
     const csss = new Set();
 
     const importNodes = [];
-    traverse.default(ast, {
+    const traverseFn = typeof traverse === "function" ? traverse : (traverse.default || traverse);
+    traverseFn(ast, {
       ImportDeclaration(nodePath) {
         importNodes.push(nodePath);
       },
@@ -88,10 +90,17 @@ export default async function getEsbuildEntries({
         if (isImportedFileClient) {
           continue; // Do not recursively process client components
         }
+
+        const isImportedFileServer = useServerRegex.test(importedCode.trim());
+        if (isImportedFileServer) {
+          serverFunctions.add(normalizePath(absImportPathWithExt));
+          continue;
+        }
       } else {
         const isImportedFileServer = useServerRegex.test(importedCode.trim());
 
         if (isImportedFileServer) {
+          serverFunctions.add(normalizePath(absImportPathWithExt));
           continue;
         }
       }
@@ -157,10 +166,19 @@ export default async function getEsbuildEntries({
   });
 
   // Gather client modules and update manifest entries
+  let fileScanCount = 0;
   for (const absPath of files) {
+    if (++fileScanCount % 5 === 0) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
     const code = readFileSync(absPath, "utf8");
     const isClientModule = useClientRegex.test(code.trim());
+    const isServerFunction = useServerRegex.test(code.trim());
     const normalizedPath = normalizePath(absPath);
+
+    if (isServerFunction) {
+      serverFunctions.add(normalizedPath);
+    }
 
     if (isClientModule) {
       const name = path.basename(absPath, path.extname(absPath));
@@ -169,22 +187,6 @@ export default async function getEsbuildEntries({
       detectedClientEntries.add({
         absPath: normalizedPath,
         name,
-      });
-      const { imports } = await getImportsAndAssetsAndCsss(
-        code,
-        absPath,
-        new Set(),
-        true,
-      );
-      const clientComponentRegex = /\.(js|jsx|ts|tsx)$/i;
-      imports.forEach((imp) => {
-        if (clientComponentRegex.test(imp) && !imp.includes("node_modules")) {
-          const name = path.basename(imp, path.extname(imp));
-          detectedClientEntries.add({
-            absPath: normalizePath(imp),
-            name,
-          });
-        }
       });
     } else if (isPageOrLayout(absPath)) {
       serverModules.add(normalizedPath);
@@ -253,6 +255,16 @@ export default async function getEsbuildEntries({
     const outfileName = `${dCE.name}-${hash}`;
     dCE.outfile = `${outfileName}.js`;
     dCE.outfileName = outfileName;
+    if (manifest) {
+      const fileUrl = pathToFileURL(dCE.absPath).href;
+      const lowerFileUrl = fileUrl.toLowerCase();
+      for (const key in manifest) {
+        const kBase = key.split("#")[0].toLowerCase();
+        if (kBase === lowerFileUrl) {
+          manifest[key].id = "/" + dCE.outfile;
+        }
+      }
+    }
   }
 
   for (const dCSSE of detectedCSSEntries) {
@@ -273,6 +285,6 @@ export default async function getEsbuildEntries({
     detectedClientEntries,
     detectedCSSEntries,
     detectedAssetEntries,
-    Array.from(serverModules),
+    Array.from(serverFunctions),
   ];
 }

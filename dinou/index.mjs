@@ -3,17 +3,24 @@ import {
   usePathname,
   useSearchParams,
   useRouter,
+  refreshSlot,
   useNavigationLoading,
 } from "./core/navigation.js";
 import { redirect } from "./core/redirect.jsx";
 import { ClientRedirect } from "./core/client-redirect.jsx";
 import { Link } from "./core/link.jsx";
 
+function defineConfig(config) {
+  return config;
+}
+
 const dinou = {
+  defineConfig,
   getContext,
   usePathname,
   useSearchParams,
   useRouter,
+  refreshSlot,
   useNavigationLoading,
   redirect,
   ClientRedirect,
@@ -21,10 +28,12 @@ const dinou = {
 };
 
 export {
+  defineConfig,
   getContext,
   usePathname,
   useSearchParams,
   useRouter,
+  refreshSlot,
   useNavigationLoading,
   redirect,
   ClientRedirect,

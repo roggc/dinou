@@ -29,6 +29,13 @@ export function updateManifestForModule(
         chunks: expName,
         name: expName,
       };
+      if (expName === "default") {
+        manifest[`${fileUrl}#default`] = {
+          id: relPath,
+          chunks: expName,
+          name: expName,
+        };
+      }
     }
   }
 }

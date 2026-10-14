@@ -22,10 +22,13 @@ const absPathToLink = path.resolve(
   __dirname,
   "../core/link.jsx"
 );
+const absPathToSlot = path.resolve(
+  __dirname,
+  "../core/slot.js"
+);
 
 const frameworkEntryPoints = {
   main: path.resolve(__dirname, "../core/client.jsx"),
-  error: path.resolve(__dirname, "../core/client-error.jsx"),
   serverFunctionProxy: path.resolve(
     __dirname,
     "../core/server-function-proxy.js"
@@ -37,6 +40,7 @@ const frameworkEntryPoints = {
   ),
   dinouClientRedirect: absPathToClientRedirect,
   dinouLink: absPathToLink,
+  dinouSlot: absPathToSlot,
 };
 
 try {
@@ -54,6 +58,12 @@ try {
   updateManifestForModule(
     absPathToLink,
     await fs.readFile(absPathToLink, "utf8"),
+    true,
+    manifest
+  );
+  updateManifestForModule(
+    absPathToSlot,
+    await fs.readFile(absPathToSlot, "utf8"),
     true,
     manifest
   );
@@ -87,6 +97,46 @@ try {
       outdir,
     })
   );
+
+  // 🚀 Server & Adapter Pre-bundling with react-server condition
+  console.log("⚡ [esbuild] Pre-bundling server handler and adapters (conditions: ['react-server'])...");
+  await esbuild.build({
+    entryPoints: {
+      handler: path.resolve(__dirname, "../core/handler.js"),
+      netlify: path.resolve(__dirname, "../adapters/netlify.js"),
+    },
+    bundle: true,
+    platform: "node",
+    target: "node20",
+    format: "esm",
+    conditions: ["react-server", "node", "import"],
+    outdir: ".dinou/dist3/server",
+    external: [
+      "express",
+      "chokidar",
+      "dotenv",
+      "fsevents",
+      "@swc/core",
+      "@babel/core",
+      "esbuild",
+    ],
+    banner: {
+      js: "import { createRequire as ___createRequire } from 'node:module'; import { fileURLToPath as ___fileURLToPath } from 'node:url'; import ___path from 'node:path'; const require = ___createRequire(import.meta.url || ___path.resolve(process.cwd(), 'package.json')); const __filename = import.meta.url ? ___fileURLToPath(import.meta.url) : ___path.resolve(process.cwd(), 'index.js'); const __dirname = ___path.dirname(__filename); process.env.NODE_ENV = process.env.NODE_ENV || 'production';",
+    },
+    sourcemap: true,
+  });
+  await fs.writeFile(
+    path.resolve(process.cwd(), ".dinou/dist3/server/package.json"),
+    JSON.stringify({ type: "module" }, null, 2)
+  );
+
+  // 🏗️ Pre-render static pages (SSG) at build time
+  const { execSync } = await import("node:child_process");
+  execSync(`"${process.execPath}" --conditions=react-server "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
+    stdio: "inherit",
+    env: { ...process.env, NODE_ENV: "production" },
+  });
 } catch (err) {
   console.error("Error in build:", err);
+  process.exit(1);
 }

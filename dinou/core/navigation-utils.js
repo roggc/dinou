@@ -26,6 +26,10 @@ export function isExternalUrl(href) {
 }
 
 export function resolveUrl(href, currentPathname) {
+  if (!href) {
+    return "";
+  }
+
   if (isExternalUrl(href)) {
     return href;
   }

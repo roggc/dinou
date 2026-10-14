@@ -1,9 +1,21 @@
 const path = require("path");
 const fs = require("fs").promises;
 const { existsSync, copyFileSync } = require("fs");
-const generateStaticPage = require("./generate-static-page");
-const { buildStaticPage } = require("./build-static-pages");
-const generateStaticRSC = require("./generate-static-rsc");
+let _generateStaticPage = null;
+function getGenerateStaticPage() {
+  if (!_generateStaticPage) _generateStaticPage = require("./generate-static-page");
+  return _generateStaticPage;
+}
+let _buildStaticPage = null;
+function getBuildStaticPage() {
+  if (!_buildStaticPage) _buildStaticPage = require("./build-static-pages").buildStaticPage;
+  return _buildStaticPage;
+}
+let _generateStaticRSC = null;
+function getGenerateStaticRSC() {
+  if (!_generateStaticRSC) _generateStaticRSC = require("./generate-static-rsc");
+  return _generateStaticRSC;
+}
 const { safeRename } = require("./safe-rename");
 const { updateStatus } = require("./status-manifest");
 
@@ -22,8 +34,8 @@ function revalidating(reqPath, isDynamicFromServer) {
 
       const isExpired =
         typeof revalidate === "number" &&
-        revalidate > 0 &&
-        Date.now() > generatedAt + revalidate;
+        revalidate >= 1 &&
+        Date.now() > generatedAt + revalidate * 1000;
 
       if (isExpired && !regenerating.has(reqPath)) {
         try {
@@ -31,6 +43,11 @@ function revalidating(reqPath, isDynamicFromServer) {
             copyFileSync(
               path.join(dist2Folder, reqPath, "index.html"),
               path.join(dist2Folder, reqPath, "index._old.html")
+            );
+          if (existsSync(path.join(dist2Folder, reqPath, "page.rsc")))
+            copyFileSync(
+              path.join(dist2Folder, reqPath, "page.rsc"),
+              path.join(dist2Folder, reqPath, "page._old.rsc")
             );
           if (existsSync(path.join(dist2Folder, reqPath, "rsc.rsc")))
             copyFileSync(
@@ -47,7 +64,7 @@ function revalidating(reqPath, isDynamicFromServer) {
           try {
             console.log(`[ISR] Starting regeneration for ${reqPath}...`);
             const isDynamic = {};
-            await buildStaticPage(reqPath, isDynamic);
+            await getBuildStaticPage()(reqPath, isDynamic);
             if (isDynamic.value) {
               isDynamicFromServer.value = true;
               console.log(
@@ -57,7 +74,7 @@ function revalidating(reqPath, isDynamicFromServer) {
               return;
             }
 
-            const rscResult = await generateStaticRSC(reqPath);
+            const rscResult = await getGenerateStaticRSC()(reqPath);
             if (!rscResult.success) {
               console.warn(`⚠️ [ISR] RSC generation failed for ${reqPath}. Aborting.`);
               await fs.unlink(rscResult.tempPath).catch(() => { });
@@ -67,7 +84,7 @@ function revalidating(reqPath, isDynamicFromServer) {
             // Commit the RSC payload immediately so that generateStaticPage can read it
             await safeRename(rscResult.tempPath, rscResult.finalPath);
 
-            const pageResult = await generateStaticPage(reqPath);
+            const pageResult = await getGenerateStaticPage()(reqPath);
             if (pageResult.success) {
               await safeRename(pageResult.tempPath, pageResult.finalPath);
               updateStatus(reqPath, pageResult.status);
@@ -91,4 +108,6 @@ function revalidating(reqPath, isDynamicFromServer) {
     }).catch((err) => { });
 }
 
-module.exports = { revalidating, regenerating };
+const inFlightGenerations = new Map();
+
+module.exports = { revalidating, regenerating, inFlightGenerations };

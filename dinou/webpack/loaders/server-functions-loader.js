@@ -5,13 +5,34 @@ const parseExports = require("../../core/parse-exports.js");
 const { useServerRegex } = require("../../constants.js");
 
 module.exports = function (source) {
+  const options = this.getOptions ? this.getOptions() : {};
+  const norm = path.resolve(this.resourcePath).replace(/\\/g, "/").toLowerCase();
+
+  if (options.serverFiles) {
+    if (!options.serverFiles.has(norm)) {
+      if (!source.includes("use server")) {
+        return source;
+      }
+      if (useServerRegex.test(source)) {
+        options.serverFiles.add(norm);
+      } else {
+        return source;
+      }
+    }
+  }
+
   let hasUseServer = false;
 
   if (useServerRegex.test(source)) {
     hasUseServer = true;
   }
 
-  if (!hasUseServer) return source;
+  if (!hasUseServer) {
+    if (options.serverFiles) {
+      options.serverFiles.delete(norm);
+    }
+    return source;
+  }
 
   const exports = parseExports(source);
   if (exports.length === 0) return source;

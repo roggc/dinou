@@ -1,22 +1,29 @@
 import RefreshRuntime from "/refresh.js";
 import { isReactRefreshBoundary } from "./is-react-refresh-boundary";
 
+const runtime = RefreshRuntime?.default || RefreshRuntime;
+
 if (
   typeof window !== "undefined" &&
   !window.__REACT_REFRESH_RUNTIME_INSTALLED__
 ) {
-  RefreshRuntime.injectIntoGlobalHook(window);
-  window.$RefreshReg$ = () => {};
-  window.$RefreshSig$ = () => (type) => type;
+  runtime.injectIntoGlobalHook(window);
+  window.__reactRefreshRuntime = runtime;
+  window.$RefreshReg$ = (type, id) => {
+    runtime?.register(type, id);
+  };
+  window.$RefreshSig$ = runtime?.createSignatureFunctionForTransform
+    ? runtime.createSignatureFunctionForTransform.bind(runtime)
+    : () => (type) => type;
   window.__REACT_REFRESH_RUNTIME_INSTALLED__ = true;
 
   let refreshTimeout;
-  window.performReactRefresh = RefreshRuntime.performReactRefresh;
+  window.performReactRefresh = runtime.performReactRefresh;
   window.__debouncePerformReactRefresh = () => {
     clearTimeout(refreshTimeout);
     refreshTimeout = setTimeout(() => {
       try {
-        RefreshRuntime.performReactRefresh();
+        runtime.performReactRefresh();
       } catch (err) {
         console.warn("React Refresh failed:", err);
       }
@@ -24,5 +31,5 @@ if (
   };
 
   window.__isReactRefreshBoundary = (moduleExports) =>
-    isReactRefreshBoundary(RefreshRuntime, moduleExports);
+    isReactRefreshBoundary(runtime, moduleExports);
 }

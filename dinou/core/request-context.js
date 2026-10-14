@@ -4,25 +4,58 @@ const DINOU_CONTEXT_KEY = Symbol.for("dinou.request.context.storage");
 let requestStorage;
 
 if (typeof window === "undefined") {
-  const nodeRequire =
-    typeof module !== "undefined" && typeof module.require === "function"
-      ? module.require.bind(module)
-      : null;
+  let AsyncLocalStorageClass;
 
-  if (nodeRequire) {
-    const { AsyncLocalStorage } = nodeRequire("node:async_hooks");
+  if (typeof globalThis.AsyncLocalStorage !== "undefined") {
+    AsyncLocalStorageClass = globalThis.AsyncLocalStorage;
+  }
 
-    if (!global[DINOU_CONTEXT_KEY]) {
-      global[DINOU_CONTEXT_KEY] = new AsyncLocalStorage();
+  if (!AsyncLocalStorageClass) {
+    try {
+      if (typeof globalThis.__dinou_require__ === "function") {
+        AsyncLocalStorageClass = globalThis.__dinou_require__("node:async_hooks")?.AsyncLocalStorage;
+      } else if (typeof process !== "undefined" && process.versions && (process.versions.node || process.versions.bun)) {
+        const getRequire = new Function("return typeof require !== 'undefined' ? require : null");
+        const nodeRequire = getRequire();
+        if (nodeRequire) {
+          AsyncLocalStorageClass = nodeRequire("node:async_hooks")?.AsyncLocalStorage;
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (AsyncLocalStorageClass) {
+    if (typeof globalThis.AsyncLocalStorage === "undefined") {
+      globalThis.AsyncLocalStorage = AsyncLocalStorageClass;
     }
-
-    requestStorage = global[DINOU_CONTEXT_KEY];
+    if (!globalThis[DINOU_CONTEXT_KEY]) {
+      globalThis[DINOU_CONTEXT_KEY] = new AsyncLocalStorageClass();
+    }
+    requestStorage = globalThis[DINOU_CONTEXT_KEY];
+  } else {
+    requestStorage = {
+      run: (store, callback) => callback(),
+      getStore: () => undefined,
+    };
   }
 } else {
   requestStorage = {
     run: (store, callback) => callback(),
     getStore: () => undefined,
   };
+}
+
+function setCurrentContext(ctx) {
+  if (typeof globalThis !== "undefined") {
+    globalThis[Symbol.for("dinou.request.context.current")] = ctx;
+  }
+}
+
+function getCurrentContext() {
+  if (typeof globalThis !== "undefined") {
+    return globalThis[Symbol.for("dinou.request.context.current")];
+  }
+  return undefined;
 }
 
 function getContext() {
@@ -32,12 +65,13 @@ function getContext() {
     );
     return {};
   }
-  if (!requestStorage) return undefined;
-  const store = requestStorage.getStore();
-  return store;
+  const store = requestStorage?.getStore();
+  return store || getCurrentContext() || {};
 }
 
 module.exports = {
   requestStorage,
   getContext,
+  setCurrentContext,
+  getCurrentContext,
 };

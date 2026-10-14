@@ -16,7 +16,7 @@ class EsmHmrEngine {
     this.dependencyTree = map;
     const wss = options.server
       ? new WebSocket.Server({ noServer: true })
-      : new WebSocket.Server({ port: 3001 });
+      : new WebSocket.Server({ port: options.port || Number(process.env.HMR_PORT) || 3001 });
 
     if (options.server) {
       options.server.on("upgrade", (req, socket, head) => {

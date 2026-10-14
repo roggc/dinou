@@ -5,6 +5,100 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [7.0.0] - 2026-10-12
+
+### ⚠️ Breaking Changes
+- **`getProps` Contract: Direct Props Object Return**: Eliminated the legacy artificial wrapper `{ page: { ... } }`. In v7, `getProps` directly returns the object that is injected as top-level props into the route component in `page.tsx` (e.g. `{ user, title }`).
+- **`revalidate` Time Unit: Strictly Seconds (`s`)**: Cache revalidation intervals are now strictly specified in seconds. Legacy millisecond values (e.g. `60000ms`) must be divided by 1000 (e.g. `60s`).
+- **Elimination of `export const dynamic` (Single Source of Truth via `revalidate`)**: The `dynamic` export keyword has been completely removed. `revalidate` is now the sole authority for route execution and caching: `revalidate = 0` (Dynamic SSR), `revalidate >= 1` (ISR with background re-generation), and `revalidate = false` (Static SSG).
+- **Ahead-of-Time (AOT) SSG Compilation vs. Server Startup**: Static site generation no longer executes at server boot time during `dinou start`. All static HTML and RSC Flight payloads are now pre-rendered strictly during the build step (`dinou build`), enabling instant (0ms) production server startup. CI/CD pipelines must provide CMS and database credentials during `npm run build`.
+- **Layout Lifecycle & State Preservation (Horizontal Segmentation)**: Layout components (`layout.tsx`) never unmount or re-execute when navigating between sibling routes. Client state (form inputs, video playback, active tabs) is 100% preserved across navigations.
+- **Express Decoupling & Modern Plugin System**: Removed Express dependency and the `onServerInit(app)` plugin hook. Custom plugins now hook into standard Web APIs via `onRequest(request, context)` and `onResponse(response, context)` defined in `dinou.config.mjs`.
+- **Development Assets 100% In-Memory by Default**: `dinou dev` operates entirely in RAM via `globalThis.__DINOU_MEM_FILES__` (<0.5ms response times) to eliminate disk I/O bottlenecks and Windows antivirus penalties. The `.dinou/public/` folder is no longer generated on disk during development (use `DINOU_WRITE_TO_DISK=true` to force physical disk writes).
+
+### Added
+- **Layered Segmentation Architecture**:
+  * **Horizontal Segmentation (`layout_functions.{ts,js}`)**: Decoupled layout server lifecycles, enabling independent data loading (`getProps`), independent layout ISR caching (`revalidate`), independent Partial Prerendering (`ppr`), and route parameter validation (`validateParams`) without touching child pages.
+  * **Vertical Segmentation (`<DinouCacheSlot>` & `refreshSlot`)**: Sub-page micro-ISR component allowing individual UI sub-trees to be cached and revalidated independently without re-evaluating parent layouts or siblings, coupled with the client-side `refreshSlot(slotId)` hook for live, in-place widget updates with zero page reload.
+- **Partial Prerendering (PPR) Engine**:
+  * First-class PPR support enabled globally (`ppr: true` in `dinou.config.mjs`), per layout (`layout_functions.ts`), or per page (`page_functions.ts`).
+  * Emits an instant static shell prelude at 0ms TTFB while concurrently streaming dynamic holes via React 19 `<Suspense>`.
+- **Zero-Runtime Type-Safe Routing**:
+  * Inferred compile-time type safety derived directly from folder bracket naming conventions (`[slug]`, `[...slug]`, `[[...slug]]`, `(auth)`).
+  * Auto-generated type exports from `"dinou"`: `DinouRoute`, `DinouRoutePattern`, `PageProps<T>`, `LayoutProps<T>`, `ErrorProps<T>`, and `RouteParams<T>`.
+- **Surgical Page Cache Invalidation (`revalidatePage`)**:
+  * Added `revalidatePage(pattern)` to `"dinou/server"` to purge all compiled cache entries for a parameterized route pattern across the cluster in a single invocation.
+- **Centralized ESM Configuration (`dinou.config.mjs`) & `defineConfig`**:
+  * Introduced native ESM configuration file with type-safe `defineConfig` helper for configuring plugins, storage adapters, `reactStrictMode`, and `ppr`.
+- **Native Path Aliasing (`tsconfig.json`)**:
+  * Zero-config path alias resolution (`@/*`, `~/*`) across TypeScript, JSX, CSS modules (`@import "@/styles/..."`), and static assets across all supported bundlers (Esbuild, Rollup, Webpack).
+- **React StrictMode by Default in Development**:
+  * Client components are automatically wrapped in `<React.StrictMode>` during development to surface side-effects early (configurable via `dinou.config.mjs`).
+- **Private Folders with Underscore Prefix (`_folder`)**:
+  * Directories prefixed with an underscore (e.g. `_components/`, `_archived/`) are strictly quarantined and ignored by the route scanner.
+- **Universal Web Standards Request Handler (`dinou/core/handler.js`)**: Completely decoupled Dinou's core runtime from Node.js and Express. SSR, RSC streaming, Server Functions, routing, and static asset serving are now driven by a pure `(Request) => Promise<Response>` handler built exclusively on Web Standards (`Request`, `Response`, `ReadableStream`, `Headers`):
+  * **Double Crash & Error Boundary Resilience**: Captures secondary failures if a custom application error boundary component crashes during rendering, gracefully returning a reliable fallback HTML document without bringing down the server.
+  * **Streaming Header & Cookie Mutation**: Supports dynamic response header and cookie updates (`ctx.res.setHeader`, `ctx.res.cookie`) directly from async Server Components and Server Functions during streaming SSR renders.
+- **Edge & Node Dual-Bundle Architecture (3-Pass Compilation)**: Solved the fundamental module condition collision between RSC (`react-server`) and SSR (`browser`) across Edge runtimes and Node.js:
+  * **Pass A (RSC Engine)**: Bundles Server Components and Server Functions under `conditions: ["react-server"]` using `@roggc/react-server-dom-esm` with client references converted to proxies.
+  * **Pass B (SSR Engine)**: Bundles client components and `react-dom/server.edge` under `conditions: ["browser"]` for true, native HTML streaming.
+  * **Pass C (Worker & Server Orchestrator)**: Merges both isolated engines into self-contained, high-performance runtime entrypoints (`.dinou/cloudflare/worker.js`, `.dinou/deno/main.js`, `.dinou/bun/server.js`, and `.dinou/node/server.mjs`).
+- **0-Fork Single-Process Development Server (`dinou/node/dev.mjs`)**: Replaced multi-process orchestration (`concurrently`) with a unified, zero-fork single-process dev architecture:
+  * Eliminates port race conditions, zombie child processes, and out-of-order interleaved terminal logs.
+  * Direct in-memory coordination between the bundler dev watcher (Esbuild, Rollup, Webpack) and the Dinou HTTP development server.
+- **Interactive Terminal Activity Dashboard & Braille Spinner (`dinou/node/terminal-status.mjs`)**:
+  * Zero-dependency, CI/TTY-safe interactive status indicator utilizing smooth Unicode Braille spinner animations (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`).
+  * Non-intrusive stream interception on `process.stdout` and `process.stderr` that pins the live activity indicator to the bottom line without flickering or breaking compiler output.
+  * Automatic graceful fallback in non-interactive CI environments (e.g. GitHub Actions) to suppress ANSI control codes.
+  * Stylized, branded startup and ready banners displaying local URLs, active bundler, and initialization timings.
+- **Standalone Native Binary Compilation (Zero-Node Deployment)**:
+  * **Deno Standalone Executables**: Multi-target compilation via `deno compile` with automated cross-compilation scripts for Linux (`x86_64`, `arm64`), macOS (`Apple Silicon`), and Windows (`x64`).
+  * **Bun Standalone Executables**: Multi-target binary compilation via `bun build --compile` generating self-contained single-file servers for Linux (`x64`, `arm64`), macOS (`arm64`), and Windows (`x64`).
+  * **Self-Contained Binaries**: Binaries are emitted to `dist/`, running natively with zero runtime dependencies (no Node.js, Deno, or Bun required on target production hosts or minimal container images).
+- **Pure Bun Pipeline (`build:bun:pure`)**:
+  * End-to-end Bun-native build workflow executing Esbuild and the Bun bundler entirely within Bun (`bun dinou/esbuild/build.mjs && bun ./dinou/bun/build.mjs`), bypassing Node.js completely for pure Bun CI/CD environments.
+- **Configurable Bun Socket Timeout & Streaming Protection (`IDLE_TIMEOUT`)**:
+  * Integrated a configurable `idleTimeout` (defaulting to a safe `120` seconds, customizable via `process.env.IDLE_TIMEOUT`) in both the native Bun adapter (`dinou/adapters/bun.js`) and generated Bun standalone orchestrators (`dinou/bun/build.mjs`).
+  * Prevents Bun's aggressive default 10-second TCP socket idle cutoff (`net::ERR_EMPTY_RESPONSE`) during prolonged streaming SSR, async Server Functions, and AI LLM response pipelines.
+- **Native React 19 HTML Streaming on Edge**: Full support for progressive HTML streaming on Cloudflare Workers, Deno, and Bun via official React 19 `renderToReadableStream` from `react-dom/server.edge`. Suspense boundaries and asynchronous Server Components now stream progressive HTML directly to the browser with instant shell flushing.
+- **Semantic Client Module Validation (`isSupportedClientModule`)**: Content-based module validator in Cloudflare and Deno builders:
+  * Guarantees zero false positives for user components located in `src/` (e.g. `src/system/`, `src/design-system/`).
+  * Semantically detects and rejects incompatible non-ESM distribution formats in `node_modules` (such as SystemJS `System.register` or UMD wrapper bundles lacking ESM exports).
+- **Build-Time Static Generation (`dinou/core/run-ssg.js`)**: Static pre-rendering (SSG) now executes directly during the build step (`build:esbuild`, `build:rollup`, `build:webpack`) rather than at server startup. All static HTML and RSC payload files are generated into `.dinou/dist2` at compile time, eliminating server cold-start latency and enabling instant static exports.
+- **Zero-Dependency Native Runtime Adapters**:
+  * **Bun Adapter (`dinou/adapters/bun.js`)**: High-performance Bun native server utilizing zero-copy `Bun.file()` for `.dinou/dist3` production asset serving, configurable `IDLE_TIMEOUT`, and streaming RSC/SSR.
+  * **Deno & Deno Deploy Adapter (`dinou/adapters/deno.js`)**: Native `Deno.serve()` integration with built-in asset streaming and automatic edge detection.
+  * **Cloudflare Workers Adapter (`dinou/adapters/cloudflare.js`)**: Full edge worker integration supporting Workerd runtime, asset fetching, ISR via Cloudflare KV, and streaming responses.
+  * **Netlify Functions Adapter (`dinou/adapters/netlify.js`)**: Standard edge/serverless handler ready for Netlify Functions v2 with `preferStatic: true`.
+  * **Node / Express Adapter (`dinou/core/http-adapter.js`)**: Bi-directional bridge converting Node.js `IncomingMessage` and `ServerResponse` to Web Standard `Request` and `Response`, making the server a lightweight consumer of `handleRequest`.
+- **Pluggable Storage System & Edge ISR (`dinou/core/storage-adapter.js`)**: Decoupled SSG/ISR cache and revalidation from Node's filesystem.
+  * Added `StorageAdapter` interface with `FSStorageAdapter` (Node/Bun filesystem), `MemoryStorageAdapter` (ephemeral/testing), `DenoKVStorage` (distributed Edge KV), and `CloudflareKVStorage` (Cloudflare KV via `env.DINOU_CACHE`).
+  * **Distributed Edge ISR on Deno Deploy & Cloudflare**: Automated fallback to global edge key-value databases, enabling Incremental Static Regeneration without a persistent local disk.
+  * Exported `setStorageAdapter`, `getStorageAdapter`, `StorageAdapter`, `FSStorageAdapter`, `MemoryStorageAdapter`, `DenoKVStorage`, and `CloudflareKVStorage` from `dinou/server`.
+- **Edge Linkers & Static Route Generators**:
+  * **Cloudflare Linker (`dinou/cloudflare/build.mjs`)**: Prepares and bundles self-contained worker entries using multi-bundler manifest inlining and Esbuild edge bundling.
+  * **Deno Linker (`dinou/deno/build.mjs`)**: Bundles complete edge applications targeting Deno Deploy (`deployctl`).
+  * **Multi-Bundler Manifest Support**: Edge linkers automatically detect client and server function manifests whether generated by Esbuild, Rollup, or Webpack, with cross-platform path normalization for Windows and Linux.
+- **Standalone Static Export (`dinou/core/export-static.mjs`)**: Added `export-static` command (with Esbuild, Rollup, and Webpack variants) to export pre-rendered static HTML and assets into an `out/` directory, ready for zero-configuration deployment to Surge.sh, GitHub Pages, Cloudflare Pages, Netlify, and S3.
+- **CLI & Eject Commands**:
+  * Added CLI and `package.json` scripts: `start:bun`, `start:deno`, `build:cloudflare`, `build:deno`, `build:bun:compile`, `build:deno:compile`, `export-static` (and bundler-specific sub-commands for Rollup and Webpack).
+  * Synchronized `dinou eject` to copy all v7 architecture files (`terminal-status.mjs`, standalone compile scripts, dual-bundle linkers, and adapters) to ejected user repositories.
+  * Added `./adapters/bun`, `./adapters/deno`, `./adapters/cloudflare`, and `./adapters/netlify` subpath exports in root `package.json`.
+
+### Changed
+- **Peer Dependencies Updated to React 19.3.0+**: Dinou v7 now requires `react >= 19.3.0` and `react-dom >= 19.3.0` for full React Server Components, Server Functions (`"use server"`), and `react-dom/server.edge` streaming.
+- **Hardened State-Preserving React Fast Refresh (Esbuild & Rollup)**:
+  * **Rollup**: Decoupled development builds from React Compiler to eliminate AST collisions and component state loss, stabilizing component identities and hook signatures via `reactRefreshScopedId` for instantaneous, resilient hot reloading.
+  * **Esbuild**: Hardened and optimized the Rust-powered `@swc/core` Fast Refresh transform, restricting it strictly to user components and entrypoints to prevent initialization conflicts on client runtime roots.
+- **Webpack 5 Flexible Module Resolution (`javascript/auto`)**: Added `type: "javascript/auto"` on JS/TS loader rules in `dinou/webpack/webpack.config.js`, ensuring flawless compilation of Server Functions (`actions.js`) and ESM/CJS interop regardless of whether `"type": "module"` is configured in `package.json`.
+- **Webpack 5 Dev Server & Safe Context Resolution**: Hardened `AsyncLocalStorage` and request context resolution in `dinou/core/request-context.js` and loader registries to compile cleanly under Webpack 5 without triggering strict Node built-in module bundling errors.
+- **Build-Time SSG Pipeline**: Production builds across Esbuild, Rollup, and Webpack now automatically invoke the SSG pipeline at build completion, ensuring all edge runtimes and static hosts have pre-rendered assets immediately available upon deployment.
+- **Renamed Asset Convention from `favicons/` to `public/`**:
+  * Semantically renamed the root asset directory convention to `public/` across all bundlers (Esbuild, Rollup, Webpack).
+  * Any files placed in `public/` (e.g. `robots.txt`, `sitemap.xml`, `favicon.ico`, static images) are served directly at the root (`/`) and copied to production builds.
+  * Seamless backward compatibility preserved for existing projects still using `favicons/`.
+- **Streamlined Production Start**: Production execution scripts (`start`, `start:esbuild`, `start:rollup`) now run directly via `cross-env NODE_ENV=production node ./dinou/core/server.js` without requiring manual `--conditions react-server` or `--import` loader flags.
+
 ## [6.1.1] - 2026-09-19
 
 ### Bug Fixes

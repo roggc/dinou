@@ -1,260 +1,326 @@
+process.env.DINOU_DEV = "true";
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = "development";
+}
+
 import esbuild from "esbuild";
 import fs from "node:fs/promises";
 import getConfigEsbuild from "./helpers-esbuild/get-config-esbuild.mjs";
 import getEsbuildEntries from "./helpers-esbuild/get-esbuild-entries.mjs";
-import chokidar from "chokidar";
 import path from "node:path";
-import { regex as assetRegex } from "../core/asset-extensions.js";
 import normalizePath from "./helpers-esbuild/normalize-path.mjs";
-import { fileURLToPath, pathToFileURL } from "url";
+import { fileURLToPath } from "url";
 import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-module.mjs";
-import { useServerRegex } from "../constants.js";
+import {
+  syncAllSwcFiles,
+  transformToDisk,
+  getMirrorPath,
+} from "./helpers-esbuild/swc-disk-cache.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const outdir = ".dinou/public";
-await fs.rm(outdir, { recursive: true, force: true });
-await fs.rm(".dinou/react_client_manifest", { recursive: true, force: true });
-await fs.rm(".dinou/server_functions_manifest", { recursive: true, force: true });
+export async function startEsbuildDev(options = {}) {
+  const onRebuilt = options.onRebuilt || (() => {});
+  const onBuildStart = options.onBuildStart || (() => {});
+  const onBuildEnd = options.onBuildEnd || (() => {});
+  const outdir = ".dinou/public";
+  if (typeof globalThis !== "undefined") {
+    if (globalThis.__DINOU_MEM_FILES__) {
+      globalThis.__DINOU_MEM_FILES__.clear();
+    }
+    delete globalThis.__DINOU_RAW_CLIENT_MANIFEST__;
+    delete globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__;
+  }
+  await fs.rm(outdir, { recursive: true, force: true });
+  await fs.rm(".dinou/react_client_manifest", { recursive: true, force: true });
+  await fs.rm(".dinou/server_functions_manifest", { recursive: true, force: true });
 
-let currentCtx = null; // Track the active esbuild context
-let debounceTimer = null; // For debouncing recreations
-let clientComponentsPaths = [];
-let currentServerFiles = new Set();
-const absPathToClientRedirect = path.resolve(
-  __dirname,
-  "../core/client-redirect.jsx"
-);
-const absPathToLink = path.resolve(
-  __dirname,
-  "../core/link.jsx"
-);
-
-const frameworkEntryPoints = {
-  main: path.resolve(__dirname, "../core/client.jsx"),
-  error: path.resolve(__dirname, "../core/client-error.jsx"),
-  serverFunctionProxy: path.resolve(
+  let currentCtx = null; // Track the active esbuild context
+  let activeBuildResolve = null;
+  let clientComponentsPaths = [];
+  let currentServerFiles = new Set();
+  const absPathToClientRedirect = path.resolve(
     __dirname,
-    "../core/server-function-proxy.js"
-  ),
-  runtime: path.resolve(__dirname, "react-refresh/react-refresh-runtime.mjs"),
-  "react-refresh-entry": path.resolve(
+    "../core/client-redirect.jsx"
+  );
+  const absPathToLink = path.resolve(
     __dirname,
-    "react-refresh/react-refresh-entry.js"
-  ),
-  dinouClientRedirect: absPathToClientRedirect,
-  dinouLink: absPathToLink,
-};
-
-const changedIds = new Set();
-const hmrEngine = { value: null };
-
-const watcher = chokidar.watch("src", {
-  ignoreInitial: true,
-  ignored: /node_modules|dist/,
-});
-
-const codeCssRegex = /.(js|jsx|ts|tsx|css|scss|less)$/i;
-
-let manifest = {};
-let entryPoints = {};
-
-async function updateEntriesAndComponents() {
-  manifest = {};
-  const [
-    esbuildEntries,
-    detectedCSSEntries,
-    detectedAssetEntries,
-    serverFiles,
-  ] = await getEsbuildEntries({ manifest });
-
-  updateManifestForModule(
-    absPathToClientRedirect,
-    await fs.readFile(absPathToClientRedirect, "utf8"),
-    true,
-    manifest
+    "../core/link.jsx"
   );
-  updateManifestForModule(
-    absPathToLink,
-    await fs.readFile(absPathToLink, "utf8"),
-    true,
-    manifest
+  const absPathToSlot = path.resolve(
+    __dirname,
+    "../core/slot.js"
   );
 
-  currentServerFiles = new Set(
-    serverFiles.map((f) => normalizePath(path.resolve(f)))
-  );
+  const frameworkEntryPoints = {
+    main: path.resolve(__dirname, "../core/client.jsx"),
+    serverFunctionProxy: path.resolve(
+      __dirname,
+      "../core/server-function-proxy.js"
+    ),
+    runtime: path.resolve(__dirname, "react-refresh/react-refresh-runtime.mjs"),
+    "react-refresh-entry": path.resolve(
+      __dirname,
+      "react-refresh/react-refresh-entry.js"
+    ),
+    dinouClientRedirect: absPathToClientRedirect,
+    dinouLink: absPathToLink,
+    dinouSlot: absPathToSlot,
+  };
 
-  const componentEntryPoints = [...esbuildEntries].reduce(
-    (acc, dCE) => ({ ...acc, [dCE.outfileName]: dCE.absPath }),
-    {}
-  );
+  const changedIds = new Set();
+  const hmrEngine = { value: null };
 
-  clientComponentsPaths = Object.values(componentEntryPoints);
+  let manifest = {};
+  let entryPoints = {};
+  let cssEntryPoints = {};
+  let allComponentEntries = {};
+  let activeComponentEntries = new Map();
+  let pathToOutfile = new Map();
+  let outfileNameToPath = new Map();
 
-  const cssEntryPoints = [...detectedCSSEntries].reduce(
-    (acc, dCSSE) => ({ ...acc, [dCSSE.outfileName]: dCSSE.absPath }),
-    {}
-  );
+  async function updateEntriesAndComponents() {
+    manifest = {};
+    const [
+      esbuildEntries,
+      detectedCSSEntries,
+      detectedAssetEntries,
+      serverFiles,
+    ] = await getEsbuildEntries({ manifest });
 
-  const assetEntryPoints = [...detectedAssetEntries].reduce(
-    (acc, dAE) => ({ ...acc, [dAE.outfileName]: dAE.absPath }),
-    {}
-  );
+    updateManifestForModule(
+      absPathToClientRedirect,
+      await fs.readFile(absPathToClientRedirect, "utf8"),
+      true,
+      manifest
+    );
+    updateManifestForModule(
+      absPathToLink,
+      await fs.readFile(absPathToLink, "utf8"),
+      true,
+      manifest
+    );
+    updateManifestForModule(
+      absPathToSlot,
+      await fs.readFile(absPathToSlot, "utf8"),
+      true,
+      manifest
+    );
 
-  entryPoints = {
-    ...frameworkEntryPoints,
-    ...componentEntryPoints,
-    ...cssEntryPoints,
-    ...assetEntryPoints,
+    currentServerFiles = new Set(
+      serverFiles.map((f) => normalizePath(path.resolve(f)))
+    );
+
+    await syncAllSwcFiles(path.resolve(process.cwd(), "src"), process.cwd());
+
+    const componentEntryPoints = [...esbuildEntries].reduce(
+      (acc, dCE) => ({ ...acc, [dCE.outfileName]: getMirrorPath(dCE.absPath, process.cwd()) }),
+      {}
+    );
+
+    clientComponentsPaths = Object.values(componentEntryPoints);
+
+    cssEntryPoints = [...detectedCSSEntries].reduce(
+      (acc, dCSSE) => ({ ...acc, [dCSSE.outfileName]: dCSSE.absPath }),
+      {}
+    );
+
+    const assetEntryPoints = [...detectedAssetEntries].reduce(
+      (acc, dAE) => ({ ...acc, [dAE.outfileName]: dAE.absPath }),
+      {}
+    );
+
+    allComponentEntries = componentEntryPoints;
+    for (const [outName, absP] of Object.entries(componentEntryPoints)) {
+      const norm = normKey(absP);
+      pathToOutfile.set(norm, outName);
+      outfileNameToPath.set(outName, absP);
+    }
+    for (const dCE of esbuildEntries) {
+      pathToOutfile.set(normKey(dCE.absPath), dCE.outfileName);
+    }
+
+    entryPoints = {
+      ...frameworkEntryPoints,
+      ...componentEntryPoints,
+      ...cssEntryPoints,
+    };
+  }
+
+  // Function to (re)create esbuild context with current entries
+  async function createEsbuildContext(waitForBuild = false) {
+    try {
+      if (currentCtx) {
+        await currentCtx.dispose();
+        currentCtx = null;
+      }
+
+      let buildPromise = null;
+      if (waitForBuild) {
+        buildPromise = new Promise((res) => {
+          activeBuildResolve = res;
+        });
+      }
+
+      currentCtx = await esbuild.context(
+        getConfigEsbuild({
+          entryPoints,
+          manifest,
+          changedIds,
+          hmrEngine,
+          serverFiles: currentServerFiles,
+          hmrPort: options.hmrPort,
+          onManifestUpdated: async () => {
+            await onRebuilt();
+          },
+          onBuildStart: () => {
+            onBuildStart();
+          },
+          onBuildEnd: async (result) => {
+            await onBuildEnd(result);
+            if (activeBuildResolve) {
+              const res = activeBuildResolve;
+              activeBuildResolve = null;
+              res();
+            }
+          },
+        })
+      );
+
+      const isStandalone =
+        process.argv[1] &&
+        fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+
+      if (isStandalone) {
+        await currentCtx.watch();
+      } else {
+        await currentCtx.rebuild();
+      }
+      if (buildPromise) {
+        await buildPromise;
+      }
+    } catch (err) {
+      console.error("Error recreating context:", err);
+      if (activeBuildResolve) {
+        const res = activeBuildResolve;
+        activeBuildResolve = null;
+        res();
+      }
+    }
+  }
+
+  const normKey = (p) => {
+    if (!p) return "";
+    let s = path.resolve(p).replace(/\\/g, "/");
+    if (process.platform === "win32") {
+      s = s.replace(/^([a-zA-Z]):/, (_, d) => d.toLowerCase() + ":");
+    }
+    return s;
+  };
+
+  // Initial build
+  const tBabel0 = Date.now();
+  await updateEntriesAndComponents();
+  const clientEntriesBabel = Date.now() - tBabel0;
+
+  const tClientBuild0 = Date.now();
+  await createEsbuildContext(true);
+  const clientBuild = Date.now() - tClientBuild0;
+
+  return {
+    broadcast: (msg) => {
+      hmrEngine.value?.broadcastMessage?.(msg);
+    },
+    ensureActiveRoute: async (routeOrChunk) => {
+      if (!currentCtx || !routeOrChunk) return false;
+      // Ignore route paths (e.g. "/test-dev"). Esbuild compiles entrypoints eagerly.
+      if (typeof routeOrChunk === "string" && (routeOrChunk.startsWith("/") || routeOrChunk.startsWith("\\"))) {
+        return true;
+      }
+      const clean = routeOrChunk.replace(/^\//, "").replace(/\.js$/, "");
+      const mem = globalThis.__DINOU_MEM_FILES__;
+      if (
+        mem?.has(clean) ||
+        mem?.has(`${clean}.js`) ||
+        mem?.has(`/${clean}.js`) ||
+        mem?.has(`/${clean}`)
+      ) {
+        return true;
+      }
+      try {
+        await updateEntriesAndComponents();
+        await currentCtx.rebuild();
+        return Boolean(
+          mem?.has(clean) ||
+          mem?.has(`${clean}.js`) ||
+          mem?.has(`/${clean}.js`) ||
+          mem?.has(`/${clean}`)
+        );
+      } catch (e) {
+        return false;
+      }
+    },
+    notifyFileChanged: async (filePath) => {
+      if (filePath) {
+        const norm = normKey(filePath);
+        changedIds.add(norm);
+
+        // Fast disk-backed SWC compilation of the modified file
+        if (/\.[jt]sx?$/i.test(filePath)) {
+          const tSwc0 = Date.now();
+          const mirrorPath = await transformToDisk(filePath, process.cwd());
+          globalThis.__DINOU_SWC_TIME__ = Date.now() - tSwc0;
+          globalThis.__DINOU_SWC_COUNT__ = 1;
+          if (mirrorPath) {
+            changedIds.add(normKey(mirrorPath));
+          }
+        }
+
+        if (currentCtx) {
+          const t0 = Date.now();
+          return currentCtx.rebuild().then((result) => {
+            globalThis.__ESBUILD_CORE_TIME__ = Date.now() - t0;
+            return result;
+          }).catch((err) => {
+            console.error("❌ [Esbuild Dev] Rebuild error:", err);
+          });
+        }
+      }
+      return Promise.resolve();
+    },
+    restart: async () => {
+      console.log("⚡ [Esbuild Dev] Recreating client bundle due to directive change...");
+      await updateEntriesAndComponents();
+      await createEsbuildContext(true);
+    },
+    close: async () => {
+      try {
+        if (currentCtx) await currentCtx.dispose();
+        if (hmrEngine.value?.server?.close) {
+          try { hmrEngine.value.server.close(); } catch (e) {}
+        }
+      } catch (e) {}
+    },
+    timings: {
+      clientEntriesBabel,
+      clientBuild,
+      postCss: globalThis.__DINOU_POSTCSS_TIME__ || 0,
+      postCssCount: globalThis.__DINOU_POSTCSS_COUNT__ || 0,
+      swc: globalThis.__DINOU_SWC_TIME__ || 0,
+      swcCount: globalThis.__DINOU_SWC_COUNT__ || 0,
+      sf: globalThis.__DINOU_SF_TIME__ || 0,
+      sfCount: globalThis.__DINOU_SF_COUNT__ || 0,
+      rcm: globalThis.__DINOU_RCM_TIME__ || 0,
+      stable: globalThis.__DINOU_STABLE_TIME__ || 0,
+      writeDisk: globalThis.__DINOU_WRITE_TIME__ || 0,
+    },
   };
 }
 
-// Function to (re)create esbuild context with current entries
-async function createEsbuildContext() {
-  try {
-    if (currentCtx) {
-      await currentCtx.dispose(); // Clean up old context
-      // console.log("Disposed old esbuild context");
-    }
-
-    await fs.rm(outdir, { recursive: true, force: true });
-    // console.log("manifest before creating context:", manifest);
-    currentCtx = await esbuild.context(
-      getConfigEsbuild({
-        entryPoints,
-        manifest,
-        changedIds,
-        hmrEngine,
-      })
-    );
-
-    await currentCtx.watch();
-    // console.log("✓ Watching (changes will trigger rebuild)");
-  } catch (err) {
-    console.error("Error recreating context:", err);
-  }
+if (
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
+) {
+  startEsbuildDev();
 }
-
-// Initial setup on ready
-watcher.on("ready", async () => {
-  await updateEntriesAndComponents();
-  await createEsbuildContext();
-});
-
-const debounceRecreate = () => {
-  if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(async () => {
-    await createEsbuildContext();
-  }, 300); // 300ms debounce — adjust as needed
-};
-
-const debounceRecreateAndReload = () => {
-  if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(async () => {
-    await createEsbuildContext();
-    hmrEngine.value.broadcastMessage({ type: "reload" });
-  }, 300);
-};
-
-let reloadTimer = null;
-const debounceReload = () => {
-  if (reloadTimer) clearTimeout(reloadTimer);
-  reloadTimer = setTimeout(() => {
-    if (hmrEngine.value) {
-      hmrEngine.value.broadcastMessage({ type: "reload" });
-    }
-  }, 100);
-};
-
-watcher.on("add", async (file) => {
-  const ext = path.extname(file);
-  if (codeCssRegex.test(ext) || assetRegex.test(ext)) {
-    // console.log(`New relevant file detected: ${file}. Recreating context...`);
-    await updateEntriesAndComponents();
-    debounceRecreateAndReload();
-  }
-});
-
-watcher.on("unlink", async (file) => {
-  const ext = path.extname(file);
-  if (codeCssRegex.test(ext) || assetRegex.test(ext)) {
-    // console.log(`File deleted: ${file}. Recreating context...`);
-    await updateEntriesAndComponents();
-    if (currentCtx) {
-      await currentCtx.dispose();
-      currentCtx = null;
-    }
-    debounceRecreate();
-  }
-});
-
-watcher.on("addDir", async () => {
-  // console.log(`New directory: ${dir}. Recreating context...`);
-  await updateEntriesAndComponents();
-  debounceRecreateAndReload();
-});
-
-watcher.on("unlinkDir", async () => {
-  // console.log(`Directory deleted: ${dir}. Recreating context...`);
-  await updateEntriesAndComponents();
-  if (currentCtx) {
-    await currentCtx.dispose();
-    currentCtx = null;
-  }
-  debounceRecreate();
-});
-
-function existsInManifest(resolvedFile, manifest) {
-  const manifestKey = pathToFileURL(resolvedFile).href;
-  // console.log("Checking manifest for key:", manifestKey);
-  for (const key of Object.keys(manifest)) {
-    if (key === manifestKey) {
-      return true;
-    }
-  }
-  return false;
-}
-
-watcher.on("change", async (file) => {
-  const resolvedFile = normalizePath(path.resolve(file));
-  const oldManifest = { ...manifest };
-  const oldEntryKeys = JSON.stringify(Object.keys(entryPoints).sort());
-
-  await updateEntriesAndComponents();
-
-  const newEntryKeys = JSON.stringify(Object.keys(entryPoints).sort());
-  const entryPointsChanged = oldEntryKeys !== newEntryKeys;
-
-  // Check if changed file is a client component
-  const isClientModule = clientComponentsPaths.includes(resolvedFile);
-  const isServerModule = currentServerFiles.has(resolvedFile);
-  // console.log(
-  //   `File changed: ${resolvedFile} | Client Module: ${isClientModule} | Server Module: ${isServerModule}`
-  // );
-  // console.log("currentServerFiles:", currentServerFiles);
-
-  if (
-    isClientModule &&
-    !isServerModule &&
-    existsInManifest(resolvedFile, oldManifest)
-  ) {
-    changedIds.add(resolvedFile);
-    return;
-  }
-
-  // If it's a Server Action module ("use server"), do not reload the browser
-  const fileContent = await fs.readFile(resolvedFile, "utf8").catch(() => "");
-  const isServerAction = useServerRegex.test(fileContent.trim());
-  if (isServerAction) {
-    return;
-  }
-
-  // Only recreate context and reload if entry points actually changed or it's a CSS file
-  if (entryPointsChanged || file.endsWith(".css") || file.endsWith(".scss")) {
-    debounceRecreateAndReload();
-  } else {
-    debounceReload();
-  }
-});

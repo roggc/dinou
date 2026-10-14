@@ -16,9 +16,8 @@ const tsconfigPaths = require("rollup-plugin-tsconfig-paths");
 const serverFunctionsPlugin = require("./rollup-plugins/rollup-plugin-server-functions");
 const { regex } = require("../core/asset-extensions.js");
 const manifestGeneratorPlugin = require("./rollup-plugins/manifest-generator-plugin.js");
-
-const isDevelopment = process.env.NODE_ENV !== "production";
-const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
+const rollupMemoryPlugin = require("./rollup-plugins/rollup-plugin-memory.js");
+const rollupSwcPlugin = require("./rollup-plugins/rollup-plugin-swc.js");
 
 const localDinouPath = path.resolve(process.cwd(), "dinou");
 const isEjected = fs.existsSync(localDinouPath);
@@ -30,8 +29,12 @@ console.log(
 );
 
 module.exports = async function () {
+  const isDevelopment = process.env.NODE_ENV !== "production";
+  const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
+  const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDevelopment;
+  const serverFiles = new Set();
   const del = (await import("rollup-plugin-delete")).default;
-  return {
+  const clientConfig = {
     input: isDevelopment
       ? {
         runtime: path.resolve(
@@ -43,7 +46,6 @@ module.exports = async function () {
           "react-refresh/react-refresh-entry.js",
         ),
         main: path.resolve(__dirname, "../core/client.jsx"),
-        error: path.resolve(__dirname, "../core/client-error.jsx"),
         serverFunctionProxy: path.resolve(
           __dirname,
           "../core/server-function-proxy.js",
@@ -55,11 +57,14 @@ module.exports = async function () {
         dinouLink: path.resolve(
           __dirname,
           "../core/link.jsx",
+        ),
+        dinouSlot: path.resolve(
+          __dirname,
+          "../core/slot.js",
         ),
       }
       : {
         main: path.resolve(__dirname, "../core/client.jsx"),
-        error: path.resolve(__dirname, "../core/client-error.jsx"),
         serverFunctionProxy: path.resolve(
           __dirname,
           "../core/server-function-proxy.js",
@@ -71,13 +76,32 @@ module.exports = async function () {
         dinouLink: path.resolve(
           __dirname,
           "../core/link.jsx",
+        ),
+        dinouSlot: path.resolve(
+          __dirname,
+          "../core/slot.js",
         ),
       },
     output: {
       dir: outputDirectory,
       format: "esm",
       entryFileNames: isDevelopment ? "[name].js" : "[name]-[hash].js",
-      chunkFileNames: isDevelopment ? "[name].js" : "[name]-[hash].js",
+      chunkFileNames: (chunkInfo) => {
+        if (!isDevelopment) return "[name]-[hash].js";
+        const moduleIds =
+          chunkInfo.moduleIds || Object.keys(chunkInfo.modules || {});
+        if (moduleIds.length === 0) return "[name].js";
+        const isVendor = moduleIds.every(
+          (id) =>
+            id.includes("node_modules") ||
+            id.includes("\0") ||
+            id.includes("commonjsHelpers")
+        );
+        if (isVendor) {
+          return "[name]-[hash].js";
+        }
+        return "[name].js";
+      },
       // 🛑 THE MAGIC SOLUTION 👇
       // Defaults to 'true' in some cases.
       // By setting it to 'false', you force Rollup to use the original exported
@@ -87,21 +111,24 @@ module.exports = async function () {
     // 🛑 ADD THIS MAGIC LINE
     // Tells Rollup: "Keep entry point signatures (export names) intact"
     preserveEntrySignatures: "strict",
+    perf: isDevelopment,
+    treeshake: isDevelopment ? false : true,
     external: [
       "/refresh.js",
       "/__hmr_client__.js",
       "/__SERVER_FUNCTION_PROXY__",
     ],
     plugins: [
-      del({
-        targets: [
-          `${outputDirectory}/*`,
-          ".dinou/react_client_manifest/*",
-          ".dinou/server_functions_manifest/*",
-        ],
-        runOnce: true,
-        hook: "buildStart",
-      }),
+      shouldWriteToDisk &&
+        del({
+          targets: [
+            `${outputDirectory}/*`,
+            ".dinou/react_client_manifest/*",
+            ".dinou/server_functions_manifest/*",
+          ],
+          runOnce: true,
+          hook: "buildStart",
+        }),
       tsconfigPaths(),
       replace({
         preventAssignment: true,
@@ -121,20 +148,21 @@ module.exports = async function () {
       dinouAssetPlugin({
         include: regex,
       }),
-      babel({
-        babelHelpers: "bundled",
-        extensions: [".js", ".jsx", ".ts", ".tsx"],
-        presets: [
-          ["@babel/preset-react", { runtime: "automatic" }],
-          "@babel/preset-typescript",
-        ],
-        plugins: [
-          "babel-plugin-react-compiler",
-          isDevelopment && require.resolve("react-refresh/babel"),
-          "@babel/plugin-syntax-import-meta",
-        ].filter(Boolean),
-        exclude: /node_modules[\\/](?!dinou|react-refresh)/,
-      }),
+      isDevelopment
+        ? rollupSwcPlugin()
+        : babel({
+            babelHelpers: "bundled",
+            extensions: [".js", ".jsx", ".ts", ".tsx"],
+            presets: [
+              ["@babel/preset-react", { runtime: "automatic" }],
+              "@babel/preset-typescript",
+            ],
+            plugins: [
+              "babel-plugin-react-compiler",
+              "@babel/plugin-syntax-import-meta",
+            ].filter(Boolean),
+            exclude: /node_modules[\\/](?!dinou|react-refresh)/,
+          }),
       postcss({
         modules: {
           generateScopedName: (name, filename) =>
@@ -146,34 +174,52 @@ module.exports = async function () {
           path: path.resolve(__dirname, "postcss.config.js"),
         },
       }),
-      copy({
-        targets: [
-          {
-            src: "favicons/*",
-            dest: outputDirectory,
-          },
-        ],
-        flatten: true,
-      }),
+      shouldWriteToDisk &&
+        copy({
+          targets: [
+            fs.existsSync("public") && {
+              src: "public/*",
+              dest: outputDirectory,
+            },
+            fs.existsSync("favicons") && {
+              src: "favicons/*",
+              dest: outputDirectory,
+            },
+          ].filter(Boolean),
+          flatten: true,
+        }),
       reactClientManifest({
         manifestPath: path.join(
           ".dinou/react_client_manifest",
           "react-client-manifest.json",
         ),
+        serverFiles,
       }),
       isDevelopment && reactRefreshWrapModules(),
       isDevelopment && esmHmrPlugin(),
       !isDevelopment && manifestGeneratorPlugin(),
-      serverFunctionsPlugin(),
+      serverFunctionsPlugin({ serverFiles }),
+      isDevelopment && rollupMemoryPlugin(),
     ].filter(Boolean),
     watch: {
+      buildDelay: 100,
       exclude: [
-        ".dinou/public/**",
-        ".dinou/react_client_manifest/**",
-        ".dinou/server_functions_manifest/**",
+        /[\\/]node_modules[\\/]/,
+        /[\\/]\.git[\\/]/,
+        /[\\/]\.dinou[\\/]/,
+        /[\\/]test-results[\\/]/,
+        /[\\/]playwright-report[\\/]/,
+        "**/node_modules/**",
+        "**/.git/**",
+        "**/.dinou/**",
+        "**/test-results/**",
+        "**/playwright-report/**",
       ],
     },
     onwarn(warning, warn) {
+      if (warning.code === "CIRCULAR_DEPENDENCY" || warning.code === "THIS_IS_UNDEFINED") {
+        return;
+      }
       // Ignore eval warning if it comes from our request-context file
       if (warning.code === "EVAL") {
         // Optional: If you want to be very specific and only allow it in that file:
@@ -194,4 +240,70 @@ module.exports = async function () {
       warn(warning);
     },
   };
+
+  if (isDevelopment) {
+    return clientConfig;
+  }
+
+  const serverConfig = {
+    input: {
+      handler: path.resolve(__dirname, "../core/handler.js"),
+      netlify: path.resolve(__dirname, "../adapters/netlify.js"),
+    },
+    output: {
+      dir: path.resolve(outputDirectory, "server"),
+      format: "esm",
+      entryFileNames: "[name].js",
+      chunkFileNames: "[name]-[hash].js",
+      sourcemap: true,
+      banner: "import { createRequire as ___createRequire } from 'node:module'; import { fileURLToPath as ___fileURLToPath } from 'node:url'; import ___path from 'node:path'; const require = ___createRequire(import.meta.url || ___path.resolve(process.cwd(), 'package.json')); globalThis.__dinou_require__ = require; const __filename = import.meta.url ? ___fileURLToPath(import.meta.url) : ___path.resolve(process.cwd(), 'index.js'); const __dirname = ___path.dirname(__filename); process.env.NODE_ENV = process.env.NODE_ENV || 'production';",
+    },
+    external: [
+      "express",
+      "chokidar",
+      "dotenv",
+      "fsevents",
+      "@swc/core",
+      "@babel/core",
+      "esbuild",
+    ],
+    plugins: [
+      replace({
+        preventAssignment: true,
+        "process.env.NODE_ENV": JSON.stringify("production"),
+      }),
+      json(),
+      resolve({
+        exportConditions: ["react-server", "node", "import"],
+        preferBuiltins: true,
+        browser: false,
+      }),
+      commonjs({
+        ignoreDynamicRequires: true,
+      }),
+      {
+        name: "post-build-server",
+        closeBundle() {
+          const fs = require("fs");
+          fs.writeFileSync(
+            path.resolve(process.cwd(), ".dinou/dist3/server/package.json"),
+            JSON.stringify({ type: "module" }, null, 2)
+          );
+          const { execSync } = require("child_process");
+          execSync(`"${process.execPath}" --conditions=react-server "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
+            stdio: "inherit",
+            env: { ...process.env, NODE_ENV: "production" },
+          });
+        },
+      },
+    ],
+    onwarn(warning, warn) {
+      if (warning.code === "CIRCULAR_DEPENDENCY" || warning.code === "EVAL") {
+        return;
+      }
+      warn(warning);
+    },
+  };
+
+  return [clientConfig, serverConfig];
 };

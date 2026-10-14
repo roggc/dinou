@@ -8,9 +8,15 @@ const createScopedName = require("../core/createScopedName");
 const TsconfigPathsPlugin = require("tsconfig-paths-webpack-plugin");
 const manifestGeneratorPlugin = require("./plugins/manifest-generator-plugin");
 const ServerFunctionsPlugin = require("./plugins/server-functions-plugin");
+const WebpackMemoryPlugin = require("./plugins/webpack-memory-plugin");
 const webpack = require("webpack");
 const { regex } = require("../core/asset-extensions");
 const getCSSEntries = require("./helpers/get-webpack-entries");
+const {
+  scanProjectDependenciesForClientComponents,
+  scanProjectDependenciesForClientComponentsAsync,
+} = require("../core/scan-dependency-components.js");
+const { useClientRegex } = require("../constants.js");
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
@@ -41,6 +47,8 @@ const projectRoot = process.cwd();
 const outputDirs = [
   path.resolve(projectRoot, ".dinou/public"),
   path.resolve(projectRoot, ".dinou/dist3"),
+  path.resolve(projectRoot, "out"),
+  path.resolve(projectRoot, "dist"),
 ];
 
 function cleanDir(dir) {
@@ -62,24 +70,66 @@ function cleanDir(dir) {
 module.exports = async () => {
   const outputDir = path.resolve(process.cwd(), outputDirectory);
 
+  const shouldWriteToDisk =
+    process.env.DINOU_WRITE_TO_DISK === "true" || !isDevelopment;
+
   // 🔥 CLEAN HARD
-  cleanDir(outputDir);
-  const [cssEntries] = await getCSSEntries();
-  return {
+  if (shouldWriteToDisk) {
+    cleanDir(outputDir);
+  }
+  const [cssEntries, , serverFiles] = await getCSSEntries();
+
+  const dependencyClientFiles = new Set();
+  if (typeof scanProjectDependenciesForClientComponentsAsync === "function") {
+    await scanProjectDependenciesForClientComponentsAsync(
+      process.cwd(),
+      dependencyClientFiles,
+      useClientRegex
+    );
+  } else {
+    scanProjectDependenciesForClientComponents(
+      process.cwd(),
+      dependencyClientFiles,
+      useClientRegex
+    );
+  }
+
+  let clientDone = false;
+  let serverDone = false;
+  let ssgExecuted = false;
+
+  function runPostBuild() {
+    if (clientDone && serverDone && !ssgExecuted) {
+      ssgExecuted = true;
+      const fs = require("fs");
+      const serverDir = path.resolve(process.cwd(), ".dinou/dist3/server");
+      fs.mkdirSync(serverDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(serverDir, "package.json"),
+        JSON.stringify({ type: "module" }, null, 2)
+      );
+      const { execSync } = require("child_process");
+      execSync(`"${process.execPath}" --conditions=react-server "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
+        stdio: "inherit",
+        env: { ...process.env, NODE_ENV: "production", DINOU_BUILD_TOOL: "webpack" },
+      });
+    }
+  }
+  const clientConfig = {
     performance: {
       hints: isDevelopment ? false : "warning",
       maxEntrypointSize: 512000,
       maxAssetSize: 512000,
     },
-    cache: false,
+    cache: isDevelopment ? { type: "memory" } : false,
     mode: isDevelopment ? "development" : "production",
+    ignoreWarnings: [
+      /from "autoprefixer" plugin/,
+    ],
     entry: {
       main: [path.resolve(__dirname, "../core/client-webpack.jsx")].filter(
         Boolean,
       ),
-      error: [
-        path.resolve(__dirname, "../core/client-error-webpack.jsx"),
-      ].filter(Boolean),
       serverFunctionProxy: path.resolve(
         __dirname,
         "../core/server-function-proxy-webpack.js",
@@ -89,6 +139,7 @@ module.exports = async () => {
         "../core/client-redirect.jsx",
       ),
       dinouLink: path.resolve(__dirname, "../core/link.jsx"),
+      dinouSlot: path.resolve(__dirname, "../core/slot.js"),
       ...[...cssEntries].reduce(
         (acc, cssEntry) => ({
           ...acc,
@@ -102,9 +153,10 @@ module.exports = async () => {
     },
     output: {
       path: path.resolve(process.cwd(), outputDirectory),
-      filename: "[name]-[contenthash].js",
+      filename: isDevelopment ? "[name].js" : "[name]-[contenthash].js",
+      chunkFilename: isDevelopment ? "[name].js" : "[name]-[contenthash].js",
       publicPath: "/",
-      clean: true,
+      clean: shouldWriteToDisk,
       library: {
         type: "module",
       },
@@ -117,26 +169,37 @@ module.exports = async () => {
       rules: [
         {
           test: /\.[jt]sx?$/,
-          exclude: [/node_modules\/(?!dinou)/, ...outputDirs],
+          type: "javascript/auto",
+          exclude: [/[\\/]node_modules[\\/](?!dinou)/, ...outputDirs],
           use: [
-            {
-              loader: "babel-loader",
-              options: {
-                presets: [
-                  ["@babel/preset-react", { runtime: "automatic" }],
-                  "@babel/preset-typescript",
-                ],
-                plugins: [
-                  "babel-plugin-react-compiler",
-                  "@babel/plugin-syntax-import-meta",
-                ].filter(Boolean),
-              },
-            },
+            isDevelopment
+              ? {
+                  loader: path.resolve(__dirname, "./loaders/swc-loader.js"),
+                  options: {
+                    isDevelopment: true,
+                  },
+                }
+              : {
+                  loader: "babel-loader",
+                  options: {
+                    presets: [
+                      ["@babel/preset-react", { runtime: "automatic" }],
+                      "@babel/preset-typescript",
+                    ],
+                    plugins: [
+                      "babel-plugin-react-compiler",
+                      "@babel/plugin-syntax-import-meta",
+                    ].filter(Boolean),
+                  },
+                },
             {
               loader: path.resolve(
                 __dirname,
                 "./loaders/server-functions-loader.js",
               ),
+              options: {
+                serverFiles,
+              },
             },
           ],
         },
@@ -202,9 +265,55 @@ module.exports = async () => {
       ],
     },
     plugins: [
-      new ReactServerWebpackPlugin({ isServer: false }),
+      new ReactServerWebpackPlugin({
+        isServer: false,
+        clientReferences: [
+          {
+            directory: "./src",
+            recursive: true,
+            include: /\.(js|ts|jsx|tsx)$/,
+          },
+          {
+            directory: path.resolve(__dirname, "../core"),
+            recursive: false,
+            include: /\.(js|ts|jsx|tsx)$/,
+          },
+          ...Array.from(dependencyClientFiles),
+        ],
+      }),
+      isDevelopment && {
+        apply(compiler) {
+          compiler.hooks.thisCompilation.tap(
+            "DinouReactServerWatchPlugin",
+            (compilation) => {
+              const NormalModule = compiler.webpack ? compiler.webpack.NormalModule : webpack.NormalModule;
+              const hooks = NormalModule.getCompilationHooks(compilation);
+              hooks.needBuild.tap("DinouReactServerWatchPlugin", (module) => {
+                if (
+                  module.resource &&
+                  (module.resource.includes("client.browser") ||
+                    module.resource.includes("client-webpack"))
+                ) {
+                  return true;
+                }
+              });
+            }
+          );
+          compiler.hooks.afterCompile.tap("DinouWatchSrcPlugin", (compilation) => {
+            const srcDir = path.resolve(process.cwd(), "src");
+            if (fs.existsSync(srcDir)) {
+              compilation.contextDependencies.add(srcDir);
+            }
+          });
+        },
+      },
       new CopyWebpackPlugin({
         patterns: [
+          {
+            from: "public",
+            to: ".",
+            noErrorOnMissing: true,
+          },
           {
             from: "favicons",
             to: ".",
@@ -226,6 +335,15 @@ module.exports = async () => {
       new ServerFunctionsPlugin({
         manifest: manifestGeneratorPlugin.manifestData,
       }),
+      isDevelopment && new WebpackMemoryPlugin(),
+      !isDevelopment && {
+        apply(compiler) {
+          compiler.hooks.done.tap("PostBuildClient", () => {
+            clientDone = true;
+            runPostBuild();
+          });
+        },
+      },
     ].filter(Boolean),
     resolve: {
       extensions: [".js", ".jsx", ".ts", ".tsx"],
@@ -237,6 +355,10 @@ module.exports = async () => {
       // 🎯 ADD THIS:
       alias: {
         ...(isEjected ? { dinou: localDinouPath } : {}),
+      },
+      fallback: {
+        async_hooks: false,
+        "node:async_hooks": false,
       },
       plugins: configFile
         ? [
@@ -282,7 +404,13 @@ module.exports = async () => {
       },
     },
     watchOptions: {
-      ignored: outputDirs.map((dir) => `${dir}/**`),
+      ignored: [
+        "**/node_modules/**",
+        "**/.git/**",
+        "**/.dinou/node-dev/**",
+        "**/.dinou/dist2/**",
+        ...outputDirs.map((dir) => `${dir}/**`),
+      ],
     },
     stats: "normal", // or 'verbose' in dev
     infrastructureLogging: {
@@ -291,22 +419,92 @@ module.exports = async () => {
     ...(isDevelopment
       ? {
         devServer: {
-          port: 3001,
+          port: Number(process.env.HMR_PORT || (Number(process.env.PORT || 3000) + 1)),
           hot: false,
+          liveReload: true,
+          client: {
+            webSocketURL: `ws://localhost:${process.env.HMR_PORT || (Number(process.env.PORT || 3000) + 1)}/ws`,
+            overlay: false,
+          },
           devMiddleware: {
             index: false,
-            writeToDisk: true,
+            writeToDisk: process.env.DINOU_WRITE_TO_DISK === "true",
           },
+          watchFiles: [
+            path.resolve(process.cwd(), "src/**/*"),
+          ],
           proxy: [
             {
               context: () => true,
-              target: "http://localhost:3000",
+              target: `http://localhost:${process.env.PORT || 3000}`,
               changeOrigin: true,
             },
           ],
-          client: false,
         },
       }
       : {}),
   };
+
+  if (isDevelopment) {
+    return clientConfig;
+  }
+
+  const serverConfig = {
+    mode: "production",
+    target: "node20",
+    experiments: {
+      outputModule: true,
+    },
+    entry: {
+      handler: path.resolve(__dirname, "../core/handler.js"),
+      netlify: path.resolve(__dirname, "../adapters/netlify.js"),
+    },
+    output: {
+      path: path.resolve(process.cwd(), outputDirectory, "server"),
+      filename: "[name].js",
+      library: {
+        type: "module",
+      },
+      chunkFormat: "module",
+    },
+    resolve: {
+      conditionNames: ["react-server", "node", "import", "require"],
+      extensions: [".js", ".jsx", ".ts", ".tsx"],
+      alias: {
+        ...(isEjected ? { dinou: localDinouPath } : {}),
+      },
+    },
+    externals: [
+      "express",
+      "chokidar",
+      "dotenv",
+      "fsevents",
+      "@swc/core",
+      "@babel/core",
+      "esbuild",
+    ],
+    module: {
+      exprContextCritical: false,
+    },
+    ignoreWarnings: [
+      /Critical dependency/,
+    ],
+    plugins: [
+      new webpack.BannerPlugin({
+        banner: "import { createRequire as ___createRequire } from 'node:module'; import { fileURLToPath as ___fileURLToPath } from 'node:url'; import ___path from 'node:path'; const require = ___createRequire(import.meta.url || ___path.resolve(process.cwd(), 'package.json')); globalThis.__dinou_require__ = require; const __filename = import.meta.url ? ___fileURLToPath(import.meta.url) : ___path.resolve(process.cwd(), 'index.js'); const __dirname = ___path.dirname(__filename); process.env.NODE_ENV = process.env.NODE_ENV || 'production';",
+        raw: true,
+        entryOnly: false,
+      }),
+      {
+        apply(compiler) {
+          compiler.hooks.done.tap("PostBuildServer", () => {
+            serverDone = true;
+            runPostBuild();
+          });
+        },
+      },
+    ],
+  };
+
+  return [clientConfig, serverConfig];
 };

@@ -1,9 +1,11 @@
+// dinou/core/generate-static-page.js
+// Generates static HTML for a given path using the in-memory Dual-Bundle streaming engine.
+// Completely eliminates child_process.fork() and render-app-to-html.js.
+
 const path = require("path");
-const { mkdirSync, createWriteStream, existsSync } = require("fs");
 const fs = require("fs").promises;
-const renderAppToHtml = require("./render-app-to-html.js");
-const { getStaticMetadata } = require("./build-static-pages.js");
-const { processMetadata } = require("./get-ssg-metadata.js");
+const { existsSync, mkdirSync } = require("fs");
+const { pathToFileURL } = require("url");
 
 const OUT_DIR = path.resolve(".dinou/dist2");
 
@@ -12,107 +14,66 @@ async function generateStaticPage(reqPath) {
   const htmlPath = path.join(OUT_DIR, finalReqPath, "index.html");
   const tempHtmlPath = path.join(OUT_DIR, finalReqPath, `index.html.${Date.now()}-${Math.random()}.tmp`);
 
-  const query = {};
-  const paramsString = JSON.stringify(query);
-  const capturedStatus = {};
-
-  const contextForChild = {
-    req: {
-      query,
-      cookies: {},
-      headers: {
-        "user-agent": "Dinou-ISR-Revalidator",
-        host: "localhost",
-        "x-forwarded-proto": "http",
-      },
-      path: finalReqPath,
-      method: "GET",
-    },
-  };
-
   try {
     mkdirSync(path.dirname(htmlPath), { recursive: true });
-    const fileStream = createWriteStream(tempHtmlPath);
-    let htmlStream = null;
 
-    const mockRes = {
-      headersSent: true,
-      _cookies: [],
-      cookie(name, value, options) {
-        this._cookies.push({ name, value, options });
-      },
-      write: (chunk) => {
-        if (!fileStream.writableEnded) fileStream.write(chunk);
-      },
-      end: (chunk) => {
-        if (chunk && !fileStream.writableEnded) fileStream.write(chunk);
-        if (htmlStream) htmlStream.unpipe(fileStream);
-        if (!fileStream.writableEnded) fileStream.end();
-      },
-      status: (code) => {
-        capturedStatus.value = code;
-      },
-      setHeader: () => { },
-      clearCookie: () => { },
-      redirect: () => { },
-    };
+    const rscEnginePath = path.resolve(process.cwd(), ".dinou/node/rsc-engine.mjs");
+    const ssrEnginePath = path.resolve(process.cwd(), ".dinou/node/ssr-engine.mjs");
 
-    htmlStream = renderAppToHtml(
-      finalReqPath,
-      paramsString,
-      contextForChild,
-      mockRes,
-      capturedStatus
-    );
-
-    const metadata = getStaticMetadata(finalReqPath);
-    let sideEffectScripts = "";
-    if (metadata && metadata.effects) {
-      sideEffectScripts = processMetadata(metadata.effects);
+    let rscModule = null;
+    let ssrModule = null;
+    if (existsSync(rscEnginePath) && existsSync(ssrEnginePath)) {
+      rscModule = await import(pathToFileURL(rscEnginePath).href);
+      ssrModule = await import(pathToFileURL(ssrEnginePath).href);
     }
 
-    await new Promise((resolve, reject) => {
-      if (sideEffectScripts) fileStream.write(sideEffectScripts);
-      htmlStream.pipe(fileStream, { end: false });
-      htmlStream.on("end", () => {
-        if (!fileStream.writableEnded) fileStream.end();
-        resolve();
+    if (rscModule && ssrModule) {
+      const webReq = new Request(`http://localhost${finalReqPath}`);
+      const res = await rscModule.handleRequest(webReq, {
+        runtime: "node-bundle",
+        renderHtmlStream: ssrModule.renderHtml,
+        isSSG: true,
       });
-      htmlStream.on("error", (err) => {
-        fileStream.end();
-        if (err.code === "ERR_STREAM_WRITE_AFTER_END") resolve();
-        else reject(err);
-      });
-      fileStream.on("error", reject);
-    });
 
-    if (metadata) {
-      const metadataPath = path.join(OUT_DIR, finalReqPath, "metadata.json");
-      await fs.writeFile(
-        metadataPath,
-        JSON.stringify({
-          revalidate: metadata.revalidate,
-          generatedAt: Date.now(),
-          effects: metadata.effects,
-          tags: metadata.tags || [],
-        }, null, 2),
-        "utf8"
-      );
+      const text = await res.text();
+      await fs.writeFile(tempHtmlPath, text, "utf8");
+
+      const routeMeta = typeof rscModule.getStaticMetadata === "function" ? rscModule.getStaticMetadata(finalReqPath) : null;
+      let isRoutePpr = Boolean(routeMeta?.ppr);
+      if (!isRoutePpr) {
+        try {
+          const metaDisk = JSON.parse(await fs.readFile(path.join(OUT_DIR, finalReqPath, "metadata.json"), "utf8"));
+          if (metaDisk?.ppr) isRoutePpr = true;
+        } catch (e) {}
+      }
+      if (isRoutePpr) {
+        const shellHtmlPath = path.join(OUT_DIR, finalReqPath, "shell.html");
+        await fs.writeFile(shellHtmlPath, text, "utf8").catch(() => {});
+        try {
+          const pageReq = new Request(`http://localhost/____rsc_page____${finalReqPath}`);
+          const pageRes = await rscModule.handleRequest(pageReq, { runtime: "node-bundle" });
+          if (pageRes.status === 200) {
+            const pageRscText = await pageRes.text();
+            const shellRscPath = path.join(OUT_DIR, finalReqPath, "shell.rsc");
+            await fs.writeFile(shellRscPath, pageRscText, "utf8").catch(() => {});
+          }
+        } catch (e) {}
+      }
+
+      return {
+        success: res.status !== 500 && text.length > 0,
+        type: "html",
+        reqPath: finalReqPath,
+        tempPath: tempHtmlPath,
+        finalPath: htmlPath,
+        status: res.status || 200,
+        ppr: isRoutePpr,
+      };
     }
 
-    const status = capturedStatus.value || 200;
-    const success = status !== 500;
-
-    return {
-      success,
-      type: "html",
-      reqPath: finalReqPath,
-      tempPath: tempHtmlPath,
-      finalPath: htmlPath,
-      status: status,
-    };
+    return { success: false, tempPath: tempHtmlPath };
   } catch (error) {
-    await fs.unlink(tempHtmlPath).catch(() => { });
+    await fs.unlink(tempHtmlPath).catch(() => {});
     return { success: false, tempPath: tempHtmlPath };
   }
 }

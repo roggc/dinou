@@ -89,6 +89,9 @@ export interface RequestContextStore {
     headers: Headers;
     path: string;
     method: "GET" | "POST" | string;
+    env?: Record<string, any>;
+    ctx?: any;
+    [key: string]: any;
   };
 
   /**
@@ -96,7 +99,179 @@ export interface RequestContextStore {
    * response functions in the main process.
    */
   res: ResponseProxy;
+
+  /**
+   * Platform host environment (Cloudflare env, D1, KV, R2, etc.).
+   */
+  env?: Record<string, any>;
+
+  /**
+   * Platform execution context (Cloudflare ctx, waitUntil, etc.).
+   */
+  ctx?: any;
+
+  /**
+   * Any custom properties attached to context by plugins (e.g., context.user, context.auth).
+   */
+  [key: string]: any;
 }
+
+// ====================================================================
+// DINOU CONFIGURATION & PLUGIN INTERFACES
+// ====================================================================
+
+export interface DinouPlugin {
+  name?: string;
+  /**
+   * Universal Web Standards middleware and webhook handler.
+   * Runs on every incoming HTTP request before React rendering.
+   * If a Response is returned, Dinou sends it immediately and terminates the request.
+   * If nothing is returned, execution continues and any mutations to `context`
+   * are preserved and accessible in Server Components and Server Functions via getContext().
+   */
+  onRequest?(
+    request: Request,
+    context: RequestContextStore
+  ): Promise<Response | void> | Response | void;
+
+  /**
+   * Legacy context hook for backwards compatibility.
+   */
+  onRequestContext?(simReq: any, resBridge: any, context: any): void;
+}
+
+export interface DinouConfig {
+  /**
+   * Enable or disable React StrictMode in development mode.
+   * When enabled, React double-invokes render and effect functions in development to catch side-effects.
+   * @default true
+   */
+  reactStrictMode?: boolean;
+
+  /**
+   * Global Partial Prerendering (PPR) configuration.
+   * When enabled globally, all static-eligible routes generate static shells with Suspense streaming holes.
+   * Can also be enabled or disabled per route or layout in page_functions.ts or layout_functions.ts.
+   * @default false
+   */
+  ppr?: boolean;
+
+  /**
+   * Custom storage adapter for ISR / ISG page caching.
+   */
+  storage?: any;
+
+  /**
+   * Array of Dinou plugins.
+   */
+  plugins?: DinouPlugin[];
+}
+
+/**
+ * Route Segment Configuration for Partial Prerendering (PPR).
+ * In Dinou, export `const ppr = true;` or `export function ppr(): boolean`
+ * in your page_functions.ts or layout_functions.ts to enable instant static shell delivery with dynamic Suspense streaming holes.
+ */
+export type PPRConfig = boolean | (() => boolean | Promise<boolean>);
+
+/**
+ * A single static path item returned or defined by `getStaticPaths`.
+ * Can be:
+ * - A string: e.g. `"alpha"` for dynamic segment `[slug]`
+ * - A number: e.g. `1` for dynamic segment `[id]`
+ * - A string array: e.g. `["docs", "getting-started"]` for catch-all segment `[...slug]`
+ * - A parameter object: e.g. `{ slug: "alpha", id: "1" }`
+ */
+export type StaticPathItem<TParams = Record<string, string | number | string[] | undefined>> =
+  | string
+  | number
+  | string[]
+  | TParams;
+
+/**
+ * Result array or promise of array for `getStaticPaths`.
+ */
+export type StaticPathsResult<TParams = Record<string, string | number | string[] | undefined>> =
+  | StaticPathItem<TParams>[]
+  | Promise<StaticPathItem<TParams>[]>;
+
+export interface RouteSegmentConfig<TParams = any, TProps = any> {
+  /**
+   * Partial Prerendering (PPR) flag.
+   * Can be declared as a constant or a function (sync or async) in page_functions or layout_functions.
+   * @default false
+   */
+  ppr?: PPRConfig;
+
+  /**
+   * Route caching and revalidation strategy in seconds (s). Single source of truth for page rendering mode.
+   * - `0` (or `< 1`): Dynamically rendered on every request (dynamic SSR, bypassing static cache).
+   * - `>= 1`: Pre-rendered/cached with Incremental Static Regeneration (ISR) expiring after the specified seconds.
+   * - `false` (or omitted): Statically pre-rendered and cached forever until on-demand revalidation via `revalidatePath` or `revalidateTag`.
+   *
+   * Can be declared as a number, false, or as a sync/async function in `page_functions.ts` or `layout_functions.ts`.
+   */
+  revalidate?: number | false | (() => number | false | Promise<number | false>);
+
+  /**
+   * Cache tags associated with this route segment for on-demand invalidation via `revalidateTag(tag)`.
+   * Can be declared as a sync/async function `getCacheTags(params)` or as a constant array `getCacheTags = [...]`.
+   */
+  getCacheTags?: string[] | ((params?: TParams) => string[] | Promise<string[]>);
+
+  /**
+   * Generates static path parameter objects or values for dynamic route segments during build time (SSG).
+   * Supports returning:
+   * - Array of strings (e.g. `["alpha", "beta"]`)
+   * - Array of numbers (e.g. `[1, 2, 3]`)
+   * - Array of string arrays for catch-all routes (e.g. `[["docs", "intro"], ["docs", "setup"]]`)
+   * - Array of parameter objects (e.g. `[{ slug: "alpha" }, { slug: "beta" }]`)
+   *
+   * Can be declared as a sync or async function, or as a constant array in `page_functions.ts` or `layout_functions.ts`.
+   */
+  getStaticPaths?:
+    | StaticPathItem<TParams>[]
+    | (() => StaticPathsResult<TParams>);
+
+  /**
+   * Server-side loader that fetches or calculates props passed directly to the Page or Layout component.
+   */
+  getProps?: (params?: TParams) => TProps | Promise<TProps>;
+
+  /**
+   * Parameter validator hook. If it returns false, Dinou halts rendering and returns 404 Not Found.
+   */
+  validateParams?: (params?: TParams) => boolean | Promise<boolean>;
+
+  /**
+   * Controls whether on-demand Incremental Static Generation (ISG) is allowed for ungenerated paths.
+   * @default true
+   */
+  allowISG?: boolean | (() => boolean | Promise<boolean>);
+}
+
+/**
+ * Type-safe interface representing the available exports in `page_functions.ts`.
+ * Accepts either a route pattern string (e.g. `"/products/[id]"`) or a direct parameters dictionary.
+ */
+export type PageFunctions<TRouteOrParams = any, TProps = any> = RouteSegmentConfig<
+  [TRouteOrParams] extends [string] ? RouteParams<TRouteOrParams> : TRouteOrParams,
+  TProps
+>;
+
+/**
+ * Type-safe interface representing the available exports in `layout_functions.ts`.
+ * Accepts either a route pattern string (e.g. `"/[organization]"`) or a direct parameters dictionary.
+ */
+export type LayoutFunctions<TRouteOrParams = any, TProps = any> = RouteSegmentConfig<
+  [TRouteOrParams] extends [string] ? RouteParams<TRouteOrParams> : TRouteOrParams,
+  TProps
+>;
+
+/**
+ * Type-safe configuration helper for dinou.config.js / dinou.config.mjs.
+ */
+export declare function defineConfig(config: DinouConfig): DinouConfig;
 
 // ====================================================================
 // MAIN EXPORTED FUNCTIONS (SERVER SIDE)
@@ -153,8 +328,8 @@ export declare function ClientRedirect(props: ClientRedirectProps): ReactNode;
 export declare function redirect(destination: string): ReactNode;
 
 /**
- * A Client Component hook that lets you read the current URL's pathname.
- * This hook triggers a re-render when the route changes.
+ * Universal hook (works in both Server Components and Client Components) that lets you read the current URL's pathname.
+ * On the client, this hook triggers a re-render when the route changes.
  *
  * @returns {string} The current pathname (e.g., "/dashboard") without search parameters.
  * @example
@@ -164,8 +339,8 @@ export declare function redirect(destination: string): ReactNode;
 export declare function usePathname(): string;
 
 /**
- * A Client Component hook that lets you read the current URL's search parameters.
- * This hook triggers a re-render when the route changes.
+ * Universal hook (works in both Server Components and Client Components) that lets you read the current URL's search parameters.
+ * On the client, this hook triggers a re-render when the route changes.
  *
  * @returns {URLSearchParams} A read-only version of the standard URLSearchParams interface.
  * @example
@@ -211,20 +386,124 @@ export interface NavigationOptions {
  * // Soft refresh (re-fetch data without full reload)
  * router.refresh();
  */
+// ====================================================================
+// TYPE-SAFE ROUTING (Level 1 & Level 2)
+// ====================================================================
+
+export namespace DinouRouter {
+  export interface Register {
+    // When .dinou/types/routes.d.ts is generated, it augments this interface.
+  }
+}
+
+/**
+ * Union of all valid routes in the application.
+ * When typed routes are generated, autocompletes known routes.
+ * Falls back to string if not yet generated or in loose mode.
+ */
+export type DinouRoute = DinouRouter.Register extends { route: infer R extends string }
+  ? R
+  : string;
+
+/**
+ * Utility types to parse dynamic route parameters from a route string pattern.
+ * e.g. ExtractRouteParams<"/blog/[id]"> => { id: string }
+ * e.g. ExtractRouteParams<"/docs/[...slug]"> => { slug: string[] }
+ * e.g. ExtractRouteParams<"/shop/[[...slug]]"> => { slug?: string[] }
+ * e.g. ExtractRouteParams<"/item/[[code]]"> => { code?: string }
+ */
+export type ExtractSegmentParam<Segment extends string> =
+  Segment extends `[[...${infer Param}]]`
+    ? { [K in Param]?: string[] }
+    : Segment extends `[[${infer Param}]]`
+    ? { [K in Param]?: string }
+    : Segment extends `[...${infer Param}]`
+    ? { [K in Param]: string[] }
+    : Segment extends `[${infer Param}]`
+    ? { [K in Param]: string }
+    : {};
+
+export type ExtractRouteParams<Path extends string> =
+  Path extends `/${infer Rest}`
+    ? ExtractRouteParams<Rest>
+    : Path extends `${infer Start}/${infer Rest}`
+    ? ExtractSegmentParam<Start> & ExtractRouteParams<Rest>
+    : ExtractSegmentParam<Path>;
+
+/**
+ * All known route patterns in the application (e.g. "/blog/[slug]", "/t-params/[[slug]]").
+ * Autocompletes all project routes when typing PageProps<"..." or LayoutProps<"...".
+ */
+export type DinouRoutePattern = DinouRouter.Register extends { params: infer P }
+  ? (keyof P extends string ? keyof P | (keyof P extends `/${infer Rest}` ? Rest : never) : string)
+  : string;
+
+export type CleanRoutePath<T extends string> = T extends `/${string}` ? T : `/${T}`;
+
+/**
+ * Resolved route parameter types for a route.
+ * Prioritizes the generated route parameters map from .dinou/types/routes.d.ts,
+ * and falls back to template literal extraction.
+ */
+export type RouteParams<T extends string = string> =
+  DinouRouter.Register extends { params: infer P }
+    ? (CleanRoutePath<T> extends keyof P
+        ? P[CleanRoutePath<T>]
+        : (T extends keyof P ? P[T] : ExtractRouteParams<T>))
+    : ExtractRouteParams<T>;
+
+/**
+ * Props for Dinou Page components.
+ * 
+ * @example
+ * export default function Page({ params }: PageProps<"/blog/[id]">) {
+ *   return <h1>Post {params.id}</h1>;
+ * }
+ */
+export interface PageProps<T extends DinouRoutePattern = DinouRoutePattern> {
+  params: RouteParams<T>;
+}
+
+/**
+ * Props for Dinou Layout components.
+ * 
+ * @example
+ * export default function Layout({ children, params }: LayoutProps<"/blog/[id]">) {
+ *   return <div>{children}</div>;
+ * }
+ */
+export interface LayoutProps<T extends DinouRoutePattern = DinouRoutePattern> {
+  children: React.ReactNode;
+  params: RouteParams<T>;
+}
+
+/**
+ * Props for Dinou Error Page components (error.tsx).
+ * 
+ * @example
+ * export default function ErrorPage({ error, params }: ErrorProps<"/blog/[id]">) {
+ *   return <h1>Error loading {params.id}: {error.message}</h1>;
+ * }
+ */
+export interface ErrorProps<T extends DinouRoutePattern = DinouRoutePattern> {
+  error: Error;
+  params: RouteParams<T>;
+}
+
 export declare function useRouter(): {
   /**
    * Navigate to the provided href. Pushes a new entry into the history stack.
    * @param href - The URL to navigate to (e.g., "/about").
    * @param options - Optional configuration for the navigation (e.g., force fresh data).
    */
-  push: (href: string, options?: NavigationOptions) => void;
+  push: (href: DinouRoute, options?: NavigationOptions) => void;
 
   /**
    * Navigate to the provided href. Replaces the current entry in the history stack.
    * @param href - The URL to navigate to.
    * @param options - Optional configuration for the navigation.
    */
-  replace: (href: string, options?: NavigationOptions) => void;
+  replace: (href: DinouRoute, options?: NavigationOptions) => void;
 
   /**
    * Navigate back in the browser's history.
@@ -242,14 +521,32 @@ export declare function useRouter(): {
    * Refresh the current route.
    *
    * This triggers a "Soft Reload":
-   * 1. Clears the client-side cache for the current route.
+   * 1. Clears the client-side cache for the current page (`pageCache`).
    * 2. Re-fetches fresh RSC payload from the server.
-   * 3. Re-renders the page components without a full browser refresh.
+   * 3. Re-renders the page components without a full browser refresh, preserving client state.
+   *
+   * By default, it refreshes only the page. Pass `{ layout: true }` to also invalidate and re-fetch the layout.
    *
    * Useful for updating the UI after a mutation (e.g., form submission) or to poll for new data.
+   *
+   * @param options - Optional configuration (`{ layout?: boolean }`).
    */
-  refresh: () => void;
+  refresh: (options?: { layout?: boolean }) => void;
+
+  /**
+   * Refreshes a specific DinouCacheSlot without re-rendering the rest of the page.
+   * @param slotId - The slot identifier or tag.
+   * @param options - Optional configuration ({ fresh?: boolean }).
+   */
+  refreshSlot: (slotId: string, options?: { fresh?: boolean }) => void;
 };
+
+/**
+ * Programmatically refreshes a specific DinouCacheSlot in the browser without reloading the page.
+ * @param slotId - The slot identifier or tag to refresh.
+ * @param options - Optional configuration ({ fresh?: boolean }).
+ */
+export declare function refreshSlot(slotId: string, options?: { fresh?: boolean }): void;
 
 /**
  * A Client Component hook that returns true if a navigation (SPA transition) is currently in progress.
@@ -269,13 +566,19 @@ import type { AnchorHTMLAttributes } from "react";
  * Props for the Dinou Link component.
  * It extends standard HTML <a> attributes, allowing className, style, etc.
  */
-export interface LinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
+export interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> {
   /**
    * The destination URL or path.
+   * * Autocompletes all known routes discovered by Dinou.
    * * Supports absolute paths (e.g., `/dashboard`).
    * * Supports relative paths (e.g., `../settings` or `details`).
    */
-  href: string;
+  href?: DinouRoute;
+
+  /**
+   * Alias for `href` (React Router / Remix compatibility).
+   */
+  to?: DinouRoute;
 
   /**
    * Whether to prefetch the RSC payload when the mouse enters the link area (hover).
@@ -314,3 +617,4 @@ export interface LinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
  * </Link>
  */
 export declare function Link(props: LinkProps): ReactNode;
+

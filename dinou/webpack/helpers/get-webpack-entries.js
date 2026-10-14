@@ -43,7 +43,8 @@ async function getCSSEntries({
     const csss = new Set();
 
     const importNodes = [];
-    traverse.default(ast, {
+    const traverseFn = typeof traverse === "function" ? traverse : (traverse.default || traverse);
+    traverseFn(ast, {
       ImportDeclaration(nodePath) {
         importNodes.push(nodePath);
       },
@@ -144,10 +145,20 @@ async function getCSSEntries({
     absolute: true,
   });
 
+  const serverFiles = new Set();
+
   // Gather client modules and update manifest entries
+  let fileScanCount = 0;
   for (const absPath of files) {
+    if (++fileScanCount % 5 === 0) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
     const code = readFileSync(absPath, "utf8");
-    const isClientModule = useClientRegex.test(code.trim());
+    const trimmed = code.trim();
+    if (useServerRegex.test(trimmed)) {
+      serverFiles.add(path.resolve(absPath).replace(/\\/g, "/").toLowerCase());
+    }
+    const isClientModule = useClientRegex.test(trimmed);
     const normalizedPath = normalizePath(absPath);
 
     if (isClientModule) {
@@ -156,22 +167,6 @@ async function getCSSEntries({
       detectedClientEntries.add({
         absPath: normalizedPath,
         name,
-      });
-      const { imports } = await getImportsAndAssetsAndCsss(
-        code,
-        absPath,
-        new Set(),
-        true,
-      );
-      const clientComponentRegex = /\.(js|jsx|ts|tsx)$/i;
-      imports.forEach((imp) => {
-        if (clientComponentRegex.test(imp) && !imp.includes("node_modules")) {
-          const name = path.basename(imp, path.extname(imp));
-          detectedClientEntries.add({
-            absPath: normalizePath(imp),
-            name,
-          });
-        }
       });
     } else if (isPageOrLayout(absPath)) {
       try {
@@ -205,7 +200,7 @@ async function getCSSEntries({
     dCSSE.outfileName = outfileName;
   }
 
-  return [detectedCSSEntries, detectedClientEntries];
+  return [detectedCSSEntries, detectedClientEntries, serverFiles];
 }
 
 module.exports = getCSSEntries;

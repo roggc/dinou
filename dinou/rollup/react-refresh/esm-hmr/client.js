@@ -96,35 +96,49 @@ class HotModuleState {
 }
 
 export function createHotContext(id) {
-  const existing = REGISTERED_MODULES[id];
+  const normId = id.startsWith("/") ? id : "/" + id;
+  const existing = REGISTERED_MODULES[normId] || REGISTERED_MODULES[id];
   if (existing) {
-    existing.lock();
+    existing.isLocked = false;
+    existing.acceptCallbacks = [];
     return existing;
   }
-  const state = new HotModuleState(id);
+  const state = new HotModuleState(normId);
+  REGISTERED_MODULES[normId] = state;
   REGISTERED_MODULES[id] = state;
   return state;
 }
 
 async function applyUpdate(id) {
-  const state = REGISTERED_MODULES[id];
+  const clean = id ? id.split("?")[0] : "";
+  const normId = clean.startsWith("/") ? clean : "/" + clean;
+  const state = REGISTERED_MODULES[normId] || REGISTERED_MODULES[clean] || REGISTERED_MODULES[id];
   if (!state || state.isDeclined) {
     return false;
   }
 
-  const acceptCallbacks = state.acceptCallbacks;
-  const disposeCallbacks = state.disposeCallbacks;
+  const acceptCallbacks = [...state.acceptCallbacks];
+  const disposeCallbacks = [...state.disposeCallbacks];
   state.disposeCallbacks = [];
   state.data = {};
 
-  disposeCallbacks.forEach((callback) => callback());
+  disposeCallbacks.forEach((callback) => {
+    try {
+      callback();
+    } catch (e) {
+      console.warn("[ESM-HMR] dispose callback error:", e);
+    }
+  });
 
   const updateID = Date.now();
 
   for (const { deps, callback: acceptCallback } of acceptCallbacks) {
     const [module, ...depModules] = await Promise.all([
-      import(`/${id}` + `?mtime=${updateID}`),
-      ...deps.map((d) => import(`/${d}` + `?mtime=${updateID}`)),
+      import(normId + `?mtime=${updateID}`),
+      ...deps.map((d) => {
+        const depId = d.startsWith("/") ? d : "/" + d;
+        return import(depId + `?mtime=${updateID}`);
+      }),
     ]);
     acceptCallback({ module, deps: depModules });
   }
@@ -142,18 +156,60 @@ socket.addEventListener("message", ({ data: _data }) => {
     return;
   }
 
+  if (data.type === "rsc-update") {
+    if (typeof window !== "undefined" && typeof window.__DINOU_ROUTER_REFRESH__ === "function") {
+      window.__DINOU_ROUTER_REFRESH__();
+      return;
+    }
+    reload();
+    return;
+  }
+
+  if (
+    data.type === "style-update" ||
+    (data.type === "update" && data.url && (data.url.endsWith(".css") || data.url.includes("styles.css")))
+  ) {
+    const targetUrl = data.url ? data.url.split("?")[0] : "";
+    const links = document.querySelectorAll('link[rel="stylesheet"]');
+    for (const link of links) {
+      const rawHref = link.getAttribute("href");
+      if (!rawHref) continue;
+      const cleanHref = rawHref.split("?")[0];
+      if (!targetUrl || cleanHref.endsWith(targetUrl) || targetUrl.endsWith(cleanHref) || cleanHref.includes("styles.css")) {
+        const nextUrl = new URL(link.href, window.location.origin);
+        nextUrl.searchParams.set("t", String(Date.now()));
+        link.href = nextUrl.href;
+      }
+    }
+    return;
+  }
+
   if (data.type !== "update") {
     return;
+  }
+
+  const tRecv = Date.now();
+  const isDebug = typeof window !== "undefined" && Boolean(window.__DINOU_DEBUG__);
+
+  if (isDebug) {
+    console.log(`⏱️ [BROWSER HMR] Received update for ${data.url} at ${new Date().toTimeString().slice(0, 8)}.${String(Date.now() % 1000).padStart(3, '0')}`);
   }
 
   applyUpdate(data.url)
     .then((ok) => {
       if (!ok) {
+        if (isDebug) console.warn(`⏱️ [BROWSER HMR] applyUpdate returned false, falling back to full reload!`);
         reload();
+      } else {
+        if (isDebug) {
+          console.log(`⏱️ [BROWSER HMR] Fast Refresh finished applying in ${Date.now() - tRecv}ms!`);
+        } else {
+          console.log(`[ESM-HMR] hot updated: ${data.url}`);
+        }
       }
     })
     .catch((err) => {
-      console.error(err);
+      console.error(`[ESM-HMR] applyUpdate error:`, err);
       reload();
     });
 });

@@ -1,10 +1,13 @@
 import { existsSync } from "node:fs";
 
 export default function skipMissingEntryPointsPlugin() {
+  let checkedOnce = false;
   return {
     name: "skip-missing-entry-points",
     setup(build) {
       build.onStart(async () => {
+        if (checkedOnce) return;
+        checkedOnce = true;
         const entryPoints = build.initialOptions.entryPoints;
         if (!entryPoints || typeof entryPoints === "string") return;
 

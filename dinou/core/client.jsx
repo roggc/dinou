@@ -1,30 +1,103 @@
 // dinou/core/client.jsx
+if (typeof window !== "undefined") {
+  if (!window.$RefreshReg$) window.$RefreshReg$ = () => { };
+  if (!window.$RefreshSig$) window.$RefreshSig$ = () => (type) => type;
+}
 import {
   use,
+  useRef,
   useState,
   useEffect,
   useTransition,
   useLayoutEffect,
   useMemo,
+  useCallback,
   Component,
+  createElement,
+  StrictMode,
 } from "react";
 import { createFromFetch } from "@roggc/react-server-dom-esm/client";
 import { hydrateRoot } from "react-dom/client";
 import { RouterContext } from "./navigation.js";
 import { resolveUrl, isExternalUrl } from "./navigation-utils.js";
 import { createServerFunctionProxy } from "./server-function-proxy.js";
+import { DinouPageContext, DinouPageSlot, cleanErrorStack } from "./slot.js";
 
 // ====================================================================
 // 1. GLOBAL STATE (Outside the component)
 // ====================================================================
-const cache = new Map();
+const pageCache = new Map();
+const layoutCache = new Map();
 const scrollCache = new Map();
 
 const getCurrentRoute = () => window.location.pathname + window.location.search;
 
+const scrollToCurrentHash = (rawHash = typeof window !== "undefined" ? window.location.hash : "") => {
+  if (!rawHash) return false;
+  try {
+    const id = decodeURIComponent(rawHash.replace("#", ""));
+    const element = document.getElementById(id) || document.getElementsByName(id)[0];
+    if (element) {
+      element.scrollIntoView({ behavior: "auto" });
+      return true;
+    }
+  } catch (e) {
+    const id = rawHash.replace("#", "");
+    const element = document.getElementById(id) || document.getElementsByName(id)[0];
+    if (element) {
+      element.scrollIntoView({ behavior: "auto" });
+      return true;
+    }
+  }
+  return false;
+};
+
 // ====================================================================
 // 2. PURE HELPERS
 // ====================================================================
+
+// Helper to determine active layout folder for a pathname
+const getLayoutKey = (pathname) => {
+  const layouts = (typeof window !== "undefined" && window.__DINOU_LAYOUTS__) || ["", "docs"];
+  const cleanPath = pathname.split("?")[0].split("#")[0];
+  const segments = cleanPath.split("/").filter(Boolean);
+
+  for (let i = segments.length; i >= 1; i--) {
+    const candidateSegments = segments.slice(0, i);
+    const candidate = candidateSegments.join("/");
+    if (layouts.includes(candidate)) {
+      return "/" + candidate;
+    }
+    const dynamicMatch = layouts.find((l) => {
+      const lSegs = l
+        .split("/")
+        .filter(Boolean)
+        .filter((seg) => !(seg.startsWith("(") && seg.endsWith(")")));
+      if (lSegs.length !== candidateSegments.length) return false;
+      return lSegs.every((seg, idx) => {
+        if (seg.startsWith("[") && seg.endsWith("]")) return true;
+        return seg === candidateSegments[idx];
+      });
+    });
+    if (dynamicMatch) {
+      return "/" + candidate;
+    }
+  }
+  if (
+    layouts.includes("") ||
+    layouts.includes("/") ||
+    layouts.some(
+      (l) =>
+        l
+          .split("/")
+          .filter(Boolean)
+          .filter((s) => !(s.startsWith("(") && s.endsWith(")"))).length === 0
+    )
+  ) {
+    return "/";
+  }
+  return null;
+};
 
 // Helper to detect if we only change the hash on the same page
 const isHashChangeOnly = (finalPath) => {
@@ -41,43 +114,35 @@ const isHashChangeOnly = (finalPath) => {
   );
 };
 
-const getRSCPayload = (rscKey, isPrefetch = false) => {
-  const url = rscKey.split("::")[0];
-  // 1. Check Idempotence (Avoids the infinite loop of React)
-  if (cache.has(url)) {
-    return cache.get(url);
+const getPagePayload = (route, isPrefetch = false) => {
+  const url = route.split("::")[0];
+  if (pageCache.has(url)) {
+    return pageCache.get(url);
   }
 
-  // 2. Global Flags Logic (Only first time)
   let payloadUrl;
   if (window.__DINOU_USE_OLD_RSC__ || window.__DINOU_USE_STATIC__) {
     payloadUrl = window.__DINOU_USE_OLD_RSC__
       ? window.__DINOU_USE_STATIC__
-        ? "/____rsc_payload_old_static____" + url
-        : "/____rsc_payload_old____" + url
+        ? "/____rsc_page_old_static____" + url
+        : "/____rsc_page_old____" + url
       : window.__DINOU_USE_STATIC__
-        ? "/____rsc_payload_static____" + url
-        : "/____rsc_payload____" + url;
-
-    // Clean flags immediately
-    window.__DINOU_USE_OLD_RSC__ = false;
-    window.__DINOU_USE_STATIC__ = false;
+        ? "/____rsc_page_static____" + url
+        : "/____rsc_page____" + url;
   } else {
-    payloadUrl = "/____rsc_payload____" + url;
+    payloadUrl = "/____rsc_page____" + url;
   }
 
   const buildId = window.__DINOU_BUILD_ID__;
   if (buildId) {
     payloadUrl += (payloadUrl.includes("?") ? "&" : "?") + "buildId=" + buildId;
-    window.__DINOU_BUILD_ID__ = undefined;
   }
 
-  // 3. Fetch and Cache Storage
   const promise = createFromFetch(
     fetch(payloadUrl).then((res) => {
       if (res.headers.has("x-rsc-redirect")) {
         const redirectUrl = res.headers.get("x-rsc-redirect");
-        cache.delete(url);
+        pageCache.delete(url);
         if (!isPrefetch) {
           if (window.__DINOU_ROUTER_NAVIGATE__) {
             window.__DINOU_ROUTER_NAVIGATE__(redirectUrl, { replace: true });
@@ -85,7 +150,6 @@ const getRSCPayload = (rscKey, isPrefetch = false) => {
             window.location.href = redirectUrl;
           }
         }
-        // Return a promise that never resolves to avoid React Server DOM throwing "Connection closed"
         return new Promise(() => {});
       }
       return res;
@@ -94,18 +158,59 @@ const getRSCPayload = (rscKey, isPrefetch = false) => {
       callServer: async (id, args) => {
         const proxy = createServerFunctionProxy(id);
         return proxy(...args);
-      }
+      },
     }
   );
-  cache.set(url, promise); // <--- KEY TO AVOID LOOP
+
+  promise.catch(() => {});
+  pageCache.set(url, promise);
+  return promise;
+};
+
+const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
+  if (!layoutKey) return null;
+  const cacheKey = `${layoutKey}${searchPart}`;
+  if (layoutCache.has(cacheKey)) {
+    return layoutCache.get(cacheKey);
+  }
+
+  const cleanKey = layoutKey === "/" ? "" : layoutKey;
+  let layoutUrl =
+    (window.__DINOU_USE_STATIC__
+      ? "/____rsc_layout_static____"
+      : "/____rsc_layout____") + cleanKey + searchPart;
+
+  if (version) {
+    layoutUrl += (layoutUrl.includes("?") ? "&" : "?") + "v=" + version;
+  }
+
+  const promise = createFromFetch(
+    fetch(layoutUrl).then((res) => {
+      if (!res.ok) {
+        console.warn(
+          `[Dinou Router] Layout ${layoutKey} fetch returned status ${res.status}`
+        );
+      }
+      return res;
+    }),
+    {
+      callServer: async (id, args) => {
+        const proxy = createServerFunctionProxy(id);
+        return proxy(...args);
+      },
+    }
+  );
+
+  promise.catch(() => {});
+  layoutCache.set(cacheKey, promise);
   return promise;
 };
 
 const getErrorRSCPayload = (route, error) => {
   const url = route.split("::")[0];
   const cacheKey = `error::${url}::${error.message || String(error)}`;
-  if (cache.has(cacheKey)) {
-    return cache.get(cacheKey);
+  if (pageCache.has(cacheKey)) {
+    return pageCache.get(cacheKey);
   }
 
   const payloadUrl = "/____rsc_payload_error____" + url;
@@ -125,13 +230,13 @@ const getErrorRSCPayload = (route, error) => {
     }).then((res) => {
       if (res.headers.has("x-rsc-redirect")) {
         const redirectUrl = res.headers.get("x-rsc-redirect");
-        cache.delete(cacheKey);
+        pageCache.delete(cacheKey);
         if (window.__DINOU_ROUTER_NAVIGATE__) {
           window.__DINOU_ROUTER_NAVIGATE__(redirectUrl, { replace: true });
         } else {
           window.location.href = redirectUrl;
         }
-        return new Promise(() => {});
+        return new Promise(() => { });
       }
       return res;
     }),
@@ -142,9 +247,42 @@ const getErrorRSCPayload = (route, error) => {
       }
     }
   );
-  cache.set(cacheKey, promise);
+  pageCache.set(cacheKey, promise);
   return promise;
 };
+
+const fetchSlotRSC = (slotId, options = {}) => {
+  const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
+  const freshQuery = options && options.fresh ? "&fresh=1" : "";
+  const slotUrl = `/____rsc_slot____/${slotId}?t=${Date.now()}${freshQuery}`;
+  return createFromFetch(
+    fetch(slotUrl, {
+      headers: {
+        "x-dinou-current-path": currentPath,
+      },
+    }),
+    {
+      callServer: async (id, args) => {
+        const proxy = createServerFunctionProxy(id);
+        return proxy(...args);
+      },
+    }
+  );
+};
+
+export const refreshSlot = (slotId, options) => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent("dinou:refresh-slot", { detail: { id: slotId, options } })
+    );
+  }
+};
+
+if (typeof globalThis !== "undefined") {
+  globalThis.__DINOU_GET_ERROR_RSC_PAYLOAD__ = getErrorRSCPayload;
+  globalThis.__DINOU_FETCH_SLOT__ = fetchSlotRSC;
+  globalThis.__DINOU_REFRESH_SLOT__ = refreshSlot;
+}
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -163,6 +301,12 @@ class ErrorBoundary extends Component {
     }
   }
 
+  componentDidUpdate(prevProps) {
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false, error: null });
+    }
+  }
+
   render() {
     if (this.state.hasError) {
       if (this.props.fallback) {
@@ -170,22 +314,78 @@ class ErrorBoundary extends Component {
       }
       const isDev = process.env.NODE_ENV !== "production";
       return (
-        <div style={{ padding: "20px", fontFamily: "sans-serif" }}>
-          <h2>Application Error</h2>
-          <p>An unexpected error occurred on the client.</p>
-          <pre style={{ backgroundColor: "#f5f5f5", padding: "15px", borderRadius: "5px", overflowX: "auto" }}>
-            {isDev ? (
-              <>
-                <div style={{ fontWeight: "bold", marginBottom: "10px" }}>
-                  {this.state.error?.name || "Error"}: {this.state.error?.message || String(this.state.error)}
-                </div>
-                <div>{this.state.error?.stack}</div>
-              </>
-            ) : (
-              this.state.error?.message || String(this.state.error)
-            )}
-          </pre>
-        </div>
+        <html lang="en">
+          <head>
+            <meta charSet="UTF-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>"Dinou Dev Error from client.jsx ErrorBoundary"</title>
+          </head>
+          <body
+            style={{
+              margin: 0,
+              backgroundColor: "#fff1f2",
+              padding: "20px",
+              boxSizing: "border-box",
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+                padding: "32px",
+                maxWidth: "960px",
+                margin: "40px auto",
+                backgroundColor: "#fff1f2",
+                border: "1px solid #fecdd3",
+                borderRadius: "12px",
+                color: "#9f1239",
+                boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
+                <span
+                  style={{
+                    background: "#e11d48",
+                    color: "white",
+                    padding: "2px 8px",
+                    borderRadius: "9999px",
+                    fontSize: "12px",
+                    fontWeight: "bold",
+                  }}
+                >
+                  {isDev ? "Dinou Dev Error" : "Application Error"}
+                </span>
+                <h2 style={{ margin: 0, fontSize: "1.25rem", fontWeight: 700, color: "#881337" }}>
+                  {this.state.error?.message || "Unhandled Application Error"}
+                </h2>
+              </div>
+              {isDev && (
+                <p style={{ margin: "0 0 16px 0", fontSize: "0.875rem", color: "#9f1239", lineHeight: 1.5 }}>
+                  An unhandled error occurred during rendering. You can provide a custom error UI by creating an{" "}
+                  <code style={{ background: "#ffe4e6", padding: "2px 6px", borderRadius: "4px", fontWeight: 600 }}>
+                    error.tsx
+                  </code>{" "}
+                  file in your route folder.
+                </p>
+              )}
+              {isDev && this.state.error?.stack && (
+                <pre
+                  style={{
+                    background: "#0f172a",
+                    color: "#f8fafc",
+                    padding: "16px",
+                    borderRadius: "8px",
+                    overflowX: "auto",
+                    fontSize: "0.8125rem",
+                    lineHeight: 1.6,
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                  }}
+                >
+                  {cleanErrorStack(this.state.error.stack)}
+                </pre>
+              )}
+            </div>
+          </body>
+        </html>
       );
     }
     return this.props.children;
@@ -202,10 +402,32 @@ function Router() {
   const [isPopState, setIsPopState] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [version, setVersion] = useState(0);
+  const [layoutVersion, setLayoutVersion] = useState(0);
   const [navError, setNavError] = useState(null);
+  const [navCount, setNavCount] = useState(0);
+
+  // If the initial SSR render had a page-level error wrapped inside a working layout,
+  // we hydrate the layout normally so the navbar/sidebar are fully interactive,
+  // while supplying the server error directly to DinouPageSlot to avoid refetching.
+  const initialPageErrorRef = useRef(
+    typeof window !== "undefined" &&
+    window.__DINOU_ERROR_MESSAGE__ &&
+    window.__DINOU_ERROR_SEGMENT__ === "page"
+      ? (() => {
+          const err = new Error(window.__DINOU_ERROR_MESSAGE__);
+          err.name = window.__DINOU_ERROR_NAME__ || "Error";
+          if (window.__DINOU_ERROR_STACK__) err.stack = window.__DINOU_ERROR_STACK__;
+          return getErrorRSCPayload(getCurrentRoute(), err);
+        })()
+      : null
+  );
 
   // 🧭 NAVIGATE FUNCTION (Core Logic)
   const navigate = (href, options = {}) => {
+    initialPageErrorRef.current = null;
+    if (typeof window !== "undefined" && window.__DINOU_ACTIVE_LAYOUT__) {
+      window.__DINOU_ACTIVE_LAYOUT__ = null;
+    }
     const finalPath = resolveUrl(href, window.location.pathname);
 
     // 🛡️ NAVIGATE PROTECTION: Hash Detection
@@ -227,8 +449,7 @@ function Router() {
     }
 
     if (options.fresh) {
-      // console.log(`[Router] Force refreshing: ${finalPath}`);
-      cache.delete(finalPath);
+      pageCache.delete(finalPath);
     }
 
     // Normal RSC Navigation
@@ -236,7 +457,6 @@ function Router() {
       window.location.pathname + window.location.search,
       window.scrollY,
     );
-    // cache.delete(finalPath);
     if (options.replace) {
       window.history.replaceState(null, "", finalPath);
     } else {
@@ -247,18 +467,52 @@ function Router() {
       setIsPopState(false);
       setRoute(finalPath);
       setNavError(null);
+      setNavCount((c) => c + 1);
     });
   };
+
+  const back = () => window.history.back();
+  const forward = () => window.history.forward();
+  const refresh = useCallback((options = {}) => {
+    const currentPath = window.location.pathname + window.location.search;
+    pageCache.delete(currentPath);
+
+    const shouldRefreshLayout = Boolean(options && options.layout);
+    if (shouldRefreshLayout) {
+      const currentLayoutKey = getLayoutKey(window.location.pathname);
+      if (currentLayoutKey) {
+        for (const k of layoutCache.keys()) {
+          if (k === currentLayoutKey || k.startsWith(currentLayoutKey + "?")) {
+            layoutCache.delete(k);
+          }
+        }
+      }
+    }
+
+    startTransition(() => {
+      setVersion((v) => v + 1);
+      if (shouldRefreshLayout) {
+        setLayoutVersion((v) => v + 1);
+      }
+      setNavError(null);
+      setNavCount((c) => c + 1);
+    });
+  }, [startTransition]);
 
   // 🔌 EFFECT 1: Expose Global Prefetch & Navigation
   useEffect(() => {
     window.__DINOU_PREFETCH__ = (url) => {
       // 🛡️ PREFETCH PROTECTION: If it's a local hash, do nothing
       if (isHashChangeOnly(url)) return;
-      getRSCPayload(url, true);
+      const lKey = getLayoutKey(url);
+      if (lKey && !layoutCache.has(lKey)) {
+        getLayoutPayload(lKey);
+      }
+      getPagePayload(url, true);
     };
 
     window.__DINOU_ROUTER_NAVIGATE__ = navigate;
+    window.__DINOU_ROUTER_REFRESH__ = refresh;
 
     // Hydration
     document.body.setAttribute("data-hydrated", "true");
@@ -267,25 +521,11 @@ function Router() {
       if (window.__DINOU_ROUTER_NAVIGATE__ === navigate) {
         window.__DINOU_ROUTER_NAVIGATE__ = undefined;
       }
+      if (window.__DINOU_ROUTER_REFRESH__ === refresh) {
+        window.__DINOU_ROUTER_REFRESH__ = undefined;
+      }
     };
-  }, [navigate]);
-
-  const back = () => window.history.back();
-  const forward = () => window.history.forward();
-  const refresh = () => {
-    const currentPath = window.location.pathname + window.location.search;
-    // console.log(`[Router] Soft Refreshing: ${currentPath}`);
-
-    // 1. Delete cache to ensure fresh data
-    cache.delete(currentPath);
-
-    // 2. Start transition (to show isPending if you want)
-    startTransition(() => {
-      // 3. Increment version to force re-execution of useMemo
-      setVersion((v) => v + 1);
-      setNavError(null);
-    });
-  };
+  }, [navigate, refresh]);
 
   // 🔌 EFFECT 2: Global Listeners (Click and PopState)
   useEffect(() => {
@@ -325,23 +565,68 @@ function Router() {
     };
 
     const onPopState = () => {
+      initialPageErrorRef.current = null;
+      if (typeof window !== "undefined" && window.__DINOU_ACTIVE_LAYOUT__) {
+        window.__DINOU_ACTIVE_LAYOUT__ = null;
+      }
       const target = getCurrentRoute();
-      // Optional: cache.delete(target); // Uncomment if you want refresh on going back
       startTransition(() => {
         setIsPopState(true);
         setRoute(target);
         setNavError(null);
+        setNavCount((c) => c + 1);
       });
+
+      if (window.location.hash) {
+        requestAnimationFrame(() => {
+          if (!scrollToCurrentHash()) {
+            let frames = 0;
+            const interval = setInterval(() => {
+              frames++;
+              if (scrollToCurrentHash() || frames > 20) {
+                clearInterval(interval);
+              }
+            }, 50);
+          }
+        });
+      } else if (target === route) {
+        requestAnimationFrame(() => {
+          const savedY = scrollCache.get(target);
+          if (savedY !== undefined) {
+            window.scrollTo(0, savedY);
+          } else {
+            window.scrollTo(0, 0);
+          }
+        });
+      }
+    };
+
+    const onHashChange = () => {
+      if (window.location.hash) {
+        requestAnimationFrame(() => {
+          if (!scrollToCurrentHash()) {
+            let frames = 0;
+            const interval = setInterval(() => {
+              frames++;
+              if (scrollToCurrentHash() || frames > 20) {
+                clearInterval(interval);
+              }
+            }, 50);
+          }
+        });
+      }
     };
 
     window.addEventListener("click", onNavigate);
     window.addEventListener("popstate", onPopState);
+    window.addEventListener("hashchange", onHashChange);
 
     return () => {
       window.removeEventListener("click", onNavigate);
       window.removeEventListener("popstate", onPopState);
+      window.removeEventListener("hashchange", onHashChange);
     };
-  }, []);
+  }, [route]);
 
   // 🔌 EFFECT 3: Scroll Management (Restoration)
   useLayoutEffect(() => {
@@ -362,21 +647,47 @@ function Router() {
 
   // 🔌 EFFECT 4: Scroll Management (Hash on new page)
   useEffect(() => {
-    const hash = window.location.hash;
-    if (!hash) return;
+    if (!window.location.hash) return;
+    if (scrollToCurrentHash()) return;
 
-    requestAnimationFrame(() => {
-      const id = hash.replace("#", "");
-      const element = document.getElementById(id);
-      if (element) {
-        element.scrollIntoView({ behavior: "auto" });
+    let frames = 0;
+    const interval = setInterval(() => {
+      frames++;
+      if (scrollToCurrentHash() || frames > 20) {
+        clearInterval(interval);
       }
-    });
+    }, 50);
+
+    return () => clearInterval(interval);
   }, [route]);
 
-  // RSC Logic
-  const rscKey = route + "::" + version;
-  const content = navError ? getErrorRSCPayload(route, navError) : getRSCPayload(rscKey);
+  // RSC Segmented Navigation Logic
+  const cleanRoutePath = route.split("?")[0].split("#")[0];
+  const searchPart = route.includes("?") ? "?" + route.split("?")[1].split("#")[0] : "";
+  const layoutKey = useMemo(() => {
+    if (
+      typeof window !== "undefined" &&
+      window.__DINOU_ACTIVE_LAYOUT__ &&
+      route === getCurrentRoute()
+    ) {
+      return window.__DINOU_ACTIVE_LAYOUT__;
+    }
+    return getLayoutKey(cleanRoutePath);
+  }, [cleanRoutePath, route]);
+
+  const pagePromise = useMemo(() => {
+    if (initialPageErrorRef.current && route === getCurrentRoute()) {
+      return initialPageErrorRef.current;
+    }
+    if (navError) return getErrorRSCPayload(route, navError);
+    return getPagePayload(route + (version ? `?v=${version}` : ""));
+  }, [route, version, navError]);
+
+  const layoutPromise = useMemo(() => {
+    return layoutKey !== null
+      ? getLayoutPayload(layoutKey, searchPart, layoutVersion)
+      : null;
+  }, [layoutKey, searchPart, layoutVersion]);
 
   const contextValue = useMemo(
     () => ({
@@ -387,22 +698,81 @@ function Router() {
       refresh,
       isPending,
     }),
-    [route, isPending],
+    [route, isPending, refresh],
+  );
+
+  const slotContextValue = useMemo(
+    () => ({
+      pagePromise,
+      resetKey: `${route}::${navCount}`,
+    }),
+    [pagePromise, route, navCount]
   );
 
   return (
     <RouterContext.Provider value={contextValue}>
       <ErrorBoundary
-        key={navError ? "error" : "normal"}
+        resetKey={`${route}::${navCount}`}
         onError={setNavError}
       >
-        {use(content)}
+        <DinouPageContext.Provider value={slotContextValue}>
+          {navError
+            ? use(pagePromise)
+            : layoutPromise
+              ? use(layoutPromise)
+              : use(pagePromise)}
+        </DinouPageContext.Provider>
       </ErrorBoundary>
     </RouterContext.Provider>
   );
 }
 
-hydrateRoot(document, <Router />);
+const routerElement = createElement(Router);
+const isDev = process.env.NODE_ENV !== "production";
+const useStrictMode = isDev && (typeof window === "undefined" || window.__DINOU_STRICT_MODE__ !== false);
+
+const app = useStrictMode
+  ? createElement(StrictMode, null, routerElement)
+  : routerElement;
+
+const onRecoverableError = (error) => {
+  // 🛡️ Filter benign ViewTransition aborts when document is hidden (e.g. background tab or HMR while in IDE)
+  if (
+    error?.name === "InvalidStateError" &&
+    (error?.message?.includes("Document hidden") || (typeof document !== "undefined" && document.hidden))
+  ) {
+    return;
+  }
+  if (error?.name === "AbortError" && error?.message?.includes("transition")) {
+    return;
+  }
+
+  if (typeof reportError === "function") {
+    reportError(error);
+  } else {
+    console.error(error);
+  }
+};
+
+// If the server rendered a fatal layout error during SSR (meaning there is no layout DOM to hydrate),
+// do NOT attempt to hydrate the application over it.
+const hasInitialServerError =
+  typeof window !== "undefined" && Boolean(window.__DINOU_ERROR_MESSAGE__);
+const isLayoutError =
+  hasInitialServerError && window.__DINOU_ERROR_SEGMENT__ !== "page";
+
+if (!isLayoutError) {
+  hydrateRoot(document, app, { onRecoverableError });
+} else {
+  console.warn(
+    "[Dinou] Initial layout server error detected:",
+    window.__DINOU_ERROR_MESSAGE__,
+    "- skipping client hydration to preserve the server-rendered error screen."
+  );
+  if (typeof document !== "undefined" && document.body) {
+    document.body.setAttribute("data-hydrated", "true");
+  }
+}
 
 if (import.meta.hot) {
   import.meta.hot.accept();

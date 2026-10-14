@@ -21,6 +21,9 @@ export function createServerFunctionProxy(id) {
       const headers = {
         "x-server-function-call": "1",
       };
+      if (typeof window !== "undefined" && window.location) {
+        headers["x-dinou-current-path"] = window.location.pathname;
+      }
 
       const formDataIndex = args.findIndex((arg) => arg instanceof FormData);
 

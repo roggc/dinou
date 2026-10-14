@@ -17,11 +17,15 @@ function dinouAssetPlugin({ include = regex } = {}) {
 
       const fileName = `assets/${scoped}${ext}`;
 
-      this.emitFile({
-        type: "asset",
-        fileName,
-        source,
-      });
+      const emitted = globalThis.__DINOU_EMITTED_ASSETS__ || (globalThis.__DINOU_EMITTED_ASSETS__ = new Set());
+      if (!emitted.has(fileName)) {
+        emitted.add(fileName);
+        this.emitFile({
+          type: "asset",
+          fileName,
+          source,
+        });
+      }
 
       return `export default '/assets/${scoped}${ext}';`;
     },

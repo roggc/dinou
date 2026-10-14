@@ -1,5 +1,7 @@
 import { ClientRedirect } from "./client-redirect.jsx";
 
+const DINOU_CONTEXT_KEY = Symbol.for("dinou.request.context.storage");
+
 /**
  * Universal redirection function.
  * Use it with 'return': return redirect('/login');
@@ -7,26 +9,23 @@ import { ClientRedirect } from "./client-redirect.jsx";
 export function redirect(destination) {
   // 1. We try to get the server context
   if (typeof window === "undefined") {
-    // getContext() must be accessible here
-    const dynamicRequire =
-      typeof __dinou_require__ !== "undefined"
-        ? __dinou_require__
-        : typeof module !== "undefined" && typeof module.require === "function"
-          ? module.require.bind(module)
-          : null;
-    if (dynamicRequire) {
-      const { getContext } = dynamicRequire(
-        /* webpackIgnore: true */ "./request-context.js"
-      );
-      const ctx = getContext();
-
-      // 2. If we are on the server and headers have NOT been sent yet...
-      // We can do a real HTTP redirect (Status 307).
-      // This is better for SEO and speed in Hard Navigation.
-      if (ctx && ctx.res) {
-        ctx.res.redirect(destination);
-        return <ClientRedirect to={destination} />;
+    let ctx;
+    try {
+      const storage = globalThis[DINOU_CONTEXT_KEY];
+      if (storage && typeof storage.getStore === "function") {
+        ctx = storage.getStore();
       }
+      if (!ctx && typeof globalThis !== "undefined") {
+        ctx = globalThis[Symbol.for("dinou.request.context.current")];
+      }
+    } catch (e) { }
+
+    // 2. If we are on the server and headers have NOT been sent yet...
+    // We can do a real HTTP redirect (Status 307 or x-rsc-redirect).
+    // This is better for SEO and speed in Hard Navigation.
+    if (ctx && ctx.res && typeof ctx.res.redirect === "function") {
+      ctx.res.redirect(destination);
+      return <ClientRedirect to={destination} />;
     }
   }
 
@@ -34,3 +33,5 @@ export function redirect(destination) {
   // We return the component that will force the redirection in the browser.
   return <ClientRedirect to={destination} />;
 }
+
+export default redirect;
