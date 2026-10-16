@@ -10,6 +10,8 @@ async function resolveModulePpr(mod) {
       ? mod.ppr
       : mod.default?.ppr !== undefined
       ? mod.default.ppr
+      : mod.default?.default?.ppr !== undefined
+      ? mod.default.default.ppr
       : undefined;
 
   if (raw === undefined || raw === null) return null;

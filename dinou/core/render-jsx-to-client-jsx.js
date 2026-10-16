@@ -17,119 +17,6 @@ function isClientComponent(type) {
   );
 }
 
-function renderJSXToClientJSX(jsx, key = null) {
-  if (
-    typeof jsx === "string" ||
-    typeof jsx === "number" ||
-    typeof jsx === "boolean" ||
-    typeof jsx === "function" ||
-    typeof jsx === "undefined" ||
-    jsx == null
-  ) {
-    return jsx;
-  } else if (Array.isArray(jsx)) {
-    return jsx.map((child) =>
-      renderJSXToClientJSX(
-        child,
-        child?.key ?? null
-      )
-    );
-  } else if (typeof jsx === "symbol") {
-    if (jsx === Symbol.for("react.fragment")) {
-      // Handle Fragment as an empty props object
-      return {
-        $$typeof: Symbol.for("react.transitional.element"),
-        type: Symbol.for("react.fragment"),
-        props: {},
-        key: key,
-      };
-    }
-    console.error("Unsupported symbol:", String(jsx));
-    throw new Error(`Unsupported symbol: ${String(jsx)}`);
-  } else if (typeof jsx === "object") {
-    if (jsx.$$typeof === Symbol.for("react.transitional.element")) {
-      if (
-        jsx.type === Symbol.for("react.fragment") ||
-        jsx.type === Symbol.for("react.suspense") ||
-        jsx.type === Symbol.for("react.view_transition") ||
-        typeof jsx.type === "string"
-      ) {
-        return {
-          ...jsx,
-          props: renderJSXToClientJSX(jsx.props),
-          key: key ?? jsx.key,
-        };
-      } else if (typeof jsx.type === "function") {
-        const Component = jsx.type;
-        const props = jsx.props;
-        if (isClientComponent(Component)) {
-          return {
-            ...jsx,
-            $$typeof: Symbol.for("react.transitional.element"),
-            type: Component,
-            props: renderJSXToClientJSX(props),
-            key: key ?? jsx.key,
-          };
-        } else {
-          // Server component: execute and process
-          const returnedJsx = Component(props);
-          return renderJSXToClientJSX(returnedJsx, key ?? jsx.key);
-        }
-      } else if (
-        typeof jsx.type === "object" &&
-        jsx.type !== null &&
-        jsx.type.$$typeof === Symbol.for("react.forward_ref")
-      ) {
-        if (isClientComponent(jsx.type)) {
-          return {
-            ...jsx,
-            $$typeof: Symbol.for("react.transitional.element"),
-            type: jsx.type,
-            props: renderJSXToClientJSX(jsx.props),
-            key: key ?? jsx.key,
-          };
-        } else {
-          const returnedJsx = jsx.type.render(jsx.props, jsx.ref);
-          return renderJSXToClientJSX(returnedJsx, key ?? jsx.key);
-        }
-      } else if (
-        typeof jsx.type === "object" &&
-        jsx.type !== null &&
-        jsx.type.$$typeof === Symbol.for("react.memo")
-      ) {
-        if (isClientComponent(jsx.type)) {
-          return {
-            ...jsx,
-            $$typeof: Symbol.for("react.transitional.element"),
-            type: jsx.type,
-            props: renderJSXToClientJSX(jsx.props),
-            key: key ?? jsx.key,
-          };
-        } else {
-          const innerComp = jsx.type.type;
-          const returnedJsx = typeof innerComp === "function" ? innerComp(jsx.props) : null;
-          return renderJSXToClientJSX(returnedJsx, key ?? jsx.key);
-        }
-      } else {
-        console.error("Unsupported JSX type:", jsx.type);
-        throw new Error("Unsupported JSX type");
-      }
-    } else if (jsx instanceof Promise) {
-      return jsx;
-    } else {
-      // Process object props (e.g., { className: "foo" })
-      return Object.fromEntries(
-        Object.entries(jsx).map(([propName, value]) => [
-          propName,
-          renderJSXToClientJSX(value),
-        ])
-      );
-    }
-  } else {
-    throw new Error("Not implemented");
-  }
-}
-
 async function asyncRenderJSXToClientJSX(jsx, key = null) {
   if (
     typeof jsx === "string" ||
@@ -290,6 +177,5 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
 }
 
 module.exports = {
-  renderJSXToClientJSX,
   asyncRenderJSXToClientJSX,
 };

@@ -153,6 +153,46 @@ function parsePprConfigWithBabel(code) {
           }
         }
       },
+      ExportDefaultDeclaration(p) {
+        function checkObject(objNode) {
+          if (!objNode || objNode.type !== "ObjectExpression") return;
+          for (const prop of objNode.properties || []) {
+            const key = prop.key?.name || prop.key?.value;
+            if (key === "ppr") {
+              const val = prop.value;
+              if (val?.type === "BooleanLiteral") pprValue = val.value;
+              else if (val?.type === "StringLiteral") pprValue = val.value !== "false";
+              else if (val?.type === "Identifier") pprValue = val.name === "true";
+              else if (val?.type === "ArrowFunctionExpression" || val?.type === "FunctionExpression") {
+                if (val.body?.type === "BooleanLiteral") pprValue = val.body.value;
+                else if (val.body?.type === "BlockStatement") {
+                  for (const s of val.body.body || []) {
+                    if (s.type === "ReturnStatement" && s.argument) {
+                      if (s.argument.type === "BooleanLiteral") pprValue = s.argument.value;
+                      else if (s.argument.type === "StringLiteral") pprValue = s.argument.value !== "false";
+                      else if (s.argument.type === "Identifier") pprValue = s.argument.name === "true";
+                    }
+                  }
+                }
+                if (pprValue === null) pprValue = true;
+              } else {
+                pprValue = true;
+              }
+            }
+          }
+        }
+
+        const decl = p.node.declaration;
+        if (!decl) return;
+        if (decl.type === "ObjectExpression") {
+          checkObject(decl);
+        } else if (decl.type === "Identifier") {
+          const binding = p.scope?.getBinding(decl.name);
+          if (binding && binding.path?.node?.init?.type === "ObjectExpression") {
+            checkObject(binding.path.node.init);
+          }
+        }
+      },
     });
 
     return pprValue;
@@ -171,6 +211,11 @@ function parsePprConfigWithBabel(code) {
     if (matchArrow) {
       const val = matchArrow[1] || matchArrow[2];
       return val === "true";
+    }
+    const matchProp = code.match(/\bppr\s*:\s*(true|false|"[^"]*"|'[^']*')/);
+    if (matchProp) {
+      const val = matchProp[1].trim();
+      return val !== "false" && val !== '"false"' && val !== "'false'";
     }
     return null;
   }
@@ -229,7 +274,7 @@ function parsePprConfig(code) {
           }
         }
       }
-      return null;
+      // If SWC didn't find named ppr, fall through to Babel for default export & scope analysis
     } catch (e) {
       // Fallback to Babel
     }

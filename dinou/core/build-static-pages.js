@@ -168,8 +168,8 @@ async function buildStaticPages(onProgress = null) {
           let revalidate, getStaticPaths;
           if (pageFunctionsPath) {
             const module = await importModule(pageFunctionsPath);
-            getStaticPaths = module.getStaticPaths;
-            revalidate = module.revalidate;
+            getStaticPaths = module.getStaticPaths || module.default?.getStaticPaths;
+            revalidate = module.revalidate || module.default?.revalidate;
           }
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
@@ -313,8 +313,8 @@ async function buildStaticPages(onProgress = null) {
           let revalidate, getStaticPaths;
           if (pageFunctionsPath) {
             const module = await importModule(pageFunctionsPath);
-            getStaticPaths = module.getStaticPaths;
-            revalidate = module.revalidate;
+            getStaticPaths = module.getStaticPaths || module.default?.getStaticPaths;
+            revalidate = module.revalidate || module.default?.revalidate;
           }
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
@@ -421,8 +421,8 @@ async function buildStaticPages(onProgress = null) {
           let revalidate, getStaticPaths;
           if (pageFunctionsPath) {
             const module = await importModule(pageFunctionsPath);
-            getStaticPaths = module.getStaticPaths;
-            revalidate = module.revalidate;
+            getStaticPaths = module.getStaticPaths || module.default?.getStaticPaths;
+            revalidate = module.revalidate || module.default?.revalidate;
           }
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
@@ -548,8 +548,9 @@ async function buildStaticPages(onProgress = null) {
           let revalidate;
           if (pageFunctionsPath) {
             const module = await importModule(pageFunctionsPath);
-            getStaticPaths = module.getStaticPaths;
-            revalidate = module.revalidate;
+            const defMod = module.default?.default ? module.default.default : module.default;
+            getStaticPaths = module.getStaticPaths || defMod?.getStaticPaths;
+            revalidate = module.revalidate || defMod?.revalidate;
           }
           const { getLayoutFunctionsPath } = require("./layout-functions");
           const lfPath = getLayoutFunctionsPath(dynamicPath);
@@ -675,8 +676,9 @@ async function buildStaticPages(onProgress = null) {
             let getStaticPaths;
             if (pageFunctionsPath) {
               const module = await importModule(pageFunctionsPath);
-              getStaticPaths = module.getStaticPaths;
-              revalidate = module.revalidate;
+              const defMod = module.default?.default ? module.default.default : module.default;
+              getStaticPaths = module.getStaticPaths || defMod?.getStaticPaths;
+              revalidate = module.revalidate || defMod?.revalidate;
             }
             const isLocalPage =
               pagePath && path.dirname(pagePath) === dynamicPath;
@@ -786,7 +788,7 @@ async function buildStaticPages(onProgress = null) {
     if (pageFunctionsPath) {
       try {
         const module = await importModule(pageFunctionsPath);
-        revalidate = module.revalidate;
+        revalidate = module.revalidate || module.default?.revalidate;
       } catch (e) {}
     }
 
@@ -950,9 +952,10 @@ async function buildStaticPages(onProgress = null) {
 
         if (pageFunctionsPath) {
           const pageFunctionsModule = await importModule(pageFunctionsPath);
-          const getProps = pageFunctionsModule.getProps;
-          revalidate = pageFunctionsModule.revalidate;
-          const rawTags = pageFunctionsModule.getCacheTags ?? pageFunctionsModule.default?.getCacheTags;
+          const defMod = pageFunctionsModule.default?.default ? pageFunctionsModule.default.default : pageFunctionsModule.default;
+          const getProps = pageFunctionsModule.getProps || defMod?.getProps;
+          revalidate = pageFunctionsModule.revalidate || defMod?.revalidate;
+          const rawTags = pageFunctionsModule.getCacheTags ?? defMod?.getCacheTags;
           if (typeof rawTags === "function") {
             try {
               cacheTags = await rawTags(params);
@@ -1311,11 +1314,12 @@ async function buildStaticPage(reqPath, isDynamic = null) {
       let pageFunctionsProps;
       if (pageFunctionsPath) {
         const pageFunctionsModule = await importModule(pageFunctionsPath);
-        const getProps = pageFunctionsModule.getProps;
-        revalidate = pageFunctionsModule.revalidate;
+        const defMod = pageFunctionsModule.default?.default ? pageFunctionsModule.default.default : pageFunctionsModule.default;
+        const getProps = pageFunctionsModule.getProps || defMod?.getProps;
+        revalidate = pageFunctionsModule.revalidate || defMod?.revalidate;
         if (isDynamic && (isDynamic.value = await isDynamicRoute(revalidate)))
           return;
-        const rawTags = pageFunctionsModule.getCacheTags ?? pageFunctionsModule.default?.getCacheTags;
+        const rawTags = pageFunctionsModule.getCacheTags ?? defMod?.getCacheTags;
         if (typeof rawTags === "function") {
           try {
             cacheTags = await rawTags(dParams);
@@ -1509,5 +1513,6 @@ module.exports = {
   getStaticPaths,
   getStaticMetadata,
   getStaticLayouts,
+  isDynamicRoute,
 };
 
