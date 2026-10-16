@@ -128,7 +128,8 @@ async function getJSX(
         );
         if (pageFunctionsPath) {
           const pageFunctionsModule = await importModule(pageFunctionsPath);
-          const getProps = pageFunctionsModule.getProps;
+          const defaultExport = pageFunctionsModule.default?.default ? pageFunctionsModule.default.default : pageFunctionsModule.default;
+          const getProps = pageFunctionsModule.getProps || defaultExport?.getProps;
           pageFunctionsProps = await getProps?.(dParams ?? {});
           props = { ...props, ...(pageFunctionsProps ?? {}) };
         }
@@ -164,7 +165,8 @@ async function getJSX(
       );
       if (pageFunctionsPath) {
         const pageFunctionsModule = await importModule(pageFunctionsPath);
-        const getProps = pageFunctionsModule.getProps;
+        const defaultExport = pageFunctionsModule.default?.default ? pageFunctionsModule.default.default : pageFunctionsModule.default;
+        const getProps = pageFunctionsModule.getProps || defaultExport?.getProps;
         pageFunctionsProps = await getProps?.(dynamicParams);
         props = { ...props, ...(pageFunctionsProps ?? {}) };
       }

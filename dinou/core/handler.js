@@ -226,18 +226,20 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
       const isPpr = await resolvePprForRoute(pagePath, pageFunctionsModule, reqSegments, queryObj);
 
       if (pageFunctionsModule) {
+        const defaultExport = pageFunctionsModule.default?.default ? pageFunctionsModule.default.default : pageFunctionsModule.default;
         const resolvedAllowISG =
           typeof pageFunctionsModule.allowISG === "function"
             ? await pageFunctionsModule.allowISG()
-            : typeof pageFunctionsModule.default?.allowISG === "function"
-            ? await pageFunctionsModule.default.allowISG()
-            : (pageFunctionsModule.allowISG ?? pageFunctionsModule.default?.allowISG ?? true);
+            : typeof defaultExport?.allowISG === "function"
+            ? await defaultExport.allowISG()
+            : (pageFunctionsModule.allowISG ?? defaultExport?.allowISG ?? true);
 
+        const getStaticPathsFn = pageFunctionsModule.getStaticPaths || defaultExport?.getStaticPaths;
         let staticPathsSet = null;
-        if (pageFunctionsModule.getStaticPaths) {
-          const paths = await (typeof pageFunctionsModule.getStaticPaths === "function"
-            ? pageFunctionsModule.getStaticPaths()
-            : pageFunctionsModule.getStaticPaths);
+        if (getStaticPathsFn) {
+          const paths = await (typeof getStaticPathsFn === "function"
+            ? getStaticPathsFn()
+            : getStaticPathsFn);
           if (Array.isArray(paths)) {
             staticPathsSet = new Set(
               paths.map((pathObj) => {
@@ -253,12 +255,15 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
           }
         }
 
-        let revalidateVal = typeof pageFunctionsModule.revalidate === "function"
-          ? await pageFunctionsModule.revalidate()
-          : pageFunctionsModule.revalidate;
+        let revalidateVal =
+          typeof pageFunctionsModule.revalidate === "function"
+            ? await pageFunctionsModule.revalidate()
+            : typeof defaultExport?.revalidate === "function"
+            ? await defaultExport.revalidate()
+            : (pageFunctionsModule.revalidate ?? defaultExport?.revalidate);
 
         const isDynamic = typeof revalidateVal === "number" && revalidateVal < 1;
-        const rawTags = pageFunctionsModule.getCacheTags ?? pageFunctionsModule.default?.getCacheTags;
+        const rawTags = pageFunctionsModule.getCacheTags ?? defaultExport?.getCacheTags;
         let tagsVal = [];
         if (typeof rawTags === "function") {
           try {
@@ -273,7 +278,7 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
         cachedConfig = {
           allowISG: resolvedAllowISG,
           staticPathsSet,
-          validateParams: pageFunctionsModule.validateParams || null,
+          validateParams: pageFunctionsModule.validateParams || defaultExport?.validateParams || null,
           isDynamic,
           revalidate: revalidateVal,
           tags: tagsVal,
@@ -344,6 +349,7 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
     revalidate: cachedConfig?.revalidate,
     tags: cachedConfig?.tags || [],
     ppr: Boolean(cachedConfig?.ppr),
+    staticPathsSet: cachedConfig?.staticPathsSet || null,
   };
 }
 
@@ -2291,6 +2297,7 @@ async function handleRequest(request, platformContext = {}) {
 module.exports = {
   handleRequest,
   WebResponseBridge,
+  resolvePageFunctionsConfig,
 };
 module.exports.default = handleRequest;
 

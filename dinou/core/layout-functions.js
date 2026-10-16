@@ -51,9 +51,10 @@ async function getLayoutProps(layoutPath, dParams = {}) {
 
   try {
     const mod = await importModule(layoutFunctionsPath);
+    const defaultExport = mod.default?.default ? mod.default.default : mod.default;
     const getPropsFn =
       mod.getProps ||
-      mod.default?.getProps ||
+      defaultExport?.getProps ||
       (typeof mod.default === "function" ? mod.default : null);
     if (typeof getPropsFn === "function") {
       const res = await getPropsFn(dParams);
@@ -106,14 +107,15 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
         }
       }
     }
+    const defaultExport = mod.default?.default ? mod.default.default : mod.default;
     const resolvedAllowISG =
       typeof mod.allowISG === "function"
         ? await mod.allowISG()
-        : typeof mod.default?.allowISG === "function"
-        ? await mod.default.allowISG()
-        : (mod.allowISG ?? mod.default?.allowISG ?? true);
+        : typeof defaultExport?.allowISG === "function"
+        ? await defaultExport.allowISG()
+        : (mod.allowISG ?? defaultExport?.allowISG ?? true);
 
-    const getStaticPathsFn = mod.getStaticPaths || mod.default?.getStaticPaths;
+    const getStaticPathsFn = mod.getStaticPaths || defaultExport?.getStaticPaths;
     let staticPathsSet = null;
     if (getStaticPathsFn) {
       const paths = await (typeof getStaticPathsFn === "function" ? getStaticPathsFn() : getStaticPathsFn);
@@ -133,13 +135,13 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
     const revalidateVal =
       typeof mod.revalidate === "function"
         ? await mod.revalidate()
-        : typeof mod.default?.revalidate === "function"
-        ? await mod.default.revalidate()
-        : (mod.revalidate ?? mod.default?.revalidate);
+        : typeof defaultExport?.revalidate === "function"
+        ? await defaultExport.revalidate()
+        : (mod.revalidate ?? defaultExport?.revalidate);
 
     const isDynamic = typeof revalidateVal === "number" && revalidateVal < 1;
 
-    const rawTags = mod.getCacheTags ?? mod.default?.getCacheTags;
+    const rawTags = mod.getCacheTags ?? defaultExport?.getCacheTags;
     let tagsVal = [];
     if (typeof rawTags === "function") {
       try {
@@ -151,10 +153,10 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
       tagsVal = rawTags;
     }
 
-    const validateParamsFn = mod.validateParams || mod.default?.validateParams;
+    const validateParamsFn = mod.validateParams || defaultExport?.validateParams;
     const getPropsFn =
       mod.getProps ||
-      mod.default?.getProps ||
+      defaultExport?.getProps ||
       (typeof mod.default === "function" ? mod.default : null);
 
     return {

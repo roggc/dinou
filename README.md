@@ -152,60 +152,60 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [6.2. Governance APIs (validateParams & allowISG)](#62-governance-apis-validateparams--allowisg)
   - [7. Complete Rendering Strategies Matrix](#7-complete-rendering-strategies-matrix)
 - [Server Functions ("use server")](#server-functions-use-server)
-  - [Overview & "use server" Directive](#overview-use-server-directive)
+  - [Overview & "use server" Directive](#overview--use-server-directive)
   - [1. Returning Live React Components (UI Streaming)](#1-returning-live-react-components-ui-streaming)
-  - [2. Server Actions & Form Mutations](#2-server-actions-form-mutations)
+  - [2. Server Actions & Form Mutations](#2-server-actions--form-mutations)
     - [2.1. Server Actions in Forms](#21-server-actions-in-forms)
-    - [2.2. React 19 Hooks: useActionState & useFormStatus](#22-react-19-hooks-useactionstate-useformstatus)
+    - [2.2. React 19 Hooks: useActionState & useFormStatus](#22-react-19-hooks-useactionstate--useformstatus)
     - [2.3. Optimistic Updates with useOptimistic](#23-optimistic-updates-with-useoptimistic)
-  - [3. Request Context, Cookies & Headers (getContext)](#3-request-context-cookies-headers-getcontext)
-    - [3.1. Reading Query, Headers & Cookies](#31-reading-query-headers-cookies)
-    - [3.2. Setting & Clearing Cookies](#32-setting-clearing-cookies)
+  - [3. Request Context, Cookies & Headers (getContext)](#3-request-context-cookies--headers-getcontext)
+    - [3.1. Reading Query, Headers & Cookies](#31-reading-query-headers--cookies)
+    - [3.2. Setting & Clearing Cookies](#32-setting--clearing-cookies)
   - [4. Redirections (redirect)](#4-redirections-redirect)
     - [4.1. The 4 Execution Contexts (HTTP 302 vs. Client Transition)](#41-the-4-execution-contexts-http-302-vs-client-transition)
     - [4.2. Universal Redirection Matrix](#42-universal-redirection-matrix)
 - [On-Demand Revalidation](#on-demand-revalidation)
-  - [Overview & Multi-Tier Architecture](#overview-multi-tier-architecture)
+  - [Overview & Multi-Tier Architecture](#overview--multi-tier-architecture)
   - [1. revalidatePage (Surgical Page Invalidation)](#1-revalidatepage-surgical-page-invalidation)
     - [1.1. Usage in Server Functions](#11-usage-in-server-functions)
-  - [2. revalidatePath (Route & Segment Purge)](#2-revalidatepath-route-segment-purge)
-    - [2.1. Cascading Revalidation ({ cascade: true })](#21-cascading-revalidation-cascade-true)
-  - [3. Granularity & Path Resolution (Page vs Segment)](#3-granularity-path-resolution-page-vs-segment)
+  - [2. revalidatePath (Route & Segment Purge)](#2-revalidatepath-route--segment-purge)
+    - [2.1. Cascading Revalidation ({ cascade: true })](#21-cascading-revalidation--cascade-true)
+  - [3. Granularity & Path Resolution (Page vs Segment)](#3-granularity--path-resolution-page-vs-segment)
     - [3.1. revalidatePage vs revalidatePath](#31-revalidatepage-vs-revalidatepath)
-    - [3.2. Absolute & Relative Route Paths](#32-absolute-relative-route-paths)
+    - [3.2. Absolute & Relative Route Paths](#32-absolute--relative-route-paths)
   - [4. revalidateTag (Cross-Cutting Invalidation)](#4-revalidatetag-cross-cutting-invalidation)
     - [4.1. Tag Assignment (getCacheTags)](#41-tag-assignment-getcachetags)
     - [4.2. Targeted Resolution (Layout vs Page vs Slot)](#42-targeted-resolution-layout-vs-page-vs-slot)
     - [4.3. Golden Rules of Invalidation](#43-golden-rules-of-invalidation)
     - [4.4. Invalidating <DinouCacheSlot> Subtrees](#44-invalidating-dinoucacheslot-subtrees)
-  - [5. Client-Side Surgical Revalidation & Router Caching](#5-client-side-surgical-revalidation-router-caching)
-    - [5.1. The Router Caches (pageCache & layoutCache)](#51-the-router-caches-pagecache-layoutcache)
+  - [5. Client-Side Surgical Revalidation & Router Caching](#5-client-side-surgical-revalidation--router-caching)
+    - [5.1. The Router Caches (pageCache & layoutCache)](#51-the-router-caches-pagecache--layoutcache)
     - [5.2. Bypassing Client Cache with <Link fresh>](#52-bypassing-client-cache-with-link-fresh)
-    - [5.3. router.refresh() & Layout Invalidation](#53-routerrefresh-layout-invalidation)
-    - [5.4. refreshSlot & router.refreshSlot](#54-refreshslot-routerrefreshslot)
+    - [5.3. router.refresh() & Layout Invalidation](#53-routerrefresh--layout-invalidation)
+    - [5.4. refreshSlot & router.refreshSlot](#54-refreshslot--routerrefreshslot)
   - [6. Pluggable Storage Adapters](#6-pluggable-storage-adapters)
     - [6.1. Why Adapters Matter for Revalidation](#61-why-adapters-matter-for-revalidation)
-    - [6.2. Supported Storage Adapters & Configuration](#62-supported-storage-adapters-configuration)
+    - [6.2. Supported Storage Adapters & Configuration](#62-supported-storage-adapters--configuration)
   - [7. Webhook Integrations (Headless CMS)](#7-webhook-integrations-headless-cms)
   - [8. Strategy Comparison Matrix](#8-strategy-comparison-matrix)
     - [8.1. Server-Side Invalidation Mechanisms](#81-server-side-invalidation-mechanisms)
     - [8.2. Client-Side Router Refresh Mechanisms](#82-client-side-router-refresh-mechanisms)
 - [Data Fetching: The 13 Strategies](#data-fetching-the-13-strategies)
   - [Overview: The 13-Strategy Architecture](#overview-the-13-strategy-architecture)
-  - [Data Fetching & Rendering Strategies Matrix](#data-fetching-rendering-strategies-matrix)
+  - [Data Fetching & Rendering Strategies Matrix](#data-fetching--rendering-strategies-matrix)
   - [1. RSC Direct await (SSG)](#1-rsc-direct-await-ssg)
   - [2. RSC Direct await (Dynamic SSR)](#2-rsc-direct-await-dynamic-ssr)
   - [3. RSC with <Suspense> (SSG)](#3-rsc-with-suspense-ssg)
   - [4. RSC with <Suspense> (Dynamic Streaming SSR)](#4-rsc-with-suspense-dynamic-streaming-ssr)
-  - [5. RSC + <Suspense> + <DinouCacheSlot> (Static SSG / Asymmetric ISR)](#5-rsc-suspense-dinoucacheslot-static-ssg-asymmetric-isr)
-  - [6. RSC + <Suspense> + <DinouCacheSlot> (Dynamic Micro-ISR)](#6-rsc-suspense-dinoucacheslot-dynamic-micro-isr)
+  - [5. RSC + <Suspense> + <DinouCacheSlot> (Static SSG / Asymmetric ISR)](#5-rsc--suspense--dinoucacheslot-static-ssg--asymmetric-isr)
+  - [6. RSC + <Suspense> + <DinouCacheSlot> (Dynamic Micro-ISR)](#6-rsc--suspense--dinoucacheslot-dynamic-micro-isr)
   - [7. RSC with <Suspense> (PPR Hybrid)](#7-rsc-with-suspense-ppr-hybrid)
-  - [8. PPR + <DinouCacheSlot> (Peak Performance Synergy)](#8-ppr-dinoucacheslot-peak-performance-synergy)
-  - [9. RSC Promise ➔ Client use() (React 19)](#9-rsc-promise-client-use-react-19)
+  - [8. PPR + <DinouCacheSlot> (Peak Performance Synergy)](#8-ppr--dinoucacheslot-peak-performance-synergy)
+  - [9. RSC Promise ➔ Client use() (React 19)](#9-rsc-promise--client-use-react-19)
   - [10. Client-First getProps (SSG)](#10-client-first-getprops-ssg)
   - [11. Client-First getProps (Dynamic SSR)](#11-client-first-getprops-dynamic-ssr)
   - [12. Client Calling Server Function (Initial Mount - Dynamic RPC)](#12-client-calling-server-function-initial-mount---dynamic-rpc)
-  - [13. Client Server Functions (User Actions & Mutations)](#13-client-server-functions-user-actions-mutations)
+  - [13. Client Server Functions (User Actions & Mutations)](#13-client-server-functions-user-actions--mutations)
   - [Architectural Decision Guide](#architectural-decision-guide)
 - [The Dinou Pattern](#the-dinou-pattern)
   - [The Concept & Architecture](#the-concept--architecture)
@@ -339,89 +339,68 @@ The ejectable React 19 framework built on web standards. Build full-stack applic
     - [2. Extending the Bundler Pipeline](#2-extending-the-bundler-pipeline)
   - [Best Practices for Ejected Projects](#best-practices-for-ejected-projects)
 - [Complete API Reference](#complete-api-reference)
-  - [1. Components (dinou)](#components)
+  - [1. Components (dinou)](#1-components-dinou)
     - [`<Link>`](#link)
     - [`<ClientRedirect>`](#clientredirect)
-  - [2. Hooks & Navigation (dinou)](#hooks-navigation)
+  - [2. Hooks & Navigation (dinou)](#2-hooks--navigation-dinou)
     - [redirect()](#redirect)
     - [useSearchParams()](#usesearchparams)
-      - [in Server Components](#usesearchparams-server)
-      - [in Client Components](#usesearchparams-client)
     - [usePathname()](#usepathname)
-      - [in Server Components](#usepathname-server)
-      - [in Client Components](#usepathname-client)
     - [useRouter()](#userouter)
-      - [Methods Reference](#userouter-methods)
-      - [Client Cache & Options](#userouter-caching)
-      - [Production Patterns](#userouter-examples)
     - [refreshSlot()](#refreshslot)
-      - [Parameters & Wildcard](#refreshslot-parameters)
-      - [Targeted Revalidation](#refreshslot-architecture)
-      - [Production Patterns](#refreshslot-examples)
     - [useNavigationLoading()](#usenavigationloading)
-      - [Trigger Events & SSR](#usenavigationloading-behavior)
-      - [Non-Blocking Transitions](#usenavigationloading-architecture)
-      - [Production Indicators](#usenavigationloading-examples)
-  - [3. Type-Safe Routing (dinou)](#type-safe-routing)
-    - [`PageProps<T>`](#pageprops)
-    - [`LayoutProps<T>`](#layoutprops)
-    - [`ErrorProps<T>`](#errorprops)
-    - [PageFunctions & LayoutFunctions](#pagefunctions)
-    - [`RouteParams<T>`](#routeparams)
+  - [3. Type-Safe Routing (dinou)](#3-type-safe-routing-dinou)
+    - [`PageProps`](#pageprops)
+    - [`LayoutProps`](#layoutprops)
+    - [`ErrorProps`](#errorprops)
+    - [PageFunctions & LayoutFunctions](#pagefunctions--layoutfunctions)
+    - [`RouteParams`](#routeparams)
     - [DinouRoute](#dinouroute)
     - [DinouRoutePattern](#dinouroutepattern)
-  - [4. Server Context & Config (dinou)](#server-context-config)
+  - [4. Server Context & Config (dinou)](#4-server-context--config-dinou)
     - [getContext()](#getcontext)
-      - [Request & Response Store](#getcontext-store)
-      - [Production Patterns](#getcontext-examples)
     - [defineConfig()](#defineconfig)
-      - [Configuration Schema](#defineconfig-schema)
-      - [Production Configuration](#defineconfig-examples)
     - [DinouPlugin](#dinouplugin)
-      - [Lifecycle & Early Exit](#dinouplugin-lifecycle)
-      - [Production Plugins](#dinouplugin-examples)
-  - [5. Server Cache & Revalidation (dinou/server)](#server-cache-revalidation)
+  - [5. Server Cache & Revalidation (dinou/server)](#5-server-cache--revalidation-dinouserver)
     - [revalidatePage()](#revalidatepage)
     - [revalidatePath()](#revalidatepath)
     - [revalidateTag()](#revalidatetag)
     - [`<DinouCacheSlot>`](#dinoucacheslot)
-      - [Props & Micro-ISR](#dinoucacheslot-props)
-      - [Production Slot Patterns](#dinoucacheslot-examples)
-  - [6. Storage Adapters (dinou/server)](#storage-adapters)
-    - [Built-In Adapters](#storage-adapters-list)
-    - [StorageAdapter Interface](#storage-adapters-interface)
-    - [Custom Storage Engine](#storage-adapters-custom)
-  - [7. Route Lifecycles & Config](#route-segment-contracts)
+  - [6. Storage Adapters (dinou/server)](#6-storage-adapters-dinouserver)
+    - [Built-In Adapters](#built-in-adapters)
+    - [StorageAdapter Interface](#storageadapter-interface)
+    - [Custom Storage Engine](#custom-storage-engine)
+  - [7. Route Lifecycles & Config](#7-route-lifecycles--config)
     - [getProps()](#getprops)
-    - [revalidate](#revalidate-config)
-    - [ppr](#ppr-config)
+    - [revalidate](#revalidate)
+    - [ppr](#ppr)
     - [getCacheTags](#getcachetags)
     - [getStaticPaths](#getstaticpaths)
     - [allowISG](#allowisg)
     - [validateParams()](#validateparams)
-- [⚡ Dinou Complete Cheatsheet](#cheatsheet)
-  - [1. File Conventions](#file-conventions)
-    - [Route Components & Lifecycles](#route-components)
-    - [Layout Control Flags](#layout-flags)
-    - [Route Escaping (_folder)](#route-escaping)
-  - [2. Route Syntax & Types](#route-syntax)
-    - [Route Patterns & Inferred Params](#route-patterns)
-    - [Type-Safe Routing Helpers](#type-helpers)
-  - [3. Server Lifecycle Contracts](#server-contracts)
-    - [Exported Contracts Table](#lifecycle-contracts)
-    - [Revalidation Modes (SSR, ISR, SSG)](#revalidate-modes)
-  - [4. Client Navigation & Hooks](#navigation-hooks)
-    - [Link & Redirection](#client-primitives)
-    - [Router & Navigation Hooks](#location-hooks)
-  - [5. Server Primitives & Cache](#server-primitives)
-    - [getContext & DinouCacheSlot](#context-and-slots)
-    - [On-Demand Invalidation](#cache-invalidation)
-  - [6. Decision Matrix: When to Use What](#decision-matrix)
-    - [Cache Invalidation Matrix](#matrix-cache)
-    - [Redirection Strategy Matrix](#matrix-redirects)
-    - [Route Parameter Access Matrix](#matrix-params)
-- [📜 Changelog](#changelog)
-- [📄 License](#license)
+- [Dinou Complete Cheatsheet](#dinou-complete-cheatsheet)
+  - [1. File Conventions](#1-file-conventions-cheatsheet)
+    - [Route Components & Lifecycles](#route-components--lifecycles)
+    - [Layout Control Flags (Empty Files)](#layout-control-flags-empty-files)
+    - [Route Escaping (`_prefix`)](#route-escaping-_prefix)
+  - [2. Route Syntax & Types](#2-route-syntax--types)
+    - [Route Patterns & Inferred Params](#route-patterns--inferred-params)
+    - [Type-Safe Routing Helpers (`dinou`)](#type-safe-routing-helpers-dinou)
+  - [3. Server Lifecycle Contracts](#3-server-lifecycle-contracts)
+    - [Exported Contracts Table](#exported-contracts-table)
+    - [Revalidation Modes (SSR vs ISR vs SSG)](#revalidation-modes-ssr-vs-isr-vs-ssg)
+  - [4. Client Navigation & Hooks](#4-client-navigation--hooks)
+    - [Link & Redirection Primitives](#link--redirection-primitives)
+    - [Router & Navigation Hooks](#router--navigation-hooks)
+  - [5. Server Primitives & Cache](#5-server-primitives--cache)
+    - [getContext & DinouCacheSlot](#getcontext--dinoucacheslot)
+    - [On-Demand Cache Invalidation (`dinou/server`)](#on-demand-cache-invalidation-dinouserver)
+  - [6. Decision Matrix: When to Use What](#6-decision-matrix-when-to-use-what)
+    - [Cache Invalidation: Which method should you call?](#cache-invalidation-which-method-should-you-call)
+    - [Redirection: Which redirection strategy should you use?](#redirection-which-redirection-strategy-should-you-use)
+    - [Route Parameter Access: Where should you read route data?](#route-parameter-access-where-should-you-read-route-data)
+- [Changelog](#changelog)
+- [License](#license)
 
 
 ## Getting Started
@@ -601,7 +580,7 @@ Add the standard Dinou scripts to your `package.json` to control development, mu
 }
 ```
 
-> **Note:** For the complete catalog of targeted platform cross-compilation scripts (such as Windows, macOS, Linux ARM/x64), see the [Complete CLI Scripts Catalog](#complete-cli-scripts-catalog-100-scripts-reference).
+> **Note:** For the complete catalog of targeted platform cross-compilation scripts (such as Windows, macOS, Linux ARM/x64), see the [Complete CLI Scripts Catalog](#complete-dinou-v7-scripts-matrix).
 
 #### 5. Configure .gitignore
 
@@ -649,7 +628,7 @@ npm run dev:rollup   # Dedicated Rollup in-memory engine
 npm run dev:webpack  # Dedicated Webpack engine
 ```
 
-For advanced compiler tuning, custom plugins, and SWC options, visit the [Bundlers Guide](#-bundlers--running-the-app).
+For advanced compiler tuning, custom plugins, and SWC options, visit the [Bundlers Guide](#bundlers--build-tooling).
 
 #### First-Class Multi-Runtime Targets
 
@@ -674,7 +653,7 @@ Compile your application for any execution environment without altering componen
   ```
   Pre-rendered HTML and RSC Flight payloads output directly to `out/`.
 
-For complete deployment guides, Docker setups, and cloud hosting instructions, see the [Deployment Guide](#-deployment-guide).
+For complete deployment guides, Docker setups, and cloud hosting instructions, see the [Deployment Guide](#deployment-guide).
 
 ## Routing & Layouts
 
@@ -6454,7 +6433,7 @@ And confirm your `tsconfig.json` includes the reference:
 
 ### Extending Custom Formats (Eject)
 
-If your application requires specialized binary formats (e.g. `.hdr`, `.glb`, `.gltf` for 3D graphics, or `.wasm`), you can [eject Dinou](#-eject-dinou) to take full ownership of the pipeline.
+If your application requires specialized binary formats (e.g. `.hdr`, `.glb`, `.gltf` for 3D graphics, or `.wasm`), you can [eject Dinou](#eject-dinou) to take full ownership of the pipeline.
 
 In an ejected project, simply add your custom extensions to the array in `dinou/core/asset-extensions.js`:
 
@@ -7916,13 +7895,11 @@ Explore all exports across `dinou`, `dinou/server`, and route lifecycle contract
 
 ### 1. Components (`dinou`)
 
-<a id="components"></a>
 
 Declarative universal and client components exported directly from `dinou`.
 
 ---
 
-<a id="link"></a>
 
 #### `<Link>`
 
@@ -8057,7 +8034,6 @@ export default function SettingsSubNav() {
 
 ---
 
-<a id="clientredirect"></a>
 
 #### `<ClientRedirect>`
 
@@ -8145,13 +8121,11 @@ export function PageB({ isAllowed }: { isAllowed: boolean }) {
 
 ### 2. Hooks & Navigation (`dinou`)
 
-<a id="hooks-navigation"></a>
 
 Universal and client navigation hooks exported directly from `dinou`.
 
 ---
 
-<a id="redirect"></a>
 
 #### `redirect()`
 
@@ -8341,7 +8315,6 @@ export default defineConfig({
 
 ---
 
-<a id="usesearchparams"></a>
 
 #### `useSearchParams()`
 
@@ -8349,7 +8322,6 @@ A dual-nature hook that provides access to the current URL's query parameters. W
 
 ##### in Server Components
 
-<a id="usesearchparams-server"></a>
 
 In Server Components, `useSearchParams()` resolves synchronously from the incoming HTTP request context via `AsyncLocalStorage`. It introduces **zero client bundle overhead** and eliminates props drilling across nested server components.
 
@@ -8398,7 +8370,6 @@ export default async function ProductCatalog() {
 
 ##### in Client Components
 
-<a id="usesearchparams-client"></a>
 
 In Client Components, `useSearchParams()` is a reactive hook returning a `URLSearchParams` object. Whenever the URL changes (via `router.push()`, `<Link>`, or browser history), components re-render with updated values while preserving local state.
 
@@ -8452,7 +8423,6 @@ export default function SearchFilter() {
 
 ---
 
-<a id="usepathname"></a>
 
 #### `usePathname()`
 
@@ -8460,7 +8430,6 @@ A dual-nature hook that provides access to the current URL pathname. Works in bo
 
 ##### in Server Components
 
-<a id="usepathname-server"></a>
 
 In Server Components, `usePathname()` resolves synchronously from the active HTTP request context. It adds **0 KB** to the client JavaScript bundle.
 
@@ -8499,7 +8468,6 @@ export default async function ServerHeader() {
 
 ##### in Client Components
 
-<a id="usepathname-client"></a>
 
 In Client Components, `usePathname()` is a reactive hook that provides the current browser URL pathname and triggers re-renders on route changes.
 
@@ -8541,7 +8509,6 @@ export function NavLink({ href, children, exact = false }: NavLinkProps) {
 
 ---
 
-<a id="userouter"></a>
 
 #### `useRouter()`
 
@@ -8549,7 +8516,6 @@ The core programmatic navigation hook for Client Components. Provides programmat
 
 ##### Methods Reference
 
-<a id="userouter-methods"></a>
 
 | Method | Signature | Description |
 | :--- | :--- | :--- |
@@ -8562,7 +8528,6 @@ The core programmatic navigation hook for Client Components. Provides programmat
 
 ##### Client Cache & Options
 
-<a id="userouter-caching"></a>
 
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -8576,7 +8541,6 @@ The core programmatic navigation hook for Client Components. Provides programmat
 
 ##### Production Patterns
 
-<a id="userouter-examples"></a>
 
 ```tsx
 // src/components/create-product-form.tsx (Client Component)
@@ -8620,7 +8584,6 @@ export function CreateProductForm() {
 
 ---
 
-<a id="refreshslot"></a>
 
 #### `refreshSlot()`
 
@@ -8628,7 +8591,6 @@ Imperative client function enabling surgical on-demand revalidation of isolated 
 
 ##### Parameters & Wildcard
 
-<a id="refreshslot-parameters"></a>
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -8637,7 +8599,6 @@ Imperative client function enabling surgical on-demand revalidation of isolated 
 
 ##### Targeted Revalidation Architecture
 
-<a id="refreshslot-architecture"></a>
 
 - **Surgical Component Updates:** Unlike full route reloads, `refreshSlot()` communicates directly with the specific mounted `<DinouCacheSlot>` sub-tree. Parent layouts and sibling components are untouched.
 - **Client vs. Server Revalidation:** Server functions (`revalidateTag`, `revalidatePath`) purge cached storage records on the backend. `refreshSlot()` actively pulls and updates the live rendered UI in the user's browser session.
@@ -8645,7 +8606,6 @@ Imperative client function enabling surgical on-demand revalidation of isolated 
 
 ##### Production Patterns
 
-<a id="refreshslot-examples"></a>
 
 ```typescript
 // src/services/realtime-socket.ts (Pure TypeScript / Non-React)
@@ -8690,7 +8650,6 @@ export function DashboardToolbar() {
 
 ---
 
-<a id="usenavigationloading"></a>
 
 #### `useNavigationLoading()`
 
@@ -8698,7 +8657,6 @@ Reactive Client Hook that returns `true` whenever a page navigation, history tra
 
 ##### Trigger Events & SSR
 
-<a id="usenavigationloading-behavior"></a>
 
 | Navigation Source | Trigger API | Toggles Loading? | Details |
 | :--- | :--- | :--- | :--- |
@@ -8711,14 +8669,12 @@ Reactive Client Hook that returns `true` whenever a page navigation, history tra
 
 ##### Non-Blocking Concurrent Transitions
 
-<a id="usenavigationloading-architecture"></a>
 
 - **Responsive UI:** Navigations execute within React's concurrent `startTransition`. The current screen remains interactive and scrollable while the server computes the destination page.
 - **Atomic Screen Replacement:** The existing view is preserved until the server has streamed enough of the new route to render its initial shell. `useNavigationLoading()` flips back to `false` precisely when the new DOM is painted, eliminating blank flashes.
 
 ##### Production Indicators
 
-<a id="usenavigationloading-examples"></a>
 
 ```tsx
 // src/components/top-progress-bar.tsx (Client Component)
@@ -8748,15 +8704,13 @@ export function TopProgressBar() {
 
 ### 3. Type-Safe Routing (`dinou`)
 
-<a id="type-safe-routing"></a>
 
 Dinou v7 introduces zero-runtime type safety with auto-generated declaration files and seamless IDE autocompletion for routes and parameters.
 
 ---
 
-<a id="pageprops"></a>
 
-#### `PageProps<T>`
+#### `PageProps`
 
 Official TypeScript interface for typing React Page components (`page.tsx`). Takes the route pattern string (constrained by `DinouRoutePattern`) as a generic parameter and automatically infers the strongly typed `params` object.
 
@@ -8778,9 +8732,8 @@ export function DocsPage({ params }: PageProps<"/docs/[...slug]">) {
 
 ---
 
-<a id="layoutprops"></a>
 
-#### `LayoutProps<T>`
+#### `LayoutProps`
 
 Official TypeScript interface for typing React Layout components (`layout.tsx`). In addition to inferred `params`, it strictly types `children: React.ReactNode`.
 
@@ -8799,9 +8752,8 @@ export default function BlogLayout({ children, params }: LayoutProps<"/blog/[slu
 
 ---
 
-<a id="errorprops"></a>
 
-#### `ErrorProps<T>`
+#### `ErrorProps`
 
 Official TypeScript interface for typing React Error Page components (`error.tsx`). In addition to inferred `params`, it strictly types the caught `error: Error`.
 
@@ -8822,7 +8774,6 @@ export default function DashboardError({ error, params }: ErrorProps<"/dashboard
 
 #### PageFunctions & LayoutFunctions
 
-<a id="pagefunctions"></a>
 
 Canonical TypeScript interfaces for typing server lifecycle files (`page_functions.ts` and `layout_functions.ts`). Exported from `dinou` and re-exported from `dinou/server` for developer convenience. Both interfaces accept either a route pattern string directly (e.g. `"/blog/[slug]"`) or a direct parameters dictionary, providing complete compile-time type safety, IDE autocompletion, and index-access typing (e.g. `PageFunctions["revalidate"]`) without boilerplate.
 
@@ -8844,9 +8795,8 @@ export const revalidate: LayoutFunctions["revalidate"] = 3600;
 
 ---
 
-<a id="routeparams"></a>
 
-#### `RouteParams<T>`
+#### `RouteParams`
 
 A standalone utility type representing the inferred parameters dictionary of a given route pattern. While `PageProps` and `PageFunctions` resolve route strings directly, `RouteParams` is ideal for typing Server Actions, services, or custom helper functions that do not inherit framework props automatically.
 
@@ -8875,7 +8825,6 @@ export async function getDocsContent(params: RouteParams<"/docs/[...slug]">) {
 
 #### DinouRoute
 
-<a id="dinouroute"></a>
 
 A union type representing all valid destinations in the application. It powers `<Link href>` and `router.push(href)`, automatically validating internal application routes, queries (`?key=val`), hashes (`#section`), relative paths (`./`, `../`), and external URLs (`https://...`).
 
@@ -8909,7 +8858,6 @@ export function ActionPanel() {
 
 #### DinouRoutePattern
 
-<a id="dinouroutepattern"></a>
 
 A union type representing all registered filesystem folder patterns across your application (e.g. `"/blog/[slug]"`, `"/docs/[...slug]"`). It is used as the generic constraint for `PageProps<T>` and `LayoutProps<T>`, enabling instant IDE autocomplete via `Ctrl + Space` and guaranteeing compliance with TypeScript declaration emit rules (TS4058).
 
@@ -8935,7 +8883,6 @@ export const postMeta = definePageMeta("/blog/[slug]", ({ params }) => {
 
 ### 4. Server Context & Config (`dinou`)
 
-<a id="server-context-config"></a>
 
 Universal Web Standards context management and root configuration primitives exported directly from `dinou`.
 
@@ -8943,14 +8890,11 @@ Universal Web Standards context management and root configuration primitives exp
 
 #### getContext()
 
-<a id="getContext"></a>
-<a id="getcontext"></a>
 
 Synchronously accesses the active HTTP request and response context store from anywhere within a Server Component, Server Function (`"use server"`), or route lifecycle contract (`page_functions.ts`). Powered by Node.js `AsyncLocalStorage`.
 
 ##### Request & Response Store
 
-<a id="getcontext-store"></a>
 
 The returned `RequestContextStore` provides:
 
@@ -8975,7 +8919,6 @@ The returned `RequestContextStore` provides:
 
 ##### Production Patterns
 
-<a id="getcontext-examples"></a>
 
 ```tsx
 // src/app/profile/page.tsx (Server Component)
@@ -9051,13 +8994,11 @@ export default async function DashboardPage() {
 
 #### defineConfig()
 
-<a id="defineconfig"></a>
 
 Type-safe configuration helper providing autocomplete, IntelliSense, and schema validation for your application's root configuration file (`dinou.config.mjs`, `dinou.config.js`, or `dinou.config.ts`).
 
 ##### Configuration Schema
 
-<a id="defineconfig-schema"></a>
 
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -9068,7 +9009,6 @@ Type-safe configuration helper providing autocomplete, IntelliSense, and schema 
 
 ##### Production Configuration
 
-<a id="defineconfig-examples"></a>
 
 ```javascript
 // dinou.config.mjs (Production ESM)
@@ -9109,7 +9049,6 @@ export default defineConfig({
 
 #### DinouPlugin
 
-<a id="dinouplugin"></a>
 
 TypeScript interface defining middleware plugins for Dinou. Plugins hook into the server request lifecycle using native Web Standards (`Request` and `Response`).
 
@@ -9120,14 +9059,12 @@ TypeScript interface defining middleware plugins for Dinou. Plugins hook into th
 
 ##### Lifecycle & Early Exit
 
-<a id="dinouplugin-lifecycle"></a>
 
 - **Early Exit (`Response` Returned):** If `onRequest` returns a `Response` instance (e.g. `Response.redirect()`, `Response.json()`), Dinou terminates the request immediately (<1ms). It completely bypasses React rendering, routing, and database lookups. Ideal for authentication walls, health checks, and bot blocking.
 - **Pass-Through & Context Enrichment (`void`):** If `onRequest` returns nothing (or `undefined`), execution proceeds to the React rendering pipeline. Any custom properties attached to `context` (e.g. `context.user = session`) are preserved in `AsyncLocalStorage` and accessible synchronously in Server Components via `getContext()`.
 
 ##### Production Plugins
 
-<a id="dinouplugin-examples"></a>
 
 ```typescript
 // src/plugins/auth-guard.ts (Early Exit Pattern)
@@ -9181,8 +9118,6 @@ export const geoPlugin: DinouPlugin = {
 
 ### 5. Server Cache & Revalidation (`dinou/server`)
 
-<a id="server-cache-revalidation"></a>
-<a id="server-primitives-storage"></a>
 
 Server-side cache management, on-demand invalidation, and Micro-ISR components exported from `dinou/server`.
 
@@ -9190,7 +9125,6 @@ Server-side cache management, on-demand invalidation, and Micro-ISR components e
 
 #### revalidatePage()
 
-<a id="revalidatepage"></a>
 
 Surgically evicts and regenerates the cached artifacts (`index.html` and `page.rsc`) of a single specific route. It leaves shared layout caches (`layout.rsc`), parent routes, and child subroutes completely untouched.
 
@@ -9223,7 +9157,6 @@ export async function updateArticle(slug: string, content: string) {
 
 #### revalidatePath()
 
-<a id="revalidatepath"></a>
 
 Asynchronously invalidates and regenerates the targeted page **and its segment layout** (`layout.rsc`). When invoked with `{ cascade: true }` on a route that defines a layout, it recursively invalidates all child subroutes beneath that route segment.
 
@@ -9261,7 +9194,6 @@ export async function publishDocSection(sectionId: string) {
 
 #### revalidateTag()
 
-<a id="revalidatetag"></a>
 
 Cross-cutting cache invalidation primitive that purges cached artifacts across disparate routes, layouts, or `<DinouCacheSlot>` components sharing the specified cache tag.
 
@@ -9310,7 +9242,6 @@ export async function restockProduct(productId: string, quantity: number) {
 
 ---
 
-<a id="dinoucacheslot"></a>
 
 #### `<DinouCacheSlot>`
 
@@ -9318,7 +9249,6 @@ A server-side component primitive enabling independent, localized Micro-ISR cach
 
 ##### Props & Micro-ISR
 
-<a id="dinoucacheslot-props"></a>
 
 | Prop | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -9334,7 +9264,6 @@ A server-side component primitive enabling independent, localized Micro-ISR cach
 
 ##### Production Slot Patterns
 
-<a id="dinoucacheslot-examples"></a>
 
 ```tsx
 // src/components/crypto-ticker-slot.tsx (Server Component)
@@ -9398,7 +9327,6 @@ async function CartCounter({ userId }: { userId: string }) {
 
 ### 6. Storage Adapters (`dinou/server`)
 
-<a id="storage-adapters"></a>
 
 Storage abstractions and persistence engines exported from `dinou/server`.
 
@@ -9412,7 +9340,6 @@ Dinou completely decouples ISR and Micro-ISR caching logic from physical storage
 
 #### Built-In Adapters
 
-<a id="storage-adapters-list"></a>
 
 | Adapter Class | Constructor Signature | Mechanism & Serialization | Recommended Environments |
 | :--- | :--- | :--- | :--- |
@@ -9429,7 +9356,6 @@ Dinou completely decouples ISR and Micro-ISR caching logic from physical storage
 
 #### StorageAdapter Interface
 
-<a id="storage-adapters-interface"></a>
 
 Abstract base class defining the contract for all storage engines in Dinou.
 
@@ -9445,7 +9371,6 @@ Abstract base class defining the contract for all storage engines in Dinou.
 
 #### Custom Storage Engine
 
-<a id="storage-adapters-custom"></a>
 
 Configure distributed caching with built-in adapters like `RedisStorage` or extend `StorageAdapter` to implement a custom database or object storage backend.
 
@@ -9532,8 +9457,6 @@ export class SQLiteStorage extends StorageAdapter {
 
 ### 7. Route Lifecycles & Config
 
-<a id="route-segment-contracts"></a>
-<a id="route-lifecycles-config"></a>
 
 Dinou strictly decouples UI components from server-side lifecycle contracts. Route lifecycles are declared in parallel `page_functions.ts` (or `layout_functions.ts`) files.
 
@@ -9541,13 +9464,11 @@ Dinou strictly decouples UI components from server-side lifecycle contracts. Rou
 
 #### getProps()
 
-<a id="getprops"></a>
 
 The primary server-side data loader for route segments. Executed exclusively on the server before JSX component rendering begins. Data returned from `getProps()` is passed directly into the corresponding `page.tsx` or `layout.tsx` component as props.
 
 ##### Parameters & Execution
 
-<a id="getprops-params"></a>
 
 | Parameter | Type | Description |
 | :--- | :--- | :--- |
@@ -9588,7 +9509,6 @@ export default function ProductPage({ product }: ProductPageProps) {
 
 #### revalidate
 
-<a id="revalidate-config"></a>
 
 Route-level cache lifetime configuration constant in `page_functions.ts` or `layout_functions.ts`. Dictates the Incremental Static Regeneration (ISR) strategy for the segment.
 
@@ -9610,7 +9530,6 @@ export const revalidate: PageFunctions["revalidate"] = 3600;
 
 #### ppr
 
-<a id="ppr-config"></a>
 
 Route-level Partial Prerendering (PPR) configuration toggle in `page_functions.ts` or `layout_functions.ts`. Enables or disables hybrid static-shell delivery with streaming dynamic Suspense holes for this route segment, overriding the global `ppr` setting in `dinou.config.mjs`.
 
@@ -9632,7 +9551,6 @@ export const ppr: LayoutFunctions["ppr"] = true;
 
 #### getCacheTags
 
-<a id="getcachetags"></a>
 
 Route-level cache tagging contract in `page_functions.ts` or `layout_functions.ts`. Associates semantic cache tags with the generated page or layout artifacts, enabling surgical cross-cutting invalidation via `revalidateTag(tag)`.
 
@@ -9653,7 +9571,6 @@ export const getCacheTags: PageFunctions<"/products/[id]">["getCacheTags"] = (pa
 
 #### getStaticPaths
 
-<a id="getstaticpaths"></a>
 
 Build-time static path pre-generation contract for dynamic routes (`[slug]`, `[...slug]`). Defines the set of parameter combinations pre-rendered to static HTML during `dinou build`.
 
@@ -9680,7 +9597,6 @@ export const getStaticPaths: PageFunctions<"/blog/[slug]">["getStaticPaths"] = a
 
 #### allowISG
 
-<a id="allowisg"></a>
 
 Defines the fallback policy for dynamic routes when a requested path was **not** pre-generated at build time by `getStaticPaths`.
 
@@ -9701,7 +9617,6 @@ export const allowISG: PageFunctions["allowISG"] = false;
 
 #### validateParams()
 
-<a id="validateparams"></a>
 
 Route perimeter guard that evaluates incoming dynamic route parameters before pipeline execution. Returning `false` immediately terminates the request with a clean 404 Not Found HTTP response without invoking `getProps` or evaluating downstream components.
 
@@ -9742,8 +9657,7 @@ export const validateParams: LayoutFunctions<"/[organization]">["validateParams"
 
 ---
 
-<a id="cheatsheet"></a>
-## ⚡ Dinou Complete Cheatsheet
+## Dinou Complete Cheatsheet
 
 `Executive Reference` · `Dinou v7`
 
@@ -9755,14 +9669,12 @@ At-a-glance high-density desktop reference for file conventions, dynamic route s
 
 ---
 
-<a id="file-conventions"></a>
 ### 1. File Conventions Cheatsheet
 
 `Filesystem`
 
 Directories inside `src/app/` directly map to URL paths. Standardized file names define UI leaves, layout shells, and decoupled server contracts.
 
-<a id="route-components"></a>
 #### Route Components & Lifecycles
 
 | Filename | Role | Scope | Key Responsibility |
@@ -9777,7 +9689,6 @@ Directories inside `src/app/` directly map to URL paths. Standardized file names
 > [!NOTE]
 > **Hierarchical Bubble-Up:** Dinou bubbles unhandled errors and 404s upward to the closest ancestor handler. A nested `src/app/blog/[slug]/not_found.tsx` intercepts 404s before the root `src/app/not_found.tsx`.
 
-<a id="layout-flags"></a>
 #### Layout Control Flags (Empty Files)
 
 Create these **empty files** (zero bytes, no extension) inside a route directory to modify layout inheritance without writing custom wrapper logic:
@@ -9789,7 +9700,6 @@ Create these **empty files** (zero bytes, no extension) inside a route directory
 | `no_layout_error` | `error.tsx` | Renders the segment's 500 error page without any surrounding layout shells. |
 | `no_layout_not_found` | `not_found.tsx` | Renders the segment's 404 not found page without any surrounding layout shells. |
 
-<a id="route-escaping"></a>
 #### Route Escaping (`_prefix`)
 
 Any directory prefixed with an underscore (`_folder`) is completely ignored by the route compiler.
@@ -9800,14 +9710,12 @@ Any directory prefixed with an underscore (`_folder`) is completely ignored by t
 
 ---
 
-<a id="route-syntax"></a>
 ### 2. Route Syntax & Types
 
 `Type Safety`
 
 Dinou provides zero-runtime type safety by inferring route parameter types directly from folder bracket naming conventions.
 
-<a id="route-patterns"></a>
 #### Route Patterns & Inferred Params
 
 | Folder Pattern | Example URL | Inferred `params` Type | Behavior |
@@ -9819,7 +9727,6 @@ Dinou provides zero-runtime type safety by inferring route parameter types direc
 | `/dash/[[tab]]` | `/dash`, `/dash/billing` | `{ tab?: string }` | Optional single parameter. |
 | `/(auth)/login` | `/login` | `{}` | Route group. Organizes files without adding a URL segment. |
 
-<a id="type-helpers"></a>
 #### Type-Safe Routing Helpers (`dinou`)
 
 | Helper Type | TypeScript Signature | Purpose | API Ref |
@@ -9833,27 +9740,24 @@ Dinou provides zero-runtime type safety by inferring route parameter types direc
 
 ---
 
-<a id="server-contracts"></a>
 ### 3. Server Lifecycle Contracts
 
 `Server Only`
 
 Contracts declared in `page_functions.ts` (or `layout_functions.ts`). Executed exclusively on the server, completely decoupled from React render passes.
 
-<a id="lifecycle-contracts"></a>
 #### Exported Contracts Table
 
 | Exported Contract | Signature | Default | Execution & Purpose | API Ref |
 | :--- | :--- | :--- | :--- | :---: |
 | `getProps(params)` | `(params) => Promise<T> | T` | `{}` | Server data loader. Return value is directly passed as props to `page.tsx` or `layout.tsx`. | [Docs](#getprops) |
-| `revalidate` | `number | false | (() => ...)` | `false` (SSG) | Cache TTL in seconds. `0` = SSR (dynamic), `>= 1` = ISR, `false` = Static SSG. | [Docs](#revalidate-config) |
-| `ppr` | `boolean | (() => boolean | Promise<boolean>)` | `false` | Enables Partial Prerendering: static shell built at build time, dynamic holes stream via React Suspense. | [Docs](#ppr-config) |
+| `revalidate` | `number | false | (() => ...)` | `false` (SSG) | Cache TTL in seconds. `0` = SSR (dynamic), `>= 1` = ISR, `false` = Static SSG. | [Docs](#revalidate) |
+| `ppr` | `boolean | (() => boolean | Promise<boolean>)` | `false` | Enables Partial Prerendering: static shell built at build time, dynamic holes stream via React Suspense. | [Docs](#ppr) |
 | `getCacheTags(params)` | `(params) => string[] | Promise<string[]>` | `[]` | Associates cache tags with the route for targeted on-demand invalidation via `revalidateTag(tag)`. | [Docs](#getcachetags) |
 | `getStaticPaths()` | `() => StaticPathItem[] | Promise<...>` | `[]` | Pre-generates dynamic parameter combinations during build time for SSG rendering. | [Docs](#getstaticpaths) |
 | `allowISG` | `boolean | (() => boolean | Promise<boolean>)` | `true` | When `true`, ungenerated paths render on-demand on first visit. When `false`, ungenerated paths return 404. | [Docs](#allowisg) |
 | `validateParams(params)` | `(params) => boolean | Promise<boolean>` | `() => true` | Route parameter gatekeeper. Returning `false` immediately terminates with a 404 before calling `getProps`. | [Docs](#validateparams) |
 
-<a id="revalidate-modes"></a>
 #### Revalidation Modes (SSR vs ISR vs SSG)
 
 | Export Value | Rendering Mode | Cache Behavior | Ideal Use Case |
@@ -9864,14 +9768,12 @@ Contracts declared in `page_functions.ts` (or `layout_functions.ts`). Executed e
 
 ---
 
-<a id="navigation-hooks"></a>
 ### 4. Client Navigation & Hooks
 
 `dinou`
 
 Declarative navigation components and reactive client hooks for routing state and micro-ISR slot manipulation.
 
-<a id="client-primitives"></a>
 #### Link & Redirection Primitives
 
 | Export | Scope | Signature / Props | Behavior | API Ref |
@@ -9880,7 +9782,6 @@ Declarative navigation components and reactive client hooks for routing state an
 | `<ClientRedirect>` | `Client` | `to: string, replace?: boolean` | Declarative redirect rendered inside component tree during render phase. | [Docs](#clientredirect) |
 | `redirect()` | `Universal` | `(path: string, status?: number) => never` | HTTP 307 on server (pre-header flush) or SPA client replace if streaming/client. | [Docs](#redirect) |
 
-<a id="location-hooks"></a>
 #### Router & Navigation Hooks
 
 | Hook / Helper | Scope | Returned Interface | Common Use Case | API Ref |
@@ -9893,14 +9794,12 @@ Declarative navigation components and reactive client hooks for routing state an
 
 ---
 
-<a id="server-primitives"></a>
 ### 5. Server Primitives & Cache
 
 `dinou & dinou/server`
 
 Server-side context providers, micro-ISR slot primitives, and cluster cache purge APIs.
 
-<a id="context-and-slots"></a>
 #### getContext & DinouCacheSlot
 
 | Export | Package | Signature | Purpose & Mechanics | API Ref |
@@ -9908,9 +9807,8 @@ Server-side context providers, micro-ISR slot primitives, and cluster cache purg
 | `getContext()` | `dinou` | `() => ServerContext | null` | Synchronous HTTP access via AsyncLocalStorage: `req.cookies`, `req.headers`, `res.cookie()`, `res.setHeader()`. | [Docs](#getcontext) |
 | `<DinouCacheSlot>` | `dinou/server` | `id, revalidate?, tag?, tags?` | Micro-ISR server component. Caches an independent sub-tree without re-evaluating parent layouts or siblings. | [Docs](#dinoucacheslot) |
 | `defineConfig(config)` | `dinou` | `(config: DinouConfig) => DinouConfig` | Type helper for `dinou.config.mjs` (reactStrictMode, ppr, storage, plugins). | [Docs](#defineconfig) |
-| `Storage Adapters` | `dinou/server` | `MemoryStorage, RedisStorage` | ISR storage engines for single server or distributed multi-instance clusters. | [Docs](#storage-adapters-list) |
+| `Storage Adapters` | `dinou/server` | `MemoryStorage, RedisStorage` | ISR storage engines for single server or distributed multi-instance clusters. | [Docs](#built-in-adapters) |
 
-<a id="cache-invalidation"></a>
 #### On-Demand Cache Invalidation (`dinou/server`)
 
 | Function | Target | Signature | Purge Effect | API Ref |
@@ -9921,14 +9819,12 @@ Server-side context providers, micro-ISR slot primitives, and cluster cache purg
 
 ---
 
-<a id="decision-matrix"></a>
 ### 6. Decision Matrix: When to Use What
 
 `Architectural Guide`
 
 Quick comparative decision tables to help you pick the right primitive for caching, navigation, and state access without trial and error.
 
-<a id="matrix-cache"></a>
 #### Cache Invalidation: Which method should you call?
 
 | Method | Caller Environment | Scope of Impact | When to Choose It |
@@ -9938,7 +9834,6 @@ Quick comparative decision tables to help you pick the right primitive for cachi
 | `refreshSlot(slotId)` | Client Component (Browser) | Single targeted slot on current page | **Zero layout re-render:** when an interactive client widget updates (e.g. cart badge counter or mini ticker) without touching the rest of the page. |
 | `router.refresh()` | Client Component (Browser) | Entire active page | When a client action needs fresh server props for the whole page without losing client state or scrolling to top. |
 
-<a id="matrix-redirects"></a>
 #### Redirection: Which redirection strategy should you use?
 
 | Strategy | Context / Location | HTTP / Browser Mechanism | When to Choose It |
@@ -9948,7 +9843,6 @@ Quick comparative decision tables to help you pick the right primitive for cachi
 | `<ClientRedirect to="..." />` | Client Component (JSX render) | Client-side router push/replace | Declarative fallback rendering in client tabs, wizard step redirections, or empty states. |
 | `router.replace(url)` | Client Event Handler | History replace without entry | Post-submission redirect where clicking browser "Back" should not re-submit the action (e.g. login form, payment checkout). |
 
-<a id="matrix-params"></a>
 #### Route Parameter Access: Where should you read route data?
 
 | Access Pattern | Environment | Return Type | When to Choose It |
@@ -9964,14 +9858,10 @@ Quick comparative decision tables to help you pick the right primitive for cachi
 
 ---
 
-<a id="changelog"></a>
-<a id="-changelog"></a>
-## 📜 Changelog
+## Changelog
 
 For a detailed list of changes, enhancements, and bug fixes across versions, see the [CHANGELOG.md](./CHANGELOG.md).
 
-<a id="license"></a>
-<a id="-license"></a>
-## 📄 License
+## License
 
 Dinou is licensed under the [MIT License](./LICENSE.md).

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [7.1.0] - 2026-10-16
+
+### Added
+- **Default export configuration object**: Added support for defining route lifecycle hooks and settings (`getProps`, `revalidate`, `ppr`, `getStaticPaths`, `allowISG`, `validateParams`, `getCacheTags`) as a consolidated configuration object exported via `export default` in both `page_functions` and `layout_functions` (ideal for strongly typed contracts like `PageFunctions<TParams, TProps>` or `LayoutFunctions`), while maintaining full backward compatibility with individual named exports.
+- **Static PPR analysis for default exports**: Extended AST analysis (SWC & Babel fallbacks) and runtime resolution to detect and extract `ppr` configurations declared within default-exported objects and variable bindings.
+
+### Removed
+- **Dead rendering utility**: Removed unused legacy synchronous `renderJSXToClientJSX` helper.
+
+### Fixed
+- **Documentation anchors**: Fixed broken anchor links and table of contents (TOC) navigation in `README.md`.
+
 ## [7.0.0] - 2026-10-12
 
 ### ⚠️ Breaking Changes
