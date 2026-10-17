@@ -43,6 +43,7 @@ export function createServerFunctionProxy(id) {
         headers["x-dinou-current-path"] = window.location.pathname;
       }
 
+      let body;
       const formDataIndex = args.findIndex((arg) => arg instanceof FormData);
 
       if (formDataIndex !== -1) {
