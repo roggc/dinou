@@ -119,12 +119,32 @@ export async function fetch(req) {
 
 const PORT = Number(process.env.PORT || 3000);
 
-export function startServer(port = PORT, host = "0.0.0.0") {
+const nodeMiddlewares = [];
+
+export async function startServer(port = PORT, host = "0.0.0.0") {
   const server = http.createServer(async (req, res) => {
     try {
+      if (res.writableEnded || res.headersSent) {
+        return;
+      }
+
+      if (nodeMiddlewares.length > 0) {
+        for (const mw of nodeMiddlewares) {
+          let continued = false;
+          await mw(req, res, () => {
+            continued = true;
+          });
+          if (!continued || res.writableEnded || res.headersSent) {
+            return;
+          }
+        }
+      }
+
       const webReq = nodeToWebRequest(req);
       const webRes = await fetch(webReq);
-      await sendWebResponseToNode(webRes, res);
+      if (!res.writableEnded && !res.headersSent) {
+        await sendWebResponseToNode(webRes, res);
+      }
     } catch (err) {
       console.error("[Dinou Node Server] Request error:", err);
       if (!res.headersSent) {
@@ -134,6 +154,29 @@ export function startServer(port = PORT, host = "0.0.0.0") {
       }
     }
   });
+
+  try {
+    const { getDinouConfig } = await import("${dinouDirSlash}/core/load-dinou-config.js");
+    const cfg = await getDinouConfig();
+    if (cfg.plugins && Array.isArray(cfg.plugins)) {
+      const serverContext = {
+        server,
+        isDev: false,
+        use(middleware) {
+          if (typeof middleware === "function") {
+            nodeMiddlewares.push(middleware);
+          }
+        },
+      };
+      for (const plugin of cfg.plugins) {
+        if (typeof plugin.configureServer === "function") {
+          await plugin.configureServer(serverContext);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("❌ [Dinou Node Server] Error running configureServer plugins:", err);
+  }
 
   return new Promise((resolve, reject) => {
     server.on("error", reject);

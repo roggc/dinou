@@ -2302,9 +2302,52 @@ async function startClientBundler(tool) {
   throw new Error(`Unsupported DINOU_BUILD_TOOL: ${tool}`);
 }
 
+// Node.js Middlewares registered by plugins via configureServer
+const nodeMiddlewares = [];
+
+async function applyServerPlugins(serverInstance) {
+  try {
+    const { getDinouConfig } = require(path.join(dinouDir, "core/load-dinou-config.js"));
+    const config = await getDinouConfig();
+    if (config.plugins && Array.isArray(config.plugins)) {
+      const serverContext = {
+        server: serverInstance,
+        isDev: true,
+        use(middleware) {
+          if (typeof middleware === "function") {
+            nodeMiddlewares.push(middleware);
+          }
+        },
+      };
+      for (const plugin of config.plugins) {
+        if (typeof plugin.configureServer === "function") {
+          await plugin.configureServer(serverContext);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("❌ [Dinou Dev] Error applying plugin configureServer hooks:", err);
+  }
+}
+
 // HTTP Server
 const server = http.createServer(async (req, res) => {
   try {
+    if (res.writableEnded || res.headersSent) {
+      return;
+    }
+
+    if (nodeMiddlewares.length > 0) {
+      for (const mw of nodeMiddlewares) {
+        let continued = false;
+        await mw(req, res, () => {
+          continued = true;
+        });
+        if (!continued || res.writableEnded || res.headersSent) {
+          return;
+        }
+      }
+    }
     if (clientBundlerPromise) {
       await clientBundlerPromise;
     }
@@ -2493,7 +2536,9 @@ const server = http.createServer(async (req, res) => {
       console.log(`[DEV 404] ${req.method} ${pathname}`);
     }
 
-    await sendWebResponseToNode(webRes, res);
+    if (!res.writableEnded && !res.headersSent) {
+      await sendWebResponseToNode(webRes, res);
+    }
   } catch (err) {
     console.error("[Dinou Dev Server] Request error:", err);
     if (!res.headersSent) {
@@ -2514,6 +2559,8 @@ server.on("error", (err) => {
   }
   process.exit(1);
 });
+
+await applyServerPlugins(server);
 
 server.listen(PORT, async () => {
   const buildTool = isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild");
