@@ -121,6 +121,71 @@ program
     runCommand(`cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack node ${p("adapters/node.mjs")}`);
   });
 
+// --- NODE (COMPILE VIA BUN) ---
+
+const nodeTargets = [
+  { name: "", flags: "", outfile: "dist/server" },
+  { name: ":linux", flags: "--target=bun-linux-x64 ", outfile: "dist/server-linux" },
+  { name: ":linux_arm", flags: "--target=bun-linux-arm64 ", outfile: "dist/server-linux-arm" },
+  { name: ":mac", flags: "--target=bun-darwin-arm64 ", outfile: "dist/server-mac" },
+  { name: ":win", flags: "--target=bun-windows-x64 ", outfile: "dist/server-win" },
+];
+
+const runNodeBuild = (bundler) => {
+  const bundlerCmd = bundler === "rollup"
+    ? `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`
+    : bundler === "webpack"
+    ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
+    : `cross-env NODE_ENV=production node ${p("esbuild/build.mjs")}`;
+
+  const envPrefix = bundler === "webpack" ? "cross-env DINOU_BUILD_TOOL=webpack " : "";
+  return `${bundlerCmd} && ${envPrefix}node ${p("node/build.mjs")}`;
+};
+
+for (const t of nodeTargets) {
+  for (const b of ["esbuild", "rollup", "webpack"]) {
+    const cmdNames = b === "esbuild"
+      ? [`build:node:compile${t.name}`, `build:node:compile${t.name}:esbuild`]
+      : [`build:node:compile${t.name}:${b}`];
+    for (const cmdName of cmdNames) {
+      program
+        .command(cmdName)
+        .description(`Compile standalone Node.js server executable with Bun (${t.name || "host"}, ${b})`)
+        .action(() => {
+          runCommand(`${runNodeBuild(b)} && bun build --compile ${t.flags}.dinou/node/server.mjs --outfile ${t.outfile}`);
+        });
+    }
+  }
+}
+
+// --- NODE (PURE BUN RUNNER COMPILE) ---
+
+const runNodePureBuild = (bundler) => {
+  if (bundler === "rollup") {
+    return `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && bun ${p("node/build.mjs")}`;
+  }
+  if (bundler === "webpack") {
+    return `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && cross-env DINOU_BUILD_TOOL=webpack bun ${p("node/build.mjs")}`;
+  }
+  return `cross-env NODE_ENV=production bun ${p("esbuild/build.mjs")} && bun ${p("node/build.mjs")}`;
+};
+
+for (const t of nodeTargets) {
+  for (const b of ["esbuild", "rollup", "webpack"]) {
+    const cmdNames = b === "esbuild"
+      ? [`build:node:pure:compile${t.name}`, `build:node:pure:compile${t.name}:esbuild`]
+      : [`build:node:pure:compile${t.name}:${b}`];
+    for (const cmdName of cmdNames) {
+      program
+        .command(cmdName)
+        .description(`Compile standalone Node.js server executable with 100% Bun (${t.name || "host"}, ${b})`)
+        .action(() => {
+          runCommand(`${runNodePureBuild(b)} && bun build --compile ${t.flags}.dinou/node/server.mjs --outfile ${t.outfile}`);
+        });
+    }
+  }
+}
+
 // --- CLOUDFLARE WORKERS ---
 
 program
