@@ -1,5 +1,5 @@
 const path = require("path");
-const { existsSync } = require("fs");
+const { existsSync, mkdirSync } = require("fs");
 const { pathToFileURL } = require("url");
 
 let dinouConfig = { plugins: [] };
@@ -12,13 +12,34 @@ async function getDinouConfig() {
   if (dinouConfigPromise) return dinouConfigPromise;
   dinouConfigPromise = (async () => {
     const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
-    for (const filename of ["dinou.config.js", "dinou.config.mjs", "dinou.config.cjs", "dinou.config.ts"]) {
+    for (const filename of ["dinou.config.ts", "dinou.config.mjs", "dinou.config.js", "dinou.config.cjs"]) {
       const p = path.resolve(cwd, filename);
       if (existsSync(p)) {
         try {
           let loaded;
           const isDev = process.env.NODE_ENV !== "production";
-          if (p.endsWith(".mjs")) {
+          let esbuild;
+          try {
+            esbuild = require("esbuild");
+          } catch (e) {}
+
+          if (esbuild) {
+            const outDir = path.resolve(cwd, ".dinou");
+            if (!existsSync(outDir)) {
+              mkdirSync(outDir, { recursive: true });
+            }
+            const bundledPath = path.resolve(outDir, "dinou.config.bundled.mjs");
+            await esbuild.build({
+              entryPoints: [p],
+              outfile: bundledPath,
+              bundle: true,
+              format: "esm",
+              platform: "node",
+              packages: "external",
+              sourcemap: "inline",
+            });
+            loaded = await import(pathToFileURL(bundledPath).href + (isDev ? `?t=${Date.now()}` : ""));
+          } else if (p.endsWith(".mjs")) {
             loaded = await import(pathToFileURL(p).href + (isDev ? `?t=${Date.now()}` : ""));
           } else {
             const nodeReq =
