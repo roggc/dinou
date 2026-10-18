@@ -819,6 +819,7 @@ const commonAlias = {
   "@": path.resolve(projectRoot, "src"),
   "dinou/config": path.resolve(dinouDir, "core/config.js"),
   dinou: dinouDir,
+  esbuild: path.resolve(shimsDir, "empty.js"),
   fs: path.resolve(shimsDir, "fs.js"),
   "node:fs": path.resolve(shimsDir, "fs.js"),
   "fs/promises": path.resolve(shimsDir, "fs.js"),

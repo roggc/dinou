@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [7.2.0]
+
+### Added
+- **Plugin Hook `configureServer`**: Attach WebSockets (Socket.IO, WS) and native Node.js HTTP middlewares before server startup without ejecting.
+- **Node Standalone Binary Compilation**: Added `dinou build:node:compile` and cross-compilation matrix (`:linux`, `:linux_arm`, `:mac`, `:win`).
+- **Client-Side Server Function Auth Hooks**: Added `window.__DINOU_SERVER_FUNCTION_HEADERS__` and `window.__DINOU_GET_AUTH_TOKEN__` to inject dynamic JWT/Bearer authorization headers into `"use server"` calls.
+- **Esbuild-Powered Config Loader**: `dinou.config.*` is automatically pre-bundled with Esbuild, enabling native `tsconfig.json` path aliases (`@/*`) and TypeScript configuration files out of the box.
+
+### Changed
+- Removed legacy `babel-esm-loader.js` and cleaned up residual loader registrations.
+
 ## [7.1.0] - 2026-10-16
 
 ### Added

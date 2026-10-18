@@ -120,8 +120,29 @@ export interface RequestContextStore {
 // DINOU CONFIGURATION & PLUGIN INTERFACES
 // ====================================================================
 
+export type NodeMiddleware = (
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse,
+  next: () => void
+) => void | Promise<void>;
+
+export interface ServerHookContext {
+  /** The underlying Node.js http.Server instance */
+  server: import("node:http").Server;
+  /** Whether the server is running in development mode */
+  isDev: boolean;
+  /** Register a raw Node.js middleware (req, res, next) executed before Dinou routes */
+  use(middleware: NodeMiddleware): void;
+}
+
 export interface DinouPlugin {
   name?: string;
+  /**
+   * Hook invoked when the Node.js HTTP server is instantiated,
+   * allowing plugins to attach WebSockets (Socket.IO, ws), listeners, or raw Node middlewares.
+   */
+  configureServer?(context: ServerHookContext): Promise<void> | void;
+
   /**
    * Universal Web Standards middleware and webhook handler.
    * Runs on every incoming HTTP request before React rendering.

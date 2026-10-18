@@ -17,14 +17,33 @@ function executeRedirect(url) {
 function createServerFunctionProxy(id) {
   return new Proxy(() => { }, {
     apply: async (_target, _thisArg, args) => {
-      let body;
+      let customHeaders = {};
+      if (typeof window !== "undefined") {
+        if (typeof window.__DINOU_SERVER_FUNCTION_HEADERS__ === "function") {
+          try {
+            customHeaders = window.__DINOU_SERVER_FUNCTION_HEADERS__() || {};
+          } catch (e) {
+            console.error("[Dinou] Error getting custom headers for server function:", e);
+          }
+        } else if (typeof window.__DINOU_GET_AUTH_TOKEN__ === "function") {
+          try {
+            const token = window.__DINOU_GET_AUTH_TOKEN__();
+            if (token) customHeaders = { Authorization: `Bearer ${token}` };
+          } catch (e) {
+            console.error("[Dinou] Error getting auth token for server function:", e);
+          }
+        }
+      }
+
       const headers = {
         "x-server-function-call": "1",
+        ...customHeaders,
       };
       if (typeof window !== "undefined" && window.location) {
         headers["x-dinou-current-path"] = window.location.pathname;
       }
 
+      let body;
       const formDataIndex = args.findIndex((arg) => arg instanceof FormData);
 
       if (formDataIndex !== -1) {

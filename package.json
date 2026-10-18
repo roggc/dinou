@@ -1,6 +1,6 @@
 {
   "name": "dinou",
-  "version": "7.1.0",
+  "version": "7.2.0",
   "description": "Full-stack React 19 framework with native RSC, Server Functions, progressive streaming, and zero vendor lock-in.",
   "main": "index.js",
   "bin": {

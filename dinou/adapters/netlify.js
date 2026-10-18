@@ -3,21 +3,9 @@
 // Automatically routes all requests to Dinou's universal Web Standards handler.
 Object.assign(process.env, { NODE_ENV: "production" });
 
-import { register } from "node:module";
-import { pathToFileURL } from "node:url";
 import path from "node:path";
 import Module from "node:module";
 
-import { dinouCoreDir } from "../core/dinou-paths.js";
-
-if (typeof register === "function") {
-  try {
-    const loaderPath = path.join(dinouCoreDir, "babel-esm-loader.js");
-    register(pathToFileURL(loaderPath).href, pathToFileURL("./"));
-  } catch (e) {
-    console.error("[Dinou Adapter] Loader registration failed:", e);
-  }
-}
 
 let reactServerPath, reactDomServerPath, reactJsxRuntimePath, reactJsxDevRuntimePath;
 let roggcServerNodePath, webpackServerNodePath;
@@ -30,17 +18,17 @@ try {
 
   const reactDomPkgJson = require.resolve("react-dom/package.json");
   reactDomServerPath = path.join(path.dirname(reactDomPkgJson), "react-dom.react-server.js");
-} catch (e) {}
+} catch (e) { }
 
 try {
   const roggcPkgJson = require.resolve("@roggc/react-server-dom-esm/package.json");
   roggcServerNodePath = path.join(path.dirname(roggcPkgJson), "server.node.js");
-} catch (e) {}
+} catch (e) { }
 
 try {
   const webpackPkgJson = require.resolve("react-server-dom-webpack/package.json");
   webpackServerNodePath = path.join(path.dirname(webpackPkgJson), "server.node.js");
-} catch (e) {}
+} catch (e) { }
 
 if (Module && Module._resolveFilename) {
   const originalResolveFilename = Module._resolveFilename;
