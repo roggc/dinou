@@ -170,6 +170,26 @@ const runNodePureBuild = (bundler) => {
   return `cross-env NODE_ENV=production bun ${p("esbuild/build.mjs")} && bun ${p("node/build.mjs")}`;
 };
 
+program
+  .command("build:node:pure")
+  .description("Build the app for Node.js with 100% Bun (using esbuild)")
+  .action(() => { runCommand(runNodePureBuild("esbuild")); });
+
+program
+  .command("build:node:pure:esbuild")
+  .description("Build the app for Node.js with 100% Bun (Esbuild)")
+  .action(() => { runCommand(runNodePureBuild("esbuild")); });
+
+program
+  .command("build:node:pure:rollup")
+  .description("Build the app for Node.js with 100% Bun (Rollup)")
+  .action(() => { runCommand(runNodePureBuild("rollup")); });
+
+program
+  .command("build:node:pure:webpack")
+  .description("Build the app for Node.js with 100% Bun (Webpack)")
+  .action(() => { runCommand(runNodePureBuild("webpack")); });
+
 for (const t of nodeTargets) {
   for (const b of ["esbuild", "rollup", "webpack"]) {
     const cmdNames = b === "esbuild"

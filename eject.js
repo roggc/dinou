@@ -48,6 +48,10 @@ const ejectedScripts = {
   "build:node:compile:win:esbuild": "npm run build:node:esbuild && bun build --compile --target=bun-windows-x64 .dinou/node/server.mjs --outfile dist/server-win",
   "build:node:compile:win:rollup": "npm run build:node:rollup && bun build --compile --target=bun-windows-x64 .dinou/node/server.mjs --outfile dist/server-win",
   "build:node:compile:win:webpack": "npm run build:node:webpack && bun build --compile --target=bun-windows-x64 .dinou/node/server.mjs --outfile dist/server-win",
+  "build:node:pure": "npm run build:node:pure:esbuild",
+  "build:node:pure:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.mjs && bun ./dinou/node/build.mjs",
+  "build:node:pure:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/node/build.mjs",
+  "build:node:pure:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js && cross-env DINOU_BUILD_TOOL=webpack bun ./dinou/node/build.mjs",
   "build:node:pure:compile": "npm run build:node:pure:compile:esbuild",
   "build:node:pure:compile:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.mjs && bun ./dinou/node/build.mjs && bun build --compile .dinou/node/server.mjs --outfile dist/server",
   "build:node:pure:compile:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/node/build.mjs && bun build --compile .dinou/node/server.mjs --outfile dist/server",
@@ -186,7 +190,7 @@ function detectPackageManager() {
 
   if (fs.existsSync(path.join(projectRoot, "yarn.lock"))) return "yarn";
   if (fs.existsSync(path.join(projectRoot, "pnpm-lock.yaml"))) return "pnpm";
-  if (fs.existsSync(path.join(projectRoot, "bun.lockb"))) return "bun";
+  if (fs.existsSync(path.join(projectRoot, "bun.lockb")) || fs.existsSync(path.join(projectRoot, "bun.lock"))) return "bun";
   if (fs.existsSync(path.join(projectRoot, "package-lock.json"))) return "npm";
 
   return "npm";
