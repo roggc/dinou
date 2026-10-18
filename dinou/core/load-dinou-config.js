@@ -19,11 +19,22 @@ async function getDinouConfig() {
           let loaded;
           const isDev = process.env.NODE_ENV !== "production";
           let esbuild;
-          try {
-            esbuild = require("esbuild");
-          } catch (e) {}
+          if (
+            typeof process !== "undefined" &&
+            process.versions &&
+            process.versions.node &&
+            process.env.DINOU_RUNTIME !== "edge"
+          ) {
+            try {
+              const req = typeof require === "function" ? require : null;
+              const esbuildPkg = "esbuild";
+              if (req) {
+                esbuild = req(esbuildPkg);
+              }
+            } catch (e) {}
+          }
 
-          if (esbuild) {
+          if (esbuild && typeof esbuild.build === "function") {
             const outDir = path.resolve(cwd, ".dinou");
             if (!existsSync(outDir)) {
               mkdirSync(outDir, { recursive: true });
