@@ -144,6 +144,12 @@ export interface DinouPlugin {
   configureServer?(context: ServerHookContext): Promise<void> | void;
 
   /**
+   * Array of setup/polyfill file paths to be executed at the earliest stage
+   * and injected into all bundled engines before any modules are loaded.
+   */
+  setupFiles?: string[];
+
+  /**
    * Universal Web Standards middleware and webhook handler.
    * Runs on every incoming HTTP request before React rendering.
    * If a Response is returned, Dinou sends it immediately and terminates the request.
@@ -181,6 +187,13 @@ export interface DinouConfig {
    * Custom storage adapter for ISR / ISG page caching.
    */
   storage?: any;
+
+  /**
+   * Array of setup/polyfill file paths to be executed at the earliest stage
+   * before any server or client components are imported.
+   * If provided, overrides the root `dinou.setup.(mjs|js|ts)` convention.
+   */
+  setupFiles?: string[];
 
   /**
    * Array of Dinou plugins.

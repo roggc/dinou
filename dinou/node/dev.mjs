@@ -76,6 +76,22 @@ const dinouDir = fs.existsSync(path.resolve(projectRoot, "dinou"))
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dinouDirSlash = dinouDir.replace(/\\/g, "/");
 
+// Resolve and execute setupFiles immediately before any compilation
+const { getDinouConfig } = require(path.join(dinouDir, "core/load-dinou-config.js"));
+const { resolveSetupFiles } = require(path.join(dinouDir, "core/resolve-setup-files.js"));
+const dinouConfig = await getDinouConfig();
+const setupFiles = resolveSetupFiles(projectRoot, dinouConfig);
+if (setupFiles.length > 0) {
+  console.log(`  🔌 [Dinou Setup] Executing setup files (${setupFiles.length}):`, setupFiles.map((f) => path.relative(projectRoot, f)).join(", "));
+  for (const f of setupFiles) {
+    try {
+      await dynamicImportWithRetry(pathToFileURL(f).href);
+    } catch (e) {
+      console.error(`❌ [Dinou Dev] Error executing setupFile "${f}":`, e);
+    }
+  }
+}
+
 function getFallbackChunkId(absPath) {
   const norm = absPath.replace(/\\/g, "/");
   const name = path.basename(absPath, path.extname(absPath));
@@ -1463,6 +1479,7 @@ const ctxA = await esbuild.context({
   conditions: ["node", "worker", "react-server"],
   external: externalList,
   banner,
+  inject: setupFiles,
   plugins: [clientReferencesPlugin, serverReferencesPlugin, serverAssetPlugin, createDevExternalPackagesPlugin(true)],
   alias: commonAlias,
   loader: commonLoader,
@@ -1490,6 +1507,7 @@ const ctxB = await esbuild.context({
   conditions: ["node", "worker", "browser"],
   external: externalList,
   banner,
+  inject: setupFiles,
   plugins: [serverReferencesPluginSsr, serverAssetPlugin, createDevExternalPackagesPlugin(false)],
   alias: commonAlias,
   loader: commonLoader,

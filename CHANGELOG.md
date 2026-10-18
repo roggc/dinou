@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [7.3.0]
+
+### Added
+- **Universal Setup Files & Environment Polyfills**:
+  - Early-stage execution guarantee: Setup scripts are injected at Line 1 of all compilation bundles before any module imports or engine code run, enabling browser/canvas polyfills (`DOMMatrix`, `ImageData`, `Path2D`) and APM/telemetry agents without ejecting.
+  - Unified configuration hierarchy: `plugin.setupFiles` (plugins run first) -> explicit `setupFiles: [...]` in `dinou.config.*` (strict source of truth; replaces convention) -> zero-config root convention `./dinou.setup.(mjs|js|ts)`.
+  - Comprehensive multi-platform support: Injected uniformly across Node.js (`Pass A`, `Pass B`, `Pass C`), Bun native AOT, Cloudflare Workers, Deno / Deno Deploy, Static Site Generation (SSG), and Hot-Reload Dev Server.
+  - Added TypeScript definitions for `setupFiles?: string[]` in both `DinouConfig` and `DinouPlugin`.
+
+### Fixed
+- **Bun Standalone Compilation Port Collision (`EADDRINUSE`)**:
+  - Resolved port binding conflict when compiling the Node.js orchestrator into a standalone executable using `bun build --compile`.
+  - Separated exports in `.dinou/node/server.mjs`: `fetch` is now exported exclusively as a named export (`export { fetch }`), while `export default` exposes `{ port, startServer }`, preventing Bun's runtime from launching a duplicate background `Bun.serve` instance over Node's `http.createServer()`.
+  - Robust `isMain` execution detection supporting both Node.js (`process.argv[1]`) and compiled Bun binaries (`import.meta.main`).
+
 ## [7.2.0]
 
 ### Added
