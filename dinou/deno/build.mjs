@@ -19,10 +19,18 @@ const {
   isSupportedClientModule,
   scanProjectDependenciesForClientComponents,
 } = require("../core/scan-dependency-components.js");
+const { getDinouConfig } = require("../core/load-dinou-config.js");
+const { resolveSetupFiles } = require("../core/resolve-setup-files.js");
 
 const projectRoot = process.cwd();
 const denoDir = path.resolve(projectRoot, ".dinou/deno");
 fs.mkdirSync(denoDir, { recursive: true });
+
+const dinouConfig = await getDinouConfig(projectRoot);
+const setupFiles = resolveSetupFiles(projectRoot, dinouConfig);
+if (setupFiles.length > 0) {
+  console.log(`  🔌 [Dinou Setup] Active setup files (${setupFiles.length}): ${setupFiles.map((f) => path.basename(f)).join(", ")}`);
+}
 
 try {
   generateRouteTypes(projectRoot);
@@ -1046,6 +1054,7 @@ try {
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
+    inject: setupFiles.length > 0 ? setupFiles : undefined,
     define: {
       "process.env.NODE_ENV": '"production"',
       "process.env.DINOU_RUNTIME": '"deno-edge"',
@@ -1069,6 +1078,7 @@ try {
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
+    inject: setupFiles.length > 0 ? setupFiles : undefined,
     define: {
       "process.env.NODE_ENV": '"production"',
       "process.env.DINOU_RUNTIME": '"deno-edge"',
@@ -1090,6 +1100,7 @@ try {
     conditions: ["deno", "worker", "browser"],
     external: externalList,
     banner,
+    inject: setupFiles.length > 0 ? setupFiles : undefined,
     alias: commonAlias,
     loader: commonLoader,
     define: {

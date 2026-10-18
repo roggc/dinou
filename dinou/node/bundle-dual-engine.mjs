@@ -20,12 +20,20 @@ const {
   isSupportedClientModule,
   scanProjectDependenciesForClientComponents,
 } = require("../core/scan-dependency-components.js");
+const { getDinouConfig } = require("../core/load-dinou-config.js");
+const { resolveSetupFiles } = require("../core/resolve-setup-files.js");
 
 export async function bundleDualEngine(options = {}) {
   const isDev = Boolean(options.isDev);
   const projectRoot = path.resolve(options.projectRoot || process.cwd());
   const nodeDir = path.resolve(projectRoot, options.outDir || ".dinou/node");
   fs.mkdirSync(nodeDir, { recursive: true });
+
+  const dinouConfig = await getDinouConfig();
+  const setupFiles = resolveSetupFiles(projectRoot, dinouConfig);
+  if (setupFiles.length > 0) {
+    console.log(`  🔌 [Dinou Setup] Active setup files (${setupFiles.length}):`, setupFiles.map((f) => path.relative(projectRoot, f)).join(", "));
+  }
 
   try {
     generateRouteTypes(projectRoot);
@@ -956,6 +964,7 @@ var __webpack_chunk_load__ = function(chunkId) {
     conditions: ["node", "worker", "react-server"],
     external: externalList,
     banner,
+    inject: setupFiles,
     plugins: [clientReferencesPlugin, serverReferencesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
@@ -980,6 +989,7 @@ var __webpack_chunk_load__ = function(chunkId) {
     conditions: ["node", "worker", "browser"],
     external: externalList,
     banner,
+    inject: setupFiles,
     plugins: [serverReferencesPluginSsr, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
@@ -1006,6 +1016,7 @@ var __webpack_chunk_load__ = function(chunkId) {
     commonAlias,
     commonLoader,
     isWebpackBuild,
+    setupFiles,
   };
 }
 

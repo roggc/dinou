@@ -23,7 +23,7 @@ try {
     outDir: ".dinou/node",
   });
 
-  const { dinouDirSlash, externalList, banner, commonAlias, commonLoader, isWebpackBuild } = engineResult;
+  const { dinouDirSlash, externalList, banner, commonAlias, commonLoader, isWebpackBuild, setupFiles } = engineResult;
 
   // Pass C: Node Orchestrator Entry
   const nodeEntryContent = `// Auto-generated main entry for Node.js (Dual-Bundle)
@@ -189,17 +189,20 @@ export async function startServer(port = PORT, host = "0.0.0.0") {
 
 export default {
   port: PORT,
-  fetch,
   startServer,
 };
 
-const isMain = typeof process !== "undefined" &&
-  process.argv[1] &&
-  (path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)));
+const isMain = Boolean(
+  (typeof import.meta !== "undefined" && import.meta.main) ||
+  (typeof process !== "undefined" &&
+    process.argv[1] &&
+    (path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))))
+);
 
 if (isMain) {
   startServer(PORT);
 }
+
 `;
   const nodeEntryPath = path.join(nodeDir, "node-entry.mjs");
   fs.writeFileSync(nodeEntryPath, nodeEntryContent, "utf8");
@@ -218,6 +221,7 @@ if (isMain) {
     conditions: ["node", "worker", "browser"],
     external: [...externalList, "./rsc-engine.mjs", "./ssr-engine.mjs"],
     banner,
+    inject: setupFiles,
     alias: commonAlias,
     loader: commonLoader,
     define: {
