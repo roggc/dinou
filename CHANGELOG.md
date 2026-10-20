@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [8.0.0] - 2026-10-20
+
+### ⚠️ Breaking Changes
+- **Native ESM Framework (`"type": "module"`)**: Dinou is now distributed and executed strictly as native ECMAScript Modules (ESM). `package.json` includes `"type": "module"`, allowing all framework and consumer code to run with modern ESM semantics.
+- **Source & Extension Unification (`.mjs` -> `.js`)**: Eliminated the hybrid extension fragmentation (`.mjs` vs `.js`). All framework build scripts, CLI commands, adapters, and entrypoints now use standard `.js` extension across the codebase.
+- **Package Exports Modernization**: Dropped legacy CommonJS conditional exports (`"require"`) and `.mjs` targets in `package.json`. All public subpaths (`dinou`, `dinou/server`, `dinou/config`, `dinou/adapters/*`) resolve directly to standard ESM `.js` targets.
+- **Universal Edge Renderer Singleton (`__DINOU_EDGE_RENDERER__`)**: Replaced dynamic module resolution in dual-bundle compilation with an explicit global singleton (`globalThis.__DINOU_EDGE_RENDERER__`), guaranteeing that React 19 RSC streaming and Server Function serialization share identical context across runtime engines.
+
+### Changed
+- **CLI & Eject Architecture Modernization**:
+  - Migrated `cli.js` to native ESM imports using Commander.
+  - Refactored `eject.js` into an idiomatic ESM module exporting `eject()`.
+  - Updated all ejected `npm run` scripts to reference standard `.js` entry points across all adapters and bundlers (Esbuild, Rollup, Webpack).
+- **Core Cleanup & Canonical Config Resolution**:
+  - Removed obsolete root wrapper `dinou/config.js`, establishing `dinou/core/config.js` as the sole canonical implementation for the `"dinou/config"` export.
+  - Formatted and aligned root `package.json` fields according to modern ecosystem conventions.
+
+### Fixed
+- **Layout `allowISG: false` False 404 on Static Routes**: Fixed a bug in `handler.js` where setting `allowISG: false` in layout functions caused production requests to prematurely return an unconditional `404 Not Found`. The handler now properly verifies parameter matches against `staticPathsSet` (`getStaticPaths`) and confirms whether pre-rendered layout artifacts (`layout.rsc`) exist on disk before blocking unauthorized dynamic paths.
+
 ## [7.3.0]
 
 ### Added
