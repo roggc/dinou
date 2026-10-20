@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
-const { program } = require("commander");
-const { execSync } = require("child_process");
-const path = require("path");
+import { program } from "commander";
+import { execSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dinouPath = path.resolve(__dirname, "dinou");
 const projectRoot = process.cwd();
 
@@ -25,28 +27,28 @@ program
   .command("dev")
   .description("Start development server with Esbuild")
   .action(() => {
-    runCommand(`cross-env DINOU_BUILD_TOOL=esbuild node ${p("node/dev.mjs")}`);
+    runCommand(`cross-env DINOU_BUILD_TOOL=esbuild node ${p("node/dev.js")}`);
   });
 
 program
   .command("dev:esbuild")
   .description("Start development server with Esbuild")
   .action(() => {
-    runCommand(`cross-env DINOU_BUILD_TOOL=esbuild node ${p("node/dev.mjs")}`);
+    runCommand(`cross-env DINOU_BUILD_TOOL=esbuild node ${p("node/dev.js")}`);
   });
 
 program
   .command("dev:rollup")
   .description("Start development server with Rollup")
   .action(() => {
-    runCommand(`cross-env DINOU_BUILD_TOOL=rollup node ${p("node/dev.mjs")}`);
+    runCommand(`cross-env DINOU_BUILD_TOOL=rollup node ${p("node/dev.js")}`);
   });
 
 program
   .command("dev:webpack")
   .description("Start development server with Webpack")
   .action(() => {
-    runCommand(`cross-env DINOU_BUILD_TOOL=webpack node ${p("node/dev.mjs")}`);
+    runCommand(`cross-env DINOU_BUILD_TOOL=webpack node ${p("node/dev.js")}`);
   });
 
 // --- NODE (BUILD & START) ---
@@ -55,70 +57,70 @@ program
   .command("build")
   .description("Build the app for Node.js production (using esbuild)")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.mjs")} && node ${p("node/build.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.js")} && node ${p("node/build.js")}`);
   });
 
 program
   .command("build:node")
   .description("Build the app for Node.js production (using esbuild)")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.mjs")} && node ${p("node/build.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.js")} && node ${p("node/build.js")}`);
   });
 
 program
   .command("build:node:esbuild")
   .description("Build the app for Node.js with Esbuild")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.mjs")} && node ${p("node/build.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.js")} && node ${p("node/build.js")}`);
   });
 
 program
   .command("build:node:rollup")
   .description("Build the app for Node.js with Rollup")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && node ${p("node/build.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && node ${p("node/build.js")}`);
   });
 
 program
   .command("build:node:webpack")
   .description("Build the app for Node.js with Webpack")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && cross-env DINOU_BUILD_TOOL=webpack node ${p("node/build.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && cross-env DINOU_BUILD_TOOL=webpack node ${p("node/build.js")}`);
   });
 
 program
   .command("start")
   .description("Start the app in production mode (Node.js)")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("adapters/node.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production node ${p("adapters/node.js")}`);
   });
 
 program
   .command("start:node")
   .description("Start the app in production mode (Node.js)")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("adapters/node.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production node ${p("adapters/node.js")}`);
   });
 
 program
   .command("start:node:esbuild")
   .description("Start the app in production mode (Esbuild build)")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("adapters/node.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production node ${p("adapters/node.js")}`);
   });
 
 program
   .command("start:node:rollup")
   .description("Start the app in production mode (Rollup build)")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("adapters/node.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production node ${p("adapters/node.js")}`);
   });
 
 program
   .command("start:node:webpack")
   .description("Start the app in production mode (Webpack build)")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack node ${p("adapters/node.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack node ${p("adapters/node.js")}`);
   });
 
 // --- NODE (COMPILE VIA BUN) ---
@@ -136,10 +138,10 @@ const runNodeBuild = (bundler) => {
     ? `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`
     : bundler === "webpack"
     ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
-    : `cross-env NODE_ENV=production node ${p("esbuild/build.mjs")}`;
+    : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
 
   const envPrefix = bundler === "webpack" ? "cross-env DINOU_BUILD_TOOL=webpack " : "";
-  return `${bundlerCmd} && ${envPrefix}node ${p("node/build.mjs")}`;
+  return `${bundlerCmd} && ${envPrefix}node ${p("node/build.js")}`;
 };
 
 for (const t of nodeTargets) {
@@ -162,12 +164,12 @@ for (const t of nodeTargets) {
 
 const runNodePureBuild = (bundler) => {
   if (bundler === "rollup") {
-    return `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && bun ${p("node/build.mjs")}`;
+    return `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && bun ${p("node/build.js")}`;
   }
   if (bundler === "webpack") {
-    return `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && cross-env DINOU_BUILD_TOOL=webpack bun ${p("node/build.mjs")}`;
+    return `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && cross-env DINOU_BUILD_TOOL=webpack bun ${p("node/build.js")}`;
   }
-  return `cross-env NODE_ENV=production bun ${p("esbuild/build.mjs")} && bun ${p("node/build.mjs")}`;
+  return `cross-env NODE_ENV=production bun ${p("esbuild/build.js")} && bun ${p("node/build.js")}`;
 };
 
 program
@@ -212,28 +214,28 @@ program
   .command("build:cloudflare")
   .description("Build the app for Cloudflare Workers (using esbuild)")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.mjs")} && node ${p("cloudflare/build.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.js")} && node ${p("cloudflare/build.js")}`);
   });
 
 program
   .command("build:cloudflare:esbuild")
   .description("Build the app for Cloudflare Workers with Esbuild")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.mjs")} && node ${p("cloudflare/build.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.js")} && node ${p("cloudflare/build.js")}`);
   });
 
 program
   .command("build:cloudflare:rollup")
   .description("Build the app for Cloudflare Workers with Rollup")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && node ${p("cloudflare/build.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && node ${p("cloudflare/build.js")}`);
   });
 
 program
   .command("build:cloudflare:webpack")
   .description("Build the app for Cloudflare Workers with Webpack")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && cross-env DINOU_BUILD_TOOL=webpack node ${p("cloudflare/build.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && cross-env DINOU_BUILD_TOOL=webpack node ${p("cloudflare/build.js")}`);
   });
 
 // --- DENO DEPLOY / EDGE ---
@@ -243,10 +245,10 @@ const runDenoBuild = (bundler) => {
     ? `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`
     : bundler === "webpack"
     ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
-    : `cross-env NODE_ENV=production node ${p("esbuild/build.mjs")}`;
+    : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
 
   const envPrefix = bundler === "webpack" ? "cross-env DINOU_BUILD_TOOL=webpack " : "";
-  return `${bundlerCmd} && ${envPrefix}node ${p("deno/build.mjs")} && deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env ${p("deno/seed-kv.js")}`;
+  return `${bundlerCmd} && ${envPrefix}node ${p("deno/build.js")} && deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env ${p("deno/seed-kv.js")}`;
 };
 
 program
@@ -308,10 +310,10 @@ const runBunBuild = (bundler) => {
     ? `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`
     : bundler === "webpack"
     ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
-    : `cross-env NODE_ENV=production node ${p("esbuild/build.mjs")}`;
+    : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
 
   const envPrefix = bundler === "webpack" ? "cross-env DINOU_BUILD_TOOL=webpack " : "";
-  return `${bundlerCmd} && ${envPrefix}node ${p("bun/build.mjs")}`;
+  return `${bundlerCmd} && ${envPrefix}node ${p("bun/build.js")}`;
 };
 
 program
@@ -390,12 +392,12 @@ for (const t of bunTargets) {
 
 const runBunPureBuild = (bundler) => {
   if (bundler === "rollup") {
-    return `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && bun ${p("bun/build.mjs")}`;
+    return `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && bun ${p("bun/build.js")}`;
   }
   if (bundler === "webpack") {
-    return `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && cross-env DINOU_BUILD_TOOL=webpack bun ${p("bun/build.mjs")}`;
+    return `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && cross-env DINOU_BUILD_TOOL=webpack bun ${p("bun/build.js")}`;
   }
-  return `cross-env NODE_ENV=production bun ${p("esbuild/build.mjs")} && bun ${p("bun/build.mjs")}`;
+  return `cross-env NODE_ENV=production bun ${p("esbuild/build.js")} && bun ${p("bun/build.js")}`;
 };
 
 program
@@ -440,28 +442,28 @@ program
   .command("export-static")
   .description("Export standalone static website (using esbuild)")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.mjs")} && node ${p("core/export-static.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.js")} && node ${p("core/export-static.js")}`);
   });
 
 program
   .command("export-static:esbuild")
   .description("Export standalone static website with Esbuild")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.mjs")} && node ${p("core/export-static.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.js")} && node ${p("core/export-static.js")}`);
   });
 
 program
   .command("export-static:rollup")
   .description("Export standalone static website with Rollup")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && node ${p("core/export-static.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && node ${p("core/export-static.js")}`);
   });
 
 program
   .command("export-static:webpack")
   .description("Export standalone static website with Webpack")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && node ${p("core/export-static.mjs")}`);
+    runCommand(`cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && node ${p("core/export-static.js")}`);
   });
 
 // --- EJECT ---
@@ -469,9 +471,10 @@ program
 program
   .command("eject")
   .description("Copy the framework to the root of the project")
-  .action(() => {
+  .action(async () => {
     console.log("Executing eject...");
-    require("./eject");
+    const { eject } = await import("./eject.js");
+    eject();
   });
 
 program.parse(process.argv);

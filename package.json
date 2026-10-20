@@ -2,30 +2,30 @@
   "name": "dinou",
   "version": "7.3.0",
   "description": "Full-stack React 19 framework with native RSC, Server Functions, progressive streaming, and zero vendor lock-in.",
-  "main": "index.js",
+  "main": "./dinou/index.js",
   "bin": {
     "dinou": "./cli.js"
   },
   "exports": {
     ".": {
       "types": "./dinou/index.d.ts",
-      "import": "./dinou/index.mjs",
-      "require": "./dinou/index.js"
+      "import": "./dinou/index.js",
+      "default": "./dinou/index.js"
     },
     "./env": {
       "types": "./dinou/env.d.ts"
     },
     "./server": {
       "types": "./dinou/server.d.ts",
-      "import": "./dinou/server.mjs",
-      "require": "./dinou/server.js"
+      "import": "./dinou/server.js",
+      "default": "./dinou/server.js"
     },
     "./config": {
       "types": "./dinou/index.d.ts",
       "import": "./dinou/core/config.js",
-      "require": "./dinou/core/config.js"
+      "default": "./dinou/core/config.js"
     },
-    "./adapters/node": "./dinou/adapters/node.mjs",
+    "./adapters/node": "./dinou/adapters/node.js",
     "./adapters/bun": "./dinou/adapters/bun.js",
     "./adapters/deno": "./dinou/adapters/deno.js",
     "./adapters/cloudflare": "./dinou/adapters/cloudflare.js",
@@ -106,5 +106,6 @@
   "peerDependencies": {
     "react": ">=19.3.0",
     "react-dom": ">=19.3.0"
-  }
+  },
+  "type": "module"
 }
