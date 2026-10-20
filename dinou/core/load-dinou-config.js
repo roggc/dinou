@@ -1,6 +1,9 @@
-const path = require("path");
-const { existsSync, mkdirSync } = require("fs");
-const { pathToFileURL } = require("url");
+import path from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
 
 let dinouConfig = { plugins: [] };
 let dinouConfigPromise = null;
@@ -87,6 +90,9 @@ if (typeof globalThis !== "undefined" && globalThis.__DINOU_CONFIG__) {
   dinouConfig = globalThis.__DINOU_CONFIG__;
 }
 
-module.exports = {
+export {
+  getDinouConfig,
+};
+export default {
   getDinouConfig,
 };

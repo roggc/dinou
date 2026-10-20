@@ -1,12 +1,12 @@
-const path = require("path");
-const { existsSync } = require("./vfs");
-const React = require("react");
-const {
+import path from "node:path";
+import { existsSync } from "./vfs.js";
+import React from "react";
+import {
   getFilePathAndDynamicParams,
-} = require("./get-file-path-and-dynamic-params");
-const importModule = require("./import-module");
-const { asyncRenderJSXToClientJSX } = require("./render-jsx-to-client-jsx");
-const { getLayoutProps } = require("./layout-functions");
+} from "./get-file-path-and-dynamic-params.js";
+import importModule from "./import-module.js";
+import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
+import { getLayoutProps } from "./layout-functions.js";
 
 function cleanErrorStack(stack) {
   if (!stack || typeof stack !== "string") return "";
@@ -377,6 +377,9 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false, options
   return jsx;
 }
 
-module.exports = {
+export {
+  getErrorJSX,
+};
+export default {
   getErrorJSX,
 };

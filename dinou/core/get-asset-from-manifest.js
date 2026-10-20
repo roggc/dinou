@@ -1,11 +1,11 @@
-const fs = require("fs");
-const path = require("path");
+import fs from "node:fs";
+import path from "node:path";
 
 let manifest = {};
 let read = false;
 const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 
-function getAssetFromManifest(name) {
+export function getAssetFromManifest(name) {
   if (typeof globalThis !== "undefined" && globalThis.__DINOU_ASSET_MANIFEST__) {
     return "/" + (globalThis.__DINOU_ASSET_MANIFEST__[name] || name);
   }
@@ -28,4 +28,4 @@ function getAssetFromManifest(name) {
   return "/" + (manifest[name] || name);
 }
 
-module.exports = getAssetFromManifest;
+export default getAssetFromManifest;

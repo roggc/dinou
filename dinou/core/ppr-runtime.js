@@ -4,11 +4,11 @@
 // streams dynamic Suspense holes as they resolve over the same HTTP connection.
 // Designed for the Dual-Bundle architecture (Pass A: RSC, Pass B: SSR).
 
-const React = require("react");
-const { renderRSCStream } = require("./rsc-renderer.js");
-const { getClientManifest } = require("./manifest-provider.js");
-const { requestStorage, setCurrentContext } = require("./request-context.js");
-const getJSX = require("./get-jsx.js");
+import React from "react";
+import { renderRSCStream } from "./rsc-renderer.js";
+import { getClientManifest } from "./manifest-provider.js";
+import { requestStorage, setCurrentContext } from "./request-context.js";
+import getJSX from "./get-jsx.js";
 
 /**
  * Traverses a React JSX element tree to find Suspense boundaries,
@@ -257,7 +257,11 @@ async function handlePprResume({
   });
 }
 
-module.exports = {
+export {
+  streamDynamicHoles,
+  handlePprResume,
+};
+export default {
   streamDynamicHoles,
   handlePprResume,
 };

@@ -43,4 +43,6 @@ class ManifestGeneratorPlugin {
   }
 }
 
-module.exports = new ManifestGeneratorPlugin();
+const instance = new ManifestGeneratorPlugin();
+export { ManifestGeneratorPlugin, instance };
+export default instance;

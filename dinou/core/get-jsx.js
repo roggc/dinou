@@ -1,13 +1,19 @@
-const path = require("path");
-const { pathToFileURL } = require("url");
-const { existsSync } = require("./vfs");
-const React = require("react");
-const {
+import path from "node:path";
+import { pathToFileURL, fileURLToPath } from "node:url";
+import { existsSync } from "./vfs.js";
+import React from "react";
+import {
   getFilePathAndDynamicParams,
-} = require("./get-file-path-and-dynamic-params");
-const importModule = require("./import-module");
-const { asyncRenderJSXToClientJSX } = require("./render-jsx-to-client-jsx");
-const { getLayoutProps } = require("./layout-functions");
+} from "./get-file-path-and-dynamic-params.js";
+import importModule from "./import-module.js";
+import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
+import { getLayoutProps } from "./layout-functions.js";
+import { DinouPageSlot as RawDinouPageSlot } from "./slot.js";
+import { getErrorJSX } from "./get-error-jsx.js";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
 
 async function getJSX(
   reqPath,
@@ -27,12 +33,12 @@ async function getJSX(
 
   // 1. Segmented handling for Layout: If only the layout is requested
   if (options && options.segment === "layout") {
-    let { DinouPageSlot } = require("./slot.js");
+    let DinouPageSlot = RawDinouPageSlot;
     if (
       typeof DinouPageSlot === "function" &&
       DinouPageSlot.$$typeof !== Symbol.for("react.client.reference")
     ) {
-      const slotPath = path.resolve(__dirname, "slot.js");
+      const slotPath = path.resolve(currentDir, "slot.js");
       const fileUrl = pathToFileURL(slotPath).href;
       let regFn = null;
       try {
@@ -296,7 +302,6 @@ async function getJSX(
           `[Dinou] Layout ${layoutPath} failed during render, isolating layout error:`,
           layoutErr?.message || layoutErr
         );
-        const { getErrorJSX } = require("./get-error-jsx");
         const serializedError = {
           message: layoutErr.message || "Unknown Error",
           name: layoutErr.name || "Error",
@@ -320,4 +325,5 @@ async function getJSX(
   return jsx;
 }
 
-module.exports = getJSX;
+export { getJSX };
+export default getJSX;

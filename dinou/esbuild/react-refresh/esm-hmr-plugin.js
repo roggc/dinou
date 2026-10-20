@@ -6,9 +6,9 @@ import { transform } from "@swc/core";
 import { createServer } from "node:http";
 import { EsmHmrEngine } from "./esm-hmr/server.js";
 import { fileURLToPath } from "node:url";
-import write from "../helpers-esbuild/write.mjs";
-import normalizePath from "../helpers-esbuild/normalize-path.mjs";
-import stripNamespace from "../helpers-esbuild/strip-namespace.mjs";
+import write from "../helpers-esbuild/write.js";
+import normalizePath from "../helpers-esbuild/normalize-path.js";
+import stripNamespace from "../helpers-esbuild/strip-namespace.js";
 
 const norm = (p) => path.resolve(p).replace(/\\/g, "/");
 const normKey = (p) => {
@@ -155,7 +155,7 @@ export default function esmHmrPlugin({
         if (!result || !result.outputFiles) return;
         const clientPath = path.resolve(
           path.dirname(fileURLToPath(import.meta.url)),
-          "./esm-hmr/client.mjs",
+          "./esm-hmr/client.js",
         );
         let clientCode = await fs.readFile(clientPath, "utf8");
         const isDebug =

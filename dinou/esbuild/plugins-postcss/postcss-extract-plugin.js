@@ -1,6 +1,6 @@
 // postcss-extract-plugin.js
-const fs = require("fs");
-const path = require("path");
+import fs from "node:fs";
+import path from "node:path";
 
 let cachedExtractedCSS = "";
 let cachedCSSBuffer = null;
@@ -71,4 +71,5 @@ const createPostCSSExtractPlugin = (options = {}) => {
   };
 };
 
-module.exports = createPostCSSExtractPlugin;
+export { createPostCSSExtractPlugin };
+export default createPostCSSExtractPlugin;

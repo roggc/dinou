@@ -1,6 +1,6 @@
-const fs = require("fs").promises;
+import fs from "node:fs/promises";
 
-async function safeRename(oldPath, newPath, retries = 5, delay = 100) {
+export async function safeRename(oldPath, newPath, retries = 5, delay = 100) {
   for (let i = 0; i < retries; i++) {
     try {
       await fs.rename(oldPath, newPath);
@@ -22,4 +22,4 @@ async function safeRename(oldPath, newPath, retries = 5, delay = 100) {
   }
 }
 
-module.exports = { safeRename };
+export default { safeRename };

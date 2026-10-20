@@ -4,7 +4,7 @@ import createScopedName from "../../core/createScopedName.js";
 import { regex } from "../../core/asset-extensions.js";
 import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
 import { pathToFileURL } from "node:url";
-import stripNamespace from "../helpers-esbuild/strip-namespace.mjs";
+import stripNamespace from "../helpers-esbuild/strip-namespace.js";
 
 const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

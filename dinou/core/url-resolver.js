@@ -1,4 +1,4 @@
-function resolveRelativeUrl(href, currentPathname) {
+export function resolveRelativeUrl(href, currentPathname) {
   if (!href || typeof href !== "string") {
     return "/";
   }
@@ -13,4 +13,4 @@ function resolveRelativeUrl(href, currentPathname) {
   return resolved.pathname + resolved.search + resolved.hash;
 }
 
-module.exports = { resolveRelativeUrl };
+export default { resolveRelativeUrl };

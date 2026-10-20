@@ -1,4 +1,4 @@
-import write from "../helpers-esbuild/write.mjs";
+import write from "../helpers-esbuild/write.js";
 
 export default function writePlugin() {
   return {

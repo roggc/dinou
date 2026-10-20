@@ -2,10 +2,10 @@
 // Generates static HTML for a given path using the in-memory Dual-Bundle streaming engine.
 // Completely eliminates child_process.fork() and render-app-to-html.js.
 
-const path = require("path");
-const fs = require("fs").promises;
-const { existsSync, mkdirSync } = require("fs");
-const { pathToFileURL } = require("url");
+import path from "node:path";
+import fs from "node:fs/promises";
+import { existsSync, mkdirSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 const OUT_DIR = path.resolve(".dinou/dist2");
 
@@ -78,4 +78,5 @@ async function generateStaticPage(reqPath) {
   }
 }
 
-module.exports = generateStaticPage;
+export { generateStaticPage };
+export default generateStaticPage;

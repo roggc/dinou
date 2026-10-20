@@ -10,9 +10,9 @@ import {
   globPattern as assetGlobPattern,
 } from "../../core/asset-extensions.js";
 import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
-import normalizePath from "./normalize-path.mjs";
+import normalizePath from "./normalize-path.js";
 import { useClientRegex, useServerRegex } from "../../constants.js";
-import { updateManifestForModule } from "./update-manifest-for-module.mjs";
+import { updateManifestForModule } from "./update-manifest-for-module.js";
 
 function hashFilePath(absPath) {
   return crypto.createHash("sha1").update(normalizePath(absPath)).digest("hex").slice(0, 8);

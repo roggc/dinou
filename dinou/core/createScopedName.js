@@ -1,8 +1,8 @@
-const genericNames = require("generic-names");
-const path = require("path");
+import genericNames from "generic-names";
+import path from "node:path";
 
 const generate = genericNames("[hash:base64]", {
   context: path.resolve(process.cwd(), "src"),
 });
 
-module.exports = generate;
+export default generate;

@@ -1,5 +1,5 @@
-const fs = require("fs");
-const path = require("path");
+import fs from "node:fs";
+import path from "node:path";
 
 const isDevelopment =
   process.env.DINOU_DEV === "true" ||
@@ -7,7 +7,7 @@ const isDevelopment =
   process.env.NODE_ENV !== "production";
 const localVfs = {};
 
-function getVfs() {
+export function getVfs() {
   if (typeof globalThis !== "undefined" && globalThis.__DINOU_VFS__) {
     return globalThis.__DINOU_VFS__;
   }
@@ -21,7 +21,7 @@ function normalizeKey(p) {
   return s;
 }
 
-function buildVfs(dir, baseDir = dir) {
+export function buildVfs(dir, baseDir = dir) {
   const vfs = getVfs();
   if (!fs.existsSync(dir)) return;
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -94,7 +94,7 @@ function lookupVfs(vfs, p) {
   return null;
 }
 
-function existsSync(filePath) {
+export function existsSync(filePath) {
   const vfs = getVfs();
   if (lookupVfs(vfs, filePath) !== null) {
     return true;
@@ -107,7 +107,7 @@ function existsSync(filePath) {
   return false;
 }
 
-function readdirSync(dirPath, options) {
+export function readdirSync(dirPath, options) {
   const vfs = getVfs();
   const entry = lookupVfs(vfs, dirPath);
 
@@ -131,7 +131,7 @@ function readdirSync(dirPath, options) {
   return [];
 }
 
-module.exports = {
+export default {
   existsSync,
   readdirSync,
   buildVfs,

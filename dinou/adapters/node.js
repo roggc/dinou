@@ -1,4 +1,4 @@
-// dinou/adapters/node.mjs
+// dinou/adapters/node.js
 // Native Node.js Pre-Bundled Adapter for Dinou v7.
 // Serves the standalone pre-bundled server from .dinou/node/server.mjs.
 
@@ -12,10 +12,16 @@ if (typeof globalThis.AsyncLocalStorage === "undefined" && typeof AsyncLocalStor
 }
 
 const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
-const bundlePath = path.resolve(cwd, ".dinou/node/server.mjs");
+let bundlePath = path.resolve(cwd, ".dinou/node/server.js");
+if (!fs.existsSync(bundlePath)) {
+  const mjsFallback = path.resolve(cwd, ".dinou/node/server.mjs");
+  if (fs.existsSync(mjsFallback)) {
+    bundlePath = mjsFallback;
+  }
+}
 
 if (!fs.existsSync(bundlePath)) {
-  console.error("❌ [Dinou Node Adapter] .dinou/node/server.mjs not found. Please run 'npm run build:node' first.");
+  console.error("❌ [Dinou Node Adapter] .dinou/node/server.js not found. Please run 'npm run build:node' first.");
   process.exit(1);
 }
 

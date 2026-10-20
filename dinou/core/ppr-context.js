@@ -1,7 +1,7 @@
 // dinou/core/ppr-context.js
 // PPR Pre-rendering Context and Suspense Hole Tracker for Dinou v7.2.
 
-const { AsyncLocalStorage } = require("async_hooks");
+import { AsyncLocalStorage } from "node:async_hooks";
 
 const pprStorage = new AsyncLocalStorage();
 
@@ -11,7 +11,7 @@ const pprStorage = new AsyncLocalStorage();
  * @param {Function} callback
  * @returns {Promise<any>}
  */
-function runWithPprContext(options, callback) {
+export function runWithPprContext(options, callback) {
   const store = {
     isPpr: Boolean(options?.isPpr),
     suspenseDepth: 0,
@@ -23,21 +23,21 @@ function runWithPprContext(options, callback) {
   return pprStorage.run(store, callback);
 }
 
-function getPprStore() {
+export function getPprStore() {
   return pprStorage.getStore() || null;
 }
 
-function isPprBuildActive() {
+export function isPprBuildActive() {
   const store = getPprStore();
   return Boolean(store && store.isPpr);
 }
 
-function isInsideSuspense() {
+export function isInsideSuspense() {
   const store = getPprStore();
   return Boolean(store && store.suspenseDepth > 0);
 }
 
-function enterSuspense(holeId = null) {
+export function enterSuspense(holeId = null) {
   const store = getPprStore();
   if (store) {
     store.suspenseDepth++;
@@ -51,7 +51,7 @@ function enterSuspense(holeId = null) {
   return null;
 }
 
-function exitSuspense() {
+export function exitSuspense() {
   const store = getPprStore();
   if (store) {
     store.suspenseDepth = Math.max(0, store.suspenseDepth - 1);
@@ -61,7 +61,7 @@ function exitSuspense() {
   }
 }
 
-function markDynamicAccess(type = "dynamic") {
+export function markDynamicAccess(type = "dynamic") {
   const store = getPprStore();
   if (store && store.isPpr && store.suspenseDepth > 0) {
     const holeId = store.currentHoleId || `ppr-hole-${store.nextHoleIndex}`;
@@ -73,7 +73,7 @@ function markDynamicAccess(type = "dynamic") {
   }
 }
 
-function registerHole(holeId, meta = {}) {
+export function registerHole(holeId, meta = {}) {
   const store = getPprStore();
   if (store) {
     store.holes.set(holeId, {
@@ -84,7 +84,7 @@ function registerHole(holeId, meta = {}) {
   }
 }
 
-function getRegisteredHoles() {
+export function getRegisteredHoles() {
   const store = getPprStore();
   if (store) {
     return Array.from(store.holes.keys());
@@ -92,7 +92,7 @@ function getRegisteredHoles() {
   return [];
 }
 
-module.exports = {
+export default {
   runWithPprContext,
   getPprStore,
   isPprBuildActive,

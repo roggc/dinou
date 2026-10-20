@@ -3,7 +3,7 @@
 // Supports constants (export const ppr = true/false), sync functions (export function ppr()),
 // and async functions (export async function ppr()).
 
-async function resolveModulePpr(mod) {
+export async function resolveModulePpr(mod) {
   if (!mod) return null;
   const raw =
     mod.ppr !== undefined
@@ -29,6 +29,6 @@ async function resolveModulePpr(mod) {
   return Boolean(raw);
 }
 
-module.exports = {
+export default {
   resolveModulePpr,
 };

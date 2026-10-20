@@ -1,30 +1,29 @@
-// dinou/cloudflare/build.mjs
-// Dual-Bundle Build script for packaging Dinou v7 for Cloudflare Workers.
-// Pass A: RSC Engine (conditions: ["workerd", "worker", "react-server"])
-// Pass B: Native Streaming HTML SSR Engine (conditions: ["workerd", "worker", "browser"])
-// Pass C: Main Worker Orchestrator (worker.js)
+// dinou/deno/build.mjs
+// Dual-Bundle Build script for packaging Dinou v7 for Deno Deploy & Edge.
+// Pass A: RSC Engine (conditions: ["deno", "worker", "react-server"])
+// Pass B: Native Streaming HTML SSR Engine (conditions: ["deno", "worker", "browser"])
+// Pass C: Main Deno Orchestrator (main.js)
 
 import fs from "node:fs";
 import path from "node:path";
 import esbuild from "esbuild";
-import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const require = createRequire(import.meta.url);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { generateRouteModulesCode, generateRouteTypes } = require("../core/route-generator.js");
-const parseExports = require("../core/parse-exports.js");
-const { useClientRegex, useServerRegex } = require("../constants.js");
-const {
+import { generateRouteModulesCode, generateRouteTypes } from "../core/route-generator.js";
+import parseExports from "../core/parse-exports.js";
+import { useClientRegex, useServerRegex } from "../constants.js";
+import {
   isSupportedClientModule,
   scanProjectDependenciesForClientComponents,
-} = require("../core/scan-dependency-components.js");
-const { getDinouConfig } = require("../core/load-dinou-config.js");
-const { resolveSetupFiles } = require("../core/resolve-setup-files.js");
+} from "../core/scan-dependency-components.js";
+import { getDinouConfig } from "../core/load-dinou-config.js";
+import { resolveSetupFiles } from "../core/resolve-setup-files.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const projectRoot = process.cwd();
-const cloudflareDir = path.resolve(projectRoot, ".dinou/cloudflare");
-fs.mkdirSync(cloudflareDir, { recursive: true });
+const denoDir = path.resolve(projectRoot, ".dinou/deno");
+fs.mkdirSync(denoDir, { recursive: true });
 
 const dinouConfig = await getDinouConfig(projectRoot);
 const setupFiles = resolveSetupFiles(projectRoot, dinouConfig);
@@ -84,14 +83,14 @@ const bundlerName = isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL |
 
 const dist2Dir = path.resolve(projectRoot, ".dinou/dist2");
 const dist3Dir = path.resolve(projectRoot, ".dinou/dist3");
-console.log(`\n🦖 Dinou v7 (Cloudflare Workers • ${bundlerName})`);
+console.log(`\n🦖 Dinou v7 (Deno • ${bundlerName})`);
 if (fs.existsSync(dist2Dir)) {
   const copiedCount = copyRecursive(dist2Dir, dist3Dir);
   console.log(`  📄 Synchronized ${copiedCount} pre-rendered static route(s) to .dinou/dist3`);
 }
 console.log("  ⚡ Generating route modules & manifests...");
 const routeModulesCode = generateRouteModulesCode(projectRoot, "../..");
-const routeModulesPath = path.join(cloudflareDir, "route-modules.js");
+const routeModulesPath = path.join(denoDir, "route-modules.js");
 fs.writeFileSync(routeModulesPath, routeModulesCode, "utf8");
 
 function findManifest(filename, fallbackFolder) {
@@ -133,7 +132,7 @@ if (sfManifestPath && fs.existsSync(sfManifestPath)) {
 // Discovery of Client Components for SSR Engine & RSC Manifest
 // ====================================================================
 if (process.env.DINOU_DEBUG) {
-  console.log("🔍 [Dinou Cloudflare] Discovering client components for SSR Engine...");
+  console.log("🔍 [Dinou Deno] Discovering client components for SSR Engine...");
 }
 const srcDir = path.resolve(projectRoot, "src");
 
@@ -169,7 +168,6 @@ function findClientComponents() {
     }
   }
 
-  // Also scan external dependencies from package.json for "use client" components (e.g. react-enhanced-suspense)
   scanProjectDependenciesForClientComponents(projectRoot, clientFiles, useClientRegex);
 
   for (const k of Object.keys(parsedClientManifest)) {
@@ -452,7 +450,7 @@ manifestInlines += `\nglobalThis.__DINOU_LAYOUTS__ = ${JSON.stringify(discovered
 
 if (process.env.DINOU_DEBUG) {
 
-  console.log("⚡ [Dinou Cloudflare] Building in-memory VFS for Edge routing...");
+  console.log("⚡ [Dinou Deno] Building in-memory VFS for Edge routing...");
 }
 const vfsSnapshot = {};
 function walkVfs(dir) {
@@ -507,7 +505,7 @@ if (typeof globalThis.__webpack_chunk_load__ === 'undefined') {
 ${manifestInlines}
 globalThis.__DINOU_VFS__ = ${JSON.stringify(vfsSnapshot)};
 `;
-const envSetupPath = path.join(cloudflareDir, "env-setup.js");
+const envSetupPath = path.join(denoDir, "env-setup.js");
 fs.writeFileSync(envSetupPath, envSetupContent, "utf8");
 
 // Generate ssr-client-manifest.js
@@ -686,23 +684,25 @@ serverFunctionFiles.forEach((relPath) => {
 
 ssrManifestCode += `  },\n  moduleLoading: null,\n};\n`;
 
-const ssrClientManifestPath = path.join(cloudflareDir, "ssr-client-manifest.js");
+const ssrClientManifestPath = path.join(denoDir, "ssr-client-manifest.js");
 fs.writeFileSync(ssrClientManifestPath, ssrManifestCode, "utf8");
 
 // ====================================================================
 // Entry Files Generation
 // ====================================================================
 // 1. RSC Engine Entry
-const rscEntryContent = `// Auto-generated RSC Engine entry for Cloudflare Workers
+const rscEntryContent = `// Auto-generated RSC Engine entry for Deno Deploy / Edge
 import "./env-setup.js";
 import "./route-modules.js";
+import * as edgeRenderer from "react-server-dom-webpack/server.edge";
+globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
 export { handleRequest } from "${dinouDirSlash}/core/handler.js";
 `;
-const rscEntryPath = path.join(cloudflareDir, "rsc-entry.js");
+const rscEntryPath = path.join(denoDir, "rsc-entry.js");
 fs.writeFileSync(rscEntryPath, rscEntryContent, "utf8");
 
 // 2. SSR Engine Entry
-const ssrEntryContent = `// Auto-generated SSR Engine entry for Cloudflare Workers
+const ssrEntryContent = `// Auto-generated SSR Engine entry for Deno Deploy / Edge
 import { renderRscStreamToHtmlStream } from "${dinouDirSlash}/core/edge-ssr.js";
 import { clientModules, ssrConsumerManifest } from "./ssr-client-manifest.js";
 
@@ -726,130 +726,120 @@ export async function renderHtml(rscStream, options = {}) {
   return renderRscStreamToHtmlStream(rscStream, ssrConsumerManifest, options);
 }
 `;
-const ssrEntryPath = path.join(cloudflareDir, "ssr-entry.js");
+const ssrEntryPath = path.join(denoDir, "ssr-entry.js");
 fs.writeFileSync(ssrEntryPath, ssrEntryContent, "utf8");
 
-// 3. Worker Orchestrator Entry
-const workerEntryContent = `// Auto-generated main worker entry for Cloudflare Workers (Dual-Bundle)
+// 3. Deno Orchestrator Entry
+const denoEntryContent = `// Auto-generated main entry for Deno Deploy / Edge (Dual-Bundle)
 import { handleRequest } from "./rsc-engine.js";
 import { renderHtml } from "./ssr-engine.js";
 import {
   getStorageAdapter,
   setStorageAdapter,
-  CloudflareKVStorage,
+  DenoKVStorage,
   MemoryStorage,
 } from "${dinouDirSlash}/core/storage-adapter.js";
+import * as path from "node:path";
+import * as fs from "node:fs";
 
 if (typeof globalThis !== "undefined") {
-  globalThis.__DINOU_RUNTIME__ = "edge";
+  globalThis.__DINOU_RUNTIME__ = "deno-edge";
 }
 
 let storageInitialized = false;
 
-export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    if (url.pathname.startsWith("/cdn-cgi/")) {
-      return new Response(null, { status: 404 });
-    }
-
-    if (!storageInitialized) {
-      if (env && env.DINOU_CACHE) {
-        setStorageAdapter(new CloudflareKVStorage(env.DINOU_CACHE));
-      } else {
+export async function fetch(req) {
+  if (!storageInitialized) {
+    if (typeof Deno !== "undefined" && typeof Deno.openKv === "function") {
+      try {
+        const kvUrl = Deno.env.get("DENO_KV_URL");
+        let kvInstance;
+        if (kvUrl) {
+          kvInstance = await Deno.openKv(kvUrl);
+        } else if (Deno.env.get("DENO_DEPLOYMENT_ID")) {
+          kvInstance = await Deno.openKv();
+        } else {
+          const cwd = typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
+          const kvPath = Deno.env.get("DENO_KV_PATH") || path.resolve(cwd, ".dinou/kv.db");
+          kvInstance = await Deno.openKv(kvPath);
+        }
+        setStorageAdapter(new DenoKVStorage(kvInstance));
+      } catch (e) {
         setStorageAdapter(new MemoryStorage());
       }
-      storageInitialized = true;
+    } else {
+      setStorageAdapter(new MemoryStorage());
     }
+    storageInitialized = true;
+  }
 
-    const isRSCPayload = url.pathname.includes("____rsc_");
-    const isServerFunction =
-      url.pathname.includes("____server_function____") ||
-      request.headers.get("x-server-function-call") === "1";
+  const url = new URL(req.url);
+  const pathname = url.pathname;
 
-    const staticExtRegex = /\\.(js|mjs|cjs|css|png|jpg|jpeg|gif|svg|ico|webp|avif|woff|woff2|ttf|eot|otf|wasm|map|txt|webmanifest)$/i;
-    const isStaticAsset =
-      staticExtRegex.test(url.pathname) ||
-      url.pathname.startsWith("/assets/") ||
-      url.pathname.startsWith("/_dinou/");
-
-    if (!isRSCPayload && !isServerFunction && isStaticAsset && env && env.ASSETS && (request.method === "GET" || request.method === "HEAD")) {
-      try {
-        const assetRes = await env.ASSETS.fetch(request.clone ? request.clone() : request);
-        if (assetRes && assetRes.status < 400) {
-          return assetRes;
-        }
-      } catch (e) {}
+  // Static assets delivery (if running with local disk access)
+  if (pathname !== "/" && typeof Deno !== "undefined" && typeof Deno.readFile === "function") {
+    try {
+      const cwd = typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
+      const dist3Dir = path.resolve(cwd, ".dinou/dist3");
+      const filePath = path.join(dist3Dir, pathname);
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        const content = await Deno.readFile(filePath);
+        const ext = path.extname(filePath).toLowerCase();
+        const headers = {};
+        if (ext === ".js" || ext === ".mjs") headers["content-type"] = "application/javascript; charset=utf-8";
+        else if (ext === ".css") headers["content-type"] = "text/css; charset=utf-8";
+        else if (ext === ".json") headers["content-type"] = "application/json";
+        else if (ext === ".svg") headers["content-type"] = "image/svg+xml";
+        else if (ext === ".png") headers["content-type"] = "image/png";
+        else if (ext === ".ico") headers["content-type"] = "image/x-icon";
+        return new Response(content, { headers });
+      }
+    } catch (e) {
+      // Fallback to Dinou handler
     }
+  }
 
-    return handleRequest(request, {
-      env,
-      ctx,
-      runtime: "edge",
-      renderHtmlStream: renderHtml,
-    });
-  },
-};
+  return handleRequest(req, {
+    runtime: "deno-edge",
+    renderHtmlStream: renderHtml,
+  });
+}
+
+if (typeof Deno !== "undefined" && typeof Deno.serve === "function" && import.meta.main) {
+  const port = Number(Deno.env.get("PORT") || 3000);
+  Deno.serve({ port }, fetch);
+}
+
+export default { fetch };
 `;
-const workerEntryPath = path.join(cloudflareDir, "worker-entry.js");
-fs.writeFileSync(workerEntryPath, workerEntryContent, "utf8");
+const denoEntryPath = path.join(denoDir, "deno-entry.js");
+fs.writeFileSync(denoEntryPath, denoEntryContent, "utf8");
 
 // ====================================================================
 // Build Configuration
 // ====================================================================
-const supportedNodeModules = [
-  "assert", "assert/strict",
-  "async_hooks",
-  "buffer",
-  "crypto",
-  "diagnostics_channel",
-  "events",
-  "module",
-  "path", "path/posix", "path/win32",
-  "process",
-  "stream", "stream/consumers", "stream/promises", "stream/web",
-  "string_decoder",
-  "timers", "timers/promises",
-  "url",
-  "util", "util/types",
-  "zlib",
+const nodeBuiltins = [
+  "assert", "async_hooks", "buffer", "child_process", "cluster", "console",
+  "constants", "crypto", "dgram", "diagnostics_channel", "dns", "domain",
+  "events", "fs", "fs/promises", "http", "http2", "https", "inspector",
+  "module", "net", "os", "path", "path/posix", "path/win32", "perf_hooks",
+  "process", "punycode", "querystring", "readline", "repl", "stream",
+  "stream/consumers", "stream/promises", "stream/web", "string_decoder",
+  "timers", "timers/promises", "tls", "trace_events", "tty", "url",
+  "util", "util/types", "v8", "vm", "wasi", "worker_threads", "zlib"
 ];
 
 const externalList = [
-  "cloudflare:*",
-  ...supportedNodeModules,
-  ...supportedNodeModules.map((b) => "node:" + b),
+  "npm:*",
+  "jsr:*",
+  ...nodeBuiltins,
+  ...nodeBuiltins.map((b) => "node:" + b),
 ];
-
-const shimsDir = path.resolve(__dirname, "shims");
 
 const commonAlias = {
   "@": path.resolve(projectRoot, "src"),
   "dinou/config": path.resolve(dinouDir, "core/config.js"),
   dinou: dinouDir,
-  esbuild: path.resolve(shimsDir, "empty.js"),
-  fs: path.resolve(shimsDir, "fs.js"),
-  "node:fs": path.resolve(shimsDir, "fs.js"),
-  "fs/promises": path.resolve(shimsDir, "fs.js"),
-  "node:fs/promises": path.resolve(shimsDir, "fs.js"),
-  child_process: path.resolve(shimsDir, "child_process.js"),
-  "node:child_process": path.resolve(shimsDir, "child_process.js"),
-  http: path.resolve(shimsDir, "empty.js"),
-  "node:http": path.resolve(shimsDir, "empty.js"),
-  https: path.resolve(shimsDir, "empty.js"),
-  "node:https": path.resolve(shimsDir, "empty.js"),
-  net: path.resolve(shimsDir, "empty.js"),
-  "node:net": path.resolve(shimsDir, "empty.js"),
-  tls: path.resolve(shimsDir, "empty.js"),
-  "node:tls": path.resolve(shimsDir, "empty.js"),
-  os: path.resolve(shimsDir, "os.js"),
-  "node:os": path.resolve(shimsDir, "os.js"),
-  cluster: path.resolve(shimsDir, "empty.js"),
-  "node:cluster": path.resolve(shimsDir, "empty.js"),
-  dgram: path.resolve(shimsDir, "empty.js"),
-  "node:dgram": path.resolve(shimsDir, "empty.js"),
-  dns: path.resolve(shimsDir, "empty.js"),
-  "node:dns": path.resolve(shimsDir, "empty.js"),
 };
 
 const commonLoader = {
@@ -870,7 +860,7 @@ const commonLoader = {
 const banner = {
   js: `import { createRequire as ___createRequire } from 'node:module';
 import { AsyncLocalStorage as ___AsyncLocalStorage } from 'node:async_hooks';
-const require = ___createRequire(import.meta.url || 'file:///worker.js');
+const require = ___createRequire(import.meta.url || 'file:///main.js');
 const __dirname = '';
 const __filename = '';
 globalThis.__dinou_require__ = require;
@@ -1044,13 +1034,13 @@ const serverReferencesPluginSsr = {
   },
 };
 
-const rscOutfile = path.join(cloudflareDir, "rsc-engine.js");
-const ssrOutfile = path.join(cloudflareDir, "ssr-engine.js");
-const finalOutfile = path.join(cloudflareDir, "worker.js");
+const rscOutfile = path.join(denoDir, "rsc-engine.js");
+const ssrOutfile = path.join(denoDir, "ssr-engine.js");
+const finalOutfile = path.join(denoDir, "main.js");
 
 try {
   // Pass A: RSC Engine
-  console.log("  ⚡ Bundling Pass A (RSC workerd) & Pass B (SSR workerd)...");
+  console.log("  ⚡ Bundling Pass A (RSC deno) & Pass B (SSR deno)...");
   await esbuild.build({
     entryPoints: [rscEntryPath],
     outfile: rscOutfile,
@@ -1059,7 +1049,7 @@ try {
     target: "es2022",
     platform: "neutral",
     mainFields: ["module", "main"],
-    conditions: ["workerd", "worker", "react-server"],
+    conditions: ["deno", "worker", "react-server"],
     external: externalList,
     plugins: [clientReferencesPlugin, serverReferencesPlugin],
     alias: commonAlias,
@@ -1068,7 +1058,7 @@ try {
     inject: setupFiles.length > 0 ? setupFiles : undefined,
     define: {
       "process.env.NODE_ENV": '"production"',
-      "process.env.DINOU_RUNTIME": '"edge"',
+      "process.env.DINOU_RUNTIME": '"deno-edge"',
       "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
     },
     logLevel: "warning",
@@ -1083,7 +1073,7 @@ try {
     target: "es2022",
     platform: "neutral",
     mainFields: ["module", "main"],
-    conditions: ["workerd", "worker", "browser"],
+    conditions: ["deno", "worker", "browser"],
     external: externalList,
     plugins: [serverReferencesPluginSsr],
     alias: commonAlias,
@@ -1092,23 +1082,23 @@ try {
     inject: setupFiles.length > 0 ? setupFiles : undefined,
     define: {
       "process.env.NODE_ENV": '"production"',
-      "process.env.DINOU_RUNTIME": '"edge"',
+      "process.env.DINOU_RUNTIME": '"deno-edge"',
       "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
     },
     logLevel: "warning",
   });
 
-  // Pass C: Final Worker Orchestrator
-  console.log("  🚀 Bundling Pass C: Cloudflare Worker Orchestrator (.dinou/cloudflare/worker.js)...");
+  // Pass C: Final Deno Orchestrator
+  console.log("  🚀 Bundling Pass C: Deno Orchestrator (.dinou/deno/main.js)...");
   await esbuild.build({
-    entryPoints: [workerEntryPath],
+    entryPoints: [denoEntryPath],
     outfile: finalOutfile,
     bundle: true,
     format: "esm",
     target: "es2022",
     platform: "neutral",
     mainFields: ["module", "main"],
-    conditions: ["workerd", "worker", "browser"],
+    conditions: ["deno", "worker", "browser"],
     external: externalList,
     banner,
     inject: setupFiles.length > 0 ? setupFiles : undefined,
@@ -1116,18 +1106,19 @@ try {
     loader: commonLoader,
     define: {
       "process.env.NODE_ENV": '"production"',
-      "process.env.DINOU_RUNTIME": '"edge"',
+      "process.env.DINOU_RUNTIME": '"deno-edge"',
       "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
     },
     logLevel: "warning",
   });
 
   const relOutfile = path.relative(projectRoot, finalOutfile).replace(/\\/g, "/");
-  console.log(`\n✓ Cloudflare Workers build complete!`);
+  console.log(`\n✓ Deno build complete!`);
   console.log(`  Output: ${relOutfile}`);
-  console.log("  👉 Preview locally:  npx wrangler dev");
-  console.log("  👉 Deploy to edge:    npx wrangler deploy\n");
+  console.log(`  👉 Run locally:     deno run --unstable-kv -A ${relOutfile}`);
+  console.log(`  👉 Deploy to edge:  deno deploy --project=<your-project> ${relOutfile}`);
+  console.log(`  👉 Compile binary:  npm run build:deno:compile\n`);
 } catch (err) {
-  console.error("❌ [Dinou Cloudflare] Worker bundling failed:", err);
+  console.error("❌ [Dinou Deno] Build failed:", err);
   process.exit(1);
 }

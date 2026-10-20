@@ -2,9 +2,11 @@
 // Ultra-fast SWC transpilation plugin for Rollup with high-speed in-memory cache.
 // Replaces heavy Babel pipeline in development and eliminates multi-second HMR latencies.
 
-const path = require("node:path");
-const fs = require("node:fs");
+import path from "node:path";
+import fs from "node:fs";
+import { createRequire } from "node:module";
 
+const require = createRequire(import.meta.url);
 let swc = null;
 try {
   swc = require("@swc/core");
@@ -96,5 +98,6 @@ function rollupSwcPlugin(options = {}) {
   };
 }
 
-module.exports = rollupSwcPlugin;
+export { rollupSwcPlugin };
+export default rollupSwcPlugin;
 

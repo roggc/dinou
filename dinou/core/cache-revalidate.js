@@ -1,35 +1,10 @@
-const path = require("path");
-const fs = require("fs").promises;
-const { existsSync, copyFileSync } = require("fs");
-let _generateStaticPage = null;
-function getGenerateStaticPage() {
-  if (!_generateStaticPage) _generateStaticPage = require("./generate-static-page");
-  return _generateStaticPage;
-}
-let _buildStaticPage = null;
-function getBuildStaticPage() {
-  if (!_buildStaticPage) _buildStaticPage = require("./build-static-pages").buildStaticPage;
-  return _buildStaticPage;
-}
-let _generateStaticRSC = null;
-function getGenerateStaticRSC() {
-  if (!_generateStaticRSC) _generateStaticRSC = require("./generate-static-rsc");
-  return _generateStaticRSC;
-}
-let _safeRename = null;
-function getSafeRename() {
-  if (!_safeRename) _safeRename = require("./safe-rename").safeRename;
-  return _safeRename;
-}
-let _updateStatus = null;
-function getUpdateStatus() {
-  if (!_updateStatus) _updateStatus = require("./status-manifest").updateStatus;
-  return _updateStatus;
-}
-const { getContext } = require("./request-context");
-const { resolveRelativeUrl } = require("./url-resolver");
-const { getStorageAdapter } = require("./storage-adapter");
-const { isEdgeRuntime } = require("./rsc-renderer");
+import path from "node:path";
+import fs from "node:fs/promises";
+import { existsSync, copyFileSync } from "node:fs";
+import { getContext } from "./request-context.js";
+import { resolveRelativeUrl } from "./url-resolver.js";
+import { getStorageAdapter } from "./storage-adapter.js";
+import { isEdgeRuntime } from "./rsc-renderer.js";
 
 async function walkMetadataFiles(dir, fileList = []) {
   try {
@@ -463,7 +438,13 @@ async function revalidateTag(tag, options = {}) {
   await Promise.all(revalidatePromises);
 }
 
-module.exports = {
+export {
+  revalidatePath,
+  revalidatePage,
+  revalidateTag,
+  revalidateLayout,
+};
+export default {
   revalidatePath,
   revalidatePage,
   revalidateTag,

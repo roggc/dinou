@@ -2,8 +2,9 @@
 // Universal provider for RSC Client Manifest and Server Functions Manifest.
 // Supports in-memory injection for Edge/Cloudflare Workers and disk fallback for Node.js.
 
-const path = require("path");
-const fs = require("fs");
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 
 let cachedClientManifest = null;
 let cachedServerFunctionsManifest = null;
@@ -149,7 +150,6 @@ function createDevClientManifestProxy(target) {
       // 4. Fallback for client files in src/ during hot edits
       if (baseUri.startsWith("file:///")) {
         try {
-          const { fileURLToPath } = require("url");
           const localPath = fileURLToPath(baseUri);
           if (fs.existsSync(localPath)) {
             const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
@@ -252,7 +252,14 @@ function setServerFunctionsManifest(manifest) {
   }
 }
 
-module.exports = {
+export {
+  isManifestReady,
+  getClientManifest,
+  setClientManifest,
+  getServerFunctionsManifest,
+  setServerFunctionsManifest,
+};
+export default {
   isManifestReady,
   getClientManifest,
   setClientManifest,

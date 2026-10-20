@@ -1,5 +1,5 @@
-const path = require("path");
-const { existsSync, readdirSync } = require("./vfs");
+import path from "node:path";
+import { existsSync, readdirSync } from "./vfs.js";
 
 function safeDecode(val) {
   try {
@@ -61,7 +61,7 @@ function getFilePathAndDynamicParams(
   accumulative = false,
   accumulate = [],
   isFound = { value: false },
-  possibleExtensions = [".tsx", ".ts", ".jsx", ".js"]
+  possibleExtensions = [".tsx", ".ts", ".jsx", ".js", ".mjs"]
 ) {
   let foundInCurrentPath;
   if (index > reqSegments.length - 1 || !finalDestination) {
@@ -422,6 +422,9 @@ function getFilePathAndDynamicParams(
   }
 }
 
-module.exports = {
+export {
+  getFilePathAndDynamicParams,
+};
+export default {
   getFilePathAndDynamicParams,
 };

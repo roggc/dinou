@@ -1,7 +1,7 @@
-const fs = require("fs");
-const path = require("path");
-const createScopedName = require("../../core/createScopedName.js");
-const { regex } = require("../../core/asset-extensions.js");
+import fs from "node:fs";
+import path from "node:path";
+import createScopedName from "../../core/createScopedName.js";
+import { regex } from "../../core/asset-extensions.js";
 
 function dinouAssetPlugin({ include = regex } = {}) {
   return {
@@ -32,4 +32,5 @@ function dinouAssetPlugin({ include = regex } = {}) {
   };
 }
 
-module.exports = dinouAssetPlugin;
+export { dinouAssetPlugin };
+export default dinouAssetPlugin;

@@ -1,9 +1,9 @@
-const path = require("path");
-const { existsSync } = require("./vfs");
-const importModule = require("./import-module");
-const { resolveModulePpr } = require("./resolve-module-ppr");
+import path from "node:path";
+import { existsSync } from "./vfs.js";
+import importModule from "./import-module.js";
+import { resolveModulePpr } from "./resolve-module-ppr.js";
 
-const LAYOUT_FUNCTIONS_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js"];
+const LAYOUT_FUNCTIONS_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js", ".mjs"];
 const LAYOUT_FUNCTIONS_NAMES = ["layout_functions", "layout.functions"];
 
 /**
@@ -175,7 +175,12 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
   }
 }
 
-module.exports = {
+export {
+  getLayoutFunctionsPath,
+  getLayoutProps,
+  resolveLayoutFunctionsConfig,
+};
+export default {
   getLayoutFunctionsPath,
   getLayoutProps,
   resolveLayoutFunctionsConfig,

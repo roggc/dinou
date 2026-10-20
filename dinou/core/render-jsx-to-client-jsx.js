@@ -1,9 +1,9 @@
-const {
+import {
   isPprBuildActive,
   enterSuspense,
   exitSuspense,
   registerHole,
-} = require("./ppr-context.js");
+} from "./ppr-context.js";
 
 // Function to check if a component is a client component
 function isClientComponent(type) {
@@ -176,6 +176,9 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
   }
 }
 
-module.exports = {
+export {
+  asyncRenderJSXToClientJSX,
+};
+export default {
   asyncRenderJSXToClientJSX,
 };

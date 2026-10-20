@@ -1,16 +1,15 @@
-const path = require("path");
-const { existsSync, readdirSync, mkdirSync, rmSync } = require("fs");
-const React = require("react");
-const { asyncRenderJSXToClientJSX } = require("./render-jsx-to-client-jsx");
-const {
-  getFilePathAndDynamicParams,
-} = require("./get-file-path-and-dynamic-params");
-const importModule = require("./import-module");
-const { requestStorage } = require("./request-context.js");
-const { getLayoutProps, resolveLayoutFunctionsConfig } = require("./layout-functions");
-const { runWithPprContext, getRegisteredHoles } = require("./ppr-context.js");
-const { resolveModulePpr } = require("./resolve-module-ppr");
-const { getDinouConfig } = require("./load-dinou-config");
+import path from "node:path";
+import { existsSync, readdirSync, mkdirSync, rmSync } from "node:fs";
+import React from "react";
+import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
+import { getFilePathAndDynamicParams } from "./get-file-path-and-dynamic-params.js";
+import importModule from "./import-module.js";
+import { requestStorage } from "./request-context.js";
+import { getLayoutProps, resolveLayoutFunctionsConfig, getLayoutFunctionsPath } from "./layout-functions.js";
+import { runWithPprContext, getRegisteredHoles } from "./ppr-context.js";
+import { resolveModulePpr } from "./resolve-module-ppr.js";
+import { getDinouConfig } from "./load-dinou-config.js";
+import { createBailoutProxy } from "./bailout-proxy.js";
 
 async function resolveBuildPprForRoute(segments, pagePath, pageFunctionsPath, srcFolder) {
   const globalCfg = await getDinouConfig();
@@ -76,7 +75,6 @@ async function isDynamicRoute(revalidate) {
   return typeof val === "number" && val < 1;
 }
 
-const { createBailoutProxy } = require("./bailout-proxy.js");
 
 /**
  * Compiles all static pages in the application.
@@ -108,7 +106,6 @@ async function buildStaticPages(onProgress = null) {
       const candidateLayout = path.join(currentPath, `layout${ext}`);
       if (existsSync(candidateLayout)) {
         const routePath = segments.length ? "/" + segments.join("/") : "/";
-        const { resolveLayoutFunctionsConfig } = require("./layout-functions");
         const layoutConfig = await resolveLayoutFunctionsConfig(candidateLayout, params);
         if (!layoutConfig.isDynamic) {
           staticLayouts.set(routePath, {
@@ -552,7 +549,6 @@ async function buildStaticPages(onProgress = null) {
             getStaticPaths = module.getStaticPaths || defMod?.getStaticPaths;
             revalidate = module.revalidate || defMod?.revalidate;
           }
-          const { getLayoutFunctionsPath } = require("./layout-functions");
           const lfPath = getLayoutFunctionsPath(dynamicPath);
           if (lfPath) {
             const lmod = await importModule(lfPath);
@@ -1507,7 +1503,15 @@ function getStaticLayouts() {
   return Array.from(staticLayouts.values());
 }
 
-module.exports = {
+export {
+  buildStaticPages,
+  buildStaticPage,
+  getStaticPaths,
+  getStaticMetadata,
+  getStaticLayouts,
+  isDynamicRoute,
+};
+export default {
   buildStaticPages,
   buildStaticPage,
   getStaticPaths,
