@@ -1,9 +1,9 @@
 // rollup-plugin-server-functions.js
-const path = require("path");
-const fs = require("fs/promises");
-const manifestGeneratorPlugin = require("./manifest-generator-plugin");
-const parseExports = require("../../core/parse-exports.js");
-const { useServerRegex } = require("../../constants.js");
+import path from "node:path";
+import fs from "node:fs/promises";
+import manifestGeneratorPlugin from "./manifest-generator-plugin.js";
+import parseExports from "../../core/parse-exports.js";
+import { useServerRegex } from "../../constants.js";
 
 function serverFunctionsPlugin(manifestData = {}, options = {}) {
   const opts =
@@ -116,4 +116,5 @@ function serverFunctionsPlugin(manifestData = {}, options = {}) {
   };
 }
 
-module.exports = serverFunctionsPlugin;
+export { serverFunctionsPlugin };
+export default serverFunctionsPlugin;

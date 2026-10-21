@@ -1,7 +1,12 @@
-const path = require("path");
-const fs = require("fs");
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
-function getDinouCoreDir() {
+const require = createRequire(import.meta.url);
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
+
+export function getDinouCoreDir() {
   // Edge runtime guard: en Cloudflare Workers / Deno Edge no hay sistema de archivos dinámico
   if (typeof process !== "undefined" && process.env && process.env.DINOU_RUNTIME === "edge") {
     return "/dinou/core";
@@ -15,13 +20,11 @@ function getDinouCoreDir() {
   } catch (e) {}
 
   // 2. Modo librería sin empaquetar: dinou-paths.js ya está en dinou/core
-  if (typeof __dirname !== "undefined") {
-    try {
-      if (fs.existsSync && fs.existsSync(path.join(__dirname, "handler.js"))) {
-        return __dirname;
-      }
-    } catch (e) {}
-  }
+  try {
+    if (fs.existsSync && fs.existsSync(path.join(currentDir, "handler.js"))) {
+      return currentDir;
+    }
+  } catch (e) {}
 
   // 3. Resolución estándar de Node
   try {
@@ -44,9 +47,9 @@ function getDinouCoreDir() {
   return "/dinou/core";
 }
 
-const dinouCoreDir = getDinouCoreDir();
+export const dinouCoreDir = getDinouCoreDir();
 
-module.exports = {
+export default {
   dinouCoreDir,
   getDinouCoreDir,
 };

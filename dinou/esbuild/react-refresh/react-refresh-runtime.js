@@ -1,5 +1,5 @@
 import RefreshRuntime from "/react-refresh-entry.js";
-import { isReactRefreshBoundary } from "./is-react-refresh-boundary.mjs";
+import { isReactRefreshBoundary } from "./is-react-refresh-boundary.js";
 
 if (
   typeof window !== "undefined" &&

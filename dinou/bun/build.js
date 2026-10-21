@@ -1,30 +1,29 @@
-// dinou/deno/build.mjs
-// Dual-Bundle Build script for packaging Dinou v7 for Deno Deploy & Edge.
-// Pass A: RSC Engine (conditions: ["deno", "worker", "react-server"])
-// Pass B: Native Streaming HTML SSR Engine (conditions: ["deno", "worker", "browser"])
-// Pass C: Main Deno Orchestrator (main.js)
+// dinou/bun/build.mjs
+// Dual-Bundle Build script for packaging Dinou v7 for Bun (Pre-bundled AOT & Standalone).
+// Pass A: RSC Engine (conditions: ["bun", "worker", "react-server"])
+// Pass B: Native Streaming HTML SSR Engine (conditions: ["bun", "worker", "browser"])
+// Pass C: Main Bun Orchestrator (.dinou/bun/server.js)
 
 import fs from "node:fs";
 import path from "node:path";
 import esbuild from "esbuild";
-import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const require = createRequire(import.meta.url);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { generateRouteModulesCode, generateRouteTypes } = require("../core/route-generator.js");
-const parseExports = require("../core/parse-exports.js");
-const { useClientRegex, useServerRegex } = require("../constants.js");
-const {
+import { generateRouteModulesCode, generateRouteTypes } from "../core/route-generator.js";
+import parseExports from "../core/parse-exports.js";
+import { useClientRegex, useServerRegex } from "../constants.js";
+import {
   isSupportedClientModule,
   scanProjectDependenciesForClientComponents,
-} = require("../core/scan-dependency-components.js");
-const { getDinouConfig } = require("../core/load-dinou-config.js");
-const { resolveSetupFiles } = require("../core/resolve-setup-files.js");
+} from "../core/scan-dependency-components.js";
+import { getDinouConfig } from "../core/load-dinou-config.js";
+import { resolveSetupFiles } from "../core/resolve-setup-files.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const projectRoot = process.cwd();
-const denoDir = path.resolve(projectRoot, ".dinou/deno");
-fs.mkdirSync(denoDir, { recursive: true });
+const bunDir = path.resolve(projectRoot, ".dinou/bun");
+fs.mkdirSync(bunDir, { recursive: true });
 
 const dinouConfig = await getDinouConfig(projectRoot);
 const setupFiles = resolveSetupFiles(projectRoot, dinouConfig);
@@ -60,38 +59,13 @@ for (const r of candidateDinouRoots) {
   candidateSlotPaths.add(path.resolve(r, "core/slot.js"));
 }
 
-function copyRecursive(src, dest) {
-  if (!fs.existsSync(src)) return 0;
-  let count = 0;
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-  for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    if (entry.isDirectory()) {
-      fs.mkdirSync(destPath, { recursive: true });
-      count += copyRecursive(srcPath, destPath);
-    } else {
-      fs.mkdirSync(path.dirname(destPath), { recursive: true });
-      fs.copyFileSync(srcPath, destPath);
-      count++;
-    }
-  }
-  return count;
-}
-
 const isWebpackBuild = process.env.DINOU_BUILD_TOOL === "webpack";
 const bundlerName = isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild");
 
-const dist2Dir = path.resolve(projectRoot, ".dinou/dist2");
-const dist3Dir = path.resolve(projectRoot, ".dinou/dist3");
-console.log(`\n🦖 Dinou v7 (Deno • ${bundlerName})`);
-if (fs.existsSync(dist2Dir)) {
-  const copiedCount = copyRecursive(dist2Dir, dist3Dir);
-  console.log(`  📄 Synchronized ${copiedCount} pre-rendered static route(s) to .dinou/dist3`);
-}
+console.log(`\n🦖 Dinou v7 (Bun • ${bundlerName})`);
 console.log("  ⚡ Generating route modules & manifests...");
 const routeModulesCode = generateRouteModulesCode(projectRoot, "../..");
-const routeModulesPath = path.join(denoDir, "route-modules.js");
+const routeModulesPath = path.join(bunDir, "route-modules.js");
 fs.writeFileSync(routeModulesPath, routeModulesCode, "utf8");
 
 function findManifest(filename, fallbackFolder) {
@@ -133,7 +107,7 @@ if (sfManifestPath && fs.existsSync(sfManifestPath)) {
 // Discovery of Client Components for SSR Engine & RSC Manifest
 // ====================================================================
 if (process.env.DINOU_DEBUG) {
-  console.log("🔍 [Dinou Deno] Discovering client components for SSR Engine...");
+  console.log("🔍 [Dinou Bun] Discovering client components for SSR Engine...");
 }
 const srcDir = path.resolve(projectRoot, "src");
 
@@ -215,7 +189,6 @@ function generateAllUrlVariants(absPath) {
   urls.add("file://" + norm);
   return Array.from(urls);
 }
-
 
 let linkChunkId = null;
 let redirectChunkId = null;
@@ -451,7 +424,7 @@ manifestInlines += `\nglobalThis.__DINOU_LAYOUTS__ = ${JSON.stringify(discovered
 
 if (process.env.DINOU_DEBUG) {
 
-  console.log("⚡ [Dinou Deno] Building in-memory VFS for Edge routing...");
+  console.log("⚡ [Dinou Bun] Building in-memory VFS for routing...");
 }
 const vfsSnapshot = {};
 function walkVfs(dir) {
@@ -506,11 +479,11 @@ if (typeof globalThis.__webpack_chunk_load__ === 'undefined') {
 ${manifestInlines}
 globalThis.__DINOU_VFS__ = ${JSON.stringify(vfsSnapshot)};
 `;
-const envSetupPath = path.join(denoDir, "env-setup.js");
+const envSetupPath = path.join(bunDir, "env-setup.js");
 fs.writeFileSync(envSetupPath, envSetupContent, "utf8");
 
 // Generate ssr-client-manifest.js
-let ssrManifestCode = `// Auto-generated client modules registry for Native Edge SSR\n`;
+let ssrManifestCode = `// Auto-generated client modules registry for Native Bun SSR\n`;
 clientComponents.forEach((compPath, index) => {
   const normPath = compPath.replace(/\\/g, "/");
   ssrManifestCode += `import * as mod_${index} from ${JSON.stringify(normPath)};\n`;
@@ -685,23 +658,25 @@ serverFunctionFiles.forEach((relPath) => {
 
 ssrManifestCode += `  },\n  moduleLoading: null,\n};\n`;
 
-const ssrClientManifestPath = path.join(denoDir, "ssr-client-manifest.js");
+const ssrClientManifestPath = path.join(bunDir, "ssr-client-manifest.js");
 fs.writeFileSync(ssrClientManifestPath, ssrManifestCode, "utf8");
 
 // ====================================================================
 // Entry Files Generation
 // ====================================================================
 // 1. RSC Engine Entry
-const rscEntryContent = `// Auto-generated RSC Engine entry for Deno Deploy / Edge
+const rscEntryContent = `// Auto-generated RSC Engine entry for Bun (Dual-Bundle)
 import "./env-setup.js";
 import "./route-modules.js";
+import * as edgeRenderer from "react-server-dom-webpack/server.edge";
+globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
 export { handleRequest } from "${dinouDirSlash}/core/handler.js";
 `;
-const rscEntryPath = path.join(denoDir, "rsc-entry.js");
+const rscEntryPath = path.join(bunDir, "rsc-entry.js");
 fs.writeFileSync(rscEntryPath, rscEntryContent, "utf8");
 
 // 2. SSR Engine Entry
-const ssrEntryContent = `// Auto-generated SSR Engine entry for Deno Deploy / Edge
+const ssrEntryContent = `// Auto-generated SSR Engine entry for Bun (Dual-Bundle)
 import { renderRscStreamToHtmlStream } from "${dinouDirSlash}/core/edge-ssr.js";
 import { clientModules, ssrConsumerManifest } from "./ssr-client-manifest.js";
 
@@ -725,94 +700,86 @@ export async function renderHtml(rscStream, options = {}) {
   return renderRscStreamToHtmlStream(rscStream, ssrConsumerManifest, options);
 }
 `;
-const ssrEntryPath = path.join(denoDir, "ssr-entry.js");
+const ssrEntryPath = path.join(bunDir, "ssr-entry.js");
 fs.writeFileSync(ssrEntryPath, ssrEntryContent, "utf8");
 
-// 3. Deno Orchestrator Entry
-const denoEntryContent = `// Auto-generated main entry for Deno Deploy / Edge (Dual-Bundle)
+// 3. Bun Orchestrator Entry
+const bunEntryContent = `// Auto-generated main entry for Bun (Dual-Bundle)
 import { handleRequest } from "./rsc-engine.js";
 import { renderHtml } from "./ssr-engine.js";
 import {
-  getStorageAdapter,
   setStorageAdapter,
-  DenoKVStorage,
+  FileSystemStorage,
   MemoryStorage,
 } from "${dinouDirSlash}/core/storage-adapter.js";
 import * as path from "node:path";
 import * as fs from "node:fs";
 
 if (typeof globalThis !== "undefined") {
-  globalThis.__DINOU_RUNTIME__ = "deno-edge";
+  globalThis.__DINOU_RUNTIME__ = "bun-bundle";
 }
 
 let storageInitialized = false;
 
-export async function fetch(req) {
+function initStorage() {
   if (!storageInitialized) {
-    if (typeof Deno !== "undefined" && typeof Deno.openKv === "function") {
-      try {
-        const kvUrl = Deno.env.get("DENO_KV_URL");
-        let kvInstance;
-        if (kvUrl) {
-          kvInstance = await Deno.openKv(kvUrl);
-        } else if (Deno.env.get("DENO_DEPLOYMENT_ID")) {
-          kvInstance = await Deno.openKv();
-        } else {
-          const cwd = typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
-          const kvPath = Deno.env.get("DENO_KV_PATH") || path.resolve(cwd, ".dinou/kv.db");
-          kvInstance = await Deno.openKv(kvPath);
-        }
-        setStorageAdapter(new DenoKVStorage(kvInstance));
-      } catch (e) {
-        setStorageAdapter(new MemoryStorage());
-      }
-    } else {
+    try {
+      const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
+      const dist2Dir = path.resolve(cwd, ".dinou/dist2");
+      setStorageAdapter(new FileSystemStorage(dist2Dir));
+    } catch (e) {
       setStorageAdapter(new MemoryStorage());
     }
     storageInitialized = true;
   }
+}
+
+const PORT = Number(process.env.PORT || 3000);
+const IDLE_TIMEOUT = Number(process.env.IDLE_TIMEOUT || 120);
+const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
+const dist3Dir = path.resolve(cwd, ".dinou/dist3");
+
+export async function fetch(req) {
+  initStorage();
 
   const url = new URL(req.url);
   const pathname = url.pathname;
 
-  // Static assets delivery (if running with local disk access)
-  if (pathname !== "/" && typeof Deno !== "undefined" && typeof Deno.readFile === "function") {
-    try {
-      const cwd = typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
-      const dist3Dir = path.resolve(cwd, ".dinou/dist3");
-      const filePath = path.join(dist3Dir, pathname);
-      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-        const content = await Deno.readFile(filePath);
-        const ext = path.extname(filePath).toLowerCase();
-        const headers = {};
-        if (ext === ".js" || ext === ".mjs") headers["content-type"] = "application/javascript; charset=utf-8";
-        else if (ext === ".css") headers["content-type"] = "text/css; charset=utf-8";
-        else if (ext === ".json") headers["content-type"] = "application/json";
-        else if (ext === ".svg") headers["content-type"] = "image/svg+xml";
-        else if (ext === ".png") headers["content-type"] = "image/png";
-        else if (ext === ".ico") headers["content-type"] = "image/x-icon";
-        return new Response(content, { headers });
-      }
-    } catch (e) {
-      // Fallback to Dinou handler
+  // Static assets delivery (Zero-copy with Bun.file)
+  if (pathname !== "/") {
+    const filePath = path.join(dist3Dir, pathname);
+    const file = Bun.file(filePath);
+    if (await file.exists()) {
+      return new Response(file);
     }
   }
 
   return handleRequest(req, {
-    runtime: "deno-edge",
+    runtime: "bun-bundle",
     renderHtmlStream: renderHtml,
   });
 }
 
-if (typeof Deno !== "undefined" && typeof Deno.serve === "function" && import.meta.main) {
-  const port = Number(Deno.env.get("PORT") || 3000);
-  Deno.serve({ port }, fetch);
-}
+export default {
+  port: PORT,
+  fetch,
+  idleTimeout: IDLE_TIMEOUT,
+};
 
-export default { fetch };
+if (typeof process !== "undefined") {
+  process.on("SIGTERM", () => process.exit(0));
+  process.on("SIGINT", () => process.exit(0));
+  if (process.stdin && typeof process.stdin.on === "function") {
+    process.stdin.on("end", () => process.exit(0));
+    process.stdin.on("close", () => process.exit(0));
+    if (typeof process.stdin.unref === "function") {
+      process.stdin.unref();
+    }
+  }
+}
 `;
-const denoEntryPath = path.join(denoDir, "deno-entry.js");
-fs.writeFileSync(denoEntryPath, denoEntryContent, "utf8");
+const bunEntryPath = path.join(bunDir, "bun-entry.js");
+fs.writeFileSync(bunEntryPath, bunEntryContent, "utf8");
 
 // ====================================================================
 // Build Configuration
@@ -829,8 +796,8 @@ const nodeBuiltins = [
 ];
 
 const externalList = [
-  "npm:*",
-  "jsr:*",
+  "bun",
+  "bun:*",
   ...nodeBuiltins,
   ...nodeBuiltins.map((b) => "node:" + b),
 ];
@@ -859,7 +826,7 @@ const commonLoader = {
 const banner = {
   js: `import { createRequire as ___createRequire } from 'node:module';
 import { AsyncLocalStorage as ___AsyncLocalStorage } from 'node:async_hooks';
-const require = ___createRequire(import.meta.url || 'file:///main.js');
+const require = ___createRequire(import.meta.url || 'file:///server.js');
 const __dirname = '';
 const __filename = '';
 globalThis.__dinou_require__ = require;
@@ -1033,13 +1000,13 @@ const serverReferencesPluginSsr = {
   },
 };
 
-const rscOutfile = path.join(denoDir, "rsc-engine.js");
-const ssrOutfile = path.join(denoDir, "ssr-engine.js");
-const finalOutfile = path.join(denoDir, "main.js");
+const rscOutfile = path.join(bunDir, "rsc-engine.js");
+const ssrOutfile = path.join(bunDir, "ssr-engine.js");
+const finalOutfile = path.join(bunDir, "server.js");
 
 try {
   // Pass A: RSC Engine
-  console.log("  ⚡ Bundling Pass A (RSC deno) & Pass B (SSR deno)...");
+  console.log("  ⚡ Bundling Pass A (RSC bun) & Pass B (SSR bun)...");
   await esbuild.build({
     entryPoints: [rscEntryPath],
     outfile: rscOutfile,
@@ -1048,7 +1015,7 @@ try {
     target: "es2022",
     platform: "neutral",
     mainFields: ["module", "main"],
-    conditions: ["deno", "worker", "react-server"],
+    conditions: ["bun", "worker", "react-server"],
     external: externalList,
     plugins: [clientReferencesPlugin, serverReferencesPlugin],
     alias: commonAlias,
@@ -1057,7 +1024,7 @@ try {
     inject: setupFiles.length > 0 ? setupFiles : undefined,
     define: {
       "process.env.NODE_ENV": '"production"',
-      "process.env.DINOU_RUNTIME": '"deno-edge"',
+      "process.env.DINOU_RUNTIME": '"bun-bundle"',
       "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
     },
     logLevel: "warning",
@@ -1072,7 +1039,7 @@ try {
     target: "es2022",
     platform: "neutral",
     mainFields: ["module", "main"],
-    conditions: ["deno", "worker", "browser"],
+    conditions: ["bun", "worker", "browser"],
     external: externalList,
     plugins: [serverReferencesPluginSsr],
     alias: commonAlias,
@@ -1081,23 +1048,23 @@ try {
     inject: setupFiles.length > 0 ? setupFiles : undefined,
     define: {
       "process.env.NODE_ENV": '"production"',
-      "process.env.DINOU_RUNTIME": '"deno-edge"',
+      "process.env.DINOU_RUNTIME": '"bun-bundle"',
       "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
     },
     logLevel: "warning",
   });
 
-  // Pass C: Final Deno Orchestrator
-  console.log("  🚀 Bundling Pass C: Deno Orchestrator (.dinou/deno/main.js)...");
+  // Pass C: Final Bun Orchestrator
+  console.log("  🚀 Bundling Pass C: Bun Orchestrator (.dinou/bun/server.js)...");
   await esbuild.build({
-    entryPoints: [denoEntryPath],
+    entryPoints: [bunEntryPath],
     outfile: finalOutfile,
     bundle: true,
     format: "esm",
     target: "es2022",
     platform: "neutral",
     mainFields: ["module", "main"],
-    conditions: ["deno", "worker", "browser"],
+    conditions: ["bun", "worker", "browser"],
     external: externalList,
     banner,
     inject: setupFiles.length > 0 ? setupFiles : undefined,
@@ -1105,19 +1072,18 @@ try {
     loader: commonLoader,
     define: {
       "process.env.NODE_ENV": '"production"',
-      "process.env.DINOU_RUNTIME": '"deno-edge"',
+      "process.env.DINOU_RUNTIME": '"bun-bundle"',
       "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
     },
     logLevel: "warning",
   });
 
   const relOutfile = path.relative(projectRoot, finalOutfile).replace(/\\/g, "/");
-  console.log(`\n✓ Deno build complete!`);
+  console.log(`\n✓ Bun build complete!`);
   console.log(`  Output: ${relOutfile}`);
-  console.log(`  👉 Run locally:     deno run --unstable-kv -A ${relOutfile}`);
-  console.log(`  👉 Deploy to edge:  deno deploy --project=<your-project> ${relOutfile}`);
-  console.log(`  👉 Compile binary:  npm run build:deno:compile\n`);
+  console.log(`  👉 Run with:        bun ${relOutfile}`);
+  console.log(`  👉 Compile binary:  npm run build:bun:compile\n`);
 } catch (err) {
-  console.error("❌ [Dinou Deno] Build failed:", err);
+  console.error("❌ [Dinou Bun] Build failed:", err);
   process.exit(1);
 }

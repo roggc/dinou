@@ -6,6 +6,7 @@ Object.assign(process.env, { NODE_ENV: "production" });
 import path from "node:path";
 import Module from "node:module";
 
+const require = Module.createRequire(import.meta.url);
 
 let reactServerPath, reactDomServerPath, reactJsxRuntimePath, reactJsxDevRuntimePath;
 let roggcServerNodePath, webpackServerNodePath;

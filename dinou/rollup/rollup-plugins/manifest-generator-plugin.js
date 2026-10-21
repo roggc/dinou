@@ -22,4 +22,5 @@ function manifestGeneratorPlugin() {
 
 manifestGeneratorPlugin.manifestData = manifestData;
 
-module.exports = manifestGeneratorPlugin;
+export { manifestGeneratorPlugin };
+export default manifestGeneratorPlugin;

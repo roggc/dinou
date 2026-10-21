@@ -1,22 +1,26 @@
-require("dotenv/config");
-const path = require("path");
-const fs = require("fs");
-const ReactServerWebpackPlugin = require("react-server-dom-webpack/plugin");
-const CopyWebpackPlugin = require("copy-webpack-plugin");
-const MiniCssExtractPlugin = require("mini-css-extract-plugin");
-const createScopedName = require("../core/createScopedName");
-const TsconfigPathsPlugin = require("tsconfig-paths-webpack-plugin");
-const manifestGeneratorPlugin = require("./plugins/manifest-generator-plugin");
-const ServerFunctionsPlugin = require("./plugins/server-functions-plugin");
-const WebpackMemoryPlugin = require("./plugins/webpack-memory-plugin");
-const webpack = require("webpack");
-const { regex } = require("../core/asset-extensions");
-const getCSSEntries = require("./helpers/get-webpack-entries");
-const {
+import "dotenv/config";
+import path from "node:path";
+import fs from "node:fs";
+import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import ReactServerWebpackPlugin from "react-server-dom-webpack/plugin";
+import CopyWebpackPlugin from "copy-webpack-plugin";
+import MiniCssExtractPlugin from "mini-css-extract-plugin";
+import createScopedName from "../core/createScopedName.js";
+import TsconfigPathsPlugin from "tsconfig-paths-webpack-plugin";
+import manifestGeneratorPlugin from "./plugins/manifest-generator-plugin.js";
+import ServerFunctionsPlugin from "./plugins/server-functions-plugin.js";
+import WebpackMemoryPlugin from "./plugins/webpack-memory-plugin.js";
+import webpack from "webpack";
+import { regex } from "../core/asset-extensions.js";
+import getCSSEntries from "./helpers/get-webpack-entries.js";
+import {
   scanProjectDependenciesForClientComponents,
   scanProjectDependenciesForClientComponentsAsync,
-} = require("../core/scan-dependency-components.js");
-const { useClientRegex } = require("../constants.js");
+} from "../core/scan-dependency-components.js";
+import { useClientRegex } from "../constants.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
@@ -67,7 +71,7 @@ function cleanDir(dir) {
   }
 }
 
-module.exports = async () => {
+export default async () => {
   const outputDir = path.resolve(process.cwd(), outputDirectory);
 
   const shouldWriteToDisk =
@@ -101,14 +105,12 @@ module.exports = async () => {
   function runPostBuild() {
     if (clientDone && serverDone && !ssgExecuted) {
       ssgExecuted = true;
-      const fs = require("fs");
       const serverDir = path.resolve(process.cwd(), ".dinou/dist3/server");
       fs.mkdirSync(serverDir, { recursive: true });
       fs.writeFileSync(
         path.join(serverDir, "package.json"),
         JSON.stringify({ type: "module" }, null, 2)
       );
-      const { execSync } = require("child_process");
       execSync(`"${process.execPath}" --conditions=react-server "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
         stdio: "inherit",
         env: { ...process.env, NODE_ENV: "production", DINOU_BUILD_TOOL: "webpack" },

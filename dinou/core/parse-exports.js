@@ -1,10 +1,15 @@
+import parser from "@babel/parser";
+import traverseModule from "@babel/traverse";
+import { createRequire } from "node:module";
+import { resolveModulePpr } from "./resolve-module-ppr.js";
+
+const require = createRequire(import.meta.url);
+const traverse = traverseModule?.default || traverseModule;
+
 let swc = null;
 try {
   swc = require("@swc/core");
 } catch (e) {}
-
-const parser = require("@babel/parser");
-const traverse = require("@babel/traverse");
 
 function parseExportsWithBabel(code) {
   const ast = parser.parse(code, {
@@ -283,11 +288,11 @@ function parsePprConfig(code) {
   return parsePprConfigWithBabel(code);
 }
 
-const { resolveModulePpr } = require("./resolve-module-ppr");
-
 parseExports.parsePprConfig = parsePprConfig;
 parseExports.hasPpr = (code) => parsePprConfig(code) === true;
 parseExports.resolveModulePpr = resolveModulePpr;
 
-module.exports = parseExports;
+export { parseExports, parsePprConfig, resolveModulePpr };
+export const hasPpr = (code) => parsePprConfig(code) === true;
+export default parseExports;
 

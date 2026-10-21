@@ -1,6 +1,6 @@
-const { pathToFileURL } = require("url");
-const path = require("path");
-const fs = require("fs");
+import { pathToFileURL } from "node:url";
+import path from "node:path";
+import fs from "node:fs";
 
 function getMtimeParam(absPath) {
   try {
@@ -80,4 +80,5 @@ function registerRouteModules(modulesMap) {
 
 importModule.register = registerRouteModules;
 
-module.exports = importModule;
+export { importModule, registerRouteModules };
+export default importModule;

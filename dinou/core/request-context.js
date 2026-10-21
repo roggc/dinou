@@ -1,14 +1,12 @@
 // dinou/core/request-context.js
-
 const DINOU_CONTEXT_KEY = Symbol.for("dinou.request.context.storage");
 let requestStorage;
 
 if (typeof window === "undefined") {
-  let AsyncLocalStorageClass;
-
-  if (typeof globalThis.AsyncLocalStorage !== "undefined") {
-    AsyncLocalStorageClass = globalThis.AsyncLocalStorage;
-  }
+  let AsyncLocalStorageClass =
+    typeof globalThis.AsyncLocalStorage !== "undefined"
+      ? globalThis.AsyncLocalStorage
+      : undefined;
 
   if (!AsyncLocalStorageClass) {
     try {
@@ -69,7 +67,13 @@ function getContext() {
   return store || getCurrentContext() || {};
 }
 
-module.exports = {
+export {
+  requestStorage,
+  getContext,
+  setCurrentContext,
+  getCurrentContext,
+};
+export default {
   requestStorage,
   getContext,
   setCurrentContext,

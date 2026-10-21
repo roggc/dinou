@@ -2,10 +2,11 @@
 // Universal Web Standards Request Handler for Dinou.
 // Implements (Request) => Promise<Response> independently of Express.
 
-const path = require("path");
-const { readFileSync, existsSync } = require("fs");
-const { fileURLToPath, pathToFileURL } = require("url");
-const { PassThrough, Readable } = require("node:stream");
+import path from "node:path";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { PassThrough, Readable } from "node:stream";
+
 const FormData = globalThis.FormData;
 const Blob = globalThis.Blob;
 
@@ -16,30 +17,33 @@ const isDevelopment =
   process.env.NODE_ENV !== "production";
 const outputFolder = isDevelopment ? ".dinou/public" : ".dinou/dist3";
 
-const { normalizePathCase } = require("./path-utils.js");
-const { resolveRelativeUrl } = require("./url-resolver.js");
-const { getFilePathAndDynamicParams } = require("./get-file-path-and-dynamic-params.js");
-const getJSX = require("./get-jsx.js");
-const { getErrorJSX } = require("./get-error-jsx.js");
-const importModule = require("./import-module.js");
-const { resolveLayoutFunctionsConfig } = require("./layout-functions.js");
-const { revalidating, regenerating, inFlightGenerations } = require("./revalidating.js");
-const { generatingISG } = require("./generating-isg.js");
-const { requestStorage, setCurrentContext } = require("./request-context.js");
-const { getStatus } = require("./status-manifest.js");
+import { normalizePathCase } from "./path-utils.js";
+import { resolveRelativeUrl } from "./url-resolver.js";
+import { getFilePathAndDynamicParams } from "./get-file-path-and-dynamic-params.js";
+import getJSX from "./get-jsx.js";
+import { getErrorJSX } from "./get-error-jsx.js";
+import importModule from "./import-module.js";
+import { resolveLayoutFunctionsConfig } from "./layout-functions.js";
+import { revalidating, regenerating, inFlightGenerations } from "./revalidating.js";
+import { generatingISG } from "./generating-isg.js";
+import { requestStorage, setCurrentContext } from "./request-context.js";
+import { getStatus } from "./status-manifest.js";
 
-const {
+import {
   isManifestReady,
   getClientManifest,
   getServerFunctionsManifest,
-} = require("./manifest-provider.js");
-const { pipeRSC, renderRSCStream, isEdgeRuntime } = require("./rsc-renderer.js");
-const { getStorageAdapter, setStorageAdapter } = require("./storage-adapter.js");
-const { createBailoutProxy } = require("./bailout-proxy.js");
-const getAssetFromManifest = require("./get-asset-from-manifest.js");
-const { handlePprResume } = require("./ppr-runtime.js");
-const { resolveModulePpr } = require("./resolve-module-ppr.js");
-const { getDinouConfig: loadDinouConfig } = require("./load-dinou-config");
+} from "./manifest-provider.js";
+import { pipeRSC, renderRSCStream, isEdgeRuntime } from "./rsc-renderer.js";
+import { getStorageAdapter, setStorageAdapter } from "./storage-adapter.js";
+import { createBailoutProxy } from "./bailout-proxy.js";
+import getAssetFromManifest from "./get-asset-from-manifest.js";
+import { handlePprResume } from "./ppr-runtime.js";
+import { resolveModulePpr } from "./resolve-module-ppr.js";
+import { getDinouConfig as loadDinouConfig } from "./load-dinou-config.js";
+import { getSlotJSX } from "./cache-slot.js";
+import { runWithPprContext, getRegisteredHoles } from "./ppr-context.js";
+import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
 
 // Load Dinou configuration and plugins
 let dinouConfig = { plugins: [] };
@@ -420,7 +424,7 @@ function getDiscoveredLayouts() {
         if (!existsSync(dir)) return;
         let entries;
         try {
-          entries = require("fs").readdirSync(dir, { withFileTypes: true });
+          entries = readdirSync(dir, { withFileTypes: true });
         } catch {
           return;
         }
@@ -1138,7 +1142,6 @@ async function handleRequest(request, platformContext = {}) {
       const urlObj = new URL(request.url || `http://localhost${pathname}`);
       const isFresh = urlObj.searchParams.get("fresh") === "1" || urlObj.searchParams.has("fresh");
 
-      const { getSlotJSX } = require("./cache-slot.js");
       const currentPath =
         request.headers?.get?.("x-dinou-current-path") ||
         simReq.headers?.["x-dinou-current-path"] ||
@@ -1385,7 +1388,27 @@ async function handleRequest(request, platformContext = {}) {
         for (const [lPath, lParams] of layouts) {
           const lConfig = await resolveLayoutFunctionsConfig(lPath, lParams);
           if (!isDevelopment && lConfig.allowISG === false) {
-            return new Response("Not Found", { status: 404 });
+            let isPathAllowed = false;
+            if (lConfig.staticPathsSet) {
+              const sortedEntries = Object.entries(lParams || {})
+                .sort((a, b) => a[0].localeCompare(b[0]))
+                .map(([k, v]) => {
+                  if (Array.isArray(v)) return [k, v.join(",")];
+                  return [k, String(v)];
+                });
+              const serializedQuery = JSON.stringify(sortedEntries);
+              const singleVal = Object.values(lParams || {})[0];
+              const singleValStr = Array.isArray(singleVal) ? singleVal.join(",") : String(singleVal);
+              isPathAllowed = lConfig.staticPathsSet.has(serializedQuery) || lConfig.staticPathsSet.has(singleValStr);
+            }
+            if (!isPathAllowed) {
+              const cleanReq = reqPath.replace(/^\//, "").replace(/\/$/, "");
+              const rscPath = path.join(process.cwd(), ".dinou/dist2", cleanReq, "layout.rsc");
+              if (!existsSync(rscPath)) {
+                isPathBlocked = true;
+                break;
+              }
+            }
           }
           if (lConfig.validateParams) {
             const isValid = await lConfig.validateParams(lParams);
@@ -1400,7 +1423,26 @@ async function handleRequest(request, platformContext = {}) {
           layoutConfig = await resolveLayoutFunctionsConfig(layoutPath, layoutParams);
         }
         if (!isDevelopment && layoutConfig.allowISG === false) {
-          return new Response("Not Found", { status: 404 });
+          let isPathAllowed = false;
+          if (layoutConfig.staticPathsSet) {
+            const sortedEntries = Object.entries(layoutParams || {})
+              .sort((a, b) => a[0].localeCompare(b[0]))
+              .map(([k, v]) => {
+                if (Array.isArray(v)) return [k, v.join(",")];
+                return [k, String(v)];
+              });
+            const serializedQuery = JSON.stringify(sortedEntries);
+            const singleVal = Object.values(layoutParams || {})[0];
+            const singleValStr = Array.isArray(singleVal) ? singleVal.join(",") : String(singleVal);
+            isPathAllowed = layoutConfig.staticPathsSet.has(serializedQuery) || layoutConfig.staticPathsSet.has(singleValStr);
+          }
+          if (!isPathAllowed) {
+            const cleanReq = reqPath.replace(/^\//, "").replace(/\/$/, "");
+            const rscPath = path.join(process.cwd(), ".dinou/dist2", cleanReq, "layout.rsc");
+            if (!existsSync(rscPath)) {
+              isPathBlocked = true;
+            }
+          }
         }
         if (layoutConfig.validateParams) {
           const isValid = await layoutConfig.validateParams(layoutParams);
@@ -1804,8 +1846,6 @@ async function handleRequest(request, platformContext = {}) {
         try {
           if (!isError) {
             if (platformContext?.isSSG && isPprConfig) {
-              const { runWithPprContext, getRegisteredHoles } = require("./ppr-context.js");
-              const { asyncRenderJSXToClientJSX } = require("./render-jsx-to-client-jsx.js");
               await requestStorage.run(context, async () => {
                 await runWithPprContext({ isPpr: true }, async () => {
                   jsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, !pagePath);
@@ -2294,10 +2334,10 @@ async function handleRequest(request, platformContext = {}) {
   return bridge.toResponse();
 }
 
-module.exports = {
+export {
   handleRequest,
   WebResponseBridge,
   resolvePageFunctionsConfig,
 };
-module.exports.default = handleRequest;
+export default handleRequest;
 

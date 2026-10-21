@@ -1,28 +1,29 @@
 {
   "name": "dinou-ejected",
-  "version": "7.3.0",
+  "version": "8.0.0",
+  "type": "module",
   "main": "index.js",
   "private": true,
   "exports": {
     ".": {
       "types": "./index.d.ts",
-      "import": "./index.mjs",
-      "require": "./index.js"
+      "import": "./index.js",
+      "default": "./index.js"
     },
     "./env": {
       "types": "./env.d.ts"
     },
     "./server": {
       "types": "./server.d.ts",
-      "import": "./server.mjs",
-      "require": "./server.js"
+      "import": "./server.js",
+      "default": "./server.js"
     },
     "./config": {
       "types": "./index.d.ts",
       "import": "./core/config.js",
-      "require": "./core/config.js"
+      "default": "./core/config.js"
     },
-    "./adapters/node": "./adapters/node.mjs",
+    "./adapters/node": "./adapters/node.js",
     "./adapters/bun": "./adapters/bun.js",
     "./adapters/deno": "./adapters/deno.js",
     "./adapters/cloudflare": "./adapters/cloudflare.js",

@@ -1,6 +1,6 @@
 // dinou/core/resolve-setup-files.js
-const fs = require("node:fs");
-const path = require("node:path");
+import fs from "node:fs";
+import path from "node:path";
 
 /**
  * Resolves setup files according to Dinou's configuration hierarchy:
@@ -66,4 +66,5 @@ function resolveSetupFiles(projectRoot, config = {}) {
   return [...new Set([...pluginSetupFiles, ...userSetupFiles])];
 }
 
-module.exports = { resolveSetupFiles };
+export { resolveSetupFiles };
+export default { resolveSetupFiles };

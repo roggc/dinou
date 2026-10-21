@@ -2,7 +2,7 @@
 // Bidirectional adapter between Node.js HTTP (IncomingMessage/ServerResponse)
 // and WHATWG Web Standards (Request/Response/ReadableStream).
 
-const { Readable } = require("node:stream");
+import { Readable } from "node:stream";
 
 /**
  * Converts a Node.js IncomingMessage / Express Request into a standard Web Request.
@@ -109,7 +109,11 @@ async function sendWebResponseToNode(webResponse, res) {
   }
 }
 
-module.exports = {
+export {
+  nodeToWebRequest,
+  sendWebResponseToNode,
+};
+export default {
   nodeToWebRequest,
   sendWebResponseToNode,
 };

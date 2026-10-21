@@ -6,22 +6,21 @@
 import fs from "node:fs";
 import path from "node:path";
 import esbuild from "esbuild";
-import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const require = createRequire(import.meta.url);
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { generateRouteModulesCode, generateRouteTypes } = require("../core/route-generator.js");
-const parseExports = require("../core/parse-exports.js");
-const { useClientRegex, useServerRegex } = require("../constants.js");
-const createScopedName = require("../core/createScopedName.js");
-const { regex: assetRegex } = require("../core/asset-extensions.js");
-const {
+import { generateRouteModulesCode, generateRouteTypes } from "../core/route-generator.js";
+import parseExports from "../core/parse-exports.js";
+import { useClientRegex, useServerRegex } from "../constants.js";
+import createScopedName from "../core/createScopedName.js";
+import { regex as assetRegex } from "../core/asset-extensions.js";
+import {
   isSupportedClientModule,
   scanProjectDependenciesForClientComponents,
-} = require("../core/scan-dependency-components.js");
-const { getDinouConfig } = require("../core/load-dinou-config.js");
-const { resolveSetupFiles } = require("../core/resolve-setup-files.js");
+} from "../core/scan-dependency-components.js";
+import { getDinouConfig } from "../core/load-dinou-config.js";
+import { resolveSetupFiles } from "../core/resolve-setup-files.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export async function bundleDualEngine(options = {}) {
   const isDev = Boolean(options.isDev);
@@ -695,6 +694,8 @@ globalThis.__DINOU_VFS__ = ${JSON.stringify(vfsSnapshot)};
   const rscEntryContent = `// Auto-generated RSC Engine entry for Node.js (Dual-Bundle)
 import "./env-setup.mjs";
 import "./route-modules.mjs";
+import * as edgeRenderer from "react-server-dom-webpack/server.edge";
+globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
 export { handleRequest } from "${dinouDirSlash}/core/handler.js";
 export { buildStaticPages, getStaticPaths, getStaticLayouts, getStaticMetadata } from "${dinouDirSlash}/core/build-static-pages.js";
 `;

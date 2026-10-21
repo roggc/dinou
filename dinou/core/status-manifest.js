@@ -1,5 +1,5 @@
-const fs = require("fs");
-const path = require("path");
+import fs from "node:fs";
+import path from "node:path";
 
 const statusMap = new Map();
 let isLoaded = false;
@@ -30,7 +30,7 @@ function saveToFile() {
   } catch (e) {}
 }
 
-function getStatus(reqPath) {
+export function getStatus(reqPath) {
   loadFromFile();
   // Also check without trailing slash or with trailing slash
   const clean = reqPath.endsWith("/") ? reqPath.slice(0, -1) : reqPath;
@@ -42,7 +42,7 @@ function getStatus(reqPath) {
   );
 }
 
-function updateStatus(reqPath, status) {
+export function updateStatus(reqPath, status) {
   loadFromFile();
   const current = statusMap.get(reqPath)?.status;
   if (current === status) return;
@@ -51,4 +51,4 @@ function updateStatus(reqPath, status) {
   saveToFile();
 }
 
-module.exports = { getStatus, updateStatus };
+export default { getStatus, updateStatus };

@@ -1,13 +1,15 @@
-const { readFileSync } = require("fs");
-const path = require("node:path");
-const glob = require("fast-glob");
-const { pathToFileURL } = require("node:url");
-const parser = require("@babel/parser");
-const traverse = require("@babel/traverse");
-const crypto = require("node:crypto");
-const { regex: assetRegex } = require("../../core/asset-extensions.js");
-const { getAbsPathWithExt } = require("../../core/get-abs-path-with-ext.js");
-const { useClientRegex, useServerRegex } = require("../../constants.js");
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import glob from "fast-glob";
+import { pathToFileURL } from "node:url";
+import parser from "@babel/parser";
+import _traverseRaw from "@babel/traverse";
+import crypto from "node:crypto";
+import { regex as assetRegex } from "../../core/asset-extensions.js";
+import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
+import { useClientRegex, useServerRegex } from "../../constants.js";
+
+const traverse = typeof _traverseRaw === "function" ? _traverseRaw : (_traverseRaw.default || _traverseRaw);
 
 const normalizePath = (p) => p.split(path.sep).join(path.posix.sep);
 
@@ -203,4 +205,5 @@ async function getCSSEntries({
   return [detectedCSSEntries, detectedClientEntries, serverFiles];
 }
 
-module.exports = getCSSEntries;
+export { getCSSEntries };
+export default getCSSEntries;

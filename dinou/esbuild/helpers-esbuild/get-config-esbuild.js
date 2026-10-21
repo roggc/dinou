@@ -1,11 +1,11 @@
-import reactClientManifestPlugin from "../plugins-esbuild/react-client-manifest-plugin.mjs";
-import serverFunctionsPlugin from "../plugins-esbuild/server-functions-plugin.mjs";
-import cssProcessorPlugin from "../plugins-esbuild/css-processor-plugin.mjs";
-import esmHmrPlugin from "../react-refresh/esm-hmr-plugin.mjs";
-import stableChunkNamesAndMapsPlugin from "../plugins-esbuild/stable-chunk-names-and-maps-plugin.mjs";
-import assetsPlugin from "../plugins-esbuild/assets-plugin.mjs";
-import skipMissingEntryPointsPlugin from "../plugins-esbuild/skip-missing-entry-points-plugin.mjs";
-import { swcRedirectPlugin } from "./swc-disk-cache.mjs";
+import reactClientManifestPlugin from "../plugins-esbuild/react-client-manifest-plugin.js";
+import serverFunctionsPlugin from "../plugins-esbuild/server-functions-plugin.js";
+import cssProcessorPlugin from "../plugins-esbuild/css-processor-plugin.js";
+import esmHmrPlugin from "../react-refresh/esm-hmr-plugin.js";
+import stableChunkNamesAndMapsPlugin from "../plugins-esbuild/stable-chunk-names-and-maps-plugin.js";
+import assetsPlugin from "../plugins-esbuild/assets-plugin.js";
+import skipMissingEntryPointsPlugin from "../plugins-esbuild/skip-missing-entry-points-plugin.js";
+import { swcRedirectPlugin } from "./swc-disk-cache.js";
 import fs from "node:fs";
 import path from "node:path";
 

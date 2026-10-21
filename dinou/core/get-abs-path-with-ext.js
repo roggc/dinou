@@ -1,6 +1,6 @@
-const fs = require("fs");
-const path = require("path");
-const { fileURLToPath, pathToFileURL } = require("url");
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // Reads tsconfig/jsconfig and builds a map of alias -> targetBase
 function loadTsconfigAliases() {
@@ -62,7 +62,7 @@ const aliasMap = loadTsconfigAliases();
 function tryExtensions(filePath) {
   if (fs.existsSync(filePath) && fs.statSync(filePath).isFile())
     return filePath;
-  const exts = [".js", ".ts", ".jsx", ".tsx"];
+  const exts = [".js", ".mjs", ".ts", ".jsx", ".tsx"];
   for (const ext of exts) {
     const f = filePath + ext;
     if (fs.existsSync(f) && fs.statSync(f).isFile()) return f;
@@ -77,7 +77,7 @@ function tryExtensions(filePath) {
   return null;
 }
 
-exports.getAbsPathWithExt = function getAbsPathWithExt(specifier, context) {
+export function getAbsPathWithExt(specifier, context) {
   const cleanSpecifier = specifier ? specifier.split("?")[0] : specifier;
   if (!cleanSpecifier) return null;
 
@@ -102,4 +102,6 @@ exports.getAbsPathWithExt = function getAbsPathWithExt(specifier, context) {
   }
 
   return null;
-};
+}
+
+export default { getAbsPathWithExt };

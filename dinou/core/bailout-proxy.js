@@ -1,4 +1,4 @@
-const { isPprBuildActive, isInsideSuspense, markDynamicAccess } = require("./ppr-context.js");
+import { isPprBuildActive, isInsideSuspense, markDynamicAccess } from "./ppr-context.js";
 
 function triggerBailout(label, onBailout) {
   if (isPprBuildActive() && isInsideSuspense()) {
@@ -17,7 +17,7 @@ function triggerBailout(label, onBailout) {
  * @param {Function} onBailout - Callback invoked when property access occurs
  * @returns {Proxy}
  */
-function createBailoutProxy(target, label = "Context", onBailout) {
+export function createBailoutProxy(target, label = "Context", onBailout) {
   const safeTarget = target || {};
 
   return new Proxy(safeTarget, {
@@ -56,6 +56,6 @@ function createBailoutProxy(target, label = "Context", onBailout) {
   });
 }
 
-module.exports = {
+export default {
   createBailoutProxy,
 };

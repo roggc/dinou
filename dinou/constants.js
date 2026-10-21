@@ -11,7 +11,7 @@ function hasDirective(code, directive) {
   );
 }
 
-const useClientRegex = {
+export const useClientRegex = {
   test(code) {
     return hasDirective(code, "use client");
   },
@@ -20,7 +20,7 @@ const useClientRegex = {
   },
 };
 
-const useServerRegex = {
+export const useServerRegex = {
   test(code) {
     return hasDirective(code, "use server");
   },
@@ -29,4 +29,4 @@ const useServerRegex = {
   },
 };
 
-module.exports = { useClientRegex, useServerRegex };
+export default { useClientRegex, useServerRegex };

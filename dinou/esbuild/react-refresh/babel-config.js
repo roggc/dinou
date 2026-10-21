@@ -1,3 +1,6 @@
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+
 const babelConfig = {
   presets: [
     ["@babel/preset-react", { runtime: "automatic" }],
@@ -10,4 +13,5 @@ const babelConfig = {
   exclude: /node_modules[\\/](?!dinou|react-refresh)/,
 };
 
-module.exports.babelConfig = babelConfig;
+export { babelConfig };
+export default babelConfig;

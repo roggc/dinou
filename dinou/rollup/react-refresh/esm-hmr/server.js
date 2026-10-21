@@ -1,4 +1,6 @@
-const WebSocket = require("ws");
+import WebSocket, { WebSocketServer } from "ws";
+
+const Server = WebSocketServer || WebSocket.Server;
 
 /**
  * @typedef {Object} Dependency
@@ -15,8 +17,8 @@ class EsmHmrEngine {
     this.clients = set;
     this.dependencyTree = map;
     const wss = options.server
-      ? new WebSocket.Server({ noServer: true })
-      : new WebSocket.Server({ port: options.port || Number(process.env.HMR_PORT) || 3001 });
+      ? new Server({ noServer: true })
+      : new Server({ port: options.port || Number(process.env.HMR_PORT) || 3001 });
 
     if (options.server) {
       options.server.on("upgrade", (req, socket, head) => {
@@ -125,6 +127,7 @@ class EsmHmrEngine {
   }
 }
 
-module.exports = {
+export {
   EsmHmrEngine,
 };
+export default EsmHmrEngine;

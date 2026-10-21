@@ -1,22 +1,43 @@
-const contextModule = require("./core/request-context.js");
-const navigationModule = require("./core/navigation.js");
-const { defineConfig } = require("./core/config.js");
+import { getContext } from "./core/request-context.js";
+import {
+  usePathname,
+  useSearchParams,
+  useRouter,
+  refreshSlot,
+  useNavigationLoading,
+} from "./core/navigation.js";
+import { redirect } from "./core/redirect.jsx";
+import { ClientRedirect } from "./core/client-redirect.jsx";
+import { Link } from "./core/link.jsx";
 
-module.exports = {
+function defineConfig(config) {
+  return config;
+}
+
+const dinou = {
   defineConfig,
-  getContext: contextModule.getContext,
-  usePathname: navigationModule.usePathname,
-  useSearchParams: navigationModule.useSearchParams,
-  useRouter: navigationModule.useRouter,
-  refreshSlot: navigationModule.refreshSlot,
-  useNavigationLoading: navigationModule.useNavigationLoading,
-  get redirect() {
-    return require("./core/redirect.jsx").redirect;
-  },
-  get ClientRedirect() {
-    return require("./core/client-redirect.jsx").ClientRedirect;
-  },
-  get Link() {
-    return require("./core/link.jsx").Link;
-  },
+  getContext,
+  usePathname,
+  useSearchParams,
+  useRouter,
+  refreshSlot,
+  useNavigationLoading,
+  redirect,
+  ClientRedirect,
+  Link,
 };
+
+export {
+  defineConfig,
+  getContext,
+  usePathname,
+  useSearchParams,
+  useRouter,
+  refreshSlot,
+  useNavigationLoading,
+  redirect,
+  ClientRedirect,
+  Link,
+};
+
+export default dinou;

@@ -2,11 +2,18 @@
 // Primitive for Vertical Segmentation (Micro-ISR) in React Server Components.
 // Caches and invalidates component sub-trees inside pages using revalidate & revalidateTag.
 
-const path = require("path");
-const { pathToFileURL } = require("url");
-const React = require("react");
-const { getStorageAdapter } = require("./storage-adapter.js");
-const { asyncRenderJSXToClientJSX } = require("./render-jsx-to-client-jsx.js");
+import path from "node:path";
+import { pathToFileURL, fileURLToPath } from "node:url";
+import React from "react";
+import { getStorageAdapter } from "./storage-adapter.js";
+import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
+import { DinouCacheSlotBoundary as RawDinouCacheSlotBoundary } from "./slot.js";
+import { getContext } from "./request-context.js";
+import { getJSX } from "./get-jsx.js";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
 
 const INFLIGHT_KEY = Symbol.for("dinou.slot.inflight.renders");
 if (!globalThis[INFLIGHT_KEY]) {
@@ -29,12 +36,12 @@ const slotRegistry = globalThis[SLOT_REGISTRY_KEY];
 let _DinouCacheSlotBoundary = null;
 function getCacheSlotBoundary() {
   if (!_DinouCacheSlotBoundary) {
-    let { DinouCacheSlotBoundary } = require("./slot.js");
+    let DinouCacheSlotBoundary = RawDinouCacheSlotBoundary;
     if (
       typeof DinouCacheSlotBoundary === "function" &&
       DinouCacheSlotBoundary.$$typeof !== Symbol.for("react.client.reference")
     ) {
-      const slotPath = path.resolve(__dirname, "slot.js");
+      const slotPath = path.resolve(currentDir, "slot.js");
       const fileUrl = pathToFileURL(slotPath).href;
       let regFn = null;
       try {
@@ -255,7 +262,6 @@ async function DinouCacheSlot(props) {
           })();
 
           try {
-            const { getContext } = require("./request-context.js");
             const reqContext = getContext();
             const ctx = reqContext?.ctx || reqContext?.platformContext?.ctx || reqContext?.req?.ctx;
             if (ctx && typeof ctx.waitUntil === "function") {
@@ -342,7 +348,6 @@ async function getSlotJSX(slotId, options = {}) {
   // 2. If missing from storage (e.g. was invalidated) or expired or forced fresh:
   if (!slotRegistry.has(slotId) && options.currentPath) {
     try {
-      const { getJSX } = require("./get-jsx.js");
       const isNotFound = { value: false };
       await getJSX(options.currentPath, {}, isNotFound, false, false, { segment: "page" });
     } catch (e) {
@@ -379,7 +384,13 @@ async function getSlotJSX(slotId, options = {}) {
   return null;
 }
 
-module.exports = {
+export {
+  DinouCacheSlot,
+  getSlotJSX,
+  serializeJSX,
+  deserializeJSX,
+};
+export default {
   DinouCacheSlot,
   getSlotJSX,
   serializeJSX,

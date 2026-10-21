@@ -5,17 +5,17 @@ if (!process.env.NODE_ENV) {
 
 import esbuild from "esbuild";
 import fs from "node:fs/promises";
-import getConfigEsbuild from "./helpers-esbuild/get-config-esbuild.mjs";
-import getEsbuildEntries from "./helpers-esbuild/get-esbuild-entries.mjs";
+import getConfigEsbuild from "./helpers-esbuild/get-config-esbuild.js";
+import getEsbuildEntries from "./helpers-esbuild/get-esbuild-entries.js";
 import path from "node:path";
-import normalizePath from "./helpers-esbuild/normalize-path.mjs";
+import normalizePath from "./helpers-esbuild/normalize-path.js";
 import { fileURLToPath } from "url";
-import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-module.mjs";
+import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-module.js";
 import {
   syncAllSwcFiles,
   transformToDisk,
   getMirrorPath,
-} from "./helpers-esbuild/swc-disk-cache.mjs";
+} from "./helpers-esbuild/swc-disk-cache.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,7 +59,7 @@ export async function startEsbuildDev(options = {}) {
       __dirname,
       "../core/server-function-proxy.js"
     ),
-    runtime: path.resolve(__dirname, "react-refresh/react-refresh-runtime.mjs"),
+    runtime: path.resolve(__dirname, "react-refresh/react-refresh-runtime.js"),
     "react-refresh-entry": path.resolve(
       __dirname,
       "react-refresh/react-refresh-entry.js"

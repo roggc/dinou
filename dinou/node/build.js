@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import esbuild from "esbuild";
 import { fileURLToPath } from "node:url";
-import { bundleDualEngine } from "./bundle-dual-engine.mjs";
+import { bundleDualEngine } from "./bundle-dual-engine.js";
 
 const projectRoot = process.cwd();
 const nodeDir = path.resolve(projectRoot, ".dinou/node");

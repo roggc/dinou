@@ -2,8 +2,8 @@
 // Pluggable storage abstraction for ISR/ISG cache and static artifacts.
 // Supports FileSystem (Node.js/Netlify/Docker), Cloudflare KV (Edge), and Memory.
 
-const path = require("path");
-const fs = require("fs");
+import path from "node:path";
+import fs from "node:fs";
 
 class StorageAdapter {
   async get(key) {
@@ -510,7 +510,17 @@ function setStorageAdapter(adapter) {
   globalThis[DINOU_STORAGE_KEY] = adapter;
 }
 
-module.exports = {
+export {
+  StorageAdapter,
+  FileSystemStorage,
+  CloudflareKVStorage,
+  DenoKVStorage,
+  MemoryStorage,
+  RedisStorage,
+  getStorageAdapter,
+  setStorageAdapter,
+};
+export default {
   StorageAdapter,
   FileSystemStorage,
   CloudflareKVStorage,

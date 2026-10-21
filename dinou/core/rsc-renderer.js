@@ -1,7 +1,10 @@
 // dinou/core/rsc-renderer.js
 // Universal RSC Stream Renderer supporting Node Streams and Web Streams (Cloudflare Workers / Edge).
 
-const { pathToFileURL } = require("url");
+import { pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
 
 const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 
@@ -31,6 +34,9 @@ function getNodeRenderer() {
 
 let edgeRender = null;
 function getEdgeRenderer() {
+  if (typeof globalThis !== "undefined" && globalThis.__DINOU_EDGE_RENDERER__) {
+    return globalThis.__DINOU_EDGE_RENDERER__;
+  }
   if (!edgeRender) {
     try {
       edgeRender = require("react-server-dom-webpack/server.edge");
@@ -83,7 +89,12 @@ function pipeRSC(model, bridge, manifest, options = {}) {
   pipe(bridge);
 }
 
-module.exports = {
+export {
+  isEdgeRuntime,
+  renderRSCStream,
+  pipeRSC,
+};
+export default {
   isEdgeRuntime,
   renderRSCStream,
   pipeRSC,

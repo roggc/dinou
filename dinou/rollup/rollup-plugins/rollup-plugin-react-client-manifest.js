@@ -1,20 +1,22 @@
-const { readFileSync, writeFileSync, mkdirSync, existsSync } = require("fs");
-const path = require("path");
-const { dirname } = require("path");
-const glob = require("fast-glob");
-const { pathToFileURL } = require("url");
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import path, { dirname } from "node:path";
+import glob from "fast-glob";
+import { pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
+import parser from "@babel/parser";
+import _traverseRaw from "@babel/traverse";
+import { regex } from "../../core/asset-extensions.js";
+import createScopedName from "../../core/createScopedName.js";
+import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
+import { useClientRegex, useServerRegex } from "../../constants.js";
+import parseExports from "../../core/parse-exports.js";
+
+const require = createRequire(import.meta.url);
 let swc = null;
 try {
   swc = require("@swc/core");
 } catch (e) {}
-const parser = require("@babel/parser");
-const _traverseRaw = require("@babel/traverse");
 const traverse = typeof _traverseRaw === "function" ? _traverseRaw : (_traverseRaw.default || _traverseRaw);
-const { regex } = require("../../core/asset-extensions.js");
-const createScopedName = require("../../core/createScopedName.js");
-const { getAbsPathWithExt } = require("../../core/get-abs-path-with-ext.js");
-const { useClientRegex, useServerRegex } = require("../../constants.js");
-const parseExports = require("../../core/parse-exports.js");
 
 function getDefaultExportName(code) {
   let name = null;
@@ -723,4 +725,5 @@ function setOnManifestUpdated(cb) {
 }
 reactClientManifestPlugin.setOnManifestUpdated = setOnManifestUpdated;
 
-module.exports = reactClientManifestPlugin;
+export { reactClientManifestPlugin, setOnManifestUpdated };
+export default reactClientManifestPlugin;

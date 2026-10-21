@@ -1,6 +1,6 @@
 // dinou/core/generate-route-types.js
-const fs = require("fs");
-const path = require("path");
+import fs from "node:fs";
+import path from "node:path";
 
 const PAGE_EXTENSIONS = [".tsx", ".jsx", ".ts", ".js"];
 
@@ -245,7 +245,12 @@ ${paramsEntries}
   };
 }
 
-module.exports = {
+export {
+  collectRoutes,
+  generateRouteDefinitions,
+  generateRouteTypes,
+};
+export default {
   collectRoutes,
   generateRouteDefinitions,
   generateRouteTypes,

@@ -1,8 +1,12 @@
-const fs = require("fs");
-const path = require("path");
-const { PassThrough } = require("stream");
-const url = require("url");
-const getJSX = require("./get-jsx.js");
+import fs from "node:fs";
+import path from "node:path";
+import { PassThrough } from "node:stream";
+import url from "node:url";
+import getJSX from "./get-jsx.js";
+import { requestStorage } from "./request-context.js";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
 let _renderToPipeableStream = null;
 function getRenderToPipeableStream() {
   if (!_renderToPipeableStream) {
@@ -14,7 +18,6 @@ function getRenderToPipeableStream() {
   }
   return _renderToPipeableStream;
 }
-const { requestStorage } = require("./request-context.js");
 
 const OUT_DIR = path.resolve(".dinou/dist2");
 const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
@@ -159,7 +162,9 @@ async function generateStaticLayoutRSC(layoutFolderPath, layoutFilePath, options
   });
 }
 
-module.exports = generateStaticRSC;
-module.exports.generateStaticRSC = generateStaticRSC;
-module.exports.generateStaticPageRSC = generateStaticPageRSC;
-module.exports.generateStaticLayoutRSC = generateStaticLayoutRSC;
+export {
+  generateStaticRSC,
+  generateStaticPageRSC,
+  generateStaticLayoutRSC,
+};
+export default generateStaticRSC;

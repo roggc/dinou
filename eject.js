@@ -1,11 +1,15 @@
-const fs = require("fs");
-const path = require("path");
-const { execSync } = require("child_process");
+import fs from "node:fs";
+import path from "node:path";
+import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dinouPath = path.resolve(__dirname, "dinou");
 const projectRoot = process.cwd();
 
-console.log("🚀 Starting Dinou ejecting process...");
+
+export function eject() {
+  console.log("🚀 Starting Dinou ejecting process...");
 
 fs.cpSync(dinouPath, path.join(projectRoot, "dinou"), {
   recursive: true,
@@ -13,7 +17,7 @@ fs.cpSync(dinouPath, path.join(projectRoot, "dinou"), {
 console.log("✅ Files copied to ./dinou");
 
 const pkgPath = path.join(projectRoot, "package.json");
-const pkg = require(pkgPath);
+const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
 
 pkg.scripts = pkg.scripts || {};
 
@@ -21,13 +25,13 @@ const ejectedScripts = {
   dev: "npm run dev:esbuild",
   build: "npm run build:node",
   start: "npm run start:node",
-  "dev:esbuild": "cross-env DINOU_BUILD_TOOL=esbuild node dinou/node/dev.mjs",
-  "dev:rollup": "cross-env DINOU_BUILD_TOOL=rollup node dinou/node/dev.mjs",
-  "dev:webpack": "cross-env DINOU_BUILD_TOOL=webpack node dinou/node/dev.mjs",
-  "build:node": "npm run build:client:esbuild && node ./dinou/node/build.mjs",
+  "dev:esbuild": "cross-env DINOU_BUILD_TOOL=esbuild node dinou/node/dev.js",
+  "dev:rollup": "cross-env DINOU_BUILD_TOOL=rollup node dinou/node/dev.js",
+  "dev:webpack": "cross-env DINOU_BUILD_TOOL=webpack node dinou/node/dev.js",
+  "build:node": "npm run build:client:esbuild && node ./dinou/node/build.js",
   "build:node:esbuild": "npm run build:node",
-  "build:node:rollup": "npm run build:client:rollup && node ./dinou/node/build.mjs",
-  "build:node:webpack": "npm run build:client:webpack && cross-env DINOU_BUILD_TOOL=webpack node ./dinou/node/build.mjs",
+  "build:node:rollup": "npm run build:client:rollup && node ./dinou/node/build.js",
+  "build:node:webpack": "npm run build:client:webpack && cross-env DINOU_BUILD_TOOL=webpack node ./dinou/node/build.js",
   "build:node:compile": "npm run build:node:compile:esbuild",
   "build:node:compile:esbuild": "npm run build:node:esbuild && bun build --compile .dinou/node/server.mjs --outfile dist/server",
   "build:node:compile:rollup": "npm run build:node:rollup && bun build --compile .dinou/node/server.mjs --outfile dist/server",
@@ -49,41 +53,41 @@ const ejectedScripts = {
   "build:node:compile:win:rollup": "npm run build:node:rollup && bun build --compile --target=bun-windows-x64 .dinou/node/server.mjs --outfile dist/server-win",
   "build:node:compile:win:webpack": "npm run build:node:webpack && bun build --compile --target=bun-windows-x64 .dinou/node/server.mjs --outfile dist/server-win",
   "build:node:pure": "npm run build:node:pure:esbuild",
-  "build:node:pure:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.mjs && bun ./dinou/node/build.mjs",
-  "build:node:pure:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/node/build.mjs",
-  "build:node:pure:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js && cross-env DINOU_BUILD_TOOL=webpack bun ./dinou/node/build.mjs",
+  "build:node:pure:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.js && bun ./dinou/node/build.js",
+  "build:node:pure:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/node/build.js",
+  "build:node:pure:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js && cross-env DINOU_BUILD_TOOL=webpack bun ./dinou/node/build.js",
   "build:node:pure:compile": "npm run build:node:pure:compile:esbuild",
-  "build:node:pure:compile:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.mjs && bun ./dinou/node/build.mjs && bun build --compile .dinou/node/server.mjs --outfile dist/server",
-  "build:node:pure:compile:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/node/build.mjs && bun build --compile .dinou/node/server.mjs --outfile dist/server",
-  "build:node:pure:compile:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js && cross-env DINOU_BUILD_TOOL=webpack bun ./dinou/node/build.mjs && bun build --compile .dinou/node/server.mjs --outfile dist/server",
+  "build:node:pure:compile:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.js && bun ./dinou/node/build.js && bun build --compile .dinou/node/server.mjs --outfile dist/server",
+  "build:node:pure:compile:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/node/build.js && bun build --compile .dinou/node/server.mjs --outfile dist/server",
+  "build:node:pure:compile:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js && cross-env DINOU_BUILD_TOOL=webpack bun ./dinou/node/build.js && bun build --compile .dinou/node/server.mjs --outfile dist/server",
   "build:node:pure:compile:linux": "npm run build:node:pure:compile:linux:esbuild",
-  "build:node:pure:compile:linux:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.mjs && bun ./dinou/node/build.mjs && bun build --compile --target=bun-linux-x64 .dinou/node/server.mjs --outfile dist/server-linux",
-  "build:node:pure:compile:linux:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/node/build.mjs && bun build --compile --target=bun-linux-x64 .dinou/node/server.mjs --outfile dist/server-linux",
-  "build:node:pure:compile:linux:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js && cross-env DINOU_BUILD_TOOL=webpack bun ./dinou/node/build.mjs && bun build --compile --target=bun-linux-x64 .dinou/node/server.mjs --outfile dist/server-linux",
+  "build:node:pure:compile:linux:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.js && bun ./dinou/node/build.js && bun build --compile --target=bun-linux-x64 .dinou/node/server.mjs --outfile dist/server-linux",
+  "build:node:pure:compile:linux:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/node/build.js && bun build --compile --target=bun-linux-x64 .dinou/node/server.mjs --outfile dist/server-linux",
+  "build:node:pure:compile:linux:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js && cross-env DINOU_BUILD_TOOL=webpack bun ./dinou/node/build.js && bun build --compile --target=bun-linux-x64 .dinou/node/server.mjs --outfile dist/server-linux",
   "build:node:pure:compile:linux_arm": "npm run build:node:pure:compile:linux_arm:esbuild",
-  "build:node:pure:compile:linux_arm:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.mjs && bun ./dinou/node/build.mjs && bun build --compile --target=bun-linux-arm64 .dinou/node/server.mjs --outfile dist/server-linux-arm",
-  "build:node:pure:compile:linux_arm:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/node/build.mjs && bun build --compile --target=bun-linux-arm64 .dinou/node/server.mjs --outfile dist/server-linux-arm",
-  "build:node:pure:compile:linux_arm:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js && cross-env DINOU_BUILD_TOOL=webpack bun ./dinou/node/build.mjs && bun build --compile --target=bun-linux-arm64 .dinou/node/server.mjs --outfile dist/server-linux-arm",
+  "build:node:pure:compile:linux_arm:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.js && bun ./dinou/node/build.js && bun build --compile --target=bun-linux-arm64 .dinou/node/server.mjs --outfile dist/server-linux-arm",
+  "build:node:pure:compile:linux_arm:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/node/build.js && bun build --compile --target=bun-linux-arm64 .dinou/node/server.mjs --outfile dist/server-linux-arm",
+  "build:node:pure:compile:linux_arm:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js && cross-env DINOU_BUILD_TOOL=webpack bun ./dinou/node/build.js && bun build --compile --target=bun-linux-arm64 .dinou/node/server.mjs --outfile dist/server-linux-arm",
   "build:node:pure:compile:mac": "npm run build:node:pure:compile:mac:esbuild",
-  "build:node:pure:compile:mac:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.mjs && bun ./dinou/node/build.mjs && bun build --compile --target=bun-darwin-arm64 .dinou/node/server.mjs --outfile dist/server-mac",
-  "build:node:pure:compile:mac:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/node/build.mjs && bun build --compile --target=bun-darwin-arm64 .dinou/node/server.mjs --outfile dist/server-mac",
-  "build:node:pure:compile:mac:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js && cross-env DINOU_BUILD_TOOL=webpack bun ./dinou/node/build.mjs && bun build --compile --target=bun-darwin-arm64 .dinou/node/server.mjs --outfile dist/server-mac",
+  "build:node:pure:compile:mac:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.js && bun ./dinou/node/build.js && bun build --compile --target=bun-darwin-arm64 .dinou/node/server.mjs --outfile dist/server-mac",
+  "build:node:pure:compile:mac:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/node/build.js && bun build --compile --target=bun-darwin-arm64 .dinou/node/server.mjs --outfile dist/server-mac",
+  "build:node:pure:compile:mac:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js && cross-env DINOU_BUILD_TOOL=webpack bun ./dinou/node/build.js && bun build --compile --target=bun-darwin-arm64 .dinou/node/server.mjs --outfile dist/server-mac",
   "build:node:pure:compile:win": "npm run build:node:pure:compile:win:esbuild",
-  "build:node:pure:compile:win:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.mjs && bun ./dinou/node/build.mjs && bun build --compile --target=bun-windows-x64 .dinou/node/server.mjs --outfile dist/server-win",
-  "build:node:pure:compile:win:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/node/build.mjs && bun build --compile --target=bun-windows-x64 .dinou/node/server.mjs --outfile dist/server-win",
-  "build:node:pure:compile:win:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js && cross-env DINOU_BUILD_TOOL=webpack bun ./dinou/node/build.mjs && bun build --compile --target=bun-windows-x64 .dinou/node/server.mjs --outfile dist/server-win",
-  "start:node": "cross-env NODE_ENV=production node dinou/adapters/node.mjs",
+  "build:node:pure:compile:win:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.js && bun ./dinou/node/build.js && bun build --compile --target=bun-windows-x64 .dinou/node/server.mjs --outfile dist/server-win",
+  "build:node:pure:compile:win:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/node/build.js && bun build --compile --target=bun-windows-x64 .dinou/node/server.mjs --outfile dist/server-win",
+  "build:node:pure:compile:win:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js && cross-env DINOU_BUILD_TOOL=webpack bun ./dinou/node/build.js && bun build --compile --target=bun-windows-x64 .dinou/node/server.mjs --outfile dist/server-win",
+  "start:node": "cross-env NODE_ENV=production node dinou/adapters/node.js",
   "start:node:esbuild": "npm run start:node",
   "start:node:rollup": "npm run start:node",
-  "start:node:webpack": "cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack node dinou/adapters/node.mjs",
-  "build:cloudflare": "npm run build:client:esbuild && node ./dinou/cloudflare/build.mjs",
+  "start:node:webpack": "cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack node dinou/adapters/node.js",
+  "build:cloudflare": "npm run build:client:esbuild && node ./dinou/cloudflare/build.js",
   "build:cloudflare:esbuild": "npm run build:cloudflare",
-  "build:cloudflare:rollup": "npm run build:client:rollup && node ./dinou/cloudflare/build.mjs",
-  "build:cloudflare:webpack": "npm run build:client:webpack && cross-env DINOU_BUILD_TOOL=webpack node ./dinou/cloudflare/build.mjs",
-  "build:deno": "npm run build:client:esbuild && node ./dinou/deno/build.mjs && deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env dinou/deno/seed-kv.js",
+  "build:cloudflare:rollup": "npm run build:client:rollup && node ./dinou/cloudflare/build.js",
+  "build:cloudflare:webpack": "npm run build:client:webpack && cross-env DINOU_BUILD_TOOL=webpack node ./dinou/cloudflare/build.js",
+  "build:deno": "npm run build:client:esbuild && node ./dinou/deno/build.js && deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env dinou/deno/seed-kv.js",
   "build:deno:esbuild": "npm run build:deno",
-  "build:deno:rollup": "npm run build:client:rollup && node ./dinou/deno/build.mjs && deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env dinou/deno/seed-kv.js",
-  "build:deno:webpack": "npm run build:client:webpack && cross-env DINOU_BUILD_TOOL=webpack node ./dinou/deno/build.mjs && deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env dinou/deno/seed-kv.js",
+  "build:deno:rollup": "npm run build:client:rollup && node ./dinou/deno/build.js && deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env dinou/deno/seed-kv.js",
+  "build:deno:webpack": "npm run build:client:webpack && cross-env DINOU_BUILD_TOOL=webpack node ./dinou/deno/build.js && deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env dinou/deno/seed-kv.js",
   "build:deno:compile": "npm run build:deno:compile:esbuild",
   "build:deno:compile:esbuild": "npm run build:deno:esbuild && deno compile --no-check --no-config --allow-net --allow-read --allow-write --allow-env --allow-sys --output dist/deno-server .dinou/deno/main.js",
   "build:deno:compile:rollup": "npm run build:deno:rollup && deno compile --no-check --no-config --allow-net --allow-read --allow-write --allow-env --allow-sys --output dist/deno-server .dinou/deno/main.js",
@@ -105,10 +109,10 @@ const ejectedScripts = {
   "build:deno:compile:win:rollup": "npm run build:deno:rollup && deno compile --target x86_64-pc-windows-msvc --no-check --no-config --allow-net --allow-read --allow-write --allow-env --allow-sys --output dist/deno-server-win .dinou/deno/main.js",
   "build:deno:compile:win:webpack": "npm run build:deno:webpack && deno compile --target x86_64-pc-windows-msvc --no-check --no-config --allow-net --allow-read --allow-write --allow-env --allow-sys --output dist/deno-server-win .dinou/deno/main.js",
   "start:deno": "deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env --allow-sys dinou/adapters/deno.js",
-  "build:bun": "npm run build:client:esbuild && node ./dinou/bun/build.mjs",
+  "build:bun": "npm run build:client:esbuild && node ./dinou/bun/build.js",
   "build:bun:esbuild": "npm run build:bun",
-  "build:bun:rollup": "npm run build:client:rollup && node ./dinou/bun/build.mjs",
-  "build:bun:webpack": "npm run build:client:webpack && cross-env DINOU_BUILD_TOOL=webpack node ./dinou/bun/build.mjs",
+  "build:bun:rollup": "npm run build:client:rollup && node ./dinou/bun/build.js",
+  "build:bun:webpack": "npm run build:client:webpack && cross-env DINOU_BUILD_TOOL=webpack node ./dinou/bun/build.js",
   "build:bun:compile": "npm run build:bun:compile:esbuild",
   "build:bun:compile:esbuild": "npm run build:bun:esbuild && bun build --compile .dinou/bun/server.js --outfile dist/server",
   "build:bun:compile:rollup": "npm run build:bun:rollup && bun build --compile .dinou/bun/server.js --outfile dist/server",
@@ -130,9 +134,9 @@ const ejectedScripts = {
   "build:bun:compile:win:rollup": "npm run build:bun:rollup && bun build --compile --target=bun-windows-x64 .dinou/bun/server.js --outfile dist/server-win",
   "build:bun:compile:win:webpack": "npm run build:bun:webpack && bun build --compile --target=bun-windows-x64 .dinou/bun/server.js --outfile dist/server-win",
   "build:bun:pure": "npm run build:bun:pure:esbuild",
-  "build:bun:pure:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.mjs && bun ./dinou/bun/build.mjs",
-  "build:bun:pure:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/bun/build.mjs",
-  "build:bun:pure:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js && cross-env DINOU_BUILD_TOOL=webpack bun ./dinou/bun/build.mjs",
+  "build:bun:pure:esbuild": "cross-env NODE_ENV=production bun dinou/esbuild/build.js && bun ./dinou/bun/build.js",
+  "build:bun:pure:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js && bun ./dinou/bun/build.js",
+  "build:bun:pure:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js && cross-env DINOU_BUILD_TOOL=webpack bun ./dinou/bun/build.js",
   "build:bun:pure:compile": "npm run build:bun:pure:compile:esbuild",
   "build:bun:pure:compile:esbuild": "npm run build:bun:pure:esbuild && bun build --compile .dinou/bun/server.js --outfile dist/server",
   "build:bun:pure:compile:rollup": "npm run build:bun:pure:rollup && bun build --compile .dinou/bun/server.js --outfile dist/server",
@@ -158,10 +162,10 @@ const ejectedScripts = {
   "start:bun:rollup": "npm run start:bun",
   "start:bun:webpack": "cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack bun dinou/adapters/bun.js",
   "export-static": "npm run export-static:esbuild",
-  "export-static:esbuild": "npm run build:client:esbuild && node ./dinou/core/export-static.mjs",
-  "export-static:rollup": "npm run build:client:rollup && node ./dinou/core/export-static.mjs",
-  "export-static:webpack": "npm run build:client:webpack && node ./dinou/core/export-static.mjs",
-  "build:client:esbuild": "cross-env NODE_ENV=production node dinou/esbuild/build.mjs",
+  "export-static:esbuild": "npm run build:client:esbuild && node ./dinou/core/export-static.js",
+  "export-static:rollup": "npm run build:client:rollup && node ./dinou/core/export-static.js",
+  "export-static:webpack": "npm run build:client:webpack && node ./dinou/core/export-static.js",
+  "build:client:esbuild": "cross-env NODE_ENV=production node dinou/esbuild/build.js",
   "build:client:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js",
   "build:client:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js",
 };
@@ -215,3 +219,6 @@ try {
 console.log(
   "🎉 Eject completed successfully! Dinou is now running from local source.",
 );
+}
+
+export default eject;

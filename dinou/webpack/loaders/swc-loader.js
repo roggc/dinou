@@ -2,8 +2,10 @@
 // Ultra-fast SWC transpilation loader for Webpack.
 // Replaces heavy Babel pipeline in development and eliminates multi-second rebuild latencies.
 
-const path = require("path");
+import path from "node:path";
+import { createRequire } from "node:module";
 
+const require = createRequire(import.meta.url);
 let swc = null;
 try {
   swc = require("@swc/core");
@@ -11,7 +13,7 @@ try {
   // Handled on first invocation
 }
 
-module.exports = function (source, inputSourceMap) {
+export default function (source, inputSourceMap) {
   if (this.cacheable) this.cacheable(true);
 
   if (!swc) {

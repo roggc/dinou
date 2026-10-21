@@ -1,10 +1,9 @@
-const path = require("path");
+import path from "node:path";
+import { normalizePathCase } from "../../core/path-utils.js";
+import parseExports from "../../core/parse-exports.js";
+import { useServerRegex } from "../../constants.js";
 
-const { normalizePathCase } = require("../../core/path-utils.js");
-const parseExports = require("../../core/parse-exports.js");
-const { useServerRegex } = require("../../constants.js");
-
-module.exports = function (source) {
+export default function (source) {
   const options = this.getOptions ? this.getOptions() : {};
   const norm = path.resolve(this.resourcePath).replace(/\\/g, "/").toLowerCase();
 

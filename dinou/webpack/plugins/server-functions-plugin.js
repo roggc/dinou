@@ -1,5 +1,5 @@
-const path = require("path");
-const manifestGeneratorPlugin = require("./manifest-generator-plugin");
+import path from "node:path";
+import manifestGeneratorPlugin from "./manifest-generator-plugin.js";
 
 class WebpackServerFunctionsPluginSimple {
   constructor() {
@@ -130,4 +130,5 @@ class WebpackServerFunctionsPluginSimple {
   }
 }
 
-module.exports = WebpackServerFunctionsPluginSimple;
+export { WebpackServerFunctionsPluginSimple };
+export default WebpackServerFunctionsPluginSimple;

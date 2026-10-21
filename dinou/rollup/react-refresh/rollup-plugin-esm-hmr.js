@@ -1,8 +1,11 @@
-// plugins/rollup-plugin-esm-hmr.cjs
-const fs = require("node:fs");
-const path = require("node:path");
-const { EsmHmrEngine } = require("./esm-hmr/server");
-const { createServer } = require("node:http");
+// plugins/rollup-plugin-esm-hmr.js
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { EsmHmrEngine } from "./esm-hmr/server.js";
+import { createServer } from "node:http";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const changedIds = new Set();
 const pendingUpdateUrls = new Set();
 let needsFullReload = false;
@@ -227,19 +230,23 @@ function notifyFileChanged(absPath) {
   }
 }
 
-module.exports = {
-  esmHmrPlugin,
-  getHmrEngine: () => activeHmrEngine,
-  notifyFileChanged,
-  closeHmrServer: () => {
-    if (activeServer) {
-      try {
-        activeServer.close();
-      } catch (e) {}
-      activeServer = null;
-      activeHmrEngine = null;
-    }
-  },
+const getHmrEngine = () => activeHmrEngine;
+const closeHmrServer = () => {
+  if (activeServer) {
+    try {
+      activeServer.close();
+    } catch (e) {}
+    activeServer = null;
+    activeHmrEngine = null;
+  }
 };
+
+export {
+  esmHmrPlugin,
+  getHmrEngine,
+  notifyFileChanged,
+  closeHmrServer,
+};
+export default esmHmrPlugin;
 
 

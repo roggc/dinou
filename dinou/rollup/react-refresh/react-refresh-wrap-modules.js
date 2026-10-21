@@ -88,5 +88,6 @@ window.$RefreshSig$ = prevRefreshSig;
   };
 }
 
-module.exports = reactRefreshWrapModules;
+export { reactRefreshWrapModules };
+export default reactRefreshWrapModules;
 

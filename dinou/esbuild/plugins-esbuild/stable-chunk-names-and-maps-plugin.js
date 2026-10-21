@@ -1,5 +1,5 @@
 import path from "node:path";
-import stripNamespace from "../helpers-esbuild/strip-namespace.mjs";
+import stripNamespace from "../helpers-esbuild/strip-namespace.js";
 
 const normKey = (p) => {
   if (!p) return "";

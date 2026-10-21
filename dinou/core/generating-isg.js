@@ -1,14 +1,11 @@
-const fs = require("fs").promises;
-const path = require("path");
-const { existsSync, copyFileSync } = require("fs");
-const generateStaticPage = require("./generate-static-page");
-const generateStaticRSC = require("./generate-static-rsc");
-const { buildStaticPage } = require("./build-static-pages");
-const { regenerating } = require("./revalidating"); // We share the Set of locks
-const { safeRename } = require("./safe-rename");
-const { updateStatus } = require("./status-manifest");
+import fs from "node:fs/promises";
+import path from "node:path";
+import { existsSync, copyFileSync } from "node:fs";
+import { regenerating } from "./revalidating.js";
+import { safeRename } from "./safe-rename.js";
+import { updateStatus } from "./status-manifest.js";
 
-function generatingISG(reqPath, isDynamicFromServer) {
+export function generatingISG(reqPath, isDynamicFromServer) {
   const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
   // 1. Concurrency Protection
   if (regenerating.has(reqPath)) return;
@@ -36,6 +33,10 @@ function generatingISG(reqPath, isDynamicFromServer) {
   (async () => {
     try {
       console.log(`[ISG] Promoting new page to static: ${reqPath}...`);
+      const { buildStaticPage } = await import("./build-static-pages.js");
+      const { default: generateStaticRSC } = await import("./generate-static-rsc.js");
+      const { default: generateStaticPage } = await import("./generate-static-page.js");
+
       const isDynamic = {};
       // A. Build Data (with dynamic check)
       await buildStaticPage(reqPath, isDynamic);
@@ -76,4 +77,4 @@ function generatingISG(reqPath, isDynamicFromServer) {
   })();
 }
 
-module.exports = { generatingISG };
+export default { generatingISG };

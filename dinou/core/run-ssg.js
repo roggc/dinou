@@ -3,17 +3,22 @@
 process.env.NODE_ENV = "production";
 process.env.DINOU_RUNTIME = "node-bundle";
 
-const generateStatic = require("./generate-static.js");
+import { fileURLToPath } from "node:url";
+import generateStatic from "./generate-static.js";
 
-async function runSSG() {
+export async function runSSG() {
   await generateStatic();
 }
 
-if (require.main === module) {
+const isMainModule =
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isMainModule) {
   runSSG().catch((err) => {
     console.error("❌ [SSG] Static generation failed:", err);
     process.exit(1);
   });
 }
 
-module.exports = { runSSG };
+export default { runSSG };

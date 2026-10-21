@@ -2,7 +2,7 @@
 // Stores all bundled chunks, assets and sourcemaps in memory (globalThis.__DINOU_MEM_FILES__)
 // and deletes them from Rollup's emit queue in dev mode to prevent massive disk writes.
 
-const path = require("node:path");
+import path from "node:path";
 
 function rollupMemoryPlugin() {
   return {
@@ -63,4 +63,5 @@ function rollupMemoryPlugin() {
   };
 }
 
-module.exports = rollupMemoryPlugin;
+export { rollupMemoryPlugin };
+export default rollupMemoryPlugin;

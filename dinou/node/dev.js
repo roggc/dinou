@@ -23,8 +23,22 @@ import {
   logInfo,
   showIdleStatus,
   printReadyBanner,
-} from "./terminal-status.mjs";
-import { resolveDevPorts } from "./port-selector.mjs";
+} from "./terminal-status.js";
+import { resolveDevPorts } from "./port-selector.js";
+import { getDinouConfig } from "../core/load-dinou-config.js";
+import { resolveSetupFiles } from "../core/resolve-setup-files.js";
+import { generateRouteModulesCode, generateRouteTypes } from "../core/route-generator.js";
+import parseExports from "../core/parse-exports.js";
+import { useClientRegex, useServerRegex } from "../constants.js";
+import { nodeToWebRequest, sendWebResponseToNode } from "../core/http-adapter.js";
+import { setStorageAdapter, FileSystemStorage, MemoryStorage } from "../core/storage-adapter.js";
+import createScopedName from "../core/createScopedName.js";
+import { regex as assetRegex } from "../core/asset-extensions.js";
+import {
+  isSupportedClientModule,
+  scanProjectDependenciesForClientComponents,
+  scanProjectDependenciesForClientComponentsAsync,
+} from "../core/scan-dependency-components.js";
 
 // Resolve dev HTTP and HMR ports before initiating background compilation
 const { port: PORT, hmrPort: HMR_PORT } = await resolveDevPorts();
@@ -77,8 +91,6 @@ const dinouDir = fs.existsSync(path.resolve(projectRoot, "dinou"))
 const dinouDirSlash = dinouDir.replace(/\\/g, "/");
 
 // Resolve and execute setupFiles immediately before any compilation
-const { getDinouConfig } = require(path.join(dinouDir, "core/load-dinou-config.js"));
-const { resolveSetupFiles } = require(path.join(dinouDir, "core/resolve-setup-files.js"));
 const dinouConfig = await getDinouConfig();
 const setupFiles = resolveSetupFiles(projectRoot, dinouConfig);
 if (setupFiles.length > 0) {
@@ -106,21 +118,9 @@ function getFallbackChunkId(absPath) {
   return `/${name}-${hash}.js`;
 }
 
-const { generateRouteModulesCode, generateRouteTypes } = require(path.join(dinouDir, "core/route-generator.js"));
 try {
   generateRouteTypes(projectRoot);
 } catch (e) {}
-const parseExports = require(path.join(dinouDir, "core/parse-exports.js"));
-const { useClientRegex, useServerRegex } = require(path.join(dinouDir, "constants.js"));
-const { nodeToWebRequest, sendWebResponseToNode } = require(path.join(dinouDir, "core/http-adapter.js"));
-const { setStorageAdapter, FileSystemStorage, MemoryStorage } = require(path.join(dinouDir, "core/storage-adapter.js"));
-const createScopedName = require(path.join(dinouDir, "core/createScopedName.js"));
-const { regex: assetRegex } = require(path.join(dinouDir, "core/asset-extensions.js"));
-const {
-  isSupportedClientModule,
-  scanProjectDependenciesForClientComponents,
-  scanProjectDependenciesForClientComponentsAsync,
-} = require(path.join(dinouDir, "core/scan-dependency-components.js"));
 
 const yieldToEventLoop = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -976,6 +976,8 @@ globalThis.__DINOU_LAYOUTS__ = ${JSON.stringify(discoveredLayouts)};
   const rscEntryContent = `// Auto-generated RSC Engine entry for Dev (Dual-Bundle)
 import "./env-setup.mjs";
 import "./route-modules.mjs";
+import * as edgeRenderer from "react-server-dom-webpack/server.edge";
+globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
 export { handleRequest } from "${dinouDirSlash}/core/handler.js";
 `;
   fs.writeFileSync(path.join(devDir, "rsc-entry.mjs"), rscEntryContent, "utf8");
@@ -2071,7 +2073,7 @@ async function startClientBundler(tool) {
 
   if (normTool === "esbuild") {
     const { startEsbuildDev } = await import(
-      pathToFileURL(path.resolve(dinouDir, "esbuild/dev.mjs")).href
+      pathToFileURL(path.resolve(dinouDir, "esbuild/dev.js")).href
     );
     return await startEsbuildDev({
       onRebuilt: () => onManifestUpdated(),
@@ -2082,9 +2084,12 @@ async function startClientBundler(tool) {
 
   if (normTool === "rollup") {
     const { watch } = require("rollup");
-    const getRollupConfig = require(path.resolve(dinouDir, "rollup/rollup.config.js"));
-    const { getHmrEngine, closeHmrServer, notifyFileChanged } = require(path.resolve(dinouDir, "rollup/react-refresh/rollup-plugin-esm-hmr.js"));
-    const reactClientManifestPlugin = require(path.resolve(dinouDir, "rollup/rollup-plugins/rollup-plugin-react-client-manifest.js"));
+    const rollupConfigMod = await import(pathToFileURL(path.resolve(dinouDir, "rollup/rollup.config.js")).href);
+    const getRollupConfig = rollupConfigMod.default || rollupConfigMod;
+    const hmrMod = await import(pathToFileURL(path.resolve(dinouDir, "rollup/react-refresh/rollup-plugin-esm-hmr.js")).href);
+    const { getHmrEngine, closeHmrServer, notifyFileChanged } = hmrMod;
+    const rcmpMod = await import(pathToFileURL(path.resolve(dinouDir, "rollup/rollup-plugins/rollup-plugin-react-client-manifest.js")).href);
+    const reactClientManifestPlugin = rcmpMod.default || rcmpMod;
     reactClientManifestPlugin.setOnManifestUpdated?.(() => onManifestUpdated());
 
     let currentWatcher = null;
@@ -2231,7 +2236,8 @@ async function startClientBundler(tool) {
     }
     const webpack = require("webpack");
     const WebpackDevServer = require("webpack-dev-server");
-    const getWebpackConfig = require(path.resolve(dinouDir, "webpack/webpack.config.js"));
+    const webpackConfigMod = await import(pathToFileURL(path.resolve(dinouDir, "webpack/webpack.config.js")).href);
+    const getWebpackConfig = webpackConfigMod.default || webpackConfigMod;
     const webpackConfig = await getWebpackConfig();
     const compiler = webpack(webpackConfig);
 
@@ -2325,7 +2331,6 @@ const nodeMiddlewares = [];
 
 async function applyServerPlugins(serverInstance) {
   try {
-    const { getDinouConfig } = require(path.join(dinouDir, "core/load-dinou-config.js"));
     const config = await getDinouConfig();
     if (config.plugins && Array.isArray(config.plugins)) {
       const serverContext = {

@@ -1,23 +1,29 @@
-const path = require("path");
-const fs = require("fs");
-const postcss = require("rollup-plugin-postcss");
-const babel = require("@rollup/plugin-babel").default;
-const resolve = require("@rollup/plugin-node-resolve").default;
-const commonjs = require("@rollup/plugin-commonjs");
-const copy = require("rollup-plugin-copy");
-const reactClientManifest = require("./rollup-plugins/rollup-plugin-react-client-manifest.js");
-const createScopedName = require("../core/createScopedName.js");
-const replace = require("@rollup/plugin-replace");
-const json = require("@rollup/plugin-json");
-const reactRefreshWrapModules = require("./react-refresh/react-refresh-wrap-modules.js");
-const { esmHmrPlugin } = require("./react-refresh/rollup-plugin-esm-hmr.js");
-const dinouAssetPlugin = require("./rollup-plugins/dinou-asset-plugin.js");
-const tsconfigPaths = require("rollup-plugin-tsconfig-paths");
-const serverFunctionsPlugin = require("./rollup-plugins/rollup-plugin-server-functions");
-const { regex } = require("../core/asset-extensions.js");
-const manifestGeneratorPlugin = require("./rollup-plugins/manifest-generator-plugin.js");
-const rollupMemoryPlugin = require("./rollup-plugins/rollup-plugin-memory.js");
-const rollupSwcPlugin = require("./rollup-plugins/rollup-plugin-swc.js");
+import path from "node:path";
+import fs from "node:fs";
+import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import postcss from "rollup-plugin-postcss";
+import babelModule from "@rollup/plugin-babel";
+import resolveModule from "@rollup/plugin-node-resolve";
+import commonjs from "@rollup/plugin-commonjs";
+import copy from "rollup-plugin-copy";
+import reactClientManifest from "./rollup-plugins/rollup-plugin-react-client-manifest.js";
+import createScopedName from "../core/createScopedName.js";
+import replace from "@rollup/plugin-replace";
+import json from "@rollup/plugin-json";
+import reactRefreshWrapModules from "./react-refresh/react-refresh-wrap-modules.js";
+import { esmHmrPlugin } from "./react-refresh/rollup-plugin-esm-hmr.js";
+import dinouAssetPlugin from "./rollup-plugins/dinou-asset-plugin.js";
+import tsconfigPaths from "rollup-plugin-tsconfig-paths";
+import serverFunctionsPlugin from "./rollup-plugins/rollup-plugin-server-functions.js";
+import { regex } from "../core/asset-extensions.js";
+import manifestGeneratorPlugin from "./rollup-plugins/manifest-generator-plugin.js";
+import rollupMemoryPlugin from "./rollup-plugins/rollup-plugin-memory.js";
+import rollupSwcPlugin from "./rollup-plugins/rollup-plugin-swc.js";
+
+const babel = babelModule?.default || babelModule;
+const resolve = resolveModule?.default || resolveModule;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const localDinouPath = path.resolve(process.cwd(), "dinou");
 const isEjected = fs.existsSync(localDinouPath);
@@ -28,7 +34,7 @@ console.log(
     : "📦 [Dinou] Library Mode detected (Using node_modules)",
 );
 
-module.exports = async function () {
+export default async function () {
   const isDevelopment = process.env.NODE_ENV !== "production";
   const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
   const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDevelopment;
@@ -284,12 +290,10 @@ module.exports = async function () {
       {
         name: "post-build-server",
         closeBundle() {
-          const fs = require("fs");
           fs.writeFileSync(
             path.resolve(process.cwd(), ".dinou/dist3/server/package.json"),
             JSON.stringify({ type: "module" }, null, 2)
           );
-          const { execSync } = require("child_process");
           execSync(`"${process.execPath}" --conditions=react-server "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
             stdio: "inherit",
             env: { ...process.env, NODE_ENV: "production" },

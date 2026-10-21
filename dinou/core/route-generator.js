@@ -1,6 +1,7 @@
-const fs = require("fs");
-const path = require("path");
-const parseExports = require("./parse-exports.js");
+import fs from "node:fs";
+import path from "node:path";
+import parseExports from "./parse-exports.js";
+import { generateRouteTypes } from "./generate-route-types.js";
 
 function collectSourceFiles(dir, baseDir = dir) {
   if (!fs.existsSync(dir)) return [];
@@ -11,7 +12,7 @@ function collectSourceFiles(dir, baseDir = dir) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       files = files.concat(collectSourceFiles(fullPath, baseDir));
-    } else if (/\.[jt]sx?$/.test(entry.name) && !entry.name.endsWith(".d.ts")) {
+    } else if (/\.(?:[jt]sx?|mjs)$/.test(entry.name) && !entry.name.endsWith(".d.ts")) {
       const relPath = path.relative(baseDir, fullPath).replace(/\\/g, "/");
       files.push({
         relPath: "src/" + relPath,
@@ -60,7 +61,7 @@ function generateRouteModulesCode(projectRoot = process.cwd(), relativeImportBas
     lines.push(`  ${JSON.stringify(file.relPath)}: () => import(${JSON.stringify(importPath)}),`);
 
     // Detect PPR from page_functions or layout_functions ONLY
-    if (/(?:^|\/)(?:page_functions|layout_functions|page\.functions|layout\.functions)\.[jt]sx?$/.test(file.relPath)) {
+    if (/(?:^|\/)(?:page_functions|layout_functions|page\.functions|layout\.functions)\.(?:[jt]sx?|mjs)$/.test(file.relPath)) {
       try {
         const content = fs.readFileSync(file.fullPath, "utf8");
         const isPpr = parseExports.parsePprConfig ? parseExports.parsePprConfig(content) : null;
@@ -98,9 +99,12 @@ function generateRouteModulesCode(projectRoot = process.cwd(), relativeImportBas
   return lines.join("\n");
 }
 
-const { generateRouteTypes } = require("./generate-route-types.js");
-
-module.exports = {
+export {
+  collectSourceFiles,
+  generateRouteModulesCode,
+  generateRouteTypes,
+};
+export default {
   collectSourceFiles,
   generateRouteModulesCode,
   generateRouteTypes,

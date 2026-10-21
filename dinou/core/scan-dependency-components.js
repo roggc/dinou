@@ -1,8 +1,8 @@
 // dinou/core/scan-dependency-components.js
 // Scans dependencies for React "use client" directives without recursively walking massive trees.
 
-const fs = require("fs");
-const path = require("path");
+import fs from "node:fs";
+import path from "node:path";
 
 function isSupportedClientModule(filePath, content) {
   const norm = filePath.replace(/\\/g, "/");
@@ -210,7 +210,13 @@ async function scanProjectDependenciesForClientComponentsAsync(projectRoot, clie
   } catch (e) {}
 }
 
-module.exports = {
+export {
+  isSupportedClientModule,
+  scanDependencyForClientComponents,
+  scanProjectDependenciesForClientComponents,
+  scanProjectDependenciesForClientComponentsAsync,
+};
+export default {
   isSupportedClientModule,
   scanDependencyForClientComponents,
   scanProjectDependenciesForClientComponents,

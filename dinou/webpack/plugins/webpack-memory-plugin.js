@@ -2,7 +2,7 @@
 // Captures Webpack client assets, chunks, manifests, and sourcemaps in memory (globalThis.__DINOU_MEM_FILES__)
 // and sets global raw manifests in dev mode to prevent massive disk writes.
 
-const path = require("path");
+import path from "node:path";
 
 class WebpackMemoryPlugin {
   constructor(options = {}) {
@@ -63,4 +63,5 @@ class WebpackMemoryPlugin {
   }
 }
 
-module.exports = WebpackMemoryPlugin;
+export { WebpackMemoryPlugin };
+export default WebpackMemoryPlugin;

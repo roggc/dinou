@@ -1,10 +1,10 @@
 import esbuild from "esbuild";
 import fs from "node:fs/promises";
-import getConfigEsbuildProd from "./helpers-esbuild/get-config-esbuild-prod.mjs";
-import getEsbuildEntries from "./helpers-esbuild/get-esbuild-entries.mjs";
+import getConfigEsbuildProd from "./helpers-esbuild/get-config-esbuild-prod.js";
+import getEsbuildEntries from "./helpers-esbuild/get-esbuild-entries.js";
 import { fileURLToPath } from "url";
 import path from "node:path";
-import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-module.mjs";
+import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-module.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,7 +33,7 @@ const frameworkEntryPoints = {
     __dirname,
     "../core/server-function-proxy.js"
   ),
-  runtime: path.resolve(__dirname, "react-refresh/react-refresh-runtime.mjs"),
+  runtime: path.resolve(__dirname, "react-refresh/react-refresh-runtime.js"),
   "react-refresh-entry": path.resolve(
     __dirname,
     "react-refresh/react-refresh-entry.js"

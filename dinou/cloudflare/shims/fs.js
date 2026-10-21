@@ -77,6 +77,7 @@ export const statSync = (p) => {
 export const mkdirSync = () => {};
 export const writeFileSync = () => {};
 export const rmSync = () => {};
+export const copyFileSync = () => {};
 
 export const promises = {
   readFile: async (p) => readFileSync(p),
@@ -85,6 +86,7 @@ export const promises = {
   stat: async (p) => statSync(p),
   mkdir: async () => {},
   rm: async () => {},
+  copyFile: async () => {},
 };
 
 export default {
@@ -95,5 +97,6 @@ export default {
   mkdirSync,
   writeFileSync,
   rmSync,
+  copyFileSync,
   promises,
 };
