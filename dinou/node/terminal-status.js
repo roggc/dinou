@@ -279,7 +279,7 @@ export function printReadyBanner({ port, tool, durationMs, timings }) {
   const timeBadge = durationStr ? ` ${C_DIM}in ${C_BOLD}${durationStr}${C_RESET}` : "";
 
   console.log("");
-  console.log(`  ${C_CYAN}${C_BOLD}🦖 Dinou v7${C_RESET} ${C_GREEN}(Dual-Bundle, 0-fork)${C_RESET}${timeBadge}`);
+  console.log(`  ${C_CYAN}${C_BOLD}🦖 Dinou${C_RESET} ${C_GREEN}(Dual-Bundle, 0-fork)${C_RESET}${timeBadge}`);
   console.log("");
   console.log(`  ${C_GREEN}➜${C_RESET}  ${C_BOLD}Local:${C_RESET}   ${C_CYAN}http://localhost:${port}/${C_RESET}`);
   console.log(`  ${C_GREEN}➜${C_RESET}  ${C_BOLD}Bundler:${C_RESET} ${tool}`);

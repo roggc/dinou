@@ -1,5 +1,5 @@
-// dinou/node/build.mjs
-// Dual-Bundle Build script for packaging Dinou v7 for Node.js (Pre-bundled AOT Standalone).
+// dinou/node/build.js
+// Dual-Bundle Build script for packaging Dinou for Node.js (Pre-bundled AOT Standalone).
 // Pass A & Pass B: Handled via bundleDualEngine
 // Pass C: Main Node Orchestrator (.dinou/node/server.js)
 
@@ -15,7 +15,7 @@ fs.mkdirSync(nodeDir, { recursive: true });
 
 try {
   const bundlerName = process.env.DINOU_BUILD_TOOL || "esbuild";
-  console.log(`\n🦖 Dinou v7 (Node.js • ${bundlerName})`);
+  console.log(`\n🦖 Dinou (Node.js • ${bundlerName})`);
   console.log(`  ⚡ Compiling Pass A (RSC) and Pass B (SSR) via Dual-Engine...`);
   const engineResult = await bundleDualEngine({
     isDev: false,

@@ -11,7 +11,7 @@ const dist3Dir = path.resolve(projectRoot, ".dinou/dist3");
 const dist2Dir = path.resolve(projectRoot, ".dinou/dist2");
 
 const bundlerName = process.env.DINOU_BUILD_TOOL || "esbuild";
-console.log(`\n🦖 Dinou v7 (Static Export • ${bundlerName})`);
+console.log(`\n🦖 Dinou (Static Export • ${bundlerName})`);
 
 // 1. Clean output directory
 if (fs.existsSync(outDir)) {
