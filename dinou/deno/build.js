@@ -83,7 +83,7 @@ const bundlerName = isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL |
 
 const dist2Dir = path.resolve(projectRoot, ".dinou/dist2");
 const dist3Dir = path.resolve(projectRoot, ".dinou/dist3");
-console.log(`\n🦖 Dinou v7 (Deno • ${bundlerName})`);
+console.log(`\n🦖 Dinou (Deno • ${bundlerName})`);
 if (fs.existsSync(dist2Dir)) {
   const copiedCount = copyRecursive(dist2Dir, dist3Dir);
   console.log(`  📄 Synchronized ${copiedCount} pre-rendered static route(s) to .dinou/dist3`);

@@ -62,7 +62,7 @@ for (const r of candidateDinouRoots) {
 const isWebpackBuild = process.env.DINOU_BUILD_TOOL === "webpack";
 const bundlerName = isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild");
 
-console.log(`\n🦖 Dinou v7 (Bun • ${bundlerName})`);
+console.log(`\n🦖 Dinou (Bun • ${bundlerName})`);
 console.log("  ⚡ Generating route modules & manifests...");
 const routeModulesCode = generateRouteModulesCode(projectRoot, "../..");
 const routeModulesPath = path.join(bunDir, "route-modules.js");
