@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [8.0.0] - 2026-10-20
 
 ### ⚠️ Breaking Changes
+> **Note**: For standard Dinou applications using `import` and the Dinou CLI, upgrading from v7 to v8 is completely seamless and requires zero code changes.
+
 - **Native ESM Framework (`"type": "module"`)**: Dinou is now distributed and executed strictly as native ECMAScript Modules (ESM). `package.json` includes `"type": "module"`, allowing all framework and consumer code to run with modern ESM semantics.
 - **Source & Extension Unification (`.mjs` -> `.js`)**: Eliminated the hybrid extension fragmentation (`.mjs` vs `.js`). All framework build scripts, CLI commands, adapters, and entrypoints now use standard `.js` extension across the codebase.
 - **Package Exports Modernization**: Dropped legacy CommonJS conditional exports (`"require"`) and `.mjs` targets in `package.json`. All public subpaths (`dinou`, `dinou/server`, `dinou/config`, `dinou/adapters/*`) resolve directly to standard ESM `.js` targets.
