@@ -1,6 +1,6 @@
 {
   "name": "dinou",
-  "version": "8.0.0",
+  "version": "8.0.1",
   "description": "Full-stack React 19 framework with native RSC, Server Functions, progressive streaming, and zero vendor lock-in.",
   "type": "module",
   "main": "./dinou/index.js",
