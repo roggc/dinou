@@ -288,7 +288,10 @@ export interface RouteSegmentConfig<TParams = any, TProps = any> {
  * Type-safe interface representing the available exports in `page_functions.ts`.
  * Accepts either a route pattern string (e.g. `"/products/[id]"`) or a direct parameters dictionary.
  */
-export type PageFunctions<TRouteOrParams = any, TProps = any> = RouteSegmentConfig<
+export type PageFunctions<
+  TRouteOrParams extends DinouRoutePattern | object = any,
+  TProps = any
+> = RouteSegmentConfig<
   [TRouteOrParams] extends [string] ? RouteParams<TRouteOrParams> : TRouteOrParams,
   TProps
 >;
@@ -297,7 +300,10 @@ export type PageFunctions<TRouteOrParams = any, TProps = any> = RouteSegmentConf
  * Type-safe interface representing the available exports in `layout_functions.ts`.
  * Accepts either a route pattern string (e.g. `"/[organization]"`) or a direct parameters dictionary.
  */
-export type LayoutFunctions<TRouteOrParams = any, TProps = any> = RouteSegmentConfig<
+export type LayoutFunctions<
+  TRouteOrParams extends DinouRoutePattern | object = any,
+  TProps = any
+> = RouteSegmentConfig<
   [TRouteOrParams] extends [string] ? RouteParams<TRouteOrParams> : TRouteOrParams,
   TProps
 >;
@@ -479,7 +485,7 @@ export type CleanRoutePath<T extends string> = T extends `/${string}` ? T : `/${
  * Prioritizes the generated route parameters map from .dinou/types/routes.d.ts,
  * and falls back to template literal extraction.
  */
-export type RouteParams<T extends string = string> =
+export type RouteParams<T extends DinouRoutePattern = DinouRoutePattern> =
   DinouRouter.Register extends { params: infer P }
     ? (CleanRoutePath<T> extends keyof P
         ? P[CleanRoutePath<T>]

@@ -2222,12 +2222,24 @@ export interface RouteSegmentConfig<TParams = any, TProps = any> {
 /**
  * Concrete semantic alias to import and use in 'page_functions.ts'
  */
-export type PageFunctions<TParams = any, TProps = any> = RouteSegmentConfig<TParams, TProps>;
+export type PageFunctions<
+  TRouteOrParams extends DinouRoutePattern | object = any,
+  TProps = any
+> = RouteSegmentConfig<
+  [TRouteOrParams] extends [string] ? RouteParams<TRouteOrParams> : TRouteOrParams,
+  TProps
+>;
 
 /**
  * Concrete semantic alias to import and use in 'layout_functions.ts'
  */
-export type LayoutFunctions<TParams = any, TProps = any> = RouteSegmentConfig<TParams, TProps>;
+export type LayoutFunctions<
+  TRouteOrParams extends DinouRoutePattern | object = any,
+  TProps = any
+> = RouteSegmentConfig<
+  [TRouteOrParams] extends [string] ? RouteParams<TRouteOrParams> : TRouteOrParams,
+  TProps
+>;
 ```
 
 | Where to use | Type to import | Purpose |
