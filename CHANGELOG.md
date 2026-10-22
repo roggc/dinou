@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [8.0.3] - 2026-10-22
+
+### Fixed
+- **Type-Safe Route Pattern Autocompletion in Segment Configs**: Added generic constraints (`TRouteOrParams extends DinouRoutePattern | object = any`) to `PageFunctions` and `LayoutFunctions`, as well as `RouteParams<T extends DinouRoutePattern = DinouRoutePattern>`. This enables immediate IDE / TypeScript autocompletion for known project routes when typing string literals (`PageFunctions<"..."`) and strict compile-time validation against typos in route strings, while preserving full backward compatibility for parameter dictionaries and custom interfaces (`PageFunctions<CustomParams>`).
+- **Direct `defineConfig` Import from `"dinou"`**: Added an esbuild resolution plugin (`dinou-config-alias`) in `load-dinou-config.js` to alias exact `"dinou"` specifier imports to `"dinou/config"` when bundling configuration files (`dinou.config.ts`, `dinou.config.mjs`, etc.). This allows importing `defineConfig` directly from `"dinou"` (`import { defineConfig } from "dinou"`) without triggering Node.js native ESM `ERR_UNKNOWN_FILE_EXTENSION` errors from unbundled React JSX components (`redirect.jsx`, `link.jsx`) in `dinou/index.js`, while keeping all other subpath imports (`dinou/adapters/*`, `dinou/config`) intact.
+
 ## [8.0.2] - 2026-10-22
 
 ### Fixed
