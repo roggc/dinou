@@ -539,7 +539,8 @@ Dinou does not force you to use TypeScript—you are completely free to write yo
   },
   "include": [
     "src",
-    "dinou-env.d.ts"
+    "dinou-env.d.ts",
+    ".dinou/types/**/*.d.ts"
   ]
 }
 ```
@@ -6148,7 +6149,8 @@ Ensure your `tsconfig.json` includes the declaration file and specifies `"module
   },
   "include": [
     "src",
-    "dinou-env.d.ts"
+    "dinou-env.d.ts",
+    ".dinou/types/**/*.d.ts"
   ]
 }
 ```
@@ -6426,7 +6428,8 @@ And confirm your `tsconfig.json` includes the reference:
   },
   "include": [
     "src",
-    "dinou-env.d.ts"
+    "dinou-env.d.ts",
+    ".dinou/types/**/*.d.ts"
   ]
 }
 ```
@@ -6698,7 +6701,8 @@ To enable the standard `@/*` alias pointing to your `src/` directory, configure 
   },
   "include": [
     "src",
-    "dinou-env.d.ts"
+    "dinou-env.d.ts",
+    ".dinou/types/**/*.d.ts"
   ]
 }
 ```

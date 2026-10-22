@@ -134,7 +134,7 @@ function generateRouteDefinitions(routes) {
 }
 
 /**
- * Generates the .dinou/types/routes.d.ts file and ensures dinou-env.d.ts references it.
+ * Generates the .dinou/types/routes.d.ts ambient definitions file.
  * @param {string} projectRoot Root directory of the project (default process.cwd())
  */
 function generateRouteTypes(projectRoot = process.cwd()) {
@@ -224,19 +224,6 @@ ${paramsEntries}
       console.warn("[Dinou] Could not write .dinou/types/routes.d.ts:", e.message);
     }
   }
-
-  // Ensure dinou-env.d.ts references .dinou/types/routes.d.ts
-  const envFile = path.resolve(projectRoot, "dinou-env.d.ts");
-  try {
-    if (fs.existsSync(envFile)) {
-      let envContent = fs.readFileSync(envFile, "utf8");
-      const refLine = '/// <reference path="./.dinou/types/routes.d.ts" />';
-      if (!envContent.includes(refLine)) {
-        envContent = envContent.trimEnd() + "\n" + refLine + "\n";
-        fs.writeFileSync(envFile, envContent, "utf8");
-      }
-    }
-  } catch (e) {}
 
   return {
     staticCount: staticRoutes.length,
