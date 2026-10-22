@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [8.0.2] - 2026-10-22
+
+### Fixed
+- **Type-Safe Routing Ambient Inclusions**: Dinou no longer modifies `dinou-env.d.ts` at runtime. Ambient route declarations (`.dinou/types/routes.d.ts`) are now consumed directly via `tsconfig.json` (`".dinou/types/**/*.d.ts"`), preventing `TS6053` errors on fresh clones and keeping Git working trees clean.
+
 ## [8.0.1] - 2026-10-21
 
 ### Fixed
