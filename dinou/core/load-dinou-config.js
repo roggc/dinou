@@ -51,6 +51,16 @@ async function getDinouConfig() {
               platform: "node",
               packages: "external",
               sourcemap: "inline",
+              plugins: [
+                {
+                  name: "dinou-config-alias",
+                  setup(build) {
+                    build.onResolve({ filter: /^dinou$/ }, () => {
+                      return { path: "dinou/config", external: true };
+                    });
+                  },
+                },
+              ],
             });
             loaded = await import(pathToFileURL(bundledPath).href + (isDev ? `?t=${Date.now()}` : ""));
           } else if (p.endsWith(".mjs")) {
