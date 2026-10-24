@@ -12,6 +12,7 @@ import {
 import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
 import normalizePath from "./normalize-path.js";
 import { useClientRegex, useServerRegex } from "../../constants.js";
+import { hasServerFunctions } from "../../core/transform-server-functions.js";
 import { updateManifestForModule } from "./update-manifest-for-module.js";
 
 function hashFilePath(absPath) {
@@ -95,6 +96,8 @@ export default async function getEsbuildEntries({
         if (isImportedFileServer) {
           serverFunctions.add(normalizePath(absImportPathWithExt));
           continue;
+        } else if (hasServerFunctions(importedCode)) {
+          serverFunctions.add(normalizePath(absImportPathWithExt));
         }
       } else {
         const isImportedFileServer = useServerRegex.test(importedCode.trim());
@@ -102,6 +105,8 @@ export default async function getEsbuildEntries({
         if (isImportedFileServer) {
           serverFunctions.add(normalizePath(absImportPathWithExt));
           continue;
+        } else if (hasServerFunctions(importedCode)) {
+          serverFunctions.add(normalizePath(absImportPathWithExt));
         }
       }
 
@@ -156,7 +161,12 @@ export default async function getEsbuildEntries({
 
   function isPageOrLayout(absPath) {
     const fileName = path.basename(absPath);
-    return fileName.startsWith("page.") || fileName.startsWith("layout.");
+    return (
+      fileName.startsWith("page.") ||
+      fileName.startsWith("layout.") ||
+      fileName.startsWith("page_functions.") ||
+      fileName.startsWith("layout_functions.")
+    );
   }
 
 
@@ -173,12 +183,7 @@ export default async function getEsbuildEntries({
     }
     const code = readFileSync(absPath, "utf8");
     const isClientModule = useClientRegex.test(code.trim());
-    const isServerFunction = useServerRegex.test(code.trim());
     const normalizedPath = normalizePath(absPath);
-
-    if (isServerFunction) {
-      serverFunctions.add(normalizedPath);
-    }
 
     if (isClientModule) {
       const name = path.basename(absPath, path.extname(absPath));
@@ -188,8 +193,14 @@ export default async function getEsbuildEntries({
         absPath: normalizedPath,
         name,
       });
+      try {
+        await getImportsAndAssetsAndCsss(code, absPath, new Set(), true);
+      } catch (err) {}
     } else if (isPageOrLayout(absPath)) {
       serverModules.add(normalizedPath);
+      if (hasServerFunctions(code)) {
+        serverFunctions.add(normalizedPath);
+      }
       try {
         const { imports, assets, csss } = await getImportsAndAssetsAndCsss(
           code,

@@ -1,3 +1,4 @@
+import { defineConfig } from "./core/config.js";
 import { getContext } from "./core/request-context.js";
 import {
   usePathname,
@@ -9,10 +10,6 @@ import {
 import { redirect } from "./core/redirect.jsx";
 import { ClientRedirect } from "./core/client-redirect.jsx";
 import { Link } from "./core/link.jsx";
-
-function defineConfig(config) {
-  return config;
-}
 
 const dinou = {
   defineConfig,

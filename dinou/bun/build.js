@@ -12,6 +12,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { generateRouteModulesCode, generateRouteTypes } from "../core/route-generator.js";
 import parseExports from "../core/parse-exports.js";
 import { useClientRegex, useServerRegex } from "../constants.js";
+import { transformServerFunctions, hasServerFunctions } from "../core/transform-server-functions.js";
 import {
   isSupportedClientModule,
   scanProjectDependenciesForClientComponents,
@@ -931,14 +932,18 @@ const serverReferencesPlugin = {
         return null;
       }
 
-      if (!useServerRegex.test(code.trim())) return null;
+      if (!hasServerFunctions(code)) return null;
 
-      const exports = parseExports(code);
+      const sfResult = transformServerFunctions(code, args.path);
+      if (!sfResult.actions || sfResult.actions.length === 0) return null;
+
+      const transformedCode = sfResult.code;
+      const exports = sfResult.actions;
       const absPath = path.resolve(args.path);
       const relPath = path.relative(projectRoot, absPath).replace(/\\/g, "/");
       const relativeFileUrl = "file:///" + relPath;
 
-      let transformed = code + "\n\n";
+      let transformed = transformedCode + "\n\n";
       transformed += `import { registerServerReference } from "react-server-dom-webpack/server.edge";\n`;
 
       for (const name of exports) {
@@ -972,14 +977,18 @@ const serverReferencesPluginSsr = {
         return null;
       }
 
-      if (!useServerRegex.test(code.trim())) return null;
+      if (!hasServerFunctions(code)) return null;
 
-      const exports = parseExports(code);
+      const sfResult = transformServerFunctions(code, args.path);
+      if (!sfResult.actions || sfResult.actions.length === 0) return null;
+
+      const transformedCode = sfResult.code;
+      const exports = sfResult.actions;
       const absPath = path.resolve(args.path);
       const relPath = path.relative(projectRoot, absPath).replace(/\\/g, "/");
       const relativeFileUrl = "file:///" + relPath;
 
-      let transformed = code + "\n\n";
+      let transformed = transformedCode + "\n\n";
       transformed += `import { registerServerReference } from "react-server-dom-webpack/client.edge";\n`;
 
       for (const name of exports) {

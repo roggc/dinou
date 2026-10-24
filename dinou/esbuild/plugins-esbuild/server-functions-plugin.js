@@ -2,15 +2,12 @@ import path from "path";
 import fs from "node:fs/promises";
 import parseExports from "../../core/parse-exports.js";
 import { useServerRegex } from "../../constants.js";
+import { extractServerFunctions, hasServerFunctions } from "../../core/transform-server-functions.js";
 
-export default function serverFunctionsPlugin(manifestData = {}, options = {}) {
-  const opts =
-    typeof manifestData === "object" && manifestData !== null && ("onManifestUpdated" in manifestData || "serverFiles" in manifestData)
-      ? manifestData
-      : options;
-  const manifestMap = opts.manifestData || (manifestData.onManifestUpdated ? {} : manifestData) || {};
-  const onManifestUpdated = opts.onManifestUpdated;
-  const serverFiles = opts.serverFiles || manifestData.serverFiles || options.serverFiles || null;
+export default function serverFunctionsPlugin({
+  manifestData = {},
+  serverFiles = null,
+} = {}) {
   const normalizeNormPath = (p) => {
     let s = path.resolve(p).replace(/\\/g, "/");
     if (process.platform === "win32") {
@@ -135,15 +132,42 @@ export default function serverFunctionsPlugin(manifestData = {}, options = {}) {
       build.onEnd(async (result) => {
         const tEnd0 = Date.now();
         try {
+          if (serverFilesSet && serverFilesSet.size > 0) {
+            for (const filePath of serverFilesSet) {
+              const rel = path.relative(root, filePath).replace(/\\/g, "/");
+              if (!serverFunctions.has(rel)) {
+                try {
+                  const code = await fs.readFile(filePath, "utf8");
+                  if (useServerRegex.test(code.trim())) {
+                    const exports = parseExports(code);
+                    if (exports && exports.length > 0) {
+                      serverFunctions.set(rel, new Set(exports));
+                    }
+                  } else if (hasServerFunctions(code)) {
+                    const actions = extractServerFunctions(code, filePath);
+                    if (actions && actions.length > 0) {
+                      serverFunctions.set(rel, new Set(actions));
+                    }
+                  }
+                } catch (e) {}
+              }
+            }
+          }
+
           if (serverFunctions.size === 0) {
             if (typeof globalThis !== "undefined") {
               globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__ = {};
             }
             return;
           }
-          const hashedProxy =
-          "/" +
-          (manifestMap["serverFunctionProxy.js"] || "serverFunctionProxy.js");
+          const isProd = process.env.NODE_ENV === "production";
+          const proxyName = manifestData["serverFunctionProxy.js"];
+          if (isProd && !proxyName) {
+            throw new Error(
+              "[Dinou] serverFunctionsPlugin: could not find hashed 'serverFunctionProxy.js' in manifestData during production build."
+            );
+          }
+          const hashedProxy = "/" + (proxyName || "serverFunctionProxy.js");
 
           const serverFnNormalized = new Set();
           for (const relPath of serverFunctions.keys()) {
@@ -151,32 +175,22 @@ export default function serverFunctionsPlugin(manifestData = {}, options = {}) {
           }
 
           let targetOutputFiles = Object.values(result.outputFiles || {});
-          if (result.metafile && result.metafile.outputs) {
-            const allowedOutputs = new Set();
-            for (const [outPath, outMeta] of Object.entries(result.metafile.outputs)) {
-              const hasSf = Object.keys(outMeta.inputs || {}).some((inPath) => {
-                const norm = path.resolve(root, inPath).replace(/\\/g, "/").toLowerCase();
-                return serverFnNormalized.has(norm);
-              });
-              if (hasSf) {
-                allowedOutputs.add(path.resolve(root, outPath).replace(/\\/g, "/").toLowerCase());
-              }
-            }
-            targetOutputFiles = targetOutputFiles.filter((outputFile) => {
-              const norm = path.resolve(outputFile.path).replace(/\\/g, "/").toLowerCase();
-              return allowedOutputs.has(norm);
-            });
-          }
 
           for (const outputFile of targetOutputFiles) {
             const fileCode = new TextDecoder().decode(outputFile.contents);
 
             if (!fileCode) continue;
-            if (fileCode.includes("/__SERVER_FUNCTION_PROXY__")) {
-              const newCode = fileCode.replace(
+            if (fileCode.includes("/__SERVER_FUNCTION_PROXY__") || (proxyName && fileCode.includes("/serverFunctionProxy.js"))) {
+              let newCode = fileCode.replace(
                 /\/__SERVER_FUNCTION_PROXY__/g,
                 hashedProxy
               );
+              if (proxyName && proxyName !== "serverFunctionProxy.js") {
+                newCode = newCode.replace(
+                  /\/serverFunctionProxy\.js/g,
+                  hashedProxy
+                );
+              }
               outputFile.contents = new TextEncoder().encode(newCode);
             }
           }

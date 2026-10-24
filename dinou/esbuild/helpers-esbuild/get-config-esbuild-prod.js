@@ -9,13 +9,13 @@ import writePlugin from "../plugins-esbuild/write-plugin.js";
 import babelReactCompilerPlugin from "../plugins-esbuild/babel-react-compiler-plugin.js";
 import { existsSync } from "node:fs";
 
-const manifestData = {};
-
 export default function getConfigEsbuildProd({
   entryPoints,
   outdir = ".dinou/dist3",
   manifest = {},
+  serverFiles,
 }) {
+  const manifestData = {};
   let plugins = [
     babelReactCompilerPlugin(),
     TsconfigPathsPlugin({}),
@@ -26,7 +26,7 @@ export default function getConfigEsbuildProd({
     }),
     assetsPlugin(),
     manifestGeneratorPlugin(manifestData),
-    serverFunctionsPlugin(manifestData),
+    serverFunctionsPlugin({ manifestData, serverFiles }),
     writePlugin(),
   ];
 

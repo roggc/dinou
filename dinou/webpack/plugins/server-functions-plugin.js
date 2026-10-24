@@ -1,9 +1,14 @@
 import path from "node:path";
+import fs from "node:fs";
 import manifestGeneratorPlugin from "./manifest-generator-plugin.js";
+import parseExports from "../../core/parse-exports.js";
+import { useServerRegex } from "../../constants.js";
+import { extractServerFunctions, hasServerFunctions } from "../../core/transform-server-functions.js";
 
 class WebpackServerFunctionsPluginSimple {
-  constructor() {
+  constructor(options = {}) {
     this.serverFunctions = new Map();
+    this.serverFiles = options.serverFiles || null;
   }
 
   apply(compiler) {
@@ -41,6 +46,34 @@ class WebpackServerFunctionsPluginSimple {
                   delete assets[filename];
                 } catch (e) {
                   // Ignore parsing errors
+                }
+              }
+            }
+
+            if (this.serverFiles && this.serverFiles.size > 0) {
+              for (const filePath of this.serverFiles) {
+                const rel = path.relative(process.cwd(), filePath).replace(/\\/g, "/");
+                if (!serverFunctionsManifest[rel]) {
+                  try {
+                    const fileCode = fs.readFileSync(filePath, "utf8");
+                    if (useServerRegex.test(fileCode.trim())) {
+                      const exports = parseExports(fileCode);
+                      if (exports && exports.length > 0) {
+                        serverFunctionsManifest[rel] = exports;
+                        serverFunctionPaths.add(
+                          path.resolve(process.cwd(), rel).replace(/\\/g, "/").toLowerCase()
+                        );
+                      }
+                    } else if (hasServerFunctions(fileCode)) {
+                      const actions = extractServerFunctions(fileCode, filePath);
+                      if (actions && actions.length > 0) {
+                        serverFunctionsManifest[rel] = actions;
+                        serverFunctionPaths.add(
+                          path.resolve(process.cwd(), rel).replace(/\\/g, "/").toLowerCase()
+                        );
+                      }
+                    }
+                  } catch (e) {}
                 }
               }
             }
@@ -105,8 +138,17 @@ class WebpackServerFunctionsPluginSimple {
             }
 
             // 5. Replace placeholder ONLY in chunks that actually contain server functions
+            const isProd =
+              process.env.NODE_ENV === "production" &&
+              process.env.DINOU_DEV !== "true";
             const manifest = manifestGeneratorPlugin.manifestData;
-            const hashedPath = manifest["serverFunctionProxy.js"] || "serverFunctionProxy.js";
+            const proxyName = manifest["serverFunctionProxy.js"];
+            if (isProd && !proxyName) {
+              throw new Error(
+                "[Dinou] webpack serverFunctionsPlugin: could not find hashed 'serverFunctionProxy.js' in manifest during production build."
+              );
+            }
+            const hashedPath = proxyName || "serverFunctionProxy.js";
 
             for (const filename of targetAssetFiles) {
               if (filename.endsWith(".js") && assets[filename]) {
