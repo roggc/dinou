@@ -8,6 +8,11 @@ if (!process.env.NODE_ENV) {
   process.env.NODE_ENV = "development";
 }
 
+import ensureVendorMode from "../core/ensure-vendor-mode.js";
+if (!ensureVendorMode()) {
+  await new Promise(() => {});
+}
+
 import http from "node:http";
 import path from "node:path";
 import fs from "node:fs";

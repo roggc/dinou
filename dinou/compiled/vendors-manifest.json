@@ -1,0 +1,184 @@
+{
+  "babel-parser": {
+    "entry": "@babel/parser",
+    "sizeKb": 560.3,
+    "builtAt": "2026-10-24T12:48:51.225Z"
+  },
+  "babel-traverse": {
+    "entry": "@babel/traverse",
+    "sizeKb": 1582.9,
+    "builtAt": "2026-10-24T12:48:51.294Z"
+  },
+  "babel-core": {
+    "entry": "@babel/core",
+    "sizeKb": 2658.5,
+    "builtAt": "2026-10-24T12:48:51.389Z"
+  },
+  "babel-generator": {
+    "entry": "@babel/generator",
+    "sizeKb": 759.9,
+    "builtAt": "2026-10-24T12:48:51.436Z"
+  },
+  "babel-types": {
+    "entry": "@babel/types",
+    "sizeKb": 524.9,
+    "builtAt": "2026-10-24T12:48:51.465Z"
+  },
+  "babel-preset-react": {
+    "entry": "@babel/preset-react",
+    "sizeKb": 2691.7,
+    "builtAt": "2026-10-24T12:48:51.564Z"
+  },
+  "babel-preset-typescript": {
+    "entry": "@babel/preset-typescript",
+    "sizeKb": 2658.5,
+    "builtAt": "2026-10-24T12:48:51.665Z"
+  },
+  "babel-plugin-syntax-import-meta": {
+    "entry": "@babel/plugin-syntax-import-meta",
+    "sizeKb": 4,
+    "builtAt": "2026-10-24T12:48:51.675Z"
+  },
+  "babel-plugin-react-compiler": {
+    "entry": "babel-plugin-react-compiler",
+    "sizeKb": 4633.7,
+    "builtAt": "2026-10-24T12:48:51.877Z"
+  },
+  "postcss": {
+    "entry": "postcss",
+    "sizeKb": 211.2,
+    "builtAt": "2026-10-24T12:48:51.897Z"
+  },
+  "postcss-import": {
+    "entry": "postcss-import",
+    "sizeKb": 82.6,
+    "builtAt": "2026-10-24T12:48:51.915Z"
+  },
+  "postcss-modules": {
+    "entry": "postcss-modules",
+    "sizeKb": 460.7,
+    "builtAt": "2026-10-24T12:48:51.951Z"
+  },
+  "autoprefixer": {
+    "entry": "autoprefixer",
+    "sizeKb": 758.7,
+    "builtAt": "2026-10-24T12:48:52.017Z"
+  },
+  "generic-names": {
+    "entry": "generic-names",
+    "sizeKb": 23.9,
+    "builtAt": "2026-10-24T12:48:52.029Z"
+  },
+  "tailwindcss-postcss": {
+    "entry": "@tailwindcss/postcss",
+    "sizeKb": 1205.5,
+    "builtAt": "2026-10-24T12:48:52.095Z"
+  },
+  "rollup-plugin-babel": {
+    "entry": "@rollup/plugin-babel",
+    "sizeKb": 2732.9,
+    "builtAt": "2026-10-24T12:48:52.206Z"
+  },
+  "rollup-plugin-commonjs": {
+    "entry": "@rollup/plugin-commonjs",
+    "sizeKb": 190.8,
+    "builtAt": "2026-10-24T12:48:52.224Z"
+  },
+  "rollup-plugin-json": {
+    "entry": "@rollup/plugin-json",
+    "sizeKb": 68.1,
+    "builtAt": "2026-10-24T12:48:52.240Z"
+  },
+  "rollup-plugin-node-resolve": {
+    "entry": "@rollup/plugin-node-resolve",
+    "sizeKb": 144.8,
+    "builtAt": "2026-10-24T12:48:52.263Z"
+  },
+  "rollup-plugin-replace": {
+    "entry": "@rollup/plugin-replace",
+    "sizeKb": 100.2,
+    "builtAt": "2026-10-24T12:48:52.281Z"
+  },
+  "rollup-plugin-copy": {
+    "entry": "rollup-plugin-copy",
+    "sizeKb": 392.9,
+    "builtAt": "2026-10-24T12:48:52.329Z"
+  },
+  "rollup-plugin-delete": {
+    "entry": "rollup-plugin-delete",
+    "sizeKb": 234.3,
+    "builtAt": "2026-10-24T12:48:52.369Z"
+  },
+  "rollup-plugin-postcss": {
+    "entry": "rollup-plugin-postcss",
+    "sizeKb": 3920,
+    "builtAt": "2026-10-24T12:48:52.640Z"
+  },
+  "rollup-plugin-tsconfig-paths": {
+    "entry": "rollup-plugin-tsconfig-paths",
+    "sizeKb": 18.4,
+    "builtAt": "2026-10-24T12:48:52.649Z"
+  },
+  "babel-loader": {
+    "entry": "babel-loader",
+    "sizeKb": 2689,
+    "builtAt": "2026-10-24T12:48:52.756Z"
+  },
+  "css-loader": {
+    "entry": "css-loader",
+    "sizeKb": 557.8,
+    "builtAt": "2026-10-24T12:48:52.796Z"
+  },
+  "mini-css-extract-plugin": {
+    "entry": {
+      "index": "mini-css-extract-plugin",
+      "loader": "mini-css-extract-plugin/dist/loader.js"
+    },
+    "sizeKb": 0.4,
+    "builtAt": "2026-10-24T12:48:52.879Z"
+  },
+  "copy-webpack-plugin": {
+    "entry": "copy-webpack-plugin",
+    "sizeKb": 535.8,
+    "builtAt": "2026-10-24T12:48:52.934Z"
+  },
+  "tsconfig-paths-webpack-plugin": {
+    "entry": "tsconfig-paths-webpack-plugin",
+    "sizeKb": 140.8,
+    "builtAt": "2026-10-24T12:48:52.951Z"
+  },
+  "commander": {
+    "entry": "commander",
+    "sizeKb": 124,
+    "builtAt": "2026-10-24T12:48:52.966Z"
+  },
+  "dotenv": {
+    "entry": "dotenv",
+    "sizeKb": 13.2,
+    "builtAt": "2026-10-24T12:48:52.979Z"
+  },
+  "cross-env": {
+    "entry": "cross-env",
+    "sizeKb": 21.4,
+    "builtAt": "2026-10-24T12:48:52.996Z"
+  },
+  "ws": {
+    "entry": "ws",
+    "sizeKb": 126.8,
+    "builtAt": "2026-10-24T12:48:53.011Z"
+  },
+  "chokidar": {
+    "entry": "chokidar",
+    "sizeKb": 47.2,
+    "builtAt": "2026-10-24T12:48:53.025Z"
+  },
+  "esbuild-copy-static-files": {
+    "entry": "esbuild-copy-static-files",
+    "sizeKb": 2.4,
+    "builtAt": "2026-10-24T12:48:53.034Z"
+  },
+  "esbuild-tsconfig-paths": {
+    "sizeKb": 39.4,
+    "builtAt": "2026-10-24T12:48:53.050Z"
+  }
+}

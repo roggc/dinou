@@ -1,4 +1,4 @@
-import babel from "@babel/core";
+import babel from "#babel/core";
 import fs from "node:fs/promises";
 import path from "node:path";
 const norm = (p) => path.resolve(p).replace(/\\/g, "/");

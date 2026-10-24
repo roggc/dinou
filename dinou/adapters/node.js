@@ -7,6 +7,11 @@ import * as fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { AsyncLocalStorage } from "node:async_hooks";
 
+import ensureVendorMode from "../core/ensure-vendor-mode.js";
+if (!ensureVendorMode()) {
+  await new Promise(() => {});
+}
+
 if (typeof globalThis.AsyncLocalStorage === "undefined" && typeof AsyncLocalStorage !== "undefined") {
   globalThis.AsyncLocalStorage = AsyncLocalStorage;
 }

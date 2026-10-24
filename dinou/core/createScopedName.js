@@ -1,4 +1,4 @@
-import genericNames from "generic-names";
+import genericNames from "#generic-names";
 import path from "node:path";
 
 const generate = genericNames("[hash:base64]", {

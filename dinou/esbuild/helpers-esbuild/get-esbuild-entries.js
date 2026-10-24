@@ -2,8 +2,8 @@ import { readFileSync } from "fs";
 import path from "node:path";
 import glob from "fast-glob";
 import { pathToFileURL } from "node:url";
-import parser from "@babel/parser";
-import traverse from "@babel/traverse";
+import parser from "#babel/parser";
+import traverse from "#babel/traverse";
 import crypto from "node:crypto";
 import {
   regex as assetRegex,

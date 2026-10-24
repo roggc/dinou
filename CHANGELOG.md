@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [9.0.0] - 2026-10-24
+
+### Added
+- **Additive Vendoring System (Zero-Drift & Instant Cold Starts)**: Pre-bundled 36 build-time and runtime utility dependencies directly inside `dinou/compiled/` with native Node.js Subpath Imports (`#...`). Projects boot with zero node_modules traversal overhead while keeping all dependencies declared in `package.json`.
+- **Dual-Mode Import Resolution (Vendorized by Default / Unvendorized on Demand)**:
+  - **Default Mode**: Resolves `#pkg` directly to `dinou/compiled/<pkg>/index.js` for fast startup and isolated bundling.
+  - **Unvendorized Mode (`-u` / `--unvendorized` / `DINOU_UNVENDORIZED=true`)**: Transparent fallback to standard `node_modules/<pkg>` via Node subpath import condition `unvendorized`.
+  - Transparent CLI detection via [dinou/core/ensure-vendor-mode.js](file:///c:/Users/roggc/dev/my-dinou-apps/dinou-e2e/dinou/core/ensure-vendor-mode.js) across `dinou/node/dev.js`, `dinou/node/build.js`, `dinou/esbuild/build.js`, and `dinou/adapters/node.js`.
+- **Unified Multi-Entrypoint Shared Chunks**: Multi-entrypoint vendors (such as `mini-css-extract-plugin` and `mini-css-extract-plugin/loader`) use code-splitting chunks (`splitting: true`) to share symbols, avoiding plugin configuration mismatch in Webpack pipelines.
+- **Cross-Bundler Parity**: Exact dual-mode behavior tested and verified across **esbuild**, **Rollup**, and **Webpack** both in standard and ejected modes.
+
 ## [8.1.0] - 2026-10-23
 
 ### Added

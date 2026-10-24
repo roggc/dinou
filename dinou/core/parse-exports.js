@@ -1,5 +1,5 @@
-import parser from "@babel/parser";
-import traverseModule from "@babel/traverse";
+import parser from "#babel/parser";
+import traverseModule from "#babel/traverse";
 import { createRequire } from "node:module";
 import { resolveModulePpr } from "./resolve-module-ppr.js";
 

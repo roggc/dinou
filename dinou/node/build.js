@@ -8,6 +8,10 @@ import path from "node:path";
 import esbuild from "esbuild";
 import { fileURLToPath } from "node:url";
 import { bundleDualEngine } from "./bundle-dual-engine.js";
+import ensureVendorMode from "../core/ensure-vendor-mode.js";
+if (!ensureVendorMode()) {
+  await new Promise(() => {});
+}
 
 const projectRoot = process.cwd();
 const nodeDir = path.resolve(projectRoot, ".dinou/node");
