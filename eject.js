@@ -168,6 +168,7 @@ const ejectedScripts = {
   "build:client:esbuild": "cross-env NODE_ENV=production node dinou/esbuild/build.js",
   "build:client:rollup": "cross-env NODE_ENV=production rollup -c ./dinou/rollup/rollup.config.js",
   "build:client:webpack": "cross-env NODE_ENV=production webpack --config dinou/webpack/webpack.config.js",
+  "build:vendors": "node dinou/scripts/build-vendors.js",
 };
 
 Object.assign(pkg.scripts, ejectedScripts);

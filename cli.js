@@ -9,9 +9,35 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dinouPath = path.resolve(__dirname, "dinou");
 const projectRoot = process.cwd();
 
+// Global CLI options for Dinou v9 (Dual-Mode Vendoring)
+program
+  .name("dinou")
+  .description("Full-stack React 19 framework with native RSC, progressive streaming, and dual-mode vendoring")
+  .version("9.0.0")
+  .option("-u, --unvendorized", "Run with standard node_modules dependencies instead of pre-bundled vendor packages");
+
+const isUnvendorizedRequested = () =>
+  process.argv.includes("-u") ||
+  process.argv.includes("--unvendorized") ||
+  process.env.DINOU_UNVENDORIZED === "true" ||
+  process.env.DINOU_UNVENDORIZED === "1" ||
+  Boolean(program.opts?.().unvendorized);
+
 const runCommand = (command, options = {}) => {
   try {
-    execSync(command, { stdio: "inherit", cwd: projectRoot, ...options });
+    const unvendorized = isUnvendorizedRequested();
+    const env = {
+      ...process.env,
+      ...(unvendorized ? { DINOU_UNVENDORIZED: "true" } : {}),
+      ...(options.env || {}),
+    };
+
+    let finalCommand = command;
+    if (unvendorized) {
+      finalCommand = finalCommand.replace(/(node\s+[^\s&|]+(?:\.js|\.mjs)?)(?!\s+-u)/g, "$1 -u");
+    }
+
+    execSync(finalCommand, { stdio: "inherit", cwd: projectRoot, ...options, env });
   } catch (error) {
     console.error(`Error executing "${command}":`, error.message);
     process.exit(1);
