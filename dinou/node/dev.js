@@ -30,6 +30,7 @@ import { resolveSetupFiles } from "../core/resolve-setup-files.js";
 import { generateRouteModulesCode, generateRouteTypes } from "../core/route-generator.js";
 import parseExports from "../core/parse-exports.js";
 import { useClientRegex, useServerRegex } from "../constants.js";
+import { transformServerFunctions, hasServerFunctions } from "../core/transform-server-functions.js";
 import { nodeToWebRequest, sendWebResponseToNode } from "../core/http-adapter.js";
 import { setStorageAdapter, FileSystemStorage, MemoryStorage } from "../core/storage-adapter.js";
 import createScopedName from "../core/createScopedName.js";
@@ -1225,14 +1226,18 @@ const serverReferencesPlugin = {
       return getCachedFileTransform(args.path, "server-ref-rsc", () => {
         let code;
         try { code = fs.readFileSync(args.path, "utf8"); } catch (e) { return null; }
-        if (!useServerRegex.test(code.trim())) return null;
+        if (!hasServerFunctions(code)) return null;
 
-        const exports = getCachedExports(args.path, code);
+        const sfResult = transformServerFunctions(code, args.path);
+        if (!sfResult.actions || sfResult.actions.length === 0) return null;
+
+        const transformedCode = sfResult.code;
+        const exports = sfResult.actions;
         const absPath = path.resolve(args.path);
         const relPath = path.relative(projectRoot, absPath).replace(/\\/g, "/");
         const relativeFileUrl = "file:///" + relPath;
 
-        let transformed = code + "\n\n";
+        let transformed = transformedCode + "\n\n";
         transformed += `import { registerServerReference } from "react-server-dom-webpack/server.edge";\n`;
         for (const name of exports) {
           if (name !== "default") {
@@ -1255,14 +1260,18 @@ const serverReferencesPluginSsr = {
       return getCachedFileTransform(args.path, "server-ref-ssr", () => {
         let code;
         try { code = fs.readFileSync(args.path, "utf8"); } catch (e) { return null; }
-        if (!useServerRegex.test(code.trim())) return null;
+        if (!hasServerFunctions(code)) return null;
 
-        const exports = getCachedExports(args.path, code);
+        const sfResult = transformServerFunctions(code, args.path);
+        if (!sfResult.actions || sfResult.actions.length === 0) return null;
+
+        const transformedCode = sfResult.code;
+        const exports = sfResult.actions;
         const absPath = path.resolve(args.path);
         const relPath = path.relative(projectRoot, absPath).replace(/\\/g, "/");
         const relativeFileUrl = "file:///" + relPath;
 
-        let transformed = code + "\n\n";
+        let transformed = transformedCode + "\n\n";
         transformed += `import { registerServerReference } from "react-server-dom-webpack/client.edge";\n`;
         for (const name of exports) {
           if (name !== "default") {
@@ -1753,7 +1762,7 @@ async function doRebuildBatch(changesMap) {
         try {
           const content = fs.readFileSync(absFilePath, "utf8");
           isClientFile = useClientRegex.test(content.trim());
-          isServerFile = useServerRegex.test(content.trim());
+          isServerFile = useServerRegex.test(content.trim()) || hasServerFunctions(content);
         } catch (e) {}
       }
 

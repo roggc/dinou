@@ -1,3 +1,4 @@
+import "./helpers/patch-webpack-internals.js";
 import "dotenv/config";
 import path from "node:path";
 import fs from "node:fs";
@@ -336,6 +337,7 @@ export default async () => {
       }),
       new ServerFunctionsPlugin({
         manifest: manifestGeneratorPlugin.manifestData,
+        serverFiles,
       }),
       isDevelopment && new WebpackMemoryPlugin(),
       !isDevelopment && {

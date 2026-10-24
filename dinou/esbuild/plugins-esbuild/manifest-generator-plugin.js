@@ -30,11 +30,13 @@ export default function manifestGeneratorPlugin(manifestData) {
             ) {
               continue;
             }
-            const entryName = outputFile.split("/").pop().split("-").shift();
+            const normOut = outputFile.replace(/\\/g, "/");
+            const fileName = normOut.split("/").pop();
+            const entryName = fileName.split("-").shift();
             if (!frameworkEntryNames.includes(entryName)) {
               continue;
             }
-            manifestData[entryName + ".js"] = outputFile.split("/").pop(); // e.g. client-ABC123.js
+            manifestData[entryName + ".js"] = fileName; // e.g. serverFunctionProxy-ABC123.js
           }
         }
 

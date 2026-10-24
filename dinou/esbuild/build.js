@@ -46,8 +46,12 @@ const frameworkEntryPoints = {
 try {
   const manifest = {};
 
-  const [esbuildEntries, detectedCSSEntries, detectedAssetEntries] =
-    await getEsbuildEntries({ manifest });
+  const [
+    esbuildEntries,
+    detectedCSSEntries,
+    detectedAssetEntries,
+    serverFiles,
+  ] = await getEsbuildEntries({ manifest });
 
   updateManifestForModule(
     absPathToClientRedirect,
@@ -95,6 +99,7 @@ try {
       entryPoints,
       manifest,
       outdir,
+      serverFiles,
     })
   );
 

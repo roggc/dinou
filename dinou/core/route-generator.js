@@ -61,7 +61,7 @@ function generateRouteModulesCode(projectRoot = process.cwd(), relativeImportBas
     lines.push(`  ${JSON.stringify(file.relPath)}: () => import(${JSON.stringify(importPath)}),`);
 
     // Detect PPR from page_functions or layout_functions ONLY
-    if (/(?:^|\/)(?:page_functions|layout_functions|page\.functions|layout\.functions)\.(?:[jt]sx?|mjs)$/.test(file.relPath)) {
+    if (/(?:^|\/)(?:page_functions|layout_functions)\.(?:[jt]sx?|mjs)$/.test(file.relPath)) {
       try {
         const content = fs.readFileSync(file.fullPath, "utf8");
         const isPpr = parseExports.parsePprConfig ? parseExports.parsePprConfig(content) : null;

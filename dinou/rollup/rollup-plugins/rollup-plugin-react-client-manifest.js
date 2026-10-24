@@ -9,6 +9,7 @@ import { regex } from "../../core/asset-extensions.js";
 import createScopedName from "../../core/createScopedName.js";
 import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
 import { useClientRegex, useServerRegex } from "../../constants.js";
+import { hasServerFunctions } from "../../core/transform-server-functions.js";
 import parseExports from "../../core/parse-exports.js";
 
 const require = createRequire(import.meta.url);
@@ -87,7 +88,8 @@ const urlToManifestKeys = new Map();
 const defaultExportCache = new Map();
 
 function normalizeFsPath(p) {
-  return path.resolve(p).replace(/\\/g, "/").toLowerCase();
+  const resolved = path.resolve(p).replace(/\\/g, "/");
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
 function alignDrive(p) {
@@ -289,6 +291,13 @@ function setManifestEntry(fileUrl, expName, entry) {
           continue;
         }
 
+        if (useServerRegex.test(importCode.trim())) {
+          serverFiles.add(normalizeFsPath(absImportPathWithExt));
+          continue;
+        } else if (hasServerFunctions(importCode)) {
+          serverFiles.add(normalizeFsPath(absImportPathWithExt));
+        }
+
         const nested = await getImportsAndAssetsAndCsss(
           importCode,
           absImportPathWithExt,
@@ -337,7 +346,12 @@ function setManifestEntry(fileUrl, expName, entry) {
 
   function isPageOrLayout(absPath) {
     const fileName = path.basename(absPath);
-    return fileName.startsWith("page.") || fileName.startsWith("layout.");
+    return (
+      fileName.startsWith("page.") ||
+      fileName.startsWith("layout.") ||
+      fileName.startsWith("page_functions.") ||
+      fileName.startsWith("layout_functions.")
+    );
   }
 
   let isInitial = true;
@@ -435,10 +449,6 @@ function setManifestEntry(fileUrl, expName, entry) {
         const normKey = normalizeFsPath(normAbs);
         const code = readFileSync(normAbs, "utf8");
         const isClientModule = useClientRegex.test(code.trim());
-        const isServerModule = useServerRegex.test(code.trim());
-        if (isServerModule) {
-          serverFiles.add(normKey);
-        }
 
         if (isClientModule) {
           clientModules.add(normKey);
@@ -454,8 +464,20 @@ function setManifestEntry(fileUrl, expName, entry) {
               name: chunkName,
             });
           }
+          try {
+            await getImportsAndAssetsAndCsss(
+              code,
+              normAbs,
+              new Set(),
+              this,
+              sharedAstCache
+            );
+          } catch (e) {}
         } else if (isPageOrLayout(normAbs)) {
           serverModules.add(normKey);
+          if (useServerRegex.test(code.trim()) || hasServerFunctions(code)) {
+            serverFiles.add(normKey);
+          }
           this.addWatchFile(normAbs);
           const { imports, assets, csss } = await getImportsAndAssetsAndCsss(
             code,
@@ -550,7 +572,7 @@ function setManifestEntry(fileUrl, expName, entry) {
       }
       const code = readFileSync(normAbs, "utf8");
       const isClientModule = useClientRegex.test(code.trim());
-      const isServerModule = useServerRegex.test(code.trim());
+      const isServerModule = useServerRegex.test(code.trim()) || hasServerFunctions(code);
       if (isServerModule) {
         serverFiles.add(normId);
       } else {
@@ -565,6 +587,9 @@ function setManifestEntry(fileUrl, expName, entry) {
         knownClientChunks.set(normId, { id: normAbs, name: chunkName });
         serverModules.delete(normId);
         this.addWatchFile(normAbs);
+        try {
+          await getImportsAndAssetsAndCsss(code, normAbs, new Set(), this);
+        } catch (e) {}
       } else {
         clientModules.delete(normId);
         knownClientChunks.delete(normId);
