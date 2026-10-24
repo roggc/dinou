@@ -45,7 +45,7 @@ const runCommand = (command, options = {}) => {
 };
 
 // Helper paths
-const p = (rel) => `"${path.join(dinouPath, rel)}"`;
+const p = (rel) => `"${path.join(dinouPath, rel).replaceAll("\\", "/")}"`;
 
 // --- DEV ---
 
