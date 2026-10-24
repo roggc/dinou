@@ -14,7 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Granular Manifest Tree-Shaking**: Updated `server-functions-manifest.json` generation across all bundlers (Rollup, Webpack, esbuild) and runtimes. In files containing function-level actions, only functions with `"use server"` in their body are registered in the manifest, keeping private utilities hidden. Unreferenced ("orphan") action modules are completely excluded.
 - **Discovery of Function-Level Actions in Bundler Crawlers**: Enhanced entry crawlers across esbuild, Webpack, and Rollup to detect pages, layouts, and component or utility files containing body-level `"use server"` (`hasServerFunctions`). These files are now properly registered in `serverFiles` for manifest generation while continuing recursive traversal of their styles and static assets.
 
+### Changed
+- **Deterministic Builds via Pinned Dependencies**: Pinned all internal compiler and build toolchain dependencies (`esbuild`, `webpack`, `rollup`, `@swc/core`, `@babel/*`, PostCSS, and loaders) to exact versions (removing `^` carets). This guarantees 100% reproducible, zero-drift builds across all environments and prevents upstream regressions from affecting end-user applications.
+- **Aligned React 19 RSC Protocol & Peer Dependencies**: Synchronized `@roggc/react-server-dom-esm` and `react-server-dom-webpack` to `19.3.1`. Updated Dinou's `peerDependencies` to `react >=19.3.1` and `react-dom >=19.3.1` for complete protocol parity across all bundlers without peer dependency warnings.
+
 ### Fixed
+- **Fail-Fast Validation for Server Functions Proxy**: Added build-time checks across esbuild, Rollup, and Webpack to immediately fail with a descriptive error if `serverFunctionProxy.js` is missing from the client manifest in production, preventing silent 404 dynamic import failures in the browser.
+- **esbuild Manifest Propagation Fix**: Ensured the client manifest reference is correctly passed by reference to `serverFunctionsPlugin` in production builds, resolving dynamic import 404s when invoking Server Functions from Client Components.
 - **Webpack 5.112+ Internal Path Compatibility Shim**: Added a module resolution shim (`patch-webpack-internals.js`) in `webpack.config.js` to redirect legacy `react-server-dom-webpack` internal paths to Webpack 5.112+'s reorganized directory structure.
 - **DRY Single-Source Definition of `defineConfig`**: Refactored `dinou/index.js` to re-export `defineConfig` directly from `./core/config.js` instead of maintaining duplicate definitions.
 
