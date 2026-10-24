@@ -45,7 +45,7 @@ const runCommand = (command, options = {}) => {
 };
 
 // Helper paths
-const p = (rel) => path.join(dinouPath, rel);
+const p = (rel) => `"${path.join(dinouPath, rel)}"`;
 
 // --- DEV ---
 
@@ -163,8 +163,8 @@ const runNodeBuild = (bundler) => {
   const bundlerCmd = bundler === "rollup"
     ? `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`
     : bundler === "webpack"
-    ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
-    : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
+      ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
+      : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
 
   const envPrefix = bundler === "webpack" ? "cross-env DINOU_BUILD_TOOL=webpack " : "";
   return `${bundlerCmd} && ${envPrefix}node ${p("node/build.js")}`;
@@ -270,8 +270,8 @@ const runDenoBuild = (bundler) => {
   const bundlerCmd = bundler === "rollup"
     ? `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`
     : bundler === "webpack"
-    ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
-    : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
+      ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
+      : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
 
   const envPrefix = bundler === "webpack" ? "cross-env DINOU_BUILD_TOOL=webpack " : "";
   return `${bundlerCmd} && ${envPrefix}node ${p("deno/build.js")} && deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env ${p("deno/seed-kv.js")}`;
@@ -335,8 +335,8 @@ const runBunBuild = (bundler) => {
   const bundlerCmd = bundler === "rollup"
     ? `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`
     : bundler === "webpack"
-    ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
-    : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
+      ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
+      : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
 
   const envPrefix = bundler === "webpack" ? "cross-env DINOU_BUILD_TOOL=webpack " : "";
   return `${bundlerCmd} && ${envPrefix}node ${p("bun/build.js")}`;

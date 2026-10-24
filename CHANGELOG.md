@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Unified Multi-Entrypoint Shared Chunks**: Multi-entrypoint vendors (such as `mini-css-extract-plugin` and `mini-css-extract-plugin/loader`) use code-splitting chunks (`splitting: true`) to share symbols, avoiding plugin configuration mismatch in Webpack pipelines.
 - **Cross-Bundler Parity**: Exact dual-mode behavior tested and verified across **esbuild**, **Rollup**, and **Webpack** both in standard and ejected modes.
 
+## [8.1.1] - 2026-10-24
+
+### Fixed
+- **HMR & Fast Refresh Full-Reload Regression (`dev.js`)**: Fixed an issue where minor keystrokes or text edits inside documentation and markdown pages falsely triggered a full browser reload (`location.reload()`) instead of Fast Refresh or an in-place RSC stream update.
+  - Replaced naive substring matching (`content.includes("use server")`) with AST-level Server Function action detection (`transformServerFunctions`) during development watcher cycles, preventing pages containing mentions or snippets of `"use server"` from being erroneously treated as server action modules.
+  - Dynamically synchronized `knownServerFiles` and `knownClientFiles` tracking sets after each rebuild batch to prevent perpetual `serverDirectiveChanged` false positives on subsequent keystrokes.
+  - Excluded pure Server Component route entries (`page.tsx`, `layout.tsx` without `"use client"`) from the client bundler queue (`!isPageRoute`), reducing incremental rebuild times to ~140ms and reliably streaming targeted `{ type: "rsc-update" }` events without reloading the page.
+
 ## [8.1.0] - 2026-10-23
 
 ### Added
