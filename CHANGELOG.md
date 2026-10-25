@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Unified Multi-Entrypoint Shared Chunks**: Multi-entrypoint vendors (such as `mini-css-extract-plugin` and `mini-css-extract-plugin/loader`) use code-splitting chunks (`splitting: true`) to share symbols, avoiding plugin configuration mismatch in Webpack pipelines.
 - **Cross-Bundler Parity**: Exact dual-mode behavior tested and verified across **esbuild**, **Rollup**, and **Webpack** both in standard and ejected modes.
 
+## [8.1.2] - 2026-10-25
+
+### Fixed
+- **HMR & Fast Refresh Granular Module Resolution (`rollup-plugin-esm-hmr` & client runtime)**: Resolved an issue where saving components with common names or navigating code-split routes caused unintended full-browser reloads (`location.reload()`) and wiped React state in active tabs.
+  - **Exact Relative Chunk Matching (Rollup)**: Removed loose substring matching on `path.basename()` (`.includes(baseName)`) in `rollup-plugin-esm-hmr.js`, which falsely flagged unrelated chunks sharing similar names (e.g. multiple `counter.tsx`, `button.tsx`, or `card.tsx` across different directories) as modified. Replaced with exact normalized relative path matching (`chunkFileNameLower === relClean`).
+  - **Code-Splitting Safe Client Runtime (`esm-hmr/client.js`)**: Updated `applyUpdate()` across both Rollup and esbuild client runtimes to gracefully ignore (`return true`) update events for chunks that are not currently mounted in the active page (`!state`). Full page reload is now strictly reserved for active modules that explicitly decline HMR (`state.isDeclined`), ensuring open tabs, multi-page workflows, and independent route states remain intact.
+
 ## [8.1.1] - 2026-10-24
 
 ### Fixed
