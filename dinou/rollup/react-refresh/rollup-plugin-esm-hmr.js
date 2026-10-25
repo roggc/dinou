@@ -133,7 +133,7 @@ function esmHmrPlugin() {
             });
           }
 
-          // 3. Fallback: match chunk filename with base name or relative path of changedId
+          // 3. Fallback: match chunk filename with exact normalized relative path of changedId
           if (!isChangedByJs) {
             const chunkFileNameLower = fileName.toLowerCase().replace(/\.[jt]sx?$/, "");
             for (const changedId of changedIds) {
@@ -142,12 +142,7 @@ function esmHmrPlugin() {
                 .replace(/\.[jt]sx?$/, "")
                 .replace(/[^a-zA-Z0-9_-]/g, "_")
                 .toLowerCase();
-              if (relClean && chunkFileNameLower.includes(relClean)) {
-                isChangedByJs = true;
-                break;
-              }
-              const baseName = path.basename(changedId).replace(/\.[jt]sx?$/, "").toLowerCase();
-              if (baseName.length > 2 && baseName !== "page" && baseName !== "layout" && baseName !== "index" && chunkFileNameLower.includes(baseName)) {
+              if (relClean && (chunkFileNameLower === relClean || chunkFileNameLower.endsWith("/" + relClean))) {
                 isChangedByJs = true;
                 break;
               }
