@@ -8,6 +8,10 @@ import fs from "node:fs";
 import path from "node:path";
 import esbuild from "esbuild";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import ensureVendorMode from "../core/ensure-vendor-mode.js";
+if (!ensureVendorMode()) {
+  await new Promise(() => {});
+}
 
 import { generateRouteModulesCode, generateRouteTypes } from "../core/route-generator.js";
 import parseExports from "../core/parse-exports.js";

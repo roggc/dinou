@@ -1,12 +1,13 @@
-import parser from "@babel/parser";
-import traverseModule from "@babel/traverse";
-import generateModule from "@babel/generator";
-import * as t from "@babel/types";
+import parser from "#babel/parser";
+import traverseModule from "#babel/traverse";
+import generateModule from "#babel/generator";
+import * as tModule from "#babel/types";
 import { useServerRegex } from "../constants.js";
 import parseExports from "./parse-exports.js";
 
 const traverse = traverseModule?.default || traverseModule;
 const generate = generateModule?.default || generateModule;
+const t = tModule?.default || tModule;
 
 /**
  * Fast string check to determine if the source code could contain any "use server" directive.

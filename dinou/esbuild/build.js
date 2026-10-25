@@ -5,6 +5,10 @@ import getEsbuildEntries from "./helpers-esbuild/get-esbuild-entries.js";
 import { fileURLToPath } from "url";
 import path from "node:path";
 import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-module.js";
+import ensureVendorMode from "../core/ensure-vendor-mode.js";
+if (!ensureVendorMode()) {
+  await new Promise(() => {});
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

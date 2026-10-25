@@ -1,12 +1,12 @@
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
-import tailwindcss from "@tailwindcss/postcss";
-import autoprefixer from "autoprefixer";
+import tailwindcss from "#tailwindcss/postcss";
+import autoprefixer from "#autoprefixer";
 import createScopedName from "../../core/createScopedName.js";
-import postCssModules from "postcss-modules";
-import postcss from "postcss";
-import postcssImport from "postcss-import";
+import postCssModules from "#postcss-modules";
+import postcss from "#postcss";
+import postcssImport from "#postcss-import";
 import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
 import { pathToFileURL } from "node:url";
 import resolve from "resolve";

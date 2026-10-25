@@ -135,7 +135,9 @@ function serverFunctionsPlugin(manifestData = {}, options = {}) {
         process.env.NODE_ENV !== "production" ||
         process.env.DINOU_DEV === "true";
       const shouldWriteToDisk =
-        process.env.DINOU_WRITE_TO_DISK === "true" || !isDev;
+        process.env.DINOU_WRITE_TO_DISK === "false"
+          ? false
+          : process.env.DINOU_WRITE_TO_DISK === "true" || !isDev;
 
       if (shouldWriteToDisk) {
         // Write the manifest to the specified folder (e.g. same place as other assets)

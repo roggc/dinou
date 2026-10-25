@@ -110,7 +110,10 @@ export function createHotContext(id) {
 async function applyUpdate(id) {
   const normId = id.startsWith("/") ? id : "/" + id;
   const state = REGISTERED_MODULES[normId] || REGISTERED_MODULES[id];
-  if (!state || state.isDeclined) {
+  if (!state) {
+    return true;
+  }
+  if (state.isDeclined) {
     return false;
   }
 

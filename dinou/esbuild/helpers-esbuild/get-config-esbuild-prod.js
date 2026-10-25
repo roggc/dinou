@@ -1,9 +1,9 @@
-import { TsconfigPathsPlugin } from "@esbuild-plugins/tsconfig-paths";
+import { TsconfigPathsPlugin } from "#esbuild-plugins/tsconfig-paths";
 import reactClientManifestPlugin from "../plugins-esbuild/react-client-manifest-plugin.js";
 import serverFunctionsPlugin from "../plugins-esbuild/server-functions-plugin.js";
 import cssProcessorPlugin from "../plugins-esbuild/css-processor-plugin.js";
 import assetsPlugin from "../plugins-esbuild/assets-plugin.js";
-import copyStaticFiles from "esbuild-copy-static-files";
+import copyStaticFiles from "#esbuild-copy-static-files";
 import manifestGeneratorPlugin from "../plugins-esbuild/manifest-generator-plugin.js";
 import writePlugin from "../plugins-esbuild/write-plugin.js";
 import babelReactCompilerPlugin from "../plugins-esbuild/babel-react-compiler-plugin.js";

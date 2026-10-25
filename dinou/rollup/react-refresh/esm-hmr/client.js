@@ -113,7 +113,10 @@ async function applyUpdate(id) {
   const clean = id ? id.split("?")[0] : "";
   const normId = clean.startsWith("/") ? clean : "/" + clean;
   const state = REGISTERED_MODULES[normId] || REGISTERED_MODULES[clean] || REGISTERED_MODULES[id];
-  if (!state || state.isDeclined) {
+  if (!state) {
+    return true;
+  }
+  if (state.isDeclined) {
     return false;
   }
 

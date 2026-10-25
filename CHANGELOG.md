@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [9.0.0] - 2026-10-25
+
+### Added
+- **Additive Vendoring System (Zero-Drift & Instant Cold Starts)**: Pre-bundled 36 build-time and runtime utility dependencies directly inside `dinou/compiled/` with native Node.js Subpath Imports (`#...`). Projects boot with zero node_modules traversal overhead while keeping all dependencies declared in `package.json`.
+- **Dual-Mode Import Resolution (Vendorized by Default / Unvendorized on Demand)**:
+  - **Default Mode**: Resolves `#pkg` directly to `dinou/compiled/<pkg>/index.js` for fast startup and isolated bundling.
+  - **Unvendorized Mode (`-u` / `--unvendorized` / `DINOU_UNVENDORIZED=true`)**: Transparent fallback to standard `node_modules/<pkg>` via Node subpath import condition `unvendorized`.
+  - Transparent CLI detection via `dinou/core/ensure-vendor-mode.js` across `dinou/node/dev.js`, `dinou/node/build.js`, `dinou/esbuild/build.js`, and `dinou/adapters/node.js`.
+- **Ejected CLI Runner (`dinou/cli.js`)**: Updated `dinou eject` to generate streamlined npm scripts delegating directly to `dinou/cli.js` (e.g. `node dinou/cli.js dev`). This eliminates the limitations of chaining commands with `&&` in `npm run`, properly preserves argument forwarding across all commands (such as passing `-u` or custom flags), and automatically extends the execution PATH so ejected applications run seamlessly without global binary dependencies.
+- **Unified Multi-Entrypoint Shared Chunks**: Multi-entrypoint vendors (such as `mini-css-extract-plugin` and `mini-css-extract-plugin/loader`) use code-splitting chunks (`splitting: true`) to share symbols, avoiding plugin configuration mismatch in Webpack pipelines.
+- **Cross-Bundler Parity**: Exact dual-mode behavior tested and verified across **esbuild**, **Rollup**, and **Webpack** both in standard and ejected modes.
+
+## [8.1.2] - 2026-10-25
+
+### Fixed
+- **HMR & Fast Refresh Granular Module Resolution (`rollup-plugin-esm-hmr` & client runtime)**: Resolved an issue where saving components with common names or navigating code-split routes caused unintended full-browser reloads (`location.reload()`) and wiped React state in active tabs.
+  - **Exact Relative Chunk Matching (Rollup)**: Removed loose substring matching on `path.basename()` (`.includes(baseName)`) in `rollup-plugin-esm-hmr.js`, which falsely flagged unrelated chunks sharing similar names (e.g. multiple `counter.tsx`, `button.tsx`, or `card.tsx` across different directories) as modified. Replaced with exact normalized relative path matching (`chunkFileNameLower === relClean`).
+  - **Code-Splitting Safe Client Runtime (`esm-hmr/client.js`)**: Updated `applyUpdate()` across both Rollup and esbuild client runtimes to gracefully ignore (`return true`) update events for chunks that are not currently mounted in the active page (`!state`). Full page reload is now strictly reserved for active modules that explicitly decline HMR (`state.isDeclined`), ensuring open tabs, multi-page workflows, and independent route states remain intact.
+
+## [8.1.1] - 2026-10-24
+
+### Fixed
+- **HMR & Fast Refresh Full-Reload Regression (`dev.js`)**: Fixed an issue where minor keystrokes or text edits inside documentation and markdown pages falsely triggered a full browser reload (`location.reload()`) instead of Fast Refresh or an in-place RSC stream update.
+  - Replaced naive substring matching (`content.includes("use server")`) with AST-level Server Function action detection (`transformServerFunctions`) during development watcher cycles, preventing pages containing mentions or snippets of `"use server"` from being erroneously treated as server action modules.
+  - Dynamically synchronized `knownServerFiles` and `knownClientFiles` tracking sets after each rebuild batch to prevent perpetual `serverDirectiveChanged` false positives on subsequent keystrokes.
+  - Excluded pure Server Component route entries (`page.tsx`, `layout.tsx` without `"use client"`) from the client bundler queue (`!isPageRoute`), reducing incremental rebuild times to ~140ms and reliably streaming targeted `{ type: "rsc-update" }` events without reloading the page.
+
 ## [8.1.0] - 2026-10-23
 
 ### Added

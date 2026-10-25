@@ -1,6 +1,6 @@
 {
   "name": "dinou",
-  "version": "8.1.0",
+  "version": "9.0.0",
   "description": "Full-stack React 19 framework with native RSC, Server Functions, progressive streaming, and zero vendor lock-in.",
   "type": "module",
   "main": "./dinou/index.js",
@@ -34,7 +34,8 @@
   },
   "types": "./dinou/index.d.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:vendors": "node dinou/scripts/build-vendors.js"
   },
   "keywords": [
     "react",

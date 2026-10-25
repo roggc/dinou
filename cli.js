@@ -1,17 +1,52 @@
 #!/usr/bin/env node
 
+import fs from "node:fs";
 import { program } from "commander";
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dinouPath = path.resolve(__dirname, "dinou");
+const dinouPath = fs.existsSync(path.resolve(__dirname, "dinou")) ? path.resolve(__dirname, "dinou") : __dirname;
 const projectRoot = process.cwd();
+
+// Global CLI options for Dinou v9 (Dual-Mode Vendoring)
+program
+  .name("dinou")
+  .description("Full-stack React 19 framework with native RSC, progressive streaming, and dual-mode vendoring")
+  .version("9.0.0")
+  .option("-u, --unvendorized", "Run with standard node_modules dependencies instead of pre-bundled vendor packages");
+
+const isUnvendorizedRequested = () =>
+  process.argv.includes("-u") ||
+  process.argv.includes("--unvendorized") ||
+  process.env.DINOU_UNVENDORIZED === "true" ||
+  process.env.DINOU_UNVENDORIZED === "1" ||
+  Boolean(program.opts?.().unvendorized);
+
+const pathKey = Object.keys(process.env).find((k) => k.toLowerCase() === "path") || "PATH";
+const projectBin = path.join(projectRoot, "node_modules", ".bin");
+const dinouBin = path.join(dinouPath, "node_modules", ".bin");
+const extendedPath = [projectBin, dinouBin, process.env[pathKey]].filter(Boolean).join(path.delimiter);
 
 const runCommand = (command, options = {}) => {
   try {
-    execSync(command, { stdio: "inherit", cwd: projectRoot, ...options });
+    const unvendorized = isUnvendorizedRequested();
+    const env = {
+      ...process.env,
+      [pathKey]: extendedPath,
+      Path: extendedPath,
+      PATH: extendedPath,
+      ...(unvendorized ? { DINOU_UNVENDORIZED: "true" } : {}),
+      ...(options.env || {}),
+    };
+
+    let finalCommand = command;
+    if (unvendorized) {
+      finalCommand = finalCommand.replace(/(node\s+[^\s&|]+(?:\.js|\.mjs)?)(?!\s+-u)/g, "$1 -u");
+    }
+
+    execSync(finalCommand, { stdio: "inherit", cwd: projectRoot, ...options, env });
   } catch (error) {
     console.error(`Error executing "${command}":`, error.message);
     process.exit(1);
@@ -19,7 +54,7 @@ const runCommand = (command, options = {}) => {
 };
 
 // Helper paths
-const p = (rel) => path.join(dinouPath, rel);
+const p = (rel) => `"${path.join(dinouPath, rel).replaceAll("\\", "/")}"`;
 
 // --- DEV ---
 
@@ -137,8 +172,8 @@ const runNodeBuild = (bundler) => {
   const bundlerCmd = bundler === "rollup"
     ? `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`
     : bundler === "webpack"
-    ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
-    : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
+      ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
+      : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
 
   const envPrefix = bundler === "webpack" ? "cross-env DINOU_BUILD_TOOL=webpack " : "";
   return `${bundlerCmd} && ${envPrefix}node ${p("node/build.js")}`;
@@ -244,8 +279,8 @@ const runDenoBuild = (bundler) => {
   const bundlerCmd = bundler === "rollup"
     ? `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`
     : bundler === "webpack"
-    ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
-    : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
+      ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
+      : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
 
   const envPrefix = bundler === "webpack" ? "cross-env DINOU_BUILD_TOOL=webpack " : "";
   return `${bundlerCmd} && ${envPrefix}node ${p("deno/build.js")} && deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env ${p("deno/seed-kv.js")}`;
@@ -309,8 +344,8 @@ const runBunBuild = (bundler) => {
   const bundlerCmd = bundler === "rollup"
     ? `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`
     : bundler === "webpack"
-    ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
-    : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
+      ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
+      : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
 
   const envPrefix = bundler === "webpack" ? "cross-env DINOU_BUILD_TOOL=webpack " : "";
   return `${bundlerCmd} && ${envPrefix}node ${p("bun/build.js")}`;
@@ -464,6 +499,16 @@ program
   .description("Export standalone static website with Webpack")
   .action(() => {
     runCommand(`cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && node ${p("core/export-static.js")}`);
+  });
+
+
+// --- VENDORS ---
+
+program
+  .command("build:vendors")
+  .description("Bundle dependencies into dinou/compiled vendors")
+  .action(() => {
+    runCommand(`node ${p("scripts/build-vendors.js")}`);
   });
 
 // --- EJECT ---

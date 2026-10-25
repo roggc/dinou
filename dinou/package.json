@@ -1,6 +1,6 @@
 {
   "name": "dinou-ejected",
-  "version": "8.1.0",
+  "version": "9.0.0",
   "type": "module",
   "main": "index.js",
   "private": true,
@@ -31,7 +31,154 @@
   },
   "types": "./index.d.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:vendors": "node scripts/build-vendors.js"
+  },
+  "imports": {
+    "#babel/core": {
+      "unvendorized": "@babel/core",
+      "default": "./compiled/babel-core/index.js"
+    },
+    "#babel/parser": {
+      "unvendorized": "@babel/parser",
+      "default": "./compiled/babel-parser/index.js"
+    },
+    "#babel/traverse": {
+      "unvendorized": "@babel/traverse",
+      "default": "./compiled/babel-traverse/index.js"
+    },
+    "#babel/generator": {
+      "unvendorized": "@babel/generator",
+      "default": "./compiled/babel-generator/index.js"
+    },
+    "#babel/types": {
+      "unvendorized": "@babel/types",
+      "default": "./compiled/babel-types/index.js"
+    },
+    "#babel/preset-react": {
+      "unvendorized": "@babel/preset-react",
+      "default": "./compiled/babel-preset-react/index.js"
+    },
+    "#babel/preset-typescript": {
+      "unvendorized": "@babel/preset-typescript",
+      "default": "./compiled/babel-preset-typescript/index.js"
+    },
+    "#babel/plugin-syntax-import-meta": {
+      "unvendorized": "@babel/plugin-syntax-import-meta",
+      "default": "./compiled/babel-plugin-syntax-import-meta/index.js"
+    },
+    "#babel-plugin-react-compiler": {
+      "unvendorized": "babel-plugin-react-compiler",
+      "default": "./compiled/babel-plugin-react-compiler/index.js"
+    },
+    "#postcss": {
+      "unvendorized": "postcss",
+      "default": "./compiled/postcss/index.js"
+    },
+    "#postcss-import": {
+      "unvendorized": "postcss-import",
+      "default": "./compiled/postcss-import/index.js"
+    },
+    "#postcss-modules": {
+      "unvendorized": "postcss-modules",
+      "default": "./compiled/postcss-modules/index.js"
+    },
+    "#autoprefixer": {
+      "unvendorized": "autoprefixer",
+      "default": "./compiled/autoprefixer/index.js"
+    },
+    "#generic-names": {
+      "unvendorized": "generic-names",
+      "default": "./compiled/generic-names/index.js"
+    },
+    "#tailwindcss/postcss": {
+      "unvendorized": "@tailwindcss/postcss",
+      "default": "./compiled/tailwindcss-postcss/index.js"
+    },
+    "#rollup/plugin-babel": {
+      "unvendorized": "@rollup/plugin-babel",
+      "default": "./compiled/rollup-plugin-babel/index.js"
+    },
+    "#rollup/plugin-commonjs": {
+      "unvendorized": "@rollup/plugin-commonjs",
+      "default": "./compiled/rollup-plugin-commonjs/index.js"
+    },
+    "#rollup/plugin-json": {
+      "unvendorized": "@rollup/plugin-json",
+      "default": "./compiled/rollup-plugin-json/index.js"
+    },
+    "#rollup/plugin-node-resolve": {
+      "unvendorized": "@rollup/plugin-node-resolve",
+      "default": "./compiled/rollup-plugin-node-resolve/index.js"
+    },
+    "#rollup/plugin-replace": {
+      "unvendorized": "@rollup/plugin-replace",
+      "default": "./compiled/rollup-plugin-replace/index.js"
+    },
+    "#rollup-plugin-copy": {
+      "unvendorized": "rollup-plugin-copy",
+      "default": "./compiled/rollup-plugin-copy/index.js"
+    },
+    "#rollup-plugin-delete": {
+      "unvendorized": "rollup-plugin-delete",
+      "default": "./compiled/rollup-plugin-delete/index.js"
+    },
+    "#rollup-plugin-postcss": {
+      "unvendorized": "rollup-plugin-postcss",
+      "default": "./compiled/rollup-plugin-postcss/index.js"
+    },
+    "#rollup-plugin-tsconfig-paths": {
+      "unvendorized": "rollup-plugin-tsconfig-paths",
+      "default": "./compiled/rollup-plugin-tsconfig-paths/index.js"
+    },
+    "#babel-loader": {
+      "unvendorized": "babel-loader",
+      "default": "./compiled/babel-loader/index.js"
+    },
+    "#css-loader": {
+      "unvendorized": "css-loader",
+      "default": "./compiled/css-loader/index.js"
+    },
+    "#mini-css-extract-plugin": {
+      "unvendorized": "mini-css-extract-plugin",
+      "default": "./compiled/mini-css-extract-plugin/index.js"
+    },
+    "#copy-webpack-plugin": {
+      "unvendorized": "copy-webpack-plugin",
+      "default": "./compiled/copy-webpack-plugin/index.js"
+    },
+    "#tsconfig-paths-webpack-plugin": {
+      "unvendorized": "tsconfig-paths-webpack-plugin",
+      "default": "./compiled/tsconfig-paths-webpack-plugin/index.js"
+    },
+    "#commander": {
+      "unvendorized": "commander",
+      "default": "./compiled/commander/index.js"
+    },
+    "#dotenv": {
+      "unvendorized": "dotenv",
+      "default": "./compiled/dotenv/index.js"
+    },
+    "#cross-env": {
+      "unvendorized": "cross-env",
+      "default": "./compiled/cross-env/index.js"
+    },
+    "#ws": {
+      "unvendorized": "ws",
+      "default": "./compiled/ws/index.js"
+    },
+    "#chokidar": {
+      "unvendorized": "chokidar",
+      "default": "./compiled/chokidar/index.js"
+    },
+    "#esbuild-copy-static-files": {
+      "unvendorized": "esbuild-copy-static-files",
+      "default": "./compiled/esbuild-copy-static-files/index.js"
+    },
+    "#esbuild-plugins/tsconfig-paths": {
+      "unvendorized": "@esbuild-plugins/tsconfig-paths",
+      "default": "./compiled/esbuild-tsconfig-paths/index.js"
+    }
   },
   "dependencies": {
     "@babel/core": "7.29.7",

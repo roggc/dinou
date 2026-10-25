@@ -206,7 +206,7 @@ export default function serverFunctionsPlugin({
           }
 
           const isDev = process.env.DINOU_DEV === "true" || process.env.NODE_ENV === "development";
-          const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDev;
+          const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "false" ? false : (process.env.DINOU_WRITE_TO_DISK === "true" || !isDev);
 
           if (shouldWriteToDisk) {
             // Write the server functions manifest JSON file to the output directory
