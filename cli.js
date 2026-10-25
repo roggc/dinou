@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
+import fs from "node:fs";
 import { program } from "commander";
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dinouPath = path.resolve(__dirname, "dinou");
+const dinouPath = fs.existsSync(path.resolve(__dirname, "dinou")) ? path.resolve(__dirname, "dinou") : __dirname;
 const projectRoot = process.cwd();
 
 // Global CLI options for Dinou v9 (Dual-Mode Vendoring)
@@ -23,11 +24,19 @@ const isUnvendorizedRequested = () =>
   process.env.DINOU_UNVENDORIZED === "1" ||
   Boolean(program.opts?.().unvendorized);
 
+const pathKey = Object.keys(process.env).find((k) => k.toLowerCase() === "path") || "PATH";
+const projectBin = path.join(projectRoot, "node_modules", ".bin");
+const dinouBin = path.join(dinouPath, "node_modules", ".bin");
+const extendedPath = [projectBin, dinouBin, process.env[pathKey]].filter(Boolean).join(path.delimiter);
+
 const runCommand = (command, options = {}) => {
   try {
     const unvendorized = isUnvendorizedRequested();
     const env = {
       ...process.env,
+      [pathKey]: extendedPath,
+      Path: extendedPath,
+      PATH: extendedPath,
       ...(unvendorized ? { DINOU_UNVENDORIZED: "true" } : {}),
       ...(options.env || {}),
     };
@@ -490,6 +499,16 @@ program
   .description("Export standalone static website with Webpack")
   .action(() => {
     runCommand(`cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && node ${p("core/export-static.js")}`);
+  });
+
+
+// --- VENDORS ---
+
+program
+  .command("build:vendors")
+  .description("Bundle dependencies into dinou/compiled vendors")
+  .action(() => {
+    runCommand(`node ${p("scripts/build-vendors.js")}`);
   });
 
 // --- EJECT ---
