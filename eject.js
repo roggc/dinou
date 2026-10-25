@@ -16,6 +16,16 @@ fs.cpSync(dinouPath, path.join(projectRoot, "dinou"), {
 });
 console.log("✅ Files copied to ./dinou");
 
+const cliSource = path.resolve(__dirname, "cli.js");
+const cliDest = path.join(projectRoot, "dinou", "cli.js");
+if (fs.existsSync(cliSource)) {
+  fs.copyFileSync(cliSource, cliDest);
+  try {
+    fs.chmodSync(cliDest, 0o755);
+  } catch {}
+  console.log("✅ CLI copied to ./dinou/cli.js");
+}
+
 const pkgPath = path.join(projectRoot, "package.json");
 const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
 
