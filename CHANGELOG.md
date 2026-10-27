@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [9.0.2] - 2026-10-27
+
+### Performance
+- **Direct NODE_OPTIONS Injection in Unvendorized Mode (`-u`)**: Injected `--conditions=unvendorized` directly into `process.env.NODE_OPTIONS` from `dinou/cli.js` when launching child commands. Downstream build scripts and adapters (`ensureVendorMode()`) now detect active unvendorized resolution on their very first boot, completely eliminating intermediate Node.js child process re-spawns and shaving ~700–1000 ms off production builds and dev server cold starts.
+
 ## [9.0.1] - 2026-10-27
 
 ### Fixed
