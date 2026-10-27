@@ -1,6 +1,6 @@
 # **Dinou**
 
-[![Documentation](https://img.shields.io/badge/docs-dinou.dev-blue?style=flat-square)](https://dinou.dev) [![Version](https://img.shields.io/badge/version-9.0.1-orange?style=flat-square)](https://www.npmjs.com/package/dinou)
+[![Documentation](https://img.shields.io/badge/docs-dinou.dev-blue?style=flat-square)](https://dinou.dev) [![Version](https://img.shields.io/badge/version-9.0.2-orange?style=flat-square)](https://www.npmjs.com/package/dinou)
 
 ### **Full-Stack React 19 Framework**
 

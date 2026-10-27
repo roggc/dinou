@@ -14,7 +14,7 @@ const projectRoot = process.cwd();
 program
   .name("dinou")
   .description("Full-stack React 19 framework with native RSC, progressive streaming, and dual-mode vendoring")
-  .version("9.0.1")
+  .version("9.0.2")
   .option("-u, --unvendorized", "Run with standard node_modules dependencies instead of pre-bundled vendor packages");
 
 const isUnvendorizedRequested = () =>
@@ -32,12 +32,18 @@ const extendedPath = [projectBin, dinouBin, process.env[pathKey]].filter(Boolean
 const runCommand = (command, options = {}) => {
   try {
     const unvendorized = isUnvendorizedRequested();
+    const baseNodeOptions = process.env.NODE_OPTIONS || "";
+    const nodeOptions = unvendorized && !baseNodeOptions.includes("unvendorized")
+      ? (baseNodeOptions ? `${baseNodeOptions} ` : "") + "--conditions=unvendorized"
+      : baseNodeOptions;
+
     const env = {
       ...process.env,
       [pathKey]: extendedPath,
       Path: extendedPath,
       PATH: extendedPath,
       ...(unvendorized ? { DINOU_UNVENDORIZED: "true" } : {}),
+      ...(nodeOptions ? { NODE_OPTIONS: nodeOptions } : {}),
       ...(options.env || {}),
     };
 
