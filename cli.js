@@ -14,7 +14,7 @@ const projectRoot = process.cwd();
 program
   .name("dinou")
   .description("Full-stack React 19 framework with native RSC, progressive streaming, and dual-mode vendoring")
-  .version("9.0.0")
+  .version("9.0.1")
   .option("-u, --unvendorized", "Run with standard node_modules dependencies instead of pre-bundled vendor packages");
 
 const isUnvendorizedRequested = () =>
@@ -43,7 +43,7 @@ const runCommand = (command, options = {}) => {
 
     let finalCommand = command;
     if (unvendorized) {
-      finalCommand = finalCommand.replace(/(node\s+[^\s&|]+(?:\.js|\.mjs)?)(?!\s+-u)/g, "$1 -u");
+      finalCommand = finalCommand.replace(/(node\s+(?:"[^"]+"|[^\s"&|]+))(?!\s+-u\b)(?=\s|$|[&|;])/g, "$1 -u");
     }
 
     execSync(finalCommand, { stdio: "inherit", cwd: projectRoot, ...options, env });
