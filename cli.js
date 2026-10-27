@@ -43,7 +43,7 @@ const runCommand = (command, options = {}) => {
 
     let finalCommand = command;
     if (unvendorized) {
-      finalCommand = finalCommand.replace(/(node\s+[^\s&|]+(?:\.js|\.mjs)?)(?!\s+-u)/g, "$1 -u");
+      finalCommand = finalCommand.replace(/(node\s+(?:"[^"]+"|[^\s"&|]+))(?!\s+-u\b)(?=\s|$|[&|;])/g, "$1 -u");
     }
 
     execSync(finalCommand, { stdio: "inherit", cwd: projectRoot, ...options, env });

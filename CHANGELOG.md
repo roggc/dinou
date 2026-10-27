@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [9.0.1] - 2026-10-27
+
+### Fixed
+- **CLI Unvendorized Mode Path Resolution and Command Rewriting (`-u`)**: Fixed an issue in `dinou/cli.js` where running in unvendorized mode (`-u` / `--unvendorized` / `DINOU_UNVENDORIZED=true`) inside directories containing spaces caused the flag to be incorrectly injected within directory paths, resulting in `MODULE_NOT_FOUND` errors. The internal command parser now reliably handles double-quoted paths and compound command chains (`&&`, `||`, `;`), ensuring robust and idempotent `-u` flag placement across all child Node processes.
+
 ## [9.0.0] - 2026-10-25
 
 ### Added
