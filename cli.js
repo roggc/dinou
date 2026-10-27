@@ -14,7 +14,7 @@ const projectRoot = process.cwd();
 program
   .name("dinou")
   .description("Full-stack React 19 framework with native RSC, progressive streaming, and dual-mode vendoring")
-  .version("9.0.0")
+  .version("9.0.1")
   .option("-u, --unvendorized", "Run with standard node_modules dependencies instead of pre-bundled vendor packages");
 
 const isUnvendorizedRequested = () =>
