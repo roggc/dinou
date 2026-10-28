@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [9.0.3] - 2026-10-28
+
+### Fixed
+- **Direct Client Component Imports of Function-Level `"use server"` Functions**: Fixed an issue in the client bundler pipelines (`esbuild`, `rollup`, and `webpack`) where modules without a top-level `"use server"` directive that exported functions declaring `"use server"` inside their body were only matched against module-level directives. Importing such functions directly into `"use client"` components previously bundled the raw function implementation into the browser instead of generating an RPC proxy. All three client bundlers now inspect and extract function-level `"use server"` exports via `hasServerFunctions` and `extractServerFunctions`, emitting `createServerFunctionProxy` bindings while preserving granular manifest tree-shaking (excluding private and non-server helpers).
+- **Live HMR Manifest Synchronization for Inline and Function-Level `"use server"` Actions**: Fixed a state desynchronization issue in development mode (`dinou/node/dev.js`, `esbuild/plugins-esbuild/server-functions-plugin.js`, `rollup/rollup-plugins/rollup-plugin-server-functions.js`, and `webpack/loaders/server-functions-loader.js`) where adding or modifying inline or body-level `"use server"` functions while the dev server was running could be omitted or overwritten in `__DINOU_SERVER_FUNCTIONS_MANIFEST__` during incremental client rebuilds. Server file `mtime` caches and live manifest state now stay synchronized in real time across Esbuild, Rollup, and Webpack without requiring a dev server restart.
+
 ## [9.0.2] - 2026-10-27
 
 ### Performance
