@@ -1,7 +1,6 @@
 import {
   isPprBuildActive,
-  enterSuspense,
-  exitSuspense,
+  runInSuspense,
   registerHole,
 } from "./ppr-context.js";
 
@@ -28,6 +27,13 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
   ) {
     return jsx;
   } else if (Array.isArray(jsx)) {
+    if (isPprBuildActive()) {
+      const results = [];
+      for (const child of jsx) {
+        results.push(await asyncRenderJSXToClientJSX(child, child?.key ?? null));
+      }
+      return results;
+    }
     return await Promise.all(
       jsx.map((child) =>
         asyncRenderJSXToClientJSX(
@@ -52,41 +58,40 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
     if (jsx.$$typeof === Symbol.for("react.transitional.element")) {
       if (jsx.type === Symbol.for("react.suspense")) {
         if (isPprBuildActive()) {
-          const holeId = enterSuspense();
-          try {
-            const renderedChildren = await asyncRenderJSXToClientJSX(jsx.props?.children);
-            exitSuspense();
-            return {
-              ...jsx,
-              props: {
-                ...jsx.props,
-                children: renderedChildren,
-                fallback: await asyncRenderJSXToClientJSX(jsx.props?.fallback),
-              },
-              key: key ?? jsx.key,
-            };
-          } catch (err) {
-            exitSuspense();
-            if (
-              (err && err.$$typeof === Symbol.for("dinou.ppr.postpone")) ||
-              (err && typeof err?.then === "function") ||
-              (err && err?.$$typeof === Symbol.for("react.postpone"))
-            ) {
-              registerHole(holeId, { type: err.pprType || "suspense" });
-              const renderedFallback = await asyncRenderJSXToClientJSX(jsx.props?.fallback);
+          return await runInSuspense(async (holeId) => {
+            try {
+              const renderedChildren = await asyncRenderJSXToClientJSX(jsx.props?.children);
               return {
-                $$typeof: Symbol.for("react.transitional.element"),
-                type: "div",
+                ...jsx,
                 props: {
-                  "data-ppr-hole": holeId,
-                  style: { display: "contents" },
-                  children: renderedFallback,
+                  ...jsx.props,
+                  children: renderedChildren,
+                  fallback: await asyncRenderJSXToClientJSX(jsx.props?.fallback),
                 },
                 key: key ?? jsx.key,
               };
+            } catch (err) {
+              if (
+                (err && err.$$typeof === Symbol.for("dinou.ppr.postpone")) ||
+                (err && typeof err?.then === "function") ||
+                (err && err?.$$typeof === Symbol.for("react.postpone"))
+              ) {
+                registerHole(holeId, { type: err.pprType || "suspense" });
+                const renderedFallback = await asyncRenderJSXToClientJSX(jsx.props?.fallback);
+                return {
+                  $$typeof: Symbol.for("react.transitional.element"),
+                  type: "div",
+                  props: {
+                    "data-ppr-hole": holeId,
+                    style: { display: "contents" },
+                    children: renderedFallback,
+                  },
+                  key: key ?? jsx.key,
+                };
+              }
+              throw err;
             }
-            throw err;
-          }
+          });
         }
         return {
           ...jsx,
@@ -162,6 +167,13 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
       return jsx;
     } else {
       // Process object props (e.g., { className: "foo" })
+      if (isPprBuildActive()) {
+        const entries = [];
+        for (const [propName, value] of Object.entries(jsx)) {
+          entries.push([propName, await asyncRenderJSXToClientJSX(value)]);
+        }
+        return Object.fromEntries(entries);
+      }
       return Object.fromEntries(
         await Promise.all(
           Object.entries(jsx).map(async ([propName, value]) => [

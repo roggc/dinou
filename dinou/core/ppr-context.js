@@ -1,5 +1,5 @@
 // dinou/core/ppr-context.js
-// PPR Pre-rendering Context and Suspense Hole Tracker for Dinou v7.2.
+// PPR Pre-rendering Context and Suspense Hole Tracker for Dinou.
 
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -12,12 +12,21 @@ const pprStorage = new AsyncLocalStorage();
  * @returns {Promise<any>}
  */
 export function runWithPprContext(options, callback) {
+  const sharedCounter = { nextHoleIndex: 0 };
+  const sharedHoles = new Map();
   const store = {
     isPpr: Boolean(options?.isPpr),
     suspenseDepth: 0,
     currentHoleId: null,
-    holes: new Map(),
-    nextHoleIndex: 0,
+    holeStack: [],
+    holes: sharedHoles,
+    counter: sharedCounter,
+    get nextHoleIndex() {
+      return sharedCounter.nextHoleIndex;
+    },
+    set nextHoleIndex(val) {
+      sharedCounter.nextHoleIndex = val;
+    },
     ...options,
   };
   return pprStorage.run(store, callback);
@@ -37,13 +46,67 @@ export function isInsideSuspense() {
   return Boolean(store && store.suspenseDepth > 0);
 }
 
+export function resetPprHoles() {
+  const store = getPprStore();
+  if (store) {
+    if (store.counter) {
+      store.counter.nextHoleIndex = 0;
+    } else {
+      store.nextHoleIndex = 0;
+    }
+    if (store.holes && typeof store.holes.clear === "function") {
+      store.holes.clear();
+    }
+    store.suspenseDepth = 0;
+    store.currentHoleId = null;
+    if (Array.isArray(store.holeStack)) {
+      store.holeStack.length = 0;
+    }
+  }
+}
+
+export function runInSuspense(callback, explicitHoleId = null) {
+  const store = getPprStore();
+  if (!store) {
+    return callback(null);
+  }
+  let holeId = explicitHoleId;
+  if (!holeId) {
+    if (store.counter) {
+      store.counter.nextHoleIndex++;
+      holeId = `ppr-hole-${store.counter.nextHoleIndex}`;
+    } else {
+      store.nextHoleIndex++;
+      holeId = `ppr-hole-${store.nextHoleIndex}`;
+    }
+  }
+  const nextStack = Array.isArray(store.holeStack)
+    ? [...store.holeStack, holeId]
+    : [holeId];
+  const childStore = {
+    ...store,
+    suspenseDepth: store.suspenseDepth + 1,
+    currentHoleId: holeId,
+    holeStack: nextStack,
+  };
+  return pprStorage.run(childStore, () => callback(holeId));
+}
+
 export function enterSuspense(holeId = null) {
   const store = getPprStore();
   if (store) {
     store.suspenseDepth++;
     if (!holeId) {
-      store.nextHoleIndex++;
-      holeId = `ppr-hole-${store.nextHoleIndex}`;
+      if (store.counter) {
+        store.counter.nextHoleIndex++;
+        holeId = `ppr-hole-${store.counter.nextHoleIndex}`;
+      } else {
+        store.nextHoleIndex++;
+        holeId = `ppr-hole-${store.nextHoleIndex}`;
+      }
+    }
+    if (Array.isArray(store.holeStack)) {
+      store.holeStack.push(holeId);
     }
     store.currentHoleId = holeId;
     return holeId;
@@ -55,7 +118,13 @@ export function exitSuspense() {
   const store = getPprStore();
   if (store) {
     store.suspenseDepth = Math.max(0, store.suspenseDepth - 1);
-    if (store.suspenseDepth === 0) {
+    if (Array.isArray(store.holeStack) && store.holeStack.length > 0) {
+      store.holeStack.pop();
+      store.currentHoleId =
+        store.holeStack.length > 0
+          ? store.holeStack[store.holeStack.length - 1]
+          : null;
+    } else if (store.suspenseDepth === 0) {
       store.currentHoleId = null;
     }
   }
@@ -64,8 +133,11 @@ export function exitSuspense() {
 export function markDynamicAccess(type = "dynamic") {
   const store = getPprStore();
   if (store && store.isPpr && store.suspenseDepth > 0) {
-    const holeId = store.currentHoleId || `ppr-hole-${store.nextHoleIndex}`;
-    const error = new Error(`[Dinou PPR] Dynamic access to '${type}' postponed inside Suspense`);
+    const idx = store.counter ? store.counter.nextHoleIndex : store.nextHoleIndex;
+    const holeId = store.currentHoleId || `ppr-hole-${idx}`;
+    const error = new Error(
+      `[Dinou PPR] Dynamic access to '${type}' postponed inside Suspense`
+    );
     error.$$typeof = Symbol.for("dinou.ppr.postpone");
     error.pprType = type;
     error.holeId = holeId;
@@ -75,7 +147,7 @@ export function markDynamicAccess(type = "dynamic") {
 
 export function registerHole(holeId, meta = {}) {
   const store = getPprStore();
-  if (store) {
+  if (store && holeId) {
     store.holes.set(holeId, {
       id: holeId,
       registeredAt: Date.now(),
@@ -97,6 +169,8 @@ export default {
   getPprStore,
   isPprBuildActive,
   isInsideSuspense,
+  resetPprHoles,
+  runInSuspense,
   enterSuspense,
   exitSuspense,
   markDynamicAccess,

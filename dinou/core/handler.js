@@ -42,7 +42,7 @@ import { handlePprResume } from "./ppr-runtime.js";
 import { resolveModulePpr } from "./resolve-module-ppr.js";
 import { getDinouConfig as loadDinouConfig } from "./load-dinou-config.js";
 import { getSlotJSX } from "./cache-slot.js";
-import { runWithPprContext, getRegisteredHoles } from "./ppr-context.js";
+import { runWithPprContext, getRegisteredHoles, resetPprHoles } from "./ppr-context.js";
 import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
 
 // Load Dinou configuration and plugins
@@ -1228,7 +1228,7 @@ async function handleRequest(request, platformContext = {}) {
     if (!isDynamic.has(cleanPath)) {
       isDynamic.set(cleanPath, { value: false });
     }
-    const dynamicState = isDynamic.get(cleanPath);
+    const dynamicState = isLayoutReq ? { value: false } : isDynamic.get(cleanPath);
 
     const reqPath = cleanPath.endsWith("/") ? cleanPath : cleanPath + "/";
     let isPathBlocked = false;
@@ -1465,7 +1465,7 @@ async function handleRequest(request, platformContext = {}) {
       isPathBlocked = pageConfig.isPathBlocked;
     }
 
-    const context = createRequestContext(simReq, bridge, platformContext, dynamicState);
+    const context = createRequestContext(simReq, bridge, platformContext, isRoutePpr ? { value: false } : dynamicState);
     copyCustomContextProperties(rootContext, context);
     const isNotFound = {};
     const segment = isLayoutReq ? "layout" : "page";
@@ -1517,6 +1517,9 @@ async function handleRequest(request, platformContext = {}) {
     isDynamic.set(reqPath, { value: false });
   }
   const dynamicState = isDynamic.get(reqPath);
+  if (platformContext?.isSSG) {
+    dynamicState.value = false;
+  }
 
   let { isPathBlocked, allowISGValue, isDynamicConfig, revalidate, tags, ppr: isPprConfig } = await resolvePageFunctionsConfig(
     pagePath,
@@ -1676,7 +1679,7 @@ async function handleRequest(request, platformContext = {}) {
     }
 
     // 3. If we found a cached/pre-rendered page:
-    if (!isDevelopment && cachedItem && !dynamicState.value && !isPathBlocked && queryObj.ssr_crash !== "true" && !platformContext?.isSSG) {
+    if (!isDevelopment && cachedItem && (!dynamicState.value || cachedItem?.metadata?.ppr || isPprConfig) && !isPathBlocked && queryObj.ssr_crash !== "true" && !platformContext?.isSSG) {
       const metadata = cachedItem.metadata || {};
       const { revalidate, generatedAt } = metadata;
       const isExpired =
@@ -1849,6 +1852,7 @@ async function handleRequest(request, platformContext = {}) {
               await requestStorage.run(context, async () => {
                 await runWithPprContext({ isPpr: true }, async () => {
                   jsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, !pagePath);
+                  resetPprHoles();
                   jsx = await asyncRenderJSXToClientJSX(jsx);
                   pprHoles = getRegisteredHoles();
                 });
@@ -2157,6 +2161,7 @@ async function handleRequest(request, platformContext = {}) {
 
             if (fullHtml) {
               if (!dynamicState.value || platformContext.isSSG === true) {
+                if (platformContext.isSSG === true) dynamicState.value = false;
                 try {
                   await storage.set(rscKey, rscPayload);
                   await storage.set(htmlKey, fullHtml, genMeta);
@@ -2165,7 +2170,7 @@ async function handleRequest(request, platformContext = {}) {
                     const shellHtmlKey = cleanPath ? `${cleanPath}/shell.html` : "shell.html";
                     const shellRscKey = cleanPath ? `${cleanPath}/shell.rsc` : "shell.rsc";
                     await storage.set(shellHtmlKey, fullHtml, genMeta);
-                    await storage.set(shellRscKey, rscPayload, { ppr: true });
+                    await storage.set(shellRscKey, rscPayload);
                   }
                   if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
                     console.log(`✅ [Edge ISG] Successfully cached ${reqPath} to KV`);
@@ -2263,7 +2268,7 @@ async function handleRequest(request, platformContext = {}) {
   }
 
   // Node.js Runtime: Serve static pre-rendered HTML if available in production
-  if (!isDevelopment && !dynamicState.value && pagePath && !isPathBlocked) {
+  if (!isDevelopment && (!dynamicState.value || isPprConfig) && pagePath && !isPathBlocked) {
     revalidating(reqPath, dynamicState);
     let htmlPathOld;
     if (regenerating.has(reqPath)) {
@@ -2272,7 +2277,7 @@ async function handleRequest(request, platformContext = {}) {
     const htmlPath = path.join(".dinou/dist2", reqPath, "index.html");
     const fileToRead = (htmlPathOld && existsSync(htmlPathOld)) ? htmlPathOld : htmlPath;
 
-    if (existsSync(fileToRead) && !dynamicState.value) {
+    if (existsSync(fileToRead) && (!dynamicState.value || isPprConfig)) {
       bridge.setHeader("Content-Type", "text/html; charset=utf-8");
       bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
       let status = getStatus(reqPath);

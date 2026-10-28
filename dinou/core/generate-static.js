@@ -184,7 +184,7 @@ async function generateStatic() {
           await storage.set(pageRscKey, pageRscText);
           if (isRoutePpr) {
             const shellRscKey = cleanPagePath ? `${cleanPagePath}/shell.rsc` : "shell.rsc";
-            await storage.set(shellRscKey, pageRscText, { ppr: true });
+            await storage.set(shellRscKey, pageRscText);
           }
         } else {
           const pageResult = await generateStaticPageRSC(reqPath);

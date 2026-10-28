@@ -6,7 +6,7 @@ import { getFilePathAndDynamicParams } from "./get-file-path-and-dynamic-params.
 import importModule from "./import-module.js";
 import { requestStorage } from "./request-context.js";
 import { getLayoutProps, resolveLayoutFunctionsConfig, getLayoutFunctionsPath } from "./layout-functions.js";
-import { runWithPprContext, getRegisteredHoles } from "./ppr-context.js";
+import { runWithPprContext, getRegisteredHoles, resetPprHoles } from "./ppr-context.js";
 import { resolveModulePpr } from "./resolve-module-ppr.js";
 import { getDinouConfig } from "./load-dinou-config.js";
 import { createBailoutProxy } from "./bailout-proxy.js";
@@ -916,6 +916,7 @@ async function buildStaticPages(onProgress = null) {
 
       let revalidate;
       let cacheTags = [];
+      let capturedHoles = [];
       const jsx = await requestStorage.run(mockContext, async () => {
         return await runWithPprContext({ isPpr: Boolean(pageIsPpr) }, async () => {
           const [pagePath] = getFilePathAndDynamicParams(
@@ -1083,11 +1084,14 @@ async function buildStaticPages(onProgress = null) {
         }
 
         // Render the layout-nested React element tree to client-side RSC JSON format
-        return await asyncRenderJSXToClientJSX(jsx);
+        resetPprHoles();
+        const renderedSingleJsx = await asyncRenderJSXToClientJSX(jsx);
+        capturedHoles = pageIsPpr ? getRegisteredHoles() : [];
+        return renderedSingleJsx;
         });
       });
 
-      if (!isStatic && !pageIsPpr) {
+      if (!isStatic) {
         // ❌ DO NOT save file.
         // Will behave as pure SSR at runtime.
         if (process.env.DINOU_DEBUG) {
@@ -1105,7 +1109,7 @@ async function buildStaticPages(onProgress = null) {
         cookies: mockRes._cookies,
       };
 
-      const holes = pageIsPpr ? getRegisteredHoles() : [];
+      const holes = pageIsPpr ? capturedHoles : [];
       staticRoutes.add(reqPath);
       staticMetadata.set(reqPath, {
         revalidate: typeof revalidate === "function" ? await revalidate() : revalidate,
@@ -1303,6 +1307,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
       );
 
       pageIsPpr = await resolveBuildPprForRoute(segments, pagePath, pageFunctionsPath, srcFolder);
+      let capturedHoles = [];
 
       return await runWithPprContext({ isPpr: pageIsPpr }, async () => {
         let props = { params: dParams };
@@ -1447,11 +1452,14 @@ async function buildStaticPage(reqPath, isDynamic = null) {
         }
       }
 
-        return await asyncRenderJSXToClientJSX(jsx);
+        resetPprHoles();
+        const renderedSingleJsx = await asyncRenderJSXToClientJSX(jsx);
+        capturedHoles = pageIsPpr ? getRegisteredHoles() : [];
+        return renderedSingleJsx;
       });
     });
 
-    if (!isStatic && !pageIsPpr) {
+    if (!isStatic) {
       // ❌ DO NOT save file.
       // It will behave as pure SSR at runtime.
       if (process.env.DINOU_DEBUG) {
@@ -1472,7 +1480,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
       cookies: mockRes._cookies,
     };
 
-    const holes = pageIsPpr ? getRegisteredHoles() : [];
+    const holes = pageIsPpr ? capturedHoles : [];
     staticRoutes.add(reqPath);
     staticMetadata.set(reqPath, {
       revalidate: typeof revalidate === "function" ? await revalidate() : revalidate,
