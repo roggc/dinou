@@ -270,6 +270,7 @@ let redirectChunkId = null;
 let slotChunkId = null;
 const knownClientFiles = new Set();
 const knownServerFiles = new Set();
+const liveServerFunctionsMap = new Map();
 const compExportsCache = new Map();
 
 function getCachedFileExports(filePath) {
@@ -324,7 +325,17 @@ async function updateManifestsState(options = {}) {
 
   const rawSf = globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__ || readJsonSafe(sfPath);
   if (rawSf) {
-    parsedServerFunctionsManifest = rawSf;
+    parsedServerFunctionsManifest = { ...rawSf };
+  }
+  for (const [relPath, actions] of liveServerFunctionsMap.entries()) {
+    if (actions && actions.length > 0) {
+      parsedServerFunctionsManifest[relPath] = actions;
+    } else {
+      delete parsedServerFunctionsManifest[relPath];
+    }
+  }
+  if (typeof globalThis !== "undefined" && globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__) {
+    globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__ = parsedServerFunctionsManifest;
   }
 
   const rawAsset = globalThis.__DINOU_RAW_ASSET_MANIFEST__ || readJsonSafe(aPath);
@@ -1770,22 +1781,61 @@ async function doRebuildBatch(changesMap) {
 
       let isClientFile = false;
       let isServerFile = false;
+      let currentServerActions = [];
 
       if (fs.existsSync(absFilePath)) {
         try {
           const content = fs.readFileSync(absFilePath, "utf8");
-          isClientFile = useClientRegex.test(content.trim());
-          if (useServerRegex.test(content.trim())) {
-            isServerFile = true;
-          } else if (hasServerFunctions(content)) {
-            try {
-              const sfRes = transformServerFunctions(content, absFilePath);
-              isServerFile = Boolean(sfRes?.actions?.length > 0);
-            } catch (e) {
-              isServerFile = false;
+          const trimmed = content.trim();
+          isClientFile = useClientRegex.test(trimmed);
+          if (!isClientFile) {
+            if (useServerRegex.test(trimmed)) {
+              currentServerActions = parseExports(content) || [];
+              isServerFile = currentServerActions.length > 0;
+            } else if (hasServerFunctions(content)) {
+              try {
+                const sfRes = transformServerFunctions(content, absFilePath);
+                currentServerActions = sfRes?.actions || [];
+                isServerFile = currentServerActions.length > 0;
+              } catch (e) {
+                isServerFile = false;
+              }
             }
           }
         } catch (e) {}
+      }
+
+      const relServerPath = path.relative(projectRoot, absFilePath).replace(/\\/g, "/");
+      const prevServerActionsRaw = parsedServerFunctionsManifest[relServerPath];
+      const prevServerActions = prevServerActionsRaw
+        ? (Array.isArray(prevServerActionsRaw) ? prevServerActionsRaw : Array.from(prevServerActionsRaw))
+        : [];
+      const serverActionsChanged =
+        prevServerActions.length !== currentServerActions.length ||
+        prevServerActions.some((act, idx) => act !== currentServerActions[idx]);
+
+      if (isServerFile) {
+        liveServerFunctionsMap.set(relServerPath, currentServerActions);
+        parsedServerFunctionsManifest[relServerPath] = currentServerActions;
+        if (typeof globalThis !== "undefined") {
+          if (globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__) {
+            globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__[relServerPath] = currentServerActions;
+          }
+          if (globalThis.__DINOU_SERVER_FUNCTIONS_MANIFEST__) {
+            globalThis.__DINOU_SERVER_FUNCTIONS_MANIFEST__[relServerPath] = currentServerActions;
+          }
+        }
+      } else if (prevServerActions.length > 0 || liveServerFunctionsMap.has(relServerPath)) {
+        liveServerFunctionsMap.set(relServerPath, null);
+        delete parsedServerFunctionsManifest[relServerPath];
+        if (typeof globalThis !== "undefined") {
+          if (globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__) {
+            delete globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__[relServerPath];
+          }
+          if (globalThis.__DINOU_SERVER_FUNCTIONS_MANIFEST__) {
+            delete globalThis.__DINOU_SERVER_FUNCTIONS_MANIFEST__[relServerPath];
+          }
+        }
       }
 
       const wasClientFile = knownClientFiles.has(absFilePath);
@@ -1830,10 +1880,14 @@ async function doRebuildBatch(changesMap) {
         }
       }
 
-      if (clientDirectiveChanged || serverDirectiveChanged) {
+      if (clientDirectiveChanged || serverDirectiveChanged || serverActionsChanged) {
         needsStructureRebuild = true;
       }
-      if (clientDirectiveChanged || (isStructureChange && (isClientRelevant || isCssFile))) {
+      if (
+        clientDirectiveChanged ||
+        (serverDirectiveChanged && !isPageRoute) ||
+        (isStructureChange && (isClientRelevant || isCssFile))
+      ) {
         needsClientBundlerRestart = true;
       }
 

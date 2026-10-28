@@ -3,8 +3,20 @@ import fsSync from "node:fs";
 import path from "node:path";
 import glob from "fast-glob";
 import { transform } from "@swc/core";
-import { useServerRegex } from "../../constants.js";
+import { useClientRegex, useServerRegex } from "../../constants.js";
+import { hasServerFunctions, extractServerFunctions } from "../../core/transform-server-functions.js";
 import { extensions as assetExtensions } from "../../core/asset-extensions.js";
+
+function isServerFunctionsModule(raw, filename) {
+  const trimmed = raw.trim();
+  if (useClientRegex.test(trimmed)) return false;
+  if (useServerRegex.test(trimmed)) return true;
+  if (hasServerFunctions(raw)) {
+    const actions = extractServerFunctions(raw, filename);
+    return Boolean(actions && actions.length > 0);
+  }
+  return false;
+}
 
 const styleExtensions = ["css", "scss", "less", "sass"];
 const fontExtensions = ["woff", "woff2", "ttf", "eot", "otf"];
@@ -50,12 +62,14 @@ export async function transformToDisk(srcPath, projectRoot = process.cwd()) {
   if (!fsSync.existsSync(normSrc)) return null;
 
   const raw = await fs.readFile(normSrc, "utf8");
+  const targetPath = getMirrorPath(normSrc, projectRoot);
   // Skip server functions - handled by serverFunctionsPlugin proxy
-  if (useServerRegex.test(raw)) {
+  if (isServerFunctionsModule(raw, normSrc)) {
+    try {
+      if (fsSync.existsSync(targetPath)) await fs.unlink(targetPath);
+    } catch (e) {}
     return null;
   }
-
-  const targetPath = getMirrorPath(normSrc, projectRoot);
 
   try {
     const { code } = await transform(raw, {
@@ -94,12 +108,15 @@ export async function syncAllSwcFiles(srcDir = path.resolve("src"), projectRoot 
     } catch (e) {
       continue;
     }
+    const targetPath = getMirrorPath(f, projectRoot);
     // Skip server functions
-    if (useServerRegex.test(raw)) {
+    if (isServerFunctionsModule(raw, f)) {
+      try {
+        if (fsSync.existsSync(targetPath)) fsSync.unlinkSync(targetPath);
+      } catch (e) {}
       continue;
     }
 
-    const targetPath = getMirrorPath(f, projectRoot);
     let needCompile = true;
     try {
       if (fsSync.existsSync(targetPath)) {

@@ -1,40 +1,47 @@
 import path from "node:path";
 import { normalizePathCase } from "../../core/path-utils.js";
 import parseExports from "../../core/parse-exports.js";
-import { useServerRegex } from "../../constants.js";
+import { useClientRegex, useServerRegex } from "../../constants.js";
+import { extractServerFunctions, hasServerFunctions } from "../../core/transform-server-functions.js";
 
 export default function (source) {
   const options = this.getOptions ? this.getOptions() : {};
+  const trimmed = source.trim();
+
+  if (useClientRegex.test(trimmed)) {
+    return source;
+  }
+
   const norm = path.resolve(this.resourcePath).replace(/\\/g, "/").toLowerCase();
+
+  const isModuleLevel = useServerRegex.test(trimmed);
+  const hasBodyUseServer = !isModuleLevel && hasServerFunctions(source);
 
   if (options.serverFiles) {
     if (!options.serverFiles.has(norm)) {
-      if (!source.includes("use server")) {
+      if (!isModuleLevel && !hasBodyUseServer) {
         return source;
       }
-      if (useServerRegex.test(source)) {
-        options.serverFiles.add(norm);
-      } else {
-        return source;
-      }
+      options.serverFiles.add(norm);
     }
   }
 
-  let hasUseServer = false;
-
-  if (useServerRegex.test(source)) {
-    hasUseServer = true;
-  }
-
-  if (!hasUseServer) {
+  if (!isModuleLevel && !hasBodyUseServer) {
     if (options.serverFiles) {
       options.serverFiles.delete(norm);
     }
     return source;
   }
 
-  const exports = parseExports(source);
-  if (exports.length === 0) return source;
+  const exports = isModuleLevel
+    ? parseExports(source)
+    : extractServerFunctions(source, this.resourcePath);
+  if (!exports || exports.length === 0) {
+    if (options.serverFiles) {
+      options.serverFiles.delete(norm);
+    }
+    return source;
+  }
 
   // Build IDs
   const moduleId = this.resourcePath;

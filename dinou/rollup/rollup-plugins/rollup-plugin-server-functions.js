@@ -17,6 +17,7 @@ function serverFunctionsPlugin(manifestData = {}, options = {}) {
     opts.serverFiles || manifestData.serverFiles || options.serverFiles || null;
   const root = process.cwd();
   const serverFunctions = new Map(); // Collect here: Map<relativePath, Set<exports>>
+  const sfMtimeCache = new Map(); // Cache by filePath: { mtimeMs, exportsSet }
 
   function normalizeFsPath(p) {
     const resolved = path.resolve(p).replace(/\\/g, "/");
@@ -72,21 +73,42 @@ function serverFunctionsPlugin(manifestData = {}, options = {}) {
       if (serverFiles && serverFiles.size > 0) {
         for (const filePath of serverFiles) {
           const rel = path.relative(root, filePath).replace(/\\/g, "/");
-          if (!serverFunctions.has(rel)) {
-            try {
-              const fileCode = await fs.readFile(filePath, "utf8");
-              if (useServerRegex.test(fileCode.trim())) {
-                const exports = parseExports(fileCode);
-                if (exports && exports.length > 0) {
-                  serverFunctions.set(rel, new Set(exports));
-                }
-              } else if (hasServerFunctions(fileCode)) {
-                const actions = extractServerFunctions(fileCode, filePath);
-                if (actions && actions.length > 0) {
-                  serverFunctions.set(rel, new Set(actions));
-                }
+          try {
+            const stat = await fs.stat(filePath);
+            const cached = sfMtimeCache.get(filePath);
+            if (cached && cached.mtimeMs === stat.mtimeMs) {
+              if (cached.exportsSet) {
+                serverFunctions.set(rel, cached.exportsSet);
+              } else {
+                serverFunctions.delete(rel);
               }
-            } catch (e) {}
+              continue;
+            }
+
+            const fileCode = await fs.readFile(filePath, "utf8");
+            let exports = null;
+            if (useServerRegex.test(fileCode.trim())) {
+              exports = parseExports(fileCode);
+            } else if (hasServerFunctions(fileCode)) {
+              exports = extractServerFunctions(fileCode, filePath);
+            }
+
+            if (exports && exports.length > 0) {
+              const exportsSet = new Set(exports);
+              serverFunctions.set(rel, exportsSet);
+              sfMtimeCache.set(filePath, {
+                mtimeMs: stat.mtimeMs,
+                exportsSet,
+              });
+            } else {
+              serverFunctions.delete(rel);
+              sfMtimeCache.set(filePath, {
+                mtimeMs: stat.mtimeMs,
+                exportsSet: null,
+              });
+            }
+          } catch (e) {
+            serverFunctions.delete(rel);
           }
         }
       }
