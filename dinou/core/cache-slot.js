@@ -33,6 +33,40 @@ if (!globalThis[SLOT_REGISTRY_KEY]) {
 }
 const slotRegistry = globalThis[SLOT_REGISTRY_KEY];
 
+const DISCOVERING_SLOTS_KEY = Symbol.for("dinou.slot.discovering");
+if (!globalThis[DISCOVERING_SLOTS_KEY]) {
+  globalThis[DISCOVERING_SLOTS_KEY] = new Set();
+}
+const discoveringSlots = globalThis[DISCOVERING_SLOTS_KEY];
+
+let _registerServerRefFn = null;
+function getRegisterServerReference() {
+  if (_registerServerRefFn) return _registerServerRefFn;
+  if (
+    typeof globalThis !== "undefined" &&
+    globalThis.__DINOU_EDGE_RENDERER__ &&
+    typeof globalThis.__DINOU_EDGE_RENDERER__.registerServerReference === "function"
+  ) {
+    _registerServerRefFn = globalThis.__DINOU_EDGE_RENDERER__.registerServerReference;
+    return _registerServerRefFn;
+  }
+  try {
+    const pkg = require("react-server-dom-webpack/server");
+    if (typeof pkg.registerServerReference === "function") {
+      _registerServerRefFn = pkg.registerServerReference;
+      return _registerServerRefFn;
+    }
+  } catch (e) {}
+  try {
+    const pkg = require("@roggc/react-server-dom-esm/server.node.js");
+    if (typeof pkg.registerServerReference === "function") {
+      _registerServerRefFn = pkg.registerServerReference;
+      return _registerServerRefFn;
+    }
+  } catch (e) {}
+  return null;
+}
+
 let _DinouCacheSlotBoundary = null;
 function getCacheSlotBoundary() {
   if (!_DinouCacheSlotBoundary) {
@@ -44,10 +78,19 @@ function getCacheSlotBoundary() {
       const slotPath = path.resolve(currentDir, "slot.js");
       const fileUrl = pathToFileURL(slotPath).href;
       let regFn = null;
-      try {
-        const pkg = require("react-server-dom-webpack/server");
-        regFn = pkg.registerClientReference;
-      } catch (e) {}
+      if (
+        typeof globalThis !== "undefined" &&
+        globalThis.__DINOU_EDGE_RENDERER__ &&
+        typeof globalThis.__DINOU_EDGE_RENDERER__.registerClientReference === "function"
+      ) {
+        regFn = globalThis.__DINOU_EDGE_RENDERER__.registerClientReference;
+      }
+      if (!regFn) {
+        try {
+          const pkg = require("react-server-dom-webpack/server");
+          regFn = pkg.registerClientReference;
+        } catch (e) {}
+      }
       if (!regFn) {
         try {
           const pkg = require("@roggc/react-server-dom-esm/server.node.js");
@@ -74,7 +117,8 @@ function getCacheSlotBoundary() {
 
 /**
  * Serializes a resolved JSX element tree into a JSON-safe string,
- * preserving symbols, React 19 transitional elements, and client component references.
+ * preserving symbols, React 19 transitional elements, client component references,
+ * and server function references ("use server").
  */
 function serializeJSX(jsx) {
   return JSON.stringify(jsx, (key, value) => {
@@ -91,6 +135,17 @@ function serializeJSX(jsx) {
         id: value.$$id || value.name,
         name: value.name,
         async: value.$$async,
+      };
+    }
+    if (
+      (typeof value === "function" || typeof value === "object") &&
+      value !== null &&
+      value.$$typeof === Symbol.for("react.server.reference")
+    ) {
+      return {
+        __dinou_server_ref__: true,
+        id: value.$$id || value.name,
+        bound: value.$$bound || null,
       };
     }
     if (
@@ -128,6 +183,26 @@ function deserializeJSX(json) {
         });
         return fakeRef;
       }
+      if (value.__dinou_server_ref__) {
+        let serverRef = function () {};
+        const regServerRef = getRegisterServerReference();
+        if (regServerRef) {
+          try {
+            serverRef = regServerRef(serverRef, value.id, null);
+            if (Array.isArray(value.bound) && typeof serverRef.bind === "function") {
+              serverRef = serverRef.bind(null, ...value.bound);
+            }
+          } catch (e) {}
+        }
+        if (serverRef.$$typeof !== Symbol.for("react.server.reference")) {
+          Object.defineProperties(serverRef, {
+            $$typeof: { value: Symbol.for("react.server.reference") },
+            $$id: { value: value.id },
+            $$bound: { value: value.bound || null },
+          });
+        }
+        return serverRef;
+      }
     }
     return value;
   });
@@ -161,6 +236,90 @@ function deserializeJSX(json) {
   return toReactElement(parsed);
 }
 
+function recordSlotTagsOnContext(tags) {
+  if (!Array.isArray(tags) || tags.length === 0) return;
+  try {
+    const reqContext = getContext();
+    if (reqContext) {
+      if (!reqContext._slotTags) {
+        reqContext._slotTags = new Set();
+      }
+      for (const t of tags) {
+        if (t) reqContext._slotTags.add(t);
+      }
+    }
+  } catch (e) {}
+}
+
+/**
+ * Traverses a deserialized JSX tree from a cached outer slot and refreshes
+ * any nested <DinouCacheSlot> boundaries so inner slot invalidations are
+ * respected even when the outer slot hits its cache.
+ */
+async function refreshNestedSlotsInTree(node, currentSlotId, options = {}) {
+  if (node == null || typeof node !== "object") return node;
+  if (Array.isArray(node)) {
+    return Promise.all(
+      node.map((item) => refreshNestedSlotsInTree(item, currentSlotId, options))
+    );
+  }
+
+  if (node.$$typeof === Symbol.for("react.transitional.element")) {
+    const nestedSlotId = node.props && node.props.__dinou_slot__;
+    if (nestedSlotId && nestedSlotId !== currentSlotId) {
+      if (Array.isArray(node.props.tags)) {
+        recordSlotTagsOnContext(node.props.tags);
+      }
+      let currentPath = options.currentPath;
+      if (!currentPath) {
+        try {
+          currentPath = getContext()?.req?.path;
+        } catch (e) {}
+      }
+      const freshInner = await getSlotJSX(nestedSlotId, {
+        ...options,
+        currentPath,
+      });
+      if (freshInner !== null) {
+        const refreshedInner = await refreshNestedSlotsInTree(
+          freshInner,
+          nestedSlotId,
+          options
+        );
+        const newProps = { ...node.props };
+        if (node.key != null) newProps.key = node.key;
+        delete newProps.children;
+        return React.createElement(node.type, newProps, refreshedInner);
+      }
+    }
+
+    if (node.props && typeof node.props === "object") {
+      let changed = false;
+      const newProps = { ...node.props };
+      for (const [k, v] of Object.entries(node.props)) {
+        if (v && typeof v === "object") {
+          const updated = await refreshNestedSlotsInTree(v, currentSlotId, options);
+          if (updated !== v) {
+            newProps[k] = updated;
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
+        if (node.key != null) newProps.key = node.key;
+        const children = newProps.children;
+        if (Array.isArray(children)) {
+          delete newProps.children;
+          return React.createElement(node.type, newProps, ...children);
+        }
+        return React.createElement(node.type, newProps);
+      }
+    }
+  }
+
+  return node;
+}
+
 /**
  * DinouCacheSlot component.
  *
@@ -185,27 +344,46 @@ async function DinouCacheSlot(props) {
     ? [tag]
     : [];
 
+  recordSlotTagsOnContext(allTags);
+
   const storageKey = `slots/${slotId}/slot.json`;
   const storage = getStorageAdapter();
+  const isNoCache = revalidate === 0;
 
   function wrapWithBoundary(content) {
     const Boundary = getCacheSlotBoundary();
     if (!Boundary) return content;
-    return React.createElement(Boundary, { id: slotId }, content);
+    return React.createElement(
+      Boundary,
+      { id: slotId, tags: allTags, __dinou_slot__: slotId },
+      content
+    );
   }
 
-  // Register in slotRegistry for on-demand endpoint re-rendering
+  // Register in slotRegistry for on-demand endpoint re-rendering and nested slot discovery
   slotRegistry.set(slotId, {
     render: async () => {
       const childElement = typeof children === "function" ? await children() : children;
       return await asyncRenderJSXToClientJSX(childElement);
     },
+    discover: async () => {
+      if (discoveringSlots.has(slotId)) return;
+      discoveringSlots.add(slotId);
+      try {
+        const childElement = typeof children === "function" ? await children() : children;
+        await asyncRenderJSXToClientJSX(childElement);
+      } catch (e) {
+      } finally {
+        discoveringSlots.delete(slotId);
+      }
+    },
     tags: allTags,
     revalidate: typeof revalidate === "number" ? revalidate : undefined,
   });
 
-  if (!storage) {
-    const directContent = typeof children === "function" ? await children() : children;
+  if (!storage || isNoCache) {
+    const childElement = typeof children === "function" ? await children() : children;
+    const directContent = await asyncRenderJSXToClientJSX(childElement);
     return wrapWithBoundary(directContent);
   }
 
@@ -226,6 +404,12 @@ async function DinouCacheSlot(props) {
         ? meta.revalidate
         : undefined;
 
+    if (revalidateSeconds === 0) {
+      const childElement = typeof children === "function" ? await children() : children;
+      const directContent = await asyncRenderJSXToClientJSX(childElement);
+      return wrapWithBoundary(directContent);
+    }
+
     const isExpired =
       typeof revalidateSeconds === "number" &&
       revalidateSeconds > 0 &&
@@ -234,7 +418,8 @@ async function DinouCacheSlot(props) {
     if (!isExpired) {
       try {
         const restored = deserializeJSX(cached.content);
-        return wrapWithBoundary(restored);
+        const withRefreshedNested = await refreshNestedSlotsInTree(restored, slotId);
+        return wrapWithBoundary(withRefreshedNested);
       } catch (err) {}
     } else {
       // Stale-While-Revalidate
@@ -270,7 +455,8 @@ async function DinouCacheSlot(props) {
           } catch (e) {}
         }
 
-        return wrapWithBoundary(staleJSX);
+        const withRefreshedNested = await refreshNestedSlotsInTree(staleJSX, slotId);
+        return wrapWithBoundary(withRefreshedNested);
       } catch (err) {}
     }
   }
@@ -312,11 +498,55 @@ async function DinouCacheSlot(props) {
 }
 
 /**
+ * Resolves a slot ID or tag to its canonical slotId using slotRegistry or storage metadata.
+ */
+async function resolveCanonicalSlotId(slotIdOrTag, storage) {
+  if (slotRegistry.has(slotIdOrTag)) {
+    return slotIdOrTag;
+  }
+  for (const [regId, entry] of slotRegistry.entries()) {
+    if (Array.isArray(entry.tags) && entry.tags.includes(slotIdOrTag)) {
+      return regId;
+    }
+  }
+  if (storage) {
+    try {
+      const direct = await storage.get(`slots/${slotIdOrTag}/slot.json`);
+      if (direct && direct.content) {
+        return slotIdOrTag;
+      }
+      if (typeof storage.keys === "function") {
+        const keys = await storage.keys("slots/");
+        for (const rawKey of keys) {
+          const key = String(rawKey || "").replace(/\\/g, "/");
+          if (key.endsWith("/slot.json") || key.endsWith("/slot.metadata.json")) {
+            const item = await storage.get(key);
+            let meta = item?.metadata;
+            if (!meta && key.endsWith("/slot.metadata.json") && item?.content) {
+              try {
+                meta = JSON.parse(item.content);
+              } catch (e) {}
+            }
+            if (meta && Array.isArray(meta.tags) && meta.tags.includes(slotIdOrTag)) {
+              if (meta.slotId) return meta.slotId;
+              const match = key.match(/^slots\/([^/]+)\//);
+              if (match) return match[1];
+            }
+          }
+        }
+      }
+    } catch (e) {}
+  }
+  return slotIdOrTag;
+}
+
+/**
  * Resolves a slot's JSX tree for the granular /____rsc_slot____/:id endpoint.
  */
 async function getSlotJSX(slotId, options = {}) {
   const storage = getStorageAdapter();
-  const storageKey = `slots/${slotId}/slot.json`;
+  let targetId = await resolveCanonicalSlotId(slotId, storage);
+  let storageKey = `slots/${targetId}/slot.json`;
 
   // 1. Check storage cache
   let cached = null;
@@ -326,58 +556,99 @@ async function getSlotJSX(slotId, options = {}) {
     } catch (e) {}
   }
 
+  const regEntryInitial = slotRegistry.get(targetId);
   const now = Date.now();
   if (cached && cached.content) {
     const meta = cached.metadata || {};
     const generatedAt = meta.generatedAt || 0;
     const revalidateSeconds =
-      typeof meta.revalidate === "number" ? meta.revalidate : undefined;
+      typeof regEntryInitial?.revalidate === "number"
+        ? regEntryInitial.revalidate
+        : typeof meta.revalidate === "number"
+        ? meta.revalidate
+        : undefined;
 
+    const isNoCache = revalidateSeconds === 0;
     const isExpired =
-      typeof revalidateSeconds === "number" &&
-      revalidateSeconds > 0 &&
-      now > generatedAt + revalidateSeconds * 1000;
+      isNoCache ||
+      (typeof revalidateSeconds === "number" &&
+        revalidateSeconds > 0 &&
+        now > generatedAt + revalidateSeconds * 1000);
 
     if (!isExpired && !options.fresh) {
       try {
-        return deserializeJSX(cached.content);
+        const restored = deserializeJSX(cached.content);
+        return await refreshNestedSlotsInTree(restored, targetId, options);
       } catch (e) {}
     }
   }
 
   // 2. If missing from storage (e.g. was invalidated) or expired or forced fresh:
-  if (!slotRegistry.has(slotId) && options.currentPath) {
+  if (!slotRegistry.has(targetId) && options.currentPath) {
     try {
       const isNotFound = { value: false };
-      await getJSX(options.currentPath, {}, isNotFound, false, false, { segment: "page" });
+      const pageJsx = await getJSX(options.currentPath, {}, isNotFound, false, false, {
+        segment: "page",
+      });
+      if (pageJsx) {
+        await asyncRenderJSXToClientJSX(pageJsx);
+      }
+      targetId = await resolveCanonicalSlotId(slotId, storage);
+
+      if (!slotRegistry.has(targetId)) {
+        const fullJsx = await getJSX(options.currentPath, {}, isNotFound, false, false);
+        if (fullJsx) {
+          await asyncRenderJSXToClientJSX(fullJsx);
+        }
+        targetId = await resolveCanonicalSlotId(slotId, storage);
+      }
     } catch (e) {
-      console.warn(`[getSlotJSX] Could not pre-evaluate route "${options.currentPath}" to register slot "${slotId}":`, e);
+      console.warn(
+        `[getSlotJSX] Could not pre-evaluate route "${options.currentPath}" to register slot "${slotId}":`,
+        e
+      );
     }
   }
 
-  if (slotRegistry.has(slotId)) {
-    const entry = slotRegistry.get(slotId);
+  // 3. If still not in slotRegistry (e.g., nested slot inside a cached outer slot),
+  // discover nested slots from registered outer slots.
+  if (!slotRegistry.has(targetId)) {
+    for (const [, entry] of Array.from(slotRegistry.entries())) {
+      if (typeof entry.discover === "function") {
+        await entry.discover();
+        targetId = await resolveCanonicalSlotId(slotId, storage);
+        if (slotRegistry.has(targetId)) break;
+      }
+    }
+  }
+
+  storageKey = `slots/${targetId}/slot.json`;
+
+  if (slotRegistry.has(targetId)) {
+    const entry = slotRegistry.get(targetId);
     try {
       const resolved = await entry.render();
       const serialized = serializeJSX(resolved);
-      if (storage) {
+      if (storage && entry.revalidate !== 0) {
         await storage.set(storageKey, serialized, {
           tags: entry.tags,
           revalidate: entry.revalidate,
           generatedAt: Date.now(),
-          slotId,
+          slotId: targetId,
         });
       }
-      return deserializeJSX(serialized);
+      const restored = deserializeJSX(serialized);
+      return await refreshNestedSlotsInTree(restored, targetId, options);
     } catch (e) {
-      console.error(`[getSlotJSX] Failed to regenerate slot "${slotId}":`, e);
+      console.error(`[getSlotJSX] Failed to regenerate slot "${targetId}":`, e);
     }
   }
 
   // Fallback to cached content if regeneration failed
   if (cached && cached.content) {
     try {
-      return deserializeJSX(cached.content);
+      const restored = deserializeJSX(cached.content);
+      return await refreshNestedSlotsInTree(restored, targetId, options);
     } catch (e) {}
   }
 

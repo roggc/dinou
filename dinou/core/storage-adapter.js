@@ -6,6 +6,46 @@ import path from "node:path";
 import fs from "node:fs";
 
 class StorageAdapter {
+  constructor() {
+    this._deletedKeys = new Set();
+  }
+
+  _normalizeTrackKey(key) {
+    return String(key || "")
+      .replace(/^\/+/, "")
+      .replace(/\\/g, "/")
+      .replace(/\/+$/, "");
+  }
+
+  _markDeleted(key) {
+    const k = this._normalizeTrackKey(key);
+    this._deletedKeys.add(k);
+    if (k.endsWith("/index.html")) {
+      this._deletedKeys.add(k.slice(0, -11));
+    } else if (k === "index.html") {
+      this._deletedKeys.add("");
+    } else if (!k.includes(".")) {
+      this._deletedKeys.add(k ? `${k}/index.html` : "index.html");
+    }
+  }
+
+  _unmarkDeleted(key) {
+    const k = this._normalizeTrackKey(key);
+    this._deletedKeys.delete(k);
+    if (k.endsWith("/index.html")) {
+      this._deletedKeys.delete(k.slice(0, -11));
+    } else if (k === "index.html") {
+      this._deletedKeys.delete("");
+    } else if (!k.includes(".")) {
+      this._deletedKeys.delete(k ? `${k}/index.html` : "index.html");
+    }
+  }
+
+  isDeleted(key) {
+    const k = this._normalizeTrackKey(key);
+    return this._deletedKeys.has(k);
+  }
+
   async get(key) {
     throw new Error("StorageAdapter.get must be implemented");
   }
@@ -68,7 +108,8 @@ class FileSystemStorage extends StorageAdapter {
     // Check companion metadata if available
     let metadata = null;
     const isLayoutKey = cleanKey.includes("layout.rsc") || cleanKey.includes("layout.metadata.json");
-    const isSlotKey = cleanKey.includes("slot");
+    const normSlotKey = cleanKey.replace(/^\/+/, "");
+    const isSlotKey = normSlotKey.startsWith("slots/") || normSlotKey.endsWith("/slot.json") || normSlotKey.endsWith("/slot.metadata.json");
     const metaFileName = isLayoutKey
       ? "layout.metadata.json"
       : isSlotKey
@@ -84,6 +125,7 @@ class FileSystemStorage extends StorageAdapter {
   }
 
   async set(key, content, metadata = null) {
+    this._unmarkDeleted(key);
     let targetPath = this._resolve(key);
     if (fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()) {
       targetPath = path.join(targetPath, "index.html");
@@ -99,7 +141,8 @@ class FileSystemStorage extends StorageAdapter {
     const isMetaJson = cleanKey.endsWith("metadata.json") || path.basename(targetPath).endsWith("metadata.json");
     if (metadata && !isMetaJson) {
       const isLayoutKey = cleanKey.includes("layout.rsc") || cleanKey.includes("layout.metadata.json");
-      const isSlotKey = cleanKey.includes("slot");
+      const normSlotKey = cleanKey.replace(/^\/+/, "");
+      const isSlotKey = normSlotKey.startsWith("slots/") || normSlotKey.endsWith("/slot.json") || normSlotKey.endsWith("/slot.metadata.json");
       const metaFileName = isLayoutKey
         ? "layout.metadata.json"
         : isSlotKey
@@ -119,11 +162,13 @@ class FileSystemStorage extends StorageAdapter {
   }
 
   async delete(key) {
+    this._markDeleted(key);
     let targetPath = this._resolve(key);
     if (fs.existsSync(targetPath)) {
       fs.rmSync(targetPath, { force: true, recursive: true });
     }
-    const isSlotKey = String(key || "").includes("slot");
+    const normSlotKey = String(key || "").replace(/^\/+/, "").replace(/\\/g, "/");
+    const isSlotKey = normSlotKey.startsWith("slots/") || normSlotKey.endsWith("/slot.json") || normSlotKey.endsWith("/slot.metadata.json");
     if (isSlotKey) {
       const dir = path.dirname(targetPath);
       if (fs.existsSync(dir)) {
@@ -136,6 +181,7 @@ class FileSystemStorage extends StorageAdapter {
 
   async keys(prefix = "") {
     if (!fs.existsSync(this.baseDir)) return [];
+    const effectivePrefix = prefix === "dinou_cache" ? "" : prefix;
     const results = [];
     const walk = (dir, rel = "") => {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -145,7 +191,7 @@ class FileSystemStorage extends StorageAdapter {
           walk(path.join(dir, entry.name), entryRel);
         } else {
           const cleanRel = entryRel.replace(/\\/g, "/");
-          if (!prefix || cleanRel.startsWith(prefix)) {
+          if (!effectivePrefix || cleanRel.startsWith(effectivePrefix)) {
             results.push(cleanRel);
           }
         }
@@ -184,6 +230,7 @@ class CloudflareKVStorage extends StorageAdapter {
   }
 
   async set(key, content, metadata = null) {
+    this._unmarkDeleted(key);
     if (!this.kv) return;
     const cleanKey = this._cleanKey(key);
     const options = metadata ? { metadata } : undefined;
@@ -191,6 +238,8 @@ class CloudflareKVStorage extends StorageAdapter {
     if (cleanKey.endsWith("/index.html")) {
       const folderKey = cleanKey.slice(0, -11);
       await this.kv.put(folderKey, content, options);
+    } else if (cleanKey === "index.html") {
+      await this.kv.put("", content, options);
     }
   }
 
@@ -202,15 +251,29 @@ class CloudflareKVStorage extends StorageAdapter {
   }
 
   async delete(key) {
+    this._markDeleted(key);
     if (!this.kv) return;
     const cleanKey = this._cleanKey(key);
     await this.kv.delete(cleanKey);
+    if (cleanKey.endsWith("/index.html")) {
+      await this.kv.delete(cleanKey.slice(0, -11));
+    } else if (cleanKey === "index.html") {
+      await this.kv.delete("");
+    } else if (!cleanKey.includes(".")) {
+      await this.kv.delete(cleanKey ? `${cleanKey}/index.html` : "index.html");
+    }
+    if (cleanKey.endsWith("/slot.json")) {
+      await this.kv.delete(cleanKey.slice(0, -10) + "/slot.metadata.json");
+    } else if (cleanKey.endsWith("/slot.metadata.json")) {
+      await this.kv.delete(cleanKey.slice(0, -19) + "/slot.json");
+    }
   }
 
   async keys(prefix = "") {
     if (!this.kv || typeof this.kv.list !== "function") return [];
     try {
-      const options = prefix ? { prefix } : undefined;
+      const effectivePrefix = prefix === "dinou_cache" ? "" : prefix;
+      const options = effectivePrefix ? { prefix: effectivePrefix } : undefined;
       const res = await this.kv.list(options);
       return res && res.keys ? res.keys.map((k) => k.name) : [];
     } catch (e) {
@@ -243,11 +306,14 @@ class MemoryStorage extends StorageAdapter {
   }
 
   async set(key, content, metadata = null) {
+    this._unmarkDeleted(key);
     const cleanKey = this._cleanKey(key);
     this.store.set(cleanKey, { content, metadata });
     if (cleanKey.endsWith("/index.html")) {
       const folderKey = cleanKey.slice(0, -11);
       this.store.set(folderKey, { content, metadata });
+    } else if (cleanKey === "index.html") {
+      this.store.set("", { content, metadata });
     }
   }
 
@@ -257,13 +323,27 @@ class MemoryStorage extends StorageAdapter {
   }
 
   async delete(key) {
+    this._markDeleted(key);
     const cleanKey = this._cleanKey(key);
     this.store.delete(cleanKey);
-    this.store.delete(cleanKey ? `${cleanKey}/index.html` : "index.html");
+    if (cleanKey.endsWith("/index.html")) {
+      this.store.delete(cleanKey.slice(0, -11));
+    } else if (cleanKey === "index.html") {
+      this.store.delete("");
+    } else if (!cleanKey.includes(".")) {
+      this.store.delete(cleanKey ? `${cleanKey}/index.html` : "index.html");
+    }
+    if (cleanKey.endsWith("/slot.json")) {
+      this.store.delete(cleanKey.slice(0, -10) + "/slot.metadata.json");
+    } else if (cleanKey.endsWith("/slot.metadata.json")) {
+      this.store.delete(cleanKey.slice(0, -19) + "/slot.json");
+    }
   }
 
-  keys() {
-    return Array.from(this.store.keys());
+  keys(prefix = "") {
+    const all = Array.from(this.store.keys());
+    if (!prefix || prefix === "dinou_cache") return all;
+    return all.filter((k) => k.startsWith(prefix));
   }
 }
 
@@ -294,6 +374,7 @@ class RedisStorage extends StorageAdapter {
   }
 
   async set(key, content, metadata = null) {
+    this._unmarkDeleted(key);
     if (!this.redis) return;
     const value = JSON.stringify({ content, metadata });
     await this.redis.set(this._k(key), value);
@@ -305,6 +386,7 @@ class RedisStorage extends StorageAdapter {
   }
 
   async delete(key) {
+    this._markDeleted(key);
     if (!this.redis) return;
     await this.redis.del(this._k(key));
   }
@@ -377,6 +459,7 @@ class DenoKVStorage extends StorageAdapter {
   }
 
   async set(key, content, metadata = null) {
+    this._unmarkDeleted(key);
     const kv = await this._getKV();
     if (!kv) return;
     const cleanKey = this._cleanKey(key);
@@ -429,6 +512,7 @@ class DenoKVStorage extends StorageAdapter {
   }
 
   async delete(key) {
+    this._markDeleted(key);
     const kv = await this._getKV();
     if (!kv) return;
     const cleanKey = this._cleanKey(key);
@@ -454,18 +538,29 @@ class DenoKVStorage extends StorageAdapter {
       await delKey(folderKey);
     } else if (cleanKey === "index.html") {
       await delKey("");
+    } else if (!cleanKey.includes(".")) {
+      await delKey(cleanKey ? `${cleanKey}/index.html` : "index.html");
+    }
+
+    if (cleanKey.endsWith("/slot.json")) {
+      await delKey(cleanKey.slice(0, -10) + "/slot.metadata.json");
+    } else if (cleanKey.endsWith("/slot.metadata.json")) {
+      await delKey(cleanKey.slice(0, -19) + "/slot.json");
     }
   }
 
-  async keys(prefix = "dinou_cache") {
+  async keys(prefix = "") {
     const kv = await this._getKV();
     if (!kv) return [];
     try {
-      const entries = kv.list({ prefix: [prefix] });
+      const entries = kv.list({ prefix: ["dinou_cache"] });
       const result = [];
       for await (const entry of entries) {
         if (entry.key && entry.key.length >= 2 && typeof entry.key[1] === "string") {
-          result.push(entry.key[1]);
+          const k = entry.key[1];
+          if (!prefix || prefix === "dinou_cache" || k.startsWith(prefix)) {
+            result.push(k);
+          }
         }
       }
       return result;

@@ -331,9 +331,11 @@ async function revalidateTag(tag, options = {}) {
       const targetPaths = new Set();
       const targetLayoutPaths = new Set();
       const targetSlotKeys = new Set();
+      const targetSlotHostCleanKeys = new Set();
+      const targetSlotLayoutCleanKeys = new Set();
       for (const rawKey of allKeys) {
         const key = String(rawKey || "").replace(/\\/g, "/");
-        if (key.includes("slot")) {
+        if (key.startsWith("slots/") || key.endsWith("/slot.json") || key.endsWith("/slot.metadata.json")) {
           try {
             const item = await storage.get(key);
             let meta = item?.metadata;
@@ -342,6 +344,11 @@ async function revalidateTag(tag, options = {}) {
             }
             if (meta && Array.isArray(meta.tags) && meta.tags.includes(tag)) {
               targetSlotKeys.add(key);
+              if (key.endsWith("/slot.metadata.json")) {
+                targetSlotKeys.add(key.slice(0, -"/slot.metadata.json".length) + "/slot.json");
+              } else if (key.endsWith("/slot.json")) {
+                targetSlotKeys.add(key.slice(0, -"/slot.json".length) + "/slot.metadata.json");
+              }
             }
           } catch (e) {}
         } else if (key.endsWith("layout.metadata.json") || key.endsWith("layout.rsc")) {
@@ -350,6 +357,12 @@ async function revalidateTag(tag, options = {}) {
             let meta = item?.metadata;
             if (!meta && item?.content) {
               try { meta = JSON.parse(item.content); } catch (e) {}
+            }
+            if (meta && !meta.ppr && Array.isArray(meta.slotTags) && meta.slotTags.includes(tag)) {
+              const cleanLayoutKey = key
+                .replace(/\/(?:layout\.metadata\.json|layout\.rsc)$/, "")
+                .replace(/^(?:layout\.metadata\.json|layout\.rsc)$/, "");
+              targetSlotLayoutCleanKeys.add(cleanLayoutKey);
             }
             if (meta && Array.isArray(meta.tags) && meta.tags.includes(tag)) {
               const cleanKey = key
@@ -366,6 +379,10 @@ async function revalidateTag(tag, options = {}) {
             if (!meta && item?.content) {
               try { meta = JSON.parse(item.content); } catch (e) {}
             }
+            if (meta && !meta.ppr && Array.isArray(meta.slotTags) && meta.slotTags.includes(tag)) {
+              const cleanKey = key.replace(/\/(?:metadata\.json|index\.html)$/, "").replace(/^(?:metadata\.json|index\.html)$/, "");
+              targetSlotHostCleanKeys.add(cleanKey);
+            }
             if (meta && Array.isArray(meta.tags) && meta.tags.includes(tag)) {
               const cleanKey = key
                 .replace(/\/metadata\.json$/, "")
@@ -378,6 +395,10 @@ async function revalidateTag(tag, options = {}) {
           try {
             const item = await storage.get(key);
             const meta = item?.metadata;
+            if (meta && !meta.ppr && Array.isArray(meta.slotTags) && meta.slotTags.includes(tag)) {
+              const cleanKey = key.replace(/\/(?:metadata\.json|index\.html)$/, "").replace(/^(?:metadata\.json|index\.html)$/, "");
+              targetSlotHostCleanKeys.add(cleanKey);
+            }
             if (meta && Array.isArray(meta.tags) && meta.tags.includes(tag)) {
               const cleanKey = key
                 .replace(/\/index\.html$/, "")
@@ -387,6 +408,32 @@ async function revalidateTag(tag, options = {}) {
             }
           } catch (e) {}
         }
+      }
+      await Promise.all(Array.from(targetSlotKeys).map((k) => storage.delete(k)));
+      for (const cleanLayoutKey of targetSlotLayoutCleanKeys) {
+        const layoutRscKey = cleanLayoutKey ? `${cleanLayoutKey}/layout.rsc` : "layout.rsc";
+        const layoutMetaKey = cleanLayoutKey ? `${cleanLayoutKey}/layout.metadata.json` : "layout.metadata.json";
+        await Promise.all([
+          storage.delete(layoutRscKey),
+          storage.delete(layoutMetaKey),
+        ]);
+      }
+      for (const cleanKey of targetSlotHostCleanKeys) {
+        if (cleanKey.startsWith("slots/") || cleanKey.endsWith("layout.rsc") || cleanKey.endsWith("layout.metadata.json")) continue;
+        const htmlKey = cleanKey ? `${cleanKey}/index.html` : "index.html";
+        const metaKey = cleanKey ? `${cleanKey}/metadata.json` : "metadata.json";
+        const pageRscKey = cleanKey ? `${cleanKey}/page.rsc` : "page.rsc";
+        const rscKey = cleanKey ? `${cleanKey}/rsc.rsc` : "rsc.rsc";
+        const delPromises = [
+          storage.delete(htmlKey),
+          storage.delete(metaKey),
+          storage.delete(pageRscKey),
+          storage.delete(rscKey),
+        ];
+        if (cleanKey) {
+          delPromises.push(storage.delete(cleanKey));
+        }
+        await Promise.all(delPromises);
       }
       await Promise.all([
         ...Array.from(targetPaths).map((p) => revalidatePage(p)),
@@ -409,7 +456,7 @@ async function revalidateTag(tag, options = {}) {
     try {
       const content = await fs.readFile(fileOfMeta, "utf8");
       const metadata = JSON.parse(content);
-      if (metadata && Array.isArray(metadata.tags) && metadata.tags.includes(tag)) {
+      if (metadata && ((Array.isArray(metadata.tags) && metadata.tags.includes(tag)) || (!metadata.ppr && Array.isArray(metadata.slotTags) && metadata.slotTags.includes(tag)))) {
         if (path.basename(fileOfMeta) === "slot.metadata.json") {
           const slotFolder = path.dirname(fileOfMeta);
           console.log(`✅ [Revalidate] Invalidating cache slot directory: ${slotFolder}`);

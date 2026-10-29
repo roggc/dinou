@@ -255,7 +255,7 @@ function SlotConsumer({ slotPromise, fallback }) {
   return use ? use(slotPromise) : (slotPromise || fallback);
 }
 
-export function DinouCacheSlotBoundary({ id, children }) {
+export function DinouCacheSlotBoundary({ id, tags, children }) {
   if (typeof useState !== "function") {
     return children;
   }
@@ -263,7 +263,9 @@ export function DinouCacheSlotBoundary({ id, children }) {
 
   useEffect(() => {
     const handleRefresh = (e) => {
-      if (!e || !e.detail || e.detail.id === id || e.detail.id === "*") {
+      const targetId = e?.detail?.id;
+      const matchesTag = Array.isArray(tags) && targetId && tags.includes(targetId);
+      if (!e || !e.detail || targetId === id || targetId === "*" || matchesTag) {
         if (
           typeof window !== "undefined" &&
           typeof window.__DINOU_FETCH_SLOT__ === "function"
@@ -283,7 +285,7 @@ export function DinouCacheSlotBoundary({ id, children }) {
     };
     window.addEventListener("dinou:refresh-slot", handleRefresh);
     return () => window.removeEventListener("dinou:refresh-slot", handleRefresh);
-  }, [id]);
+  }, [id, tags]);
 
   if (slotPromise) {
     return createElement(

@@ -99,6 +99,20 @@ async function processDir(dir, relPrefix = "") {
       if (process.env.DINOU_DEBUG) {
         console.log(`   ✅ Cached Meta: ${cleanRelPath}`);
       }
+    } else if (entry.name === "slot.json") {
+      const slotContent = fs.readFileSync(fullPath, "utf8");
+      let metadata = null;
+      const metaPath = path.join(dir, "slot.metadata.json");
+      if (fs.existsSync(metaPath)) {
+        try {
+          metadata = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+        } catch (e) {}
+      }
+      await setKvCache(kv, cleanRelPath, slotContent, metadata);
+      seededCount++;
+      if (process.env.DINOU_DEBUG) {
+        console.log(`   ✅ Cached Slot: ${cleanRelPath}`);
+      }
     } else if (entry.name.endsWith(".rsc")) {
       const rsc = fs.readFileSync(fullPath, "utf8");
       await setKvCache(kv, cleanRelPath, rsc, null);

@@ -1351,7 +1351,12 @@ async function handleRequest(request, platformContext = {}) {
           }
         } catch (e) {}
 
-        if (platformContext && platformContext.env && platformContext.env.ASSETS) {
+        if (
+          platformContext &&
+          platformContext.env &&
+          platformContext.env.ASSETS &&
+          !(typeof storage.isDeleted === "function" && storage.isDeleted(rscKey))
+        ) {
           try {
             const assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${rscKey}`, request.url)));
             if (assetRes && assetRes.status === 200) {
@@ -1367,9 +1372,7 @@ async function handleRequest(request, platformContext = {}) {
             }
           } catch (e) {}
         }
-      }
-
-      if (existsSync(payloadPath)) {
+      } else if (existsSync(payloadPath)) {
         bridge.setHeader("Content-Type", "application/octet-stream");
         bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
         try {
@@ -1634,7 +1637,10 @@ async function handleRequest(request, platformContext = {}) {
     }
 
     // 2. If not in storageAdapter, check env.ASSETS for pre-rendered build static page
-    if (!isDevelopment && !cachedItem && platformContext && platformContext.env && platformContext.env.ASSETS) {
+    const isRouteDeletedInStorage =
+      typeof storage.isDeleted === "function" &&
+      (storage.isDeleted(htmlKey) || storage.isDeleted(metaKey) || (cleanPath && storage.isDeleted(cleanPath)));
+    if (!isDevelopment && !cachedItem && !isRouteDeletedInStorage && platformContext && platformContext.env && platformContext.env.ASSETS) {
       try {
         const metaRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${metaKey}`, request.url)));
         if (metaRes && metaRes.status === 200) {
@@ -1701,7 +1707,7 @@ async function handleRequest(request, platformContext = {}) {
             await requestStorage.run(context, async () => {
               jsx = await getJSX(reqPath, queryObj, isNotFound, false, false);
               const clientManifest = getClientManifest();
-              const rscStream = renderRSCStream(jsx, clientManifest, { runtime: "edge" });
+              const rscStream = requestStorage.run(context, () => renderRSCStream(jsx, clientManifest, { runtime: "edge" }));
               if (platformContext && platformContext.renderHtmlStream) {
                 const [streamForSsr, streamForKv] = rscStream.tee();
                 const [rscText, htmlStream] = await Promise.all([
@@ -1730,6 +1736,12 @@ async function handleRequest(request, platformContext = {}) {
                   status: 200,
                   revalidate: metadata.revalidate || 3,
                   generatedAt: Date.now(),
+                  ...(Array.isArray(metadata.tags) ? { tags: metadata.tags } : {}),
+                  ...(context._slotTags && context._slotTags.size > 0
+                    ? { slotTags: Array.from(context._slotTags) }
+                    : Array.isArray(metadata.slotTags)
+                    ? { slotTags: metadata.slotTags }
+                    : {}),
                 };
                 await storage.set(htmlKey, htmlText, updatedMeta);
                 await storage.set(metaKey, JSON.stringify(updatedMeta));
@@ -1767,6 +1779,12 @@ async function handleRequest(request, platformContext = {}) {
                   status: 200,
                   revalidate: metadata.revalidate || 3,
                   generatedAt: Date.now(),
+                  ...(Array.isArray(metadata.tags) ? { tags: metadata.tags } : {}),
+                  ...(context._slotTags && context._slotTags.size > 0
+                    ? { slotTags: Array.from(context._slotTags) }
+                    : Array.isArray(metadata.slotTags)
+                    ? { slotTags: metadata.slotTags }
+                    : {}),
                 };
                 await storage.set(htmlKey, html, updatedMeta);
                 await storage.set(metaKey, JSON.stringify(updatedMeta));
@@ -1945,7 +1963,7 @@ async function handleRequest(request, platformContext = {}) {
         }
 
         const clientManifest = getClientManifest();
-        const rscStream = renderRSCStream(jsx, clientManifest, { runtime: "edge" });
+        const rscStream = requestStorage.run(context, () => renderRSCStream(jsx, clientManifest, { runtime: "edge" }));
 
         if (platformContext && platformContext.renderHtmlStream) {
           const [streamForSsr, streamForCache] = rscStream.tee();
@@ -2162,7 +2180,26 @@ async function handleRequest(request, platformContext = {}) {
             if (fullHtml) {
               if (!dynamicState.value || platformContext.isSSG === true) {
                 if (platformContext.isSSG === true) dynamicState.value = false;
+                if (context._slotTags && context._slotTags.size > 0) {
+                  genMeta.slotTags = Array.from(context._slotTags);
+                }
                 try {
+                  if (!platformContext?.isSSG && !genMeta.ppr) {
+                    const pageRscKey = cleanPath ? `${cleanPath}/page.rsc` : "page.rsc";
+                    let pageRscText = "";
+                    try {
+                      const pageJsx = await requestStorage.run(context, () =>
+                        getJSX(reqPath, queryObj, isNotFound, false, false, { segment: "page" })
+                      );
+                      const pageStream = requestStorage.run(context, () =>
+                        renderRSCStream(pageJsx, clientManifest, { runtime: "edge" })
+                      );
+                      pageRscText = await new Response(pageStream).text();
+                    } catch (e) {
+                      pageRscText = rscPayload;
+                    }
+                    await storage.set(pageRscKey, pageRscText);
+                  }
                   await storage.set(rscKey, rscPayload);
                   await storage.set(htmlKey, fullHtml, genMeta);
                   await storage.set(metaKey, JSON.stringify(genMeta));
@@ -2345,4 +2382,3 @@ export {
   resolvePageFunctionsConfig,
 };
 export default handleRequest;
-
