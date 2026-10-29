@@ -2,6 +2,7 @@ import React from "react";
 import {
   isPprBuildActive,
   runInSuspense,
+  commitPprSuspenseEffects,
   registerHole,
 } from "./ppr-context.js";
 
@@ -81,15 +82,17 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
     if (jsx.$$typeof === Symbol.for("react.transitional.element")) {
       if (jsx.type === Symbol.for("react.suspense")) {
         if (isPprBuildActive()) {
-          return await runInSuspense(async (holeId) => {
+          return await runInSuspense(async (holeId, suspenseStore) => {
             try {
               const renderedChildren = await asyncRenderJSXToClientJSX(jsx.props?.children);
+              const renderedFallback = await asyncRenderJSXToClientJSX(jsx.props?.fallback);
+              await commitPprSuspenseEffects(suspenseStore);
               return cloneWithDevProps(
                 jsx,
                 {
                   ...jsx.props,
                   children: renderedChildren,
-                  fallback: await asyncRenderJSXToClientJSX(jsx.props?.fallback),
+                  fallback: renderedFallback,
                 },
                 key ?? jsx.key
               );
@@ -135,6 +138,14 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
         const Component = jsx.type;
         const props = jsx.props;
         if (isClientComponent(Component)) {
+          if (jsx.__clientJsxAlreadyRendered) {
+            return cloneWithDevProps(
+              jsx,
+              props,
+              key ?? jsx.key,
+              Component
+            );
+          }
           return cloneWithDevProps(
             jsx,
             await asyncRenderJSXToClientJSX(props),

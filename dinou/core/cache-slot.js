@@ -10,6 +10,12 @@ import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
 import { DinouCacheSlotBoundary as RawDinouCacheSlotBoundary } from "./slot.js";
 import { getContext } from "./request-context.js";
 import { getJSX } from "./get-jsx.js";
+import {
+  isPprBuildActive,
+  isInsideSuspense,
+  deferPprSuspenseEffect,
+  runWithPprContext,
+} from "./ppr-context.js";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -20,6 +26,12 @@ if (!globalThis[INFLIGHT_KEY]) {
   globalThis[INFLIGHT_KEY] = new Map();
 }
 const inflightSlotRenders = globalThis[INFLIGHT_KEY];
+
+const RECENT_FRESH_KEY = Symbol.for("dinou.slot.recent.fresh");
+if (!globalThis[RECENT_FRESH_KEY]) {
+  globalThis[RECENT_FRESH_KEY] = new Map();
+}
+const recentFreshSlotRenders = globalThis[RECENT_FRESH_KEY];
 
 const BG_REVAL_KEY = Symbol.for("dinou.slot.background.revalidations");
 if (!globalThis[BG_REVAL_KEY]) {
@@ -38,6 +50,12 @@ if (!globalThis[DISCOVERING_SLOTS_KEY]) {
   globalThis[DISCOVERING_SLOTS_KEY] = new Set();
 }
 const discoveringSlots = globalThis[DISCOVERING_SLOTS_KEY];
+
+const PRE_EVAL_ROUTES_KEY = Symbol.for("dinou.slot.preeval.routes");
+if (!globalThis[PRE_EVAL_ROUTES_KEY]) {
+  globalThis[PRE_EVAL_ROUTES_KEY] = new Set();
+}
+const preEvaluatingRoutes = globalThis[PRE_EVAL_ROUTES_KEY];
 
 let _registerServerRefFn = null;
 function getRegisterServerReference() {
@@ -251,6 +269,82 @@ function recordSlotTagsOnContext(tags) {
   } catch (e) {}
 }
 
+function commitSlotTags(tags) {
+  if (!Array.isArray(tags) || tags.length === 0) return;
+  if (!deferPprSuspenseEffect(() => recordSlotTagsOnContext(tags))) {
+    recordSlotTagsOnContext(tags);
+  }
+}
+
+/**
+ * Reads a slot entry from storage, falling back to pre-rendered Edge static assets (env.ASSETS)
+ * when the runtime KV/Memory storage has not yet hydrated the build-time slot artifact.
+ */
+async function getSlotFromStorage(storage, storageKey, knownTags = []) {
+  if (!storage) return null;
+  let cached = null;
+  try {
+    cached = await storage.get(storageKey);
+  } catch (err) {}
+  if (cached && cached.content) {
+    return cached;
+  }
+
+  const isDeleted =
+    typeof storage.isDeleted === "function" && storage.isDeleted(storageKey);
+  if (isDeleted) {
+    return null;
+  }
+
+  try {
+    const reqContext = getContext();
+    const assets =
+      reqContext?.env?.ASSETS ||
+      reqContext?.platformContext?.env?.ASSETS ||
+      reqContext?.req?.env?.ASSETS;
+    if (assets && typeof assets.fetch === "function") {
+      const cleanKey = String(storageKey || "").replace(/^\/+/, "");
+      const metaKey = cleanKey.endsWith("/slot.json")
+        ? cleanKey.slice(0, -"/slot.json".length) + "/slot.metadata.json"
+        : `${cleanKey}.metadata.json`;
+      const [slotRes, metaRes] = await Promise.all([
+        assets.fetch(new Request(`http://localhost/${cleanKey}`)),
+        assets.fetch(new Request(`http://localhost/${metaKey}`)),
+      ]);
+      if (slotRes && slotRes.status === 200) {
+        const ct = slotRes.headers?.get?.("content-type") || "";
+        const content = await slotRes.text();
+        if (!ct.includes("text/html") && !content.trimStart().startsWith("<")) {
+          let metadata = null;
+          if (metaRes && metaRes.status === 200) {
+            try {
+              metadata = await metaRes.json();
+            } catch (e) {}
+          }
+          const generatedAt = metadata?.generatedAt || 0;
+          const combinedTags = new Set([
+            ...(Array.isArray(metadata?.tags) ? metadata.tags : []),
+            ...(Array.isArray(knownTags) ? knownTags : []),
+          ]);
+          if (typeof storage.getTagInvalidatedAt === "function") {
+            for (const t of combinedTags) {
+              const invAt = storage.getTagInvalidatedAt(t);
+              if (invAt > 0 && invAt >= generatedAt) {
+                return null;
+              }
+            }
+          }
+          cached = { content, metadata };
+          await storage.set(cleanKey, content, metadata);
+          return cached;
+        }
+      }
+    }
+  } catch (e) {}
+
+  return cached;
+}
+
 /**
  * Traverses a deserialized JSX tree from a cached outer slot and refreshes
  * any nested <DinouCacheSlot> boundaries so inner slot invalidations are
@@ -258,6 +352,8 @@ function recordSlotTagsOnContext(tags) {
  */
 async function refreshNestedSlotsInTree(node, currentSlotId, options = {}) {
   if (node == null || typeof node !== "object") return node;
+  if (discoveringSlots.size > 0 || preEvaluatingRoutes.size > 0) return node;
+
   if (Array.isArray(node)) {
     return Promise.all(
       node.map((item) => refreshNestedSlotsInTree(item, currentSlotId, options))
@@ -268,7 +364,13 @@ async function refreshNestedSlotsInTree(node, currentSlotId, options = {}) {
     const nestedSlotId = node.props && node.props.__dinou_slot__;
     if (nestedSlotId && nestedSlotId !== currentSlotId) {
       if (Array.isArray(node.props.tags)) {
-        recordSlotTagsOnContext(node.props.tags);
+        commitSlotTags(node.props.tags);
+      }
+      if (!slotRegistry.has(nestedSlotId) && slotRegistry.has(currentSlotId)) {
+        const parentEntry = slotRegistry.get(currentSlotId);
+        if (parentEntry && typeof parentEntry.discover === "function") {
+          await parentEntry.discover();
+        }
       }
       let currentPath = options.currentPath;
       if (!currentPath) {
@@ -344,20 +446,32 @@ async function DinouCacheSlot(props) {
     ? [tag]
     : [];
 
-  recordSlotTagsOnContext(allTags);
-
   const storageKey = `slots/${slotId}/slot.json`;
   const storage = getStorageAdapter();
   const isNoCache = revalidate === 0;
 
-  function wrapWithBoundary(content) {
+  function wrapWithBoundary(content, alreadyRendered = false) {
     const Boundary = getCacheSlotBoundary();
     if (!Boundary) return content;
-    return React.createElement(
+    const elem = React.createElement(
       Boundary,
       { id: slotId, tags: allTags, __dinou_slot__: slotId },
       content
     );
+    if (alreadyRendered) {
+      return Object.defineProperties(
+        Object.create(Object.getPrototypeOf(elem)),
+        {
+          ...Object.getOwnPropertyDescriptors(elem),
+          __clientJsxAlreadyRendered: {
+            value: true,
+            enumerable: false,
+            configurable: true,
+          },
+        }
+      );
+    }
+    return elem;
   }
 
   // Register in slotRegistry for on-demand endpoint re-rendering and nested slot discovery
@@ -381,17 +495,36 @@ async function DinouCacheSlot(props) {
     revalidate: typeof revalidate === "number" ? revalidate : undefined,
   });
 
+  // When running inside a nested slot discovery pass, recursively discover any child slots
+  if (discoveringSlots.size > 0 && !discoveringSlots.has(slotId)) {
+    const ownEntry = slotRegistry.get(slotId);
+    if (ownEntry && typeof ownEntry.discover === "function") {
+      await ownEntry.discover();
+    }
+  }
+
   if (!storage || isNoCache) {
     const childElement = typeof children === "function" ? await children() : children;
     const directContent = await asyncRenderJSXToClientJSX(childElement);
-    return wrapWithBoundary(directContent);
+    commitSlotTags(allTags);
+    return wrapWithBoundary(directContent, true);
   }
 
   // 1. Check if cached in storage
-  let cached = null;
-  try {
-    cached = await storage.get(storageKey);
-  } catch (err) {}
+  let cached = await getSlotFromStorage(storage, storageKey, allTags);
+
+  // During a PPR static shell build, if a slot is inside a <Suspense> boundary
+  // and was only cached at runtime (not part of the static shell), do not short-circuit
+  // from disk so any dynamic request access (cookies/headers/query) inside the slot still
+  // triggers PPR postpone.
+  if (
+    isPprBuildActive() &&
+    isInsideSuspense() &&
+    cached &&
+    !cached.metadata?.inStaticShell
+  ) {
+    cached = null;
+  }
 
   const now = Date.now();
   if (cached && cached.content) {
@@ -407,7 +540,8 @@ async function DinouCacheSlot(props) {
     if (revalidateSeconds === 0) {
       const childElement = typeof children === "function" ? await children() : children;
       const directContent = await asyncRenderJSXToClientJSX(childElement);
-      return wrapWithBoundary(directContent);
+      commitSlotTags(allTags);
+      return wrapWithBoundary(directContent, true);
     }
 
     const isExpired =
@@ -419,7 +553,8 @@ async function DinouCacheSlot(props) {
       try {
         const restored = deserializeJSX(cached.content);
         const withRefreshedNested = await refreshNestedSlotsInTree(restored, slotId);
-        return wrapWithBoundary(withRefreshedNested);
+        commitSlotTags(allTags);
+        return wrapWithBoundary(withRefreshedNested, false);
       } catch (err) {}
     } else {
       // Stale-While-Revalidate
@@ -438,6 +573,7 @@ async function DinouCacheSlot(props) {
                 revalidate: revalidateSeconds,
                 generatedAt: Date.now(),
                 slotId,
+                inStaticShell: Boolean(meta.inStaticShell),
               });
             } catch (e) {
               console.error(`[DinouCacheSlot] Background revalidation failed for slot "${slotId}":`, e);
@@ -456,7 +592,8 @@ async function DinouCacheSlot(props) {
         }
 
         const withRefreshedNested = await refreshNestedSlotsInTree(staleJSX, slotId);
-        return wrapWithBoundary(withRefreshedNested);
+        commitSlotTags(allTags);
+        return wrapWithBoundary(withRefreshedNested, false);
       } catch (err) {}
     }
   }
@@ -465,24 +602,41 @@ async function DinouCacheSlot(props) {
   if (inflightSlotRenders.has(storageKey)) {
     try {
       const deduped = await inflightSlotRenders.get(storageKey);
-      return wrapWithBoundary(deduped);
+      commitSlotTags(allTags);
+      return wrapWithBoundary(deduped, true);
     } catch (e) {}
   }
+
+  const inPprSuspense = isPprBuildActive() && isInsideSuspense();
+  const isPprShellBuild = isPprBuildActive();
 
   const renderPromise = (async () => {
     const childElement = typeof children === "function" ? await children() : children;
     const resolved = await asyncRenderJSXToClientJSX(childElement);
     const serialized = serializeJSX(resolved);
 
-    try {
-      await storage.set(storageKey, serialized, {
-        tags: allTags,
-        revalidate: typeof revalidate === "number" ? revalidate : undefined,
-        generatedAt: Date.now(),
-        slotId,
-      });
-    } catch (err) {
-      console.error(`[DinouCacheSlot] Failed to write cache for slot "${slotId}":`, err);
+    const slotMeta = {
+      tags: allTags,
+      revalidate: typeof revalidate === "number" ? revalidate : undefined,
+      generatedAt: Date.now(),
+      slotId,
+      inStaticShell: Boolean(isPprShellBuild),
+    };
+
+    const persistSlot = async () => {
+      try {
+        await storage.set(storageKey, serialized, slotMeta);
+      } catch (err) {
+        console.error(`[DinouCacheSlot] Failed to write cache for slot "${slotId}":`, err);
+      }
+    };
+
+    if (inPprSuspense) {
+      if (!deferPprSuspenseEffect(persistSlot)) {
+        await persistSlot();
+      }
+    } else {
+      await persistSlot();
     }
 
     return deserializeJSX(serialized);
@@ -491,7 +645,8 @@ async function DinouCacheSlot(props) {
   inflightSlotRenders.set(storageKey, renderPromise);
   try {
     const fresh = await renderPromise;
-    return wrapWithBoundary(fresh);
+    commitSlotTags(allTags);
+    return wrapWithBoundary(fresh, true);
   } finally {
     inflightSlotRenders.delete(storageKey);
   }
@@ -511,7 +666,7 @@ async function resolveCanonicalSlotId(slotIdOrTag, storage) {
   }
   if (storage) {
     try {
-      const direct = await storage.get(`slots/${slotIdOrTag}/slot.json`);
+      const direct = await getSlotFromStorage(storage, `slots/${slotIdOrTag}/slot.json`);
       if (direct && direct.content) {
         return slotIdOrTag;
       }
@@ -549,12 +704,7 @@ async function getSlotJSX(slotId, options = {}) {
   let storageKey = `slots/${targetId}/slot.json`;
 
   // 1. Check storage cache
-  let cached = null;
-  if (storage) {
-    try {
-      cached = await storage.get(storageKey);
-    } catch (e) {}
-  }
+  let cached = await getSlotFromStorage(storage, storageKey);
 
   const regEntryInitial = slotRegistry.get(targetId);
   const now = Date.now();
@@ -583,42 +733,66 @@ async function getSlotJSX(slotId, options = {}) {
     }
   }
 
-  // 2. If missing from storage (e.g. was invalidated) or expired or forced fresh:
-  if (!slotRegistry.has(targetId) && options.currentPath) {
+  async function discoverFromRegisteredSlots() {
+    const attempted = new Set();
+    let progressed = true;
+    while (!slotRegistry.has(targetId) && progressed) {
+      progressed = false;
+      for (const [regKey, entry] of Array.from(slotRegistry.entries())) {
+        if (attempted.has(regKey)) continue;
+        attempted.add(regKey);
+        progressed = true;
+        if (typeof entry.discover === "function") {
+          await entry.discover();
+          targetId = await resolveCanonicalSlotId(slotId, storage);
+          if (slotRegistry.has(targetId)) return;
+        }
+      }
+    }
+  }
+
+  // 2. First try discovering nested slots from already-registered outer slots
+  if (!slotRegistry.has(targetId)) {
+    await discoverFromRegisteredSlots();
+  }
+
+  // 3. If still not in slotRegistry (e.g., cold server start), pre-evaluate the route once
+  if (
+    !slotRegistry.has(targetId) &&
+    options.currentPath &&
+    !preEvaluatingRoutes.has(options.currentPath)
+  ) {
+    preEvaluatingRoutes.add(options.currentPath);
     try {
       const isNotFound = { value: false };
-      const pageJsx = await getJSX(options.currentPath, {}, isNotFound, false, false, {
-        segment: "page",
-      });
-      if (pageJsx) {
-        await asyncRenderJSXToClientJSX(pageJsx);
-      }
-      targetId = await resolveCanonicalSlotId(slotId, storage);
-
-      if (!slotRegistry.has(targetId)) {
-        const fullJsx = await getJSX(options.currentPath, {}, isNotFound, false, false);
-        if (fullJsx) {
-          await asyncRenderJSXToClientJSX(fullJsx);
+      await runWithPprContext({ isPpr: true }, async () => {
+        const pageJsx = await getJSX(options.currentPath, {}, isNotFound, false, false, {
+          segment: "page",
+        });
+        if (pageJsx) {
+          await asyncRenderJSXToClientJSX(pageJsx);
         }
         targetId = await resolveCanonicalSlotId(slotId, storage);
-      }
+
+        if (!slotRegistry.has(targetId)) {
+          const fullJsx = await getJSX(options.currentPath, {}, isNotFound, false, false);
+          if (fullJsx) {
+            await asyncRenderJSXToClientJSX(fullJsx);
+          }
+          targetId = await resolveCanonicalSlotId(slotId, storage);
+        }
+      });
     } catch (e) {
       console.warn(
         `[getSlotJSX] Could not pre-evaluate route "${options.currentPath}" to register slot "${slotId}":`,
         e
       );
+    } finally {
+      preEvaluatingRoutes.delete(options.currentPath);
     }
-  }
 
-  // 3. If still not in slotRegistry (e.g., nested slot inside a cached outer slot),
-  // discover nested slots from registered outer slots.
-  if (!slotRegistry.has(targetId)) {
-    for (const [, entry] of Array.from(slotRegistry.entries())) {
-      if (typeof entry.discover === "function") {
-        await entry.discover();
-        targetId = await resolveCanonicalSlotId(slotId, storage);
-        if (slotRegistry.has(targetId)) break;
-      }
+    if (!slotRegistry.has(targetId)) {
+      await discoverFromRegisteredSlots();
     }
   }
 
@@ -626,19 +800,71 @@ async function getSlotJSX(slotId, options = {}) {
 
   if (slotRegistry.has(targetId)) {
     const entry = slotRegistry.get(targetId);
+    const reqUrl = String(options.req?.url || "");
+    const qIdx = reqUrl.indexOf("?");
+    const queryKey = qIdx !== -1 ? reqUrl.slice(qIdx) : "";
+    const stampedeKey = `${storageKey}::${queryKey}`;
     try {
-      const resolved = await entry.render();
-      const serialized = serializeJSX(resolved);
-      if (storage && entry.revalidate !== 0) {
-        await storage.set(storageKey, serialized, {
-          tags: entry.tags,
-          revalidate: entry.revalidate,
-          generatedAt: Date.now(),
-          slotId: targetId,
-        });
+      if (inflightSlotRenders.has(storageKey)) {
+        const deduped = await inflightSlotRenders.get(storageKey);
+        return await refreshNestedSlotsInTree(deduped, targetId, options);
       }
-      const restored = deserializeJSX(serialized);
-      return await refreshNestedSlotsInTree(restored, targetId, options);
+
+      if (options.fresh && recentFreshSlotRenders.has(stampedeKey)) {
+        const recent = recentFreshSlotRenders.get(stampedeKey);
+        if (recent && Date.now() - recent.timestamp < 1000 && recent.serialized) {
+          const restored = deserializeJSX(recent.serialized);
+          return await refreshNestedSlotsInTree(restored, targetId, options);
+        }
+        recentFreshSlotRenders.delete(stampedeKey);
+      }
+
+      const renderPromise = (async () => {
+        const resolved = await entry.render();
+        const serialized = serializeJSX(resolved);
+        if (options.fresh) {
+          recentFreshSlotRenders.set(stampedeKey, {
+            timestamp: Date.now(),
+            serialized,
+          });
+        }
+        if (storage && entry.revalidate !== 0) {
+          await storage.set(storageKey, serialized, {
+            tags: entry.tags,
+            revalidate: entry.revalidate,
+            generatedAt: Date.now(),
+            slotId: targetId,
+            inStaticShell: Boolean(cached?.metadata?.inStaticShell),
+          });
+          if (Boolean(cached?.metadata?.inStaticShell) && options.currentPath) {
+            const cleanRouteKey = String(options.currentPath)
+              .split("?")[0]
+              .replace(/^\/+/, "")
+              .replace(/\/+$/, "");
+            const htmlKey = cleanRouteKey ? `${cleanRouteKey}/index.html` : "index.html";
+            const shellHtmlKey = cleanRouteKey ? `${cleanRouteKey}/shell.html` : "shell.html";
+            const metaKey = cleanRouteKey ? `${cleanRouteKey}/metadata.json` : "metadata.json";
+            const shellRscKey = cleanRouteKey ? `${cleanRouteKey}/shell.rsc` : "shell.rsc";
+            const rscKey = cleanRouteKey ? `${cleanRouteKey}/rsc.rsc` : "rsc.rsc";
+            await Promise.all([
+              storage.delete(htmlKey),
+              storage.delete(shellHtmlKey),
+              storage.delete(metaKey),
+              storage.delete(shellRscKey),
+              storage.delete(rscKey),
+            ]);
+          }
+        }
+        return deserializeJSX(serialized);
+      })();
+
+      inflightSlotRenders.set(storageKey, renderPromise);
+      try {
+        const restored = await renderPromise;
+        return await refreshNestedSlotsInTree(restored, targetId, options);
+      } finally {
+        inflightSlotRenders.delete(storageKey);
+      }
     } catch (e) {
       console.error(`[getSlotJSX] Failed to regenerate slot "${targetId}":`, e);
     }

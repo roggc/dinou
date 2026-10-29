@@ -248,18 +248,11 @@ export function DinouPageSlot() {
   );
 }
 
-function SlotConsumer({ slotPromise, fallback }) {
-  if (slotPromise && slotPromise.status === "rejected") {
-    throw slotPromise.reason;
-  }
-  return use ? use(slotPromise) : (slotPromise || fallback);
-}
-
 export function DinouCacheSlotBoundary({ id, tags, children }) {
   if (typeof useState !== "function") {
     return children;
   }
-  const [slotPromise, setSlotPromise] = useState(null);
+  const [slotContent, setSlotContent] = useState(null);
 
   useEffect(() => {
     const handleRefresh = (e) => {
@@ -271,13 +264,28 @@ export function DinouCacheSlotBoundary({ id, tags, children }) {
           typeof window.__DINOU_FETCH_SLOT__ === "function"
         ) {
           const promise = window.__DINOU_FETCH_SLOT__(id, e.detail?.options);
-          if (promise) {
+          if (promise && typeof promise.then === "function") {
+            promise.then(
+              (resolved) => {
+                if (typeof startTransition === "function") {
+                  startTransition(() => {
+                    setSlotContent(resolved);
+                  });
+                } else {
+                  setSlotContent(resolved);
+                }
+              },
+              (err) => {
+                console.error(`[Dinou] Failed to refresh slot "${id}":`, err);
+              }
+            );
+          } else if (promise) {
             if (typeof startTransition === "function") {
               startTransition(() => {
-                setSlotPromise(promise);
+                setSlotContent(promise);
               });
             } else {
-              setSlotPromise(promise);
+              setSlotContent(promise);
             }
           }
         }
@@ -287,16 +295,8 @@ export function DinouCacheSlotBoundary({ id, tags, children }) {
     return () => window.removeEventListener("dinou:refresh-slot", handleRefresh);
   }, [id, tags]);
 
-  if (slotPromise) {
-    return createElement(
-      SlotErrorBoundary,
-      { resetKey: slotPromise, pagePromise: slotPromise },
-      createElement(
-        Suspense,
-        { fallback: children },
-        createElement(SlotConsumer, { slotPromise, fallback: children })
-      )
-    );
+  if (slotContent !== null) {
+    return slotContent;
   }
   return children;
 }

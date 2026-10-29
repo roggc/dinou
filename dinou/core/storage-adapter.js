@@ -8,6 +8,17 @@ import fs from "node:fs";
 class StorageAdapter {
   constructor() {
     this._deletedKeys = new Set();
+    this._invalidatedTags = new Map();
+  }
+
+  markTagInvalidated(tag) {
+    if (tag) {
+      this._invalidatedTags.set(String(tag), Date.now());
+    }
+  }
+
+  getTagInvalidatedAt(tag) {
+    return tag ? this._invalidatedTags.get(String(tag)) || 0 : 0;
   }
 
   _normalizeTrackKey(key) {

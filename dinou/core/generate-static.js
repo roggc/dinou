@@ -72,6 +72,7 @@ async function generateStatic() {
         const layoutReq = new Request(`http://localhost/____rsc_layout____${layoutReqPath}`);
         const layoutRes = await rscModule.handleRequest(layoutReq, {
           runtime: "node-bundle",
+          isSSG: true,
         });
         if (layoutRes.status === 200) {
           const layoutRscText = await layoutRes.text();
@@ -154,8 +155,16 @@ async function generateStatic() {
           const metaKey = cleanPagePath ? `${cleanPagePath}/metadata.json` : "metadata.json";
 
           const htmlItem = await storage.get(indexHtmlKey);
+          const effectiveHoles =
+            Array.isArray(htmlItem?.metadata?.holes) && htmlItem.metadata.holes.length > 0
+              ? htmlItem.metadata.holes
+              : routeMeta.holes || [];
           if (htmlItem) {
-            await storage.set(shellHtmlKey, htmlItem.content, { ...(htmlItem.metadata || {}), ppr: true, holes: routeMeta.holes || [] });
+            await storage.set(shellHtmlKey, htmlItem.content, {
+              ...(htmlItem.metadata || {}),
+              ppr: true,
+              holes: effectiveHoles,
+            });
           }
           const metaItem = await storage.get(metaKey);
           let metaObj = {};
@@ -163,7 +172,10 @@ async function generateStatic() {
             metaObj = metaItem ? JSON.parse(metaItem.content || "{}") : {};
           } catch (e) {}
           metaObj.ppr = true;
-          metaObj.holes = routeMeta.holes || [];
+          metaObj.holes =
+            Array.isArray(metaObj.holes) && metaObj.holes.length > 0
+              ? metaObj.holes
+              : effectiveHoles;
           await storage.set(metaKey, JSON.stringify(metaObj));
         }
       } else {
@@ -177,6 +189,7 @@ async function generateStatic() {
         const pageReq = new Request(`http://localhost/____rsc_page____${reqPath}`);
         const pageRes = await rscModule.handleRequest(pageReq, {
           runtime: "node-bundle",
+          isSSG: true,
         });
         if (pageRes.status === 200) {
           const pageRscText = await pageRes.text();

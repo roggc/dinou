@@ -68,7 +68,7 @@ export function resetPprHoles() {
 export function runInSuspense(callback, explicitHoleId = null) {
   const store = getPprStore();
   if (!store) {
-    return callback(null);
+    return callback(null, null);
   }
   let holeId = explicitHoleId;
   if (!holeId) {
@@ -83,13 +83,46 @@ export function runInSuspense(callback, explicitHoleId = null) {
   const nextStack = Array.isArray(store.holeStack)
     ? [...store.holeStack, holeId]
     : [holeId];
+  const pendingEffects = [];
   const childStore = {
     ...store,
     suspenseDepth: store.suspenseDepth + 1,
     currentHoleId: holeId,
     holeStack: nextStack,
+    pendingEffects,
+    parentPendingEffects: Array.isArray(store.pendingEffects)
+      ? store.pendingEffects
+      : null,
   };
-  return pprStorage.run(childStore, () => callback(holeId));
+  return pprStorage.run(childStore, () => callback(holeId, childStore));
+}
+
+export function deferPprSuspenseEffect(effectFn) {
+  const store = getPprStore();
+  if (
+    store &&
+    store.isPpr &&
+    store.suspenseDepth > 0 &&
+    Array.isArray(store.pendingEffects) &&
+    typeof effectFn === "function"
+  ) {
+    store.pendingEffects.push(effectFn);
+    return true;
+  }
+  return false;
+}
+
+export async function commitPprSuspenseEffects(childStore) {
+  if (!childStore || !Array.isArray(childStore.pendingEffects)) return;
+  const effects = childStore.pendingEffects.splice(0);
+  if (effects.length === 0) return;
+  if (Array.isArray(childStore.parentPendingEffects)) {
+    childStore.parentPendingEffects.push(...effects);
+    return;
+  }
+  for (const fn of effects) {
+    await fn();
+  }
 }
 
 export function enterSuspense(holeId = null) {
@@ -171,6 +204,8 @@ export default {
   isInsideSuspense,
   resetPprHoles,
   runInSuspense,
+  deferPprSuspenseEffect,
+  commitPprSuspenseEffects,
   enterSuspense,
   exitSuspense,
   markDynamicAccess,
