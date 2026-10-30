@@ -411,6 +411,8 @@ export async function bundleDualEngine(options = {}) {
         findLayoutRoutes(path.join(dir, entry.name), rel ? `${rel}/${entry.name}` : entry.name);
       } else if (/^layout\.[jt]sx?$/.test(entry.name)) {
         discoveredLayouts.push(rel);
+      } else if (entry.name === "no_layout") {
+        discoveredLayouts.push("!" + rel);
       }
     }
   }

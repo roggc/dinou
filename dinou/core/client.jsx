@@ -58,7 +58,30 @@ const scrollToCurrentHash = (rawHash = typeof window !== "undefined" ? window.lo
 
 // Helper to determine active layout folder for a pathname
 const getLayoutKey = (pathname) => {
-  const layouts = (typeof window !== "undefined" && window.__DINOU_LAYOUTS__) || ["", "docs"];
+  const rawLayouts = (typeof window !== "undefined" && window.__DINOU_LAYOUTS__) || ["", "docs"];
+  const layouts = rawLayouts.filter((l) => typeof l === "string" && !l.startsWith("!"));
+  const noLayouts = rawLayouts
+    .filter((l) => typeof l === "string" && l.startsWith("!"))
+    .map((l) => l.slice(1));
+  const cleanPath0 = pathname.split("?")[0].split("#")[0];
+  const segments0 = cleanPath0.split("/").filter(Boolean);
+  const fullCandidate = segments0.join("/");
+  if (
+    noLayouts.includes(fullCandidate) ||
+    noLayouts.some((nl) => {
+      const lSegs = nl
+        .split("/")
+        .filter(Boolean)
+        .filter((seg) => !(seg.startsWith("(") && seg.endsWith(")")));
+      if (lSegs.length !== segments0.length) return false;
+      return lSegs.every((seg, idx) => {
+        if (seg.startsWith("[") && seg.endsWith("]")) return true;
+        return seg === segments0[idx];
+      });
+    })
+  ) {
+    return null;
+  }
   const cleanPath = pathname.split("?")[0].split("#")[0];
   const segments = cleanPath.split("/").filter(Boolean);
 
@@ -114,7 +137,7 @@ const isHashChangeOnly = (finalPath) => {
   );
 };
 
-const getPagePayload = (route, isPrefetch = false) => {
+const getPagePayload = (route, isPrefetch = false, version = 0) => {
   const url = route.split("::")[0];
   if (pageCache.has(url)) {
     return pageCache.get(url);
@@ -133,9 +156,16 @@ const getPagePayload = (route, isPrefetch = false) => {
     payloadUrl = "/____rsc_page____" + url;
   }
 
-  const buildId = window.__DINOU_BUILD_ID__;
-  if (buildId) {
-    payloadUrl += (payloadUrl.includes("?") ? "&" : "?") + "buildId=" + buildId;
+  const isInitialHydration =
+    !isPrefetch &&
+    typeof document !== "undefined" &&
+    (!document.body || document.body.getAttribute("data-hydrated") !== "true");
+  const buildId = isInitialHydration ? window.__DINOU_BUILD_ID__ : undefined;
+  if (buildId && !version) {
+    payloadUrl += (payloadUrl.includes("?") ? "&" : "?") + "____build_id____=" + buildId;
+  }
+  if (version) {
+    payloadUrl += (payloadUrl.includes("?") ? "&" : "?") + "____v____=" + version;
   }
 
   const promise = createFromFetch(
@@ -174,14 +204,22 @@ const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
     return layoutCache.get(cacheKey);
   }
 
+  const isInitialHydration =
+    typeof document !== "undefined" &&
+    (!document.body || document.body.getAttribute("data-hydrated") !== "true");
+  const buildId = isInitialHydration ? window.__DINOU_BUILD_ID__ : undefined;
   const cleanKey = layoutKey === "/" ? "" : layoutKey;
   let layoutUrl =
     (window.__DINOU_USE_STATIC__
       ? "/____rsc_layout_static____"
       : "/____rsc_layout____") + cleanKey + searchPart;
 
+  if (buildId && !version) {
+    layoutUrl += (layoutUrl.includes("?") ? "&" : "?") + "____build_id____=" + buildId;
+  }
+
   if (version) {
-    layoutUrl += (layoutUrl.includes("?") ? "&" : "?") + "v=" + version;
+    layoutUrl += (layoutUrl.includes("?") ? "&" : "?") + "____v____=" + version;
   }
 
   const promise = createFromFetch(
@@ -681,8 +719,18 @@ function Router() {
       return initialPageErrorRef.current;
     }
     if (navError) return getErrorRSCPayload(route, navError);
-    return getPagePayload(route + (version ? `?v=${version}` : ""));
+    return getPagePayload(route, false, version);
   }, [route, version, navError]);
+
+  useLayoutEffect(() => {
+    if (
+      typeof document !== "undefined" &&
+      document.body &&
+      document.body.getAttribute("data-hydrated") !== "true"
+    ) {
+      document.body.setAttribute("data-hydrated", "true");
+    }
+  });
 
   const layoutPromise = useMemo(() => {
     return layoutKey !== null

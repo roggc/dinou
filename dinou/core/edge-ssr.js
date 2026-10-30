@@ -2,14 +2,16 @@
 // Native React 19 Edge SSR Streaming Engine for Dinou.
 // Reconstructs React element tree from RSC stream and renders native HTML stream via react-dom/server.edge.
 
+import React from "react";
 import { createFromReadableStream } from "react-server-dom-webpack/client.edge";
 import { renderToReadableStream } from "react-dom/server.edge";
+import { DinouPageContext } from "./slot.js";
 
 /**
  * Reconstructs an RSC stream into a React element tree and streams HTML via react-dom/server.edge.
  * @param {ReadableStream} rscStream The RSC binary stream
  * @param {object} consumerManifest The client components consumer manifest ({ moduleMap, serverModuleMap, moduleLoading })
- * @param {object} options Configuration options ({ bootstrapModules, bootstrapScriptContent, onError, waitForAll })
+ * @param {object} options Configuration options ({ bootstrapModules, bootstrapScriptContent, onError, waitForAll, pageRscStream })
  * @returns {Promise<ReadableStream>} The HTML stream
  */
 export async function renderRscStreamToHtmlStream(rscStream, consumerManifest, options = {}) {
@@ -73,10 +75,36 @@ export async function renderRscStreamToHtmlStream(rscStream, consumerManifest, o
       effectiveManifest = { ...effectiveManifest, serverModuleMap: null };
     }
 
-    // 1. Reconstruct JSX element tree from RSC wire stream
-    const elementTree = await createFromReadableStream(rscStream, {
-      serverConsumerManifest: effectiveManifest,
-    });
+    // 1. Reconstruct JSX element tree from RSC wire stream(s)
+    let elementTree;
+    if (options.pageRscStream) {
+      const [layoutTree, pageTree] = await Promise.all([
+        createFromReadableStream(rscStream, {
+          serverConsumerManifest: effectiveManifest,
+        }),
+        createFromReadableStream(options.pageRscStream, {
+          serverConsumerManifest: effectiveManifest,
+        }),
+      ]);
+      const slotValue = {
+        pageElement: pageTree,
+        pagePromise: Promise.resolve(pageTree),
+        resetKey: "ssr",
+      };
+      if (typeof globalThis !== "undefined") {
+        globalThis.__DINOU_SSR_SLOT_CONTEXT__ = slotValue;
+      }
+      elementTree = DinouPageContext
+        ? React.createElement(DinouPageContext.Provider, { value: slotValue }, layoutTree)
+        : layoutTree;
+    } else {
+      if (typeof globalThis !== "undefined") {
+        globalThis.__DINOU_SSR_SLOT_CONTEXT__ = null;
+      }
+      elementTree = await createFromReadableStream(rscStream, {
+        serverConsumerManifest: effectiveManifest,
+      });
+    }
 
     // 2. Stream HTML using React 19's native Edge renderer
     const htmlStream = await renderToReadableStream(elementTree, {

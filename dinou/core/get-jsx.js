@@ -187,6 +187,7 @@ async function getJSX(
   }
 
   if (
+    options?.segment !== "layout" &&
     getFilePathAndDynamicParams(
       reqSegments,
       query,

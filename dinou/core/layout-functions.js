@@ -2,6 +2,7 @@ import path from "node:path";
 import { existsSync } from "./vfs.js";
 import importModule from "./import-module.js";
 import { resolveModulePpr } from "./resolve-module-ppr.js";
+import { getFilePathAndDynamicParams } from "./get-file-path-and-dynamic-params.js";
 
 const LAYOUT_FUNCTIONS_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js", ".mjs"];
 const LAYOUT_FUNCTIONS_NAMES = ["layout_functions", "layout.functions"];
@@ -175,14 +176,114 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
   }
 }
 
+/**
+ * Returns the active layout chain for a route from innermost (leaf) to outermost (root),
+ * honoring `no_layout` and stopping at `reset_layout`.
+ */
+function getActiveLayoutChain(
+  reqSegments,
+  queryObj = {},
+  srcFolder = path.resolve(process.cwd(), "src"),
+  options = {}
+) {
+  if (
+    !options.ignoreNoLayout &&
+    getFilePathAndDynamicParams(reqSegments, queryObj, srcFolder, "no_layout", false)[0]
+  ) {
+    return [];
+  }
+
+  const allLayouts = getFilePathAndDynamicParams(
+    reqSegments,
+    queryObj,
+    srcFolder,
+    "layout",
+    true,
+    false,
+    undefined,
+    0,
+    {},
+    true
+  );
+
+  if (!allLayouts || !Array.isArray(allLayouts) || allLayouts.length === 0) {
+    return [];
+  }
+
+  const normSrc = srcFolder.replace(/\\/g, "/").replace(/\/+$/, "");
+  const activeChain = [];
+
+  for (const [layoutPath, dParams, slots] of [...allLayouts].reverse()) {
+    const layoutFolderPath = path.dirname(layoutPath);
+    const resetLayoutPath = getFilePathAndDynamicParams(
+      [],
+      {},
+      layoutFolderPath,
+      "reset_layout",
+      false
+    )[0];
+
+    const normFolder = layoutFolderPath.replace(/\\/g, "/").replace(/\/+$/, "");
+    let relFromSrc = "";
+    if (normFolder === normSrc) {
+      relFromSrc = "";
+    } else if (normFolder.startsWith(normSrc + "/")) {
+      relFromSrc = normFolder.slice(normSrc.length + 1);
+    } else {
+      const srcIdx = normFolder.lastIndexOf("/src/");
+      if (srcIdx !== -1) {
+        relFromSrc = normFolder.slice(srcIdx + 5);
+      } else if (normFolder.endsWith("/src")) {
+        relFromSrc = "";
+      }
+    }
+
+    const rawFolderSegs = relFromSrc.split("/").filter(Boolean);
+    let urlSegCount = 0;
+    for (const seg of rawFolderSegs) {
+      if (seg.startsWith("(") && seg.endsWith(")")) continue;
+      if (seg.startsWith("[[...") && seg.endsWith("]]")) {
+        const pName = seg.slice(5, -2);
+        const val = dParams?.[pName];
+        urlSegCount += Array.isArray(val) ? val.length : val ? 1 : 0;
+      } else if (seg.startsWith("[...") && seg.endsWith("]")) {
+        const pName = seg.slice(4, -1);
+        const val = dParams?.[pName];
+        urlSegCount += Array.isArray(val) ? val.length : val ? 1 : 0;
+      } else {
+        urlSegCount += 1;
+      }
+    }
+
+    const cleanLayoutKey = reqSegments.slice(0, urlSegCount).join("/");
+    const layoutRoutePath = cleanLayoutKey ? "/" + cleanLayoutKey : "/";
+
+    activeChain.push({
+      layoutPath,
+      dParams: dParams || {},
+      slots: slots || {},
+      cleanLayoutKey,
+      layoutRoutePath,
+      hasResetLayout: Boolean(resetLayoutPath),
+    });
+
+    if (resetLayoutPath) {
+      break;
+    }
+  }
+
+  return activeChain;
+}
+
 export {
   getLayoutFunctionsPath,
   getLayoutProps,
   resolveLayoutFunctionsConfig,
+  getActiveLayoutChain,
 };
 export default {
   getLayoutFunctionsPath,
   getLayoutProps,
   resolveLayoutFunctionsConfig,
+  getActiveLayoutChain,
 };
-
