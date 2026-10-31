@@ -74,28 +74,64 @@ async function generateStatic() {
           runtime: "node-bundle",
           isSSG: true,
         });
-        if (layoutRes.status === 200) {
+        if (
+          layoutRes.status === 200 &&
+          !layoutRes.headers.has("x-rsc-redirect") &&
+          !layoutRes.headers.has("location")
+        ) {
           const layoutRscText = await layoutRes.text();
-          const cleanLayoutPath = layoutReqPath.replace(/^\/+/, "").replace(/\/+$/, "");
-          const layoutRscKey = cleanLayoutPath ? `${cleanLayoutPath}/layout.rsc` : "layout.rsc";
+          if (layoutRscText && layoutRscText.trim().length > 0) {
+            const cleanLayoutPath = layoutReqPath.replace(/^\/+/, "").replace(/\/+$/, "");
+            const layoutRscKey = cleanLayoutPath ? `${cleanLayoutPath}/layout.rsc` : "layout.rsc";
 
-          let layoutMeta = {
-            status: 200,
-            generatedAt: Date.now(),
-            revalidate: undefined,
-            tags: [],
-          };
-          try {
-            const layoutConfig = await resolveLayoutFunctionsConfig(
-              layoutInfo.layoutPath,
-              layoutInfo.params || {}
-            );
-            layoutMeta.revalidate = layoutConfig.revalidate;
-            layoutMeta.tags = layoutConfig.tags || [];
-          } catch (e) {}
+            let layoutMeta = {
+              status: 200,
+              generatedAt: Date.now(),
+              revalidate: undefined,
+              tags: [],
+            };
+            try {
+              const layoutConfig = await resolveLayoutFunctionsConfig(
+                layoutInfo.layoutPath,
+                layoutInfo.params || {}
+              );
+              layoutMeta.revalidate = layoutConfig.revalidate;
+              layoutMeta.tags = layoutConfig.tags || [];
+              if (layoutConfig.ppr !== null && layoutConfig.ppr !== undefined) {
+                layoutMeta.ppr = Boolean(layoutConfig.ppr);
+              }
+            } catch (e) {}
 
-          await storage.set(layoutRscKey, layoutRscText, layoutMeta);
-        } else {
+            try {
+              const slotTagsHeader = layoutRes.headers.get("x-dinou-slot-tags");
+              if (slotTagsHeader) {
+                const parsedSlotTags = JSON.parse(slotTagsHeader);
+                if (Array.isArray(parsedSlotTags) && parsedSlotTags.length > 0) {
+                  layoutMeta.slotTags = parsedSlotTags;
+                }
+              }
+              const holesHeader = layoutRes.headers.get("x-dinou-ppr-holes");
+              if (holesHeader) {
+                const parsedHoles = JSON.parse(holesHeader);
+                if (Array.isArray(parsedHoles) && parsedHoles.length > 0) {
+                  layoutMeta.holes = parsedHoles;
+                }
+              }
+              const suspenseCountHeader = layoutRes.headers.get("x-dinou-suspense-count");
+              if (suspenseCountHeader !== null) {
+                layoutMeta.suspenseCount = Number(suspenseCountHeader) || 0;
+              }
+              if (layoutRes.headers.get("x-dinou-dynamic") === "true") {
+                layoutMeta.dynamic = true;
+              }
+            } catch (e) {}
+
+            await storage.set(layoutRscKey, layoutRscText, layoutMeta);
+          }
+        } else if (
+          !layoutRes.headers.has("x-rsc-redirect") &&
+          !layoutRes.headers.has("location")
+        ) {
           const layoutResult = await generateStaticLayoutRSC(
             layoutReqPath,
             layoutInfo.layoutPath
@@ -184,22 +220,46 @@ async function generateStatic() {
         }
       }
 
-      // B. Pre-render isolated page RSC segment (page.rsc)
-      try {
-        const pageReq = new Request(`http://localhost/____rsc_page____${reqPath}`);
-        const pageRes = await rscModule.handleRequest(pageReq, {
-          runtime: "node-bundle",
-          isSSG: true,
-        });
-        if (pageRes.status === 200) {
-          const pageRscText = await pageRes.text();
-          const pageRscKey = cleanPagePath ? `${cleanPagePath}/page.rsc` : "page.rsc";
-          await storage.set(pageRscKey, pageRscText);
-          if (isRoutePpr) {
-            const shellRscKey = cleanPagePath ? `${cleanPagePath}/shell.rsc` : "shell.rsc";
-            await storage.set(shellRscKey, pageRscText);
+      // B. Pre-render isolated page RSC segment (page.rsc) if not already persisted in Step 5A
+      const pageRscKey = cleanPagePath ? `${cleanPagePath}/page.rsc` : "page.rsc";
+      const existingPageRsc = await storage.get(pageRscKey);
+      if (!existingPageRsc || !existingPageRsc.content) {
+        try {
+          const pageReq = new Request(`http://localhost/____rsc_page____${reqPath}`);
+          const pageRes = await rscModule.handleRequest(pageReq, {
+            runtime: "node-bundle",
+            isSSG: true,
+          });
+          if (
+            pageRes.status === 200 &&
+            !pageRes.headers.has("x-rsc-redirect") &&
+            !pageRes.headers.has("location")
+          ) {
+            const pageRscText = await pageRes.text();
+            if (pageRscText && pageRscText.trim().length > 0) {
+              await storage.set(pageRscKey, pageRscText);
+              if (isRoutePpr) {
+                const shellRscKey = cleanPagePath ? `${cleanPagePath}/shell.rsc` : "shell.rsc";
+                await storage.set(shellRscKey, pageRscText);
+              }
+            }
+          } else if (
+            res.status === 200 &&
+            !pageRes.headers.has("x-rsc-redirect") &&
+            !pageRes.headers.has("location")
+          ) {
+            const pageResult = await generateStaticPageRSC(reqPath);
+            if (
+              pageResult &&
+              pageResult.tempPath &&
+              pageResult.finalPath &&
+              existsSync(pageResult.tempPath)
+            ) {
+              mkdirSync(path.dirname(pageResult.finalPath), { recursive: true });
+              renameSync(pageResult.tempPath, pageResult.finalPath);
+            }
           }
-        } else {
+        } catch (pageErr) {
           const pageResult = await generateStaticPageRSC(reqPath);
           if (
             pageResult &&
@@ -210,17 +270,6 @@ async function generateStatic() {
             mkdirSync(path.dirname(pageResult.finalPath), { recursive: true });
             renameSync(pageResult.tempPath, pageResult.finalPath);
           }
-        }
-      } catch (pageErr) {
-        const pageResult = await generateStaticPageRSC(reqPath);
-        if (
-          pageResult &&
-          pageResult.tempPath &&
-          pageResult.finalPath &&
-          existsSync(pageResult.tempPath)
-        ) {
-          mkdirSync(path.dirname(pageResult.finalPath), { recursive: true });
-          renameSync(pageResult.tempPath, pageResult.finalPath);
         }
       }
     } catch (err) {

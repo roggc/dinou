@@ -269,13 +269,162 @@ export function DinouPageSlot() {
   );
 }
 
+const slotOverrideCache =
+  typeof globalThis !== "undefined"
+    ? (globalThis.__DINOU_SLOT_OVERRIDE_CACHE__ =
+        globalThis.__DINOU_SLOT_OVERRIDE_CACHE__ || new Map())
+    : new Map();
+
+const knownClientSlots =
+  typeof globalThis !== "undefined"
+    ? (globalThis.__DINOU_KNOWN_CLIENT_SLOTS__ =
+        globalThis.__DINOU_KNOWN_CLIENT_SLOTS__ || new Map())
+    : new Map();
+
+const mountedClientSlots =
+  typeof globalThis !== "undefined"
+    ? (globalThis.__DINOU_MOUNTED_CLIENT_SLOTS__ =
+        globalThis.__DINOU_MOUNTED_CLIENT_SLOTS__ || new Set())
+    : new Set();
+
+if (
+  typeof window !== "undefined" &&
+  !window.__DINOU_UNMOUNTED_SLOT_LISTENER_INSTALLED__
+) {
+  window.__DINOU_UNMOUNTED_SLOT_LISTENER_INSTALLED__ = true;
+  window.addEventListener("dinou:refresh-slot", (e) => {
+    const targetId = e?.detail?.id;
+    const options = e?.detail?.options;
+    if (typeof window.__DINOU_FETCH_SLOT__ !== "function") return;
+
+    for (const [slotId, entry] of knownClientSlots.entries()) {
+      if (mountedClientSlots.has(slotId)) continue;
+      const matchesTag =
+        Array.isArray(entry.tags) && targetId && entry.tags.includes(targetId);
+      if (!e || !e.detail || targetId === slotId || targetId === "*" || matchesTag) {
+        const fetchOpts = {
+          ...(options || {}),
+          currentPath: entry.routePath || window.location.pathname,
+        };
+        const promise = window.__DINOU_FETCH_SLOT__(slotId, fetchOpts);
+        if (promise && typeof promise.then === "function") {
+          entry.pendingPromise = promise;
+          const baseRef = entry.baseChildren;
+          promise.then(
+            (resolved) => {
+              if (entry.pendingPromise === promise) {
+                entry.pendingPromise = null;
+              }
+              slotOverrideCache.set(slotId, {
+                baseChildren: baseRef,
+                content: resolved,
+              });
+              if (typeof entry.notifyMounted === "function") {
+                entry.notifyMounted(resolved, baseRef);
+              }
+            },
+            () => {
+              if (entry.pendingPromise === promise) {
+                entry.pendingPromise = null;
+              }
+            }
+          );
+        }
+      }
+    }
+  });
+}
+
 export function DinouCacheSlotBoundary({ id, tags, children }) {
   if (typeof useState !== "function") {
     return children;
   }
-  const [slotContent, setSlotContent] = useState(null);
+  const isBrowser = typeof window !== "undefined";
+  const cachedOverride = isBrowser ? slotOverrideCache.get(id) : null;
+  const initialContent =
+    cachedOverride && cachedOverride.baseChildren === children
+      ? cachedOverride.content
+      : null;
+
+  const [override, setOverride] = useState({
+    baseChildren: children,
+    content: initialContent,
+  });
+  const childrenRef =
+    typeof React.useRef === "function" ? React.useRef(children) : { current: children };
+  childrenRef.current = children;
+
+  if (isBrowser) {
+    const existingKnown = knownClientSlots.get(id);
+    if (!existingKnown || existingKnown.baseChildren !== children) {
+      knownClientSlots.set(id, {
+        id,
+        tags: Array.isArray(tags) ? tags : [],
+        baseChildren: children,
+        routePath: window.location.pathname,
+        pendingPromise: existingKnown?.pendingPromise || null,
+        notifyMounted: existingKnown?.notifyMounted || null,
+      });
+    } else if (Array.isArray(tags)) {
+      existingKnown.tags = tags;
+    }
+    if (cachedOverride && cachedOverride.baseChildren !== children) {
+      slotOverrideCache.delete(id);
+    }
+  }
 
   useEffect(() => {
+    mountedClientSlots.add(id);
+    const applyResolved = (resolved, baseRef = childrenRef.current) => {
+      slotOverrideCache.set(id, {
+        baseChildren: baseRef,
+        content: resolved,
+      });
+      const applyFn = () => {
+        setOverride({
+          baseChildren: baseRef,
+          content: resolved,
+        });
+      };
+      if (typeof startTransition === "function") {
+        startTransition(applyFn);
+      } else {
+        applyFn();
+      }
+    };
+
+    const knownEntry = knownClientSlots.get(id);
+    if (knownEntry) {
+      knownEntry.routePath = window.location.pathname;
+      knownEntry.baseChildren = childrenRef.current;
+      knownEntry.notifyMounted = applyResolved;
+      if (Array.isArray(tags)) {
+        knownEntry.tags = tags;
+      }
+      if (knownEntry.pendingPromise) {
+        const pending = knownEntry.pendingPromise;
+        pending.then(
+          (resolved) => {
+            applyResolved(resolved, childrenRef.current);
+          },
+          () => {}
+        );
+      }
+    }
+
+    const latestCached = slotOverrideCache.get(id);
+    if (
+      latestCached &&
+      latestCached.baseChildren === childrenRef.current &&
+      latestCached.content !== null
+    ) {
+      setOverride((prev) =>
+        prev.content === latestCached.content && prev.baseChildren === childrenRef.current
+          ? prev
+          : { baseChildren: childrenRef.current, content: latestCached.content }
+      );
+    }
+
     const handleRefresh = (e) => {
       const targetId = e?.detail?.id;
       const matchesTag = Array.isArray(tags) && targetId && tags.includes(targetId);
@@ -288,36 +437,41 @@ export function DinouCacheSlotBoundary({ id, tags, children }) {
           if (promise && typeof promise.then === "function") {
             promise.then(
               (resolved) => {
-                if (typeof startTransition === "function") {
-                  startTransition(() => {
-                    setSlotContent(resolved);
-                  });
-                } else {
-                  setSlotContent(resolved);
-                }
+                applyResolved(resolved, childrenRef.current);
               },
               (err) => {
                 console.error(`[Dinou] Failed to refresh slot "${id}":`, err);
               }
             );
           } else if (promise) {
-            if (typeof startTransition === "function") {
-              startTransition(() => {
-                setSlotContent(promise);
-              });
-            } else {
-              setSlotContent(promise);
-            }
+            applyResolved(promise, childrenRef.current);
           }
         }
       }
     };
     window.addEventListener("dinou:refresh-slot", handleRefresh);
-    return () => window.removeEventListener("dinou:refresh-slot", handleRefresh);
+    return () => {
+      mountedClientSlots.delete(id);
+      const curKnown = knownClientSlots.get(id);
+      if (curKnown && curKnown.notifyMounted === applyResolved) {
+        curKnown.notifyMounted = null;
+      }
+      window.removeEventListener("dinou:refresh-slot", handleRefresh);
+    };
   }, [id, tags]);
 
-  if (slotContent !== null) {
-    return slotContent;
+  if (isBrowser) {
+    const latestCached = slotOverrideCache.get(id);
+    if (
+      latestCached &&
+      latestCached.content !== null &&
+      latestCached.baseChildren === children
+    ) {
+      return latestCached.content;
+    }
+  }
+  if (override.content !== null && override.baseChildren === children) {
+    return override.content;
   }
   return children;
 }

@@ -38,11 +38,23 @@ import { pipeRSC, renderRSCStream, isEdgeRuntime } from "./rsc-renderer.js";
 import { getStorageAdapter, setStorageAdapter } from "./storage-adapter.js";
 import { createBailoutProxy } from "./bailout-proxy.js";
 import getAssetFromManifest from "./get-asset-from-manifest.js";
-import { handlePprResume } from "./ppr-runtime.js";
+import { handlePprResume, spliceDynamicHolesIntoShell } from "./ppr-runtime.js";
 import { resolveModulePpr } from "./resolve-module-ppr.js";
 import { getDinouConfig as loadDinouConfig } from "./load-dinou-config.js";
-import { getSlotJSX } from "./cache-slot.js";
-import { runWithPprContext, getRegisteredHoles, resetPprHoles } from "./ppr-context.js";
+import {
+  getSlotJSX,
+  serializeJSX,
+  deserializeJSX,
+  refreshNestedSlotsInTree,
+} from "./cache-slot.js";
+import {
+  runWithPprContext,
+  getRegisteredHoles,
+  resetPprHoles,
+  getPprHoleCounter,
+  runInPageSegment,
+  runInLayoutSegment,
+} from "./ppr-context.js";
 import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
 
 // Load Dinou configuration and plugins
@@ -1361,47 +1373,69 @@ async function handleRequest(request, platformContext = {}) {
 
     let isRoutePpr = false;
     let currentGeneratedAt = null;
-    if (!isDevelopment && !platformContext?.isSSG && isEdgeRuntime(platformContext)) {
+    let leafLayoutSuspenseCount = 0;
+    if (!isDevelopment && isEdgeRuntime(platformContext)) {
       const storage = getStorageAdapter();
       const cleanRel = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
-      if (isLayoutReq && !isOld && !dynamicState.value && (!hasQueryParams || isStatic)) {
-        try {
-          const activeChain = getActiveLayoutChain(reqSegments, queryObj, srcFolder, { ignoreNoLayout: true });
-          if (activeChain.length > 1) {
-            for (const entry of activeChain) {
-              const lMetaKey = entry.cleanLayoutKey ? `${entry.cleanLayoutKey}/layout.metadata.json` : "layout.metadata.json";
-              const lRscKey = entry.cleanLayoutKey ? `${entry.cleanLayoutKey}/layout.rsc` : "layout.rsc";
-              const lMeta = await readMetaFromStorage(storage, lMetaKey, lRscKey, platformContext, request.url);
-              entry.generatedAt = Number(lMeta?.generatedAt || 0);
-            }
+      try {
+        const activeChain = getActiveLayoutChain(reqSegments, queryObj, srcFolder, {
+          ignoreNoLayout: isLayoutReq,
+        });
+        if (activeChain.length > 0) {
+          for (const entry of activeChain) {
+            const lMetaKey = entry.cleanLayoutKey ? `${entry.cleanLayoutKey}/layout.metadata.json` : "layout.metadata.json";
+            const lRscKey = entry.cleanLayoutKey ? `${entry.cleanLayoutKey}/layout.rsc` : "layout.rsc";
+            const lMeta = await readMetaFromStorage(storage, lMetaKey, lRscKey, platformContext, request.url);
+            entry.generatedAt = Number(lMeta?.generatedAt || 0);
+            entry.suspenseCount = Number(lMeta?.suspenseCount || 0);
+          }
+          if (!platformContext?.isSSG && isLayoutReq && !isOld && !dynamicState.value && activeChain.length > 1) {
             const maxAncestorGen = Math.max(0, ...activeChain.slice(1).map((l) => l.generatedAt || 0));
             if (activeChain[0].generatedAt > 0 && maxAncestorGen > activeChain[0].generatedAt) {
               const { revalidateLayout } = await import("./cache-revalidate.js");
               await revalidateLayout(activeChain[0].layoutRoutePath);
             }
           }
-        } catch (e) {}
-      }
-      const metaFileName = isLayoutReq ? "layout.metadata.json" : "metadata.json";
-      const metaKey = cleanRel ? `${cleanRel}/${metaFileName}` : metaFileName;
-      const rscBaseName = isLayoutReq ? "layout.rsc" : "page.rsc";
-      const rscBaseKey = cleanRel ? `${cleanRel}/${rscBaseName}` : rscBaseName;
-      const edgeMeta = await readMetaFromStorage(storage, metaKey, rscBaseKey, platformContext, request.url);
-      if (edgeMeta) {
-        currentGeneratedAt = edgeMeta.generatedAt || null;
-        if (edgeMeta.ppr) {
-          isRoutePpr = true;
+          leafLayoutSuspenseCount = Number(activeChain[0]?.suspenseCount || 0);
+        }
+      } catch (e) {}
+
+      if (!platformContext?.isSSG) {
+        const metaFileName = isLayoutReq ? "layout.metadata.json" : "metadata.json";
+        const metaKey = cleanRel ? `${cleanRel}/${metaFileName}` : metaFileName;
+        const rscBaseName = isLayoutReq ? "layout.rsc" : "page.rsc";
+        const rscBaseKey = cleanRel ? `${cleanRel}/${rscBaseName}` : rscBaseName;
+        const edgeMeta = await readMetaFromStorage(storage, metaKey, rscBaseKey, platformContext, request.url);
+        if (edgeMeta) {
+          currentGeneratedAt = edgeMeta.generatedAt || null;
+          if (isLayoutReq) {
+            if (edgeMeta.dynamic) {
+              dynamicState.value = true;
+            }
+            if (Array.isArray(edgeMeta.holes) && edgeMeta.holes.length > 0) {
+              isRoutePpr = true;
+            }
+          } else if (edgeMeta.ppr) {
+            isRoutePpr = true;
+          }
         }
       }
     }
-    if (!currentGeneratedAt) {
+    if (!currentGeneratedAt && !platformContext?.isSSG) {
       try {
         const metaFileName = isLayoutReq ? "layout.metadata.json" : "metadata.json";
         const metadataPath = path.join(".dinou/dist2", cleanPath, metaFileName);
         if (existsSync(metadataPath)) {
           const metaObj = JSON.parse(readFileSync(metadataPath, "utf8"));
           currentGeneratedAt = metaObj.generatedAt || null;
-          if (metaObj.ppr) {
+          if (isLayoutReq) {
+            if (metaObj.dynamic) {
+              dynamicState.value = true;
+            }
+            if (Array.isArray(metaObj.holes) && metaObj.holes.length > 0) {
+              isRoutePpr = true;
+            }
+          } else if (metaObj.ppr) {
             isRoutePpr = true;
           }
         }
@@ -1410,13 +1444,17 @@ async function handleRequest(request, platformContext = {}) {
 
     if (!isRoutePpr) {
       isRoutePpr = isLayoutReq
-        ? Boolean(layoutConfig?.ppr)
+        ? Boolean(platformContext?.isSSG && layoutConfig?.ppr)
         : pageConfig?.ppr !== undefined && pageConfig?.ppr !== null
         ? Boolean(pageConfig.ppr)
         : await resolvePprForRoute(pagePath, null, reqSegments, queryObj);
     }
 
-    if (!isDevelopment && !dynamicState.value && (!hasQueryParams || isStatic) && !isRoutePpr) {
+    const canServeCachedRsc = isLayoutReq
+      ? !isDevelopment && !platformContext?.isSSG && !dynamicState.value && !isRoutePpr
+      : !isDevelopment && !platformContext?.isSSG && !dynamicState.value && (!hasQueryParams || isStatic) && !isRoutePpr;
+
+    if (canServeCachedRsc) {
       const useOld =
         isOld ||
         regenerating.has(cleanPath) ||
@@ -1498,7 +1536,12 @@ async function handleRequest(request, platformContext = {}) {
             if (assetRes && assetRes.status === 200) {
               const contentType = assetRes.headers.get("content-type") || "";
               const rscContent = await assetRes.text();
-              if (!contentType.includes("text/html") && !rscContent.trimStart().startsWith("<")) {
+              if (
+                rscContent &&
+                rscContent.trim().length > 0 &&
+                !contentType.includes("text/html") &&
+                !rscContent.trimStart().startsWith("<")
+              ) {
                 await storage.set(rscKey, rscContent);
                 bridge.setHeader("Content-Type", "text/x-component");
                 bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
@@ -1509,12 +1552,14 @@ async function handleRequest(request, platformContext = {}) {
           } catch (e) {}
         }
       } else if (existsSync(payloadPath)) {
-        bridge.setHeader("Content-Type", "application/octet-stream");
-        bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
         try {
           const buffer = readFileSync(payloadPath);
-          bridge.end(buffer);
-          return bridge.toResponse();
+          if (buffer && buffer.length > 0) {
+            bridge.setHeader("Content-Type", "application/octet-stream");
+            bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+            bridge.end(buffer);
+            return bridge.toResponse();
+          }
         } catch (err) {
           console.error("[Dinou] Error reading RSC file:", err);
           return new Response("Internal Server Error", { status: 500 });
@@ -1604,7 +1649,8 @@ async function handleRequest(request, platformContext = {}) {
       isPathBlocked = pageConfig.isPathBlocked;
     }
 
-    const context = createRequestContext(simReq, bridge, platformContext, isRoutePpr ? { value: false } : dynamicState);
+    const rscDynamicState = isLayoutReq ? dynamicState : (isRoutePpr ? { value: false } : dynamicState);
+    const context = createRequestContext(simReq, bridge, platformContext, rscDynamicState);
     copyCustomContextProperties(rootContext, context);
     const isNotFound = {};
     const segment = isLayoutReq ? "layout" : "page";
@@ -1612,14 +1658,74 @@ async function handleRequest(request, platformContext = {}) {
     await requestStorage.run(context, async () => {
       try {
         let jsx;
-        if (platformContext?.isSSG && (isRoutePpr || Boolean(layoutConfig?.ppr))) {
+        if (platformContext?.isSSG) {
           jsx = await runWithPprContext({ isPpr: true }, async () => {
             const rawJsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, isPathBlocked, {
               segment,
             });
-            resetPprHoles();
-            return await asyncRenderJSXToClientJSX(rawJsx);
+            const startIdx = isLayoutReq ? 0 : leafLayoutSuspenseCount;
+            resetPprHoles(startIdx);
+            const runSeg = isLayoutReq ? runInLayoutSegment : runInPageSegment;
+            const rendered = await runSeg(() => asyncRenderJSXToClientJSX(rawJsx));
+            const slotTagSet = isLayoutReq
+              ? context._layoutSlotTags || context._slotTags
+              : context._pageSlotTags || context._slotTags;
+            if (slotTagSet && slotTagSet.size > 0) {
+              bridge.setHeader("X-Dinou-Slot-Tags", JSON.stringify(Array.from(slotTagSet)));
+            }
+            const regHoles = getRegisteredHoles();
+            if (regHoles.length > 0) {
+              bridge.setHeader("X-Dinou-Ppr-Holes", JSON.stringify(regHoles));
+            }
+            bridge.setHeader("X-Dinou-Suspense-Count", String(getPprHoleCounter()));
+            if (rscDynamicState.value) {
+              bridge.setHeader("X-Dinou-Dynamic", "true");
+            }
+            if (rendered && isEdgeRuntime(platformContext)) {
+              try {
+                const storage = getStorageAdapter();
+                const cleanRel = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
+                const shellPageKey = isLayoutReq ? (cleanRel ? `${cleanRel}/shell.layout.json` : "shell.layout.json") : (cleanRel ? `${cleanRel}/shell.page.json` : "shell.page.json");
+                await storage.set(shellPageKey, serializeJSX(rendered));
+              } catch (e) {}
+            }
+            return rendered;
           });
+        } else if (!isDevelopment && isPageReq && isRoutePpr && isEdgeRuntime(platformContext)) {
+          const storage = getStorageAdapter();
+          const cleanRel = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
+          const shellPageKey = cleanRel ? `${cleanRel}/shell.page.json` : "shell.page.json";
+          const shellPageJson = await readRscFromStorage(
+            storage,
+            shellPageKey,
+            platformContext,
+            request.url
+          );
+          if (shellPageJson) {
+            try {
+              let cachedShellTree = deserializeJSX(shellPageJson);
+              cachedShellTree = await refreshNestedSlotsInTree(
+                cachedShellTree,
+                "__ppr_shell__",
+                { currentPath: reqPath }
+              );
+              jsx = await spliceDynamicHolesIntoShell(
+                cachedShellTree,
+                () =>
+                  getJSX(reqPath, queryObj, isNotFound, isDevelopment, isPathBlocked, {
+                    segment,
+                  }),
+                leafLayoutSuspenseCount
+              );
+            } catch (spliceErr) {
+              console.warn(`[Dinou PPR] Error splicing dynamic holes for ${reqPath}:`, spliceErr);
+            }
+          }
+          if (!jsx) {
+            jsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, isPathBlocked, {
+              segment,
+            });
+          }
         } else {
           jsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, isPathBlocked, {
             segment,
@@ -1862,108 +1968,124 @@ async function handleRequest(request, platformContext = {}) {
 
     // 3. If we found a cached/pre-rendered page:
     if (!isDevelopment && cachedItem && (!dynamicState.value || cachedItem?.metadata?.ppr || isPprConfig) && !isPathBlocked && queryObj.ssr_crash !== "true" && !platformContext?.isSSG) {
-      if (!cachedItem?.metadata?.ppr && !isPprConfig) {
-        try {
-          const activeLayoutChain = getActiveLayoutChain(reqSegments, queryObj, srcFolder);
-          if (activeLayoutChain.length > 0) {
-            for (const entry of activeLayoutChain) {
-              const lMetaKey = entry.cleanLayoutKey
-                ? `${entry.cleanLayoutKey}/layout.metadata.json`
-                : "layout.metadata.json";
-              const lRscKey = entry.cleanLayoutKey
-                ? `${entry.cleanLayoutKey}/layout.rsc`
-                : "layout.rsc";
-              const lMeta = await readMetaFromStorage(
+      try {
+        const activeLayoutChain = getActiveLayoutChain(reqSegments, queryObj, srcFolder);
+        if (activeLayoutChain.length > 0) {
+          for (const entry of activeLayoutChain) {
+            const lMetaKey = entry.cleanLayoutKey
+              ? `${entry.cleanLayoutKey}/layout.metadata.json`
+              : "layout.metadata.json";
+            const lRscKey = entry.cleanLayoutKey
+              ? `${entry.cleanLayoutKey}/layout.rsc`
+              : "layout.rsc";
+            const lMeta = await readMetaFromStorage(
+              storage,
+              lMetaKey,
+              lRscKey,
+              platformContext,
+              request.url
+            );
+            entry.generatedAt = Number(lMeta?.generatedAt || 0);
+          }
+          const leafLayout = activeLayoutChain[0];
+          if (activeLayoutChain.length > 1) {
+            const maxAncestorGen = Math.max(
+              0,
+              ...activeLayoutChain.slice(1).map((l) => l.generatedAt || 0)
+            );
+            if (leafLayout.generatedAt > 0 && maxAncestorGen > leafLayout.generatedAt) {
+              const { revalidateLayout } = await import("./cache-revalidate.js");
+              await revalidateLayout(leafLayout.layoutRoutePath);
+              const refreshedMeta = await readMetaFromStorage(
                 storage,
-                lMetaKey,
-                lRscKey,
+                leafLayout.cleanLayoutKey
+                  ? `${leafLayout.cleanLayoutKey}/layout.metadata.json`
+                  : "layout.metadata.json",
+                leafLayout.cleanLayoutKey
+                  ? `${leafLayout.cleanLayoutKey}/layout.rsc`
+                  : "layout.rsc",
                 platformContext,
                 request.url
               );
-              entry.generatedAt = Number(lMeta?.generatedAt || 0);
-            }
-            const leafLayout = activeLayoutChain[0];
-            if (activeLayoutChain.length > 1) {
-              const maxAncestorGen = Math.max(
-                0,
-                ...activeLayoutChain.slice(1).map((l) => l.generatedAt || 0)
-              );
-              if (leafLayout.generatedAt > 0 && maxAncestorGen > leafLayout.generatedAt) {
-                const { revalidateLayout } = await import("./cache-revalidate.js");
-                await revalidateLayout(leafLayout.layoutRoutePath);
-                const refreshedMeta = await readMetaFromStorage(
-                  storage,
-                  leafLayout.cleanLayoutKey
-                    ? `${leafLayout.cleanLayoutKey}/layout.metadata.json`
-                    : "layout.metadata.json",
-                  leafLayout.cleanLayoutKey
-                    ? `${leafLayout.cleanLayoutKey}/layout.rsc`
-                    : "layout.rsc",
-                  platformContext,
-                  request.url
-                );
-                if (refreshedMeta?.generatedAt) {
-                  leafLayout.generatedAt = Number(refreshedMeta.generatedAt);
-                }
-              }
-            }
-            const pageGeneratedAt = Number(cachedItem.metadata?.generatedAt || 0);
-            if ((leafLayout.generatedAt || 0) > pageGeneratedAt && platformContext?.renderHtmlStream) {
-              const leafRscKey = leafLayout.cleanLayoutKey
-                ? `${leafLayout.cleanLayoutKey}/layout.rsc`
-                : "layout.rsc";
-              const pageRscKey = cleanPath ? `${cleanPath}/page.rsc` : "page.rsc";
-              const [layoutRscText, pageRscText] = await Promise.all([
-                readRscFromStorage(storage, leafRscKey, platformContext, request.url),
-                readRscFromStorage(storage, pageRscKey, platformContext, request.url),
-              ]);
-              if (layoutRscText && pageRscText) {
-                const encoder = new TextEncoder();
-                const toStream = (str) =>
-                  new ReadableStream({
-                    start(controller) {
-                      controller.enqueue(encoder.encode(str));
-                      controller.close();
-                    },
-                  });
-                const knownLayouts = getDiscoveredLayouts();
-                let bootstrapScriptContent = `window.__DINOU_LAYOUTS__ = ${JSON.stringify(knownLayouts)};\n`;
-                bootstrapScriptContent += "window.__DINOU_USE_STATIC__ = true;\n";
-                bootstrapScriptContent += `window.__DINOU_BUILD_ID__ = "${leafLayout.generatedAt}";\n`;
-                const clientEntry = getAssetFromManifest("main.js");
-                const recomposeCtx = createRequestContext(simReq, bridge, platformContext);
-                copyCustomContextProperties(rootContext, recomposeCtx);
-                let htmlStream;
-                await requestStorage.run(recomposeCtx, async () => {
-                  htmlStream = await platformContext.renderHtmlStream(toStream(layoutRscText), {
-                    pageRscStream: toStream(pageRscText),
-                    bootstrapModules: [clientEntry],
-                    bootstrapScriptContent,
-                    waitForAll: true,
-                  });
-                });
-                const recomposedHtml = await new Response(htmlStream).text();
-                if (recomposedHtml) {
-                  const updatedMeta = {
-                    ...(cachedItem.metadata || {}),
-                    generatedAt: leafLayout.generatedAt,
-                  };
-                  cachedItem = {
-                    content: recomposedHtml,
-                    metadata: updatedMeta,
-                  };
-                  await storage.set(htmlKey, recomposedHtml, updatedMeta);
-                  if (cleanPath) {
-                    await storage.set(cleanPath, recomposedHtml, updatedMeta);
-                  }
-                  await storage.set(metaKey, JSON.stringify(updatedMeta));
-                }
+              if (refreshedMeta?.generatedAt) {
+                leafLayout.generatedAt = Number(refreshedMeta.generatedAt);
               }
             }
           }
-        } catch (lazyErr) {
-          console.warn(`⚠️ [Dinou] Error during lazy HTML re-composition for ${reqPath}:`, lazyErr?.message || lazyErr);
+          const pageGeneratedAt = Number(cachedItem.metadata?.generatedAt || 0);
+          if ((leafLayout.generatedAt || 0) > pageGeneratedAt && platformContext?.renderHtmlStream) {
+            const leafRscKey = leafLayout.cleanLayoutKey
+              ? `${leafLayout.cleanLayoutKey}/layout.rsc`
+              : "layout.rsc";
+            const isPprRoute = Boolean(cachedItem?.metadata?.ppr || isPprConfig);
+            const shellRscKey = cleanPath ? `${cleanPath}/shell.rsc` : "shell.rsc";
+            const pageRscKey = cleanPath ? `${cleanPath}/page.rsc` : "page.rsc";
+            let [layoutRscText, pageRscText] = await Promise.all([
+              readRscFromStorage(storage, leafRscKey, platformContext, request.url),
+              readRscFromStorage(
+                storage,
+                isPprRoute ? shellRscKey : pageRscKey,
+                platformContext,
+                request.url
+              ),
+            ]);
+            if (!pageRscText && isPprRoute) {
+              pageRscText = await readRscFromStorage(storage, pageRscKey, platformContext, request.url);
+            }
+            if (layoutRscText && pageRscText) {
+              const encoder = new TextEncoder();
+              const toStream = (str) =>
+                new ReadableStream({
+                  start(controller) {
+                    controller.enqueue(encoder.encode(str));
+                    controller.close();
+                  },
+                });
+              const knownLayouts = getDiscoveredLayouts();
+              let bootstrapScriptContent = `window.__DINOU_LAYOUTS__ = ${JSON.stringify(knownLayouts)};\n`;
+              if (isPprRoute) {
+                bootstrapScriptContent += "window.__DINOU_USE_STATIC__ = false;\nwindow.__DINOU_PPR__ = true;\n";
+              } else {
+                bootstrapScriptContent += "window.__DINOU_USE_STATIC__ = true;\n";
+              }
+              bootstrapScriptContent += `window.__DINOU_BUILD_ID__ = "${leafLayout.generatedAt}";\n`;
+              const clientEntry = getAssetFromManifest("main.js");
+              const recomposeCtx = createRequestContext(simReq, bridge, platformContext);
+              copyCustomContextProperties(rootContext, recomposeCtx);
+              let htmlStream;
+              await requestStorage.run(recomposeCtx, async () => {
+                htmlStream = await platformContext.renderHtmlStream(toStream(layoutRscText), {
+                  pageRscStream: toStream(pageRscText),
+                  bootstrapModules: [clientEntry],
+                  bootstrapScriptContent,
+                  waitForAll: true,
+                });
+              });
+              const recomposedHtml = await new Response(htmlStream).text();
+              if (recomposedHtml) {
+                const updatedMeta = {
+                  ...(cachedItem.metadata || {}),
+                  generatedAt: leafLayout.generatedAt,
+                };
+                cachedItem = {
+                  content: recomposedHtml,
+                  metadata: updatedMeta,
+                };
+                await storage.set(htmlKey, recomposedHtml, updatedMeta);
+                if (isPprRoute) {
+                  const shellHtmlKey = cleanPath ? `${cleanPath}/shell.html` : "shell.html";
+                  await storage.set(shellHtmlKey, recomposedHtml, updatedMeta);
+                }
+                if (cleanPath) {
+                  await storage.set(cleanPath, recomposedHtml, updatedMeta);
+                }
+                await storage.set(metaKey, JSON.stringify(updatedMeta));
+              }
+            }
+          }
         }
+      } catch (lazyErr) {
+        console.warn(`⚠️ [Dinou] Error during lazy HTML re-composition for ${reqPath}:`, lazyErr?.message || lazyErr);
       }
       const metadata = cachedItem.metadata || {};
       const { revalidate, generatedAt } = metadata;
@@ -2460,13 +2582,33 @@ async function handleRequest(request, platformContext = {}) {
             if (fullHtml) {
               if (!dynamicState.value || (platformContext.isSSG === true && !ssgPprUnwrappedBailout)) {
                 if (platformContext.isSSG === true && !ssgPprUnwrappedBailout) dynamicState.value = false;
-                if (context._slotTags && context._slotTags.size > 0) {
-                  genMeta.slotTags = Array.from(context._slotTags);
+                const pageSlotTags =
+                  layouts && layouts.length > 0
+                    ? context._pageSlotTags
+                    : context._pageSlotTags && context._pageSlotTags.size > 0
+                    ? context._pageSlotTags
+                    : context._slotTags;
+                if (pageSlotTags && pageSlotTags.size > 0) {
+                  genMeta.slotTags = Array.from(pageSlotTags);
                 }
                 try {
-                  if (!platformContext?.isSSG && !genMeta.ppr) {
-                    const pageRscKey = cleanPath ? `${cleanPath}/page.rsc` : "page.rsc";
-                    let pageRscText = "";
+                  const pageRscKey = cleanPath ? `${cleanPath}/page.rsc` : "page.rsc";
+                  let pageRscText = "";
+                  if (context._resolvedPageClientJsx) {
+                    try {
+                      const pageStream = requestStorage.run(context, () =>
+                        renderRSCStream(context._resolvedPageClientJsx, clientManifest, { runtime: "edge" })
+                      );
+                      pageRscText = await new Response(pageStream).text();
+                    } catch (e) {}
+                    if (genMeta.ppr) {
+                      try {
+                        const shellPageKey = cleanPath ? `${cleanPath}/shell.page.json` : "shell.page.json";
+                        await storage.set(shellPageKey, serializeJSX(context._resolvedPageClientJsx));
+                      } catch (e) {}
+                    }
+                  }
+                  if (!pageRscText && !platformContext?.isSSG && !genMeta.ppr) {
                     try {
                       const pageJsx = await requestStorage.run(context, () =>
                         getJSX(reqPath, queryObj, isNotFound, false, false, { segment: "page" })
@@ -2478,6 +2620,8 @@ async function handleRequest(request, platformContext = {}) {
                     } catch (e) {
                       pageRscText = rscPayload;
                     }
+                  }
+                  if (pageRscText) {
                     await storage.set(pageRscKey, pageRscText);
                   }
                   await storage.set(rscKey, rscPayload);
@@ -2487,7 +2631,7 @@ async function handleRequest(request, platformContext = {}) {
                     const shellHtmlKey = cleanPath ? `${cleanPath}/shell.html` : "shell.html";
                     const shellRscKey = cleanPath ? `${cleanPath}/shell.rsc` : "shell.rsc";
                     await storage.set(shellHtmlKey, fullHtml, genMeta);
-                    await storage.set(shellRscKey, rscPayload);
+                    await storage.set(shellRscKey, pageRscText || rscPayload);
                   }
                   if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
                     console.log(`✅ [Edge ISG] Successfully cached ${reqPath} to KV`);

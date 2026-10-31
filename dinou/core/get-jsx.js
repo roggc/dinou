@@ -10,6 +10,7 @@ import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
 import { getLayoutProps } from "./layout-functions.js";
 import { DinouPageSlot as RawDinouPageSlot } from "./slot.js";
 import { getErrorJSX } from "./get-error-jsx.js";
+import { markPageRootElement, runInLayoutSegment } from "./ppr-context.js";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -109,10 +110,12 @@ async function getJSX(
         false,
       );
       if (!notFoundPath) {
-        jsx = React.createElement(
-          "div",
-          null,
-          `Page not found: no "page" file found for "${normalizedReqPath}"`,
+        jsx = markPageRootElement(
+          React.createElement(
+            "div",
+            null,
+            `Page not found: no "page" file found for "${normalizedReqPath}"`,
+          ),
         );
       } else {
         const pageModule = await importModule(notFoundPath);
@@ -140,7 +143,7 @@ async function getJSX(
           props = { ...props, ...(pageFunctionsProps ?? {}) };
         }
 
-        jsx = React.createElement(Page, props);
+        jsx = markPageRootElement(React.createElement(Page, props));
         const noLayoutNotFoundPath = path.join(
           notFoundDir,
           `no_layout_not_found`,
@@ -177,7 +180,7 @@ async function getJSX(
         props = { ...props, ...(pageFunctionsProps ?? {}) };
       }
 
-      jsx = React.createElement(Page, props);
+      jsx = markPageRootElement(React.createElement(Page, props));
     }
 
     // 2. Segmented handling for Page: If only the page is requested, return without layouts
@@ -243,7 +246,7 @@ async function getJSX(
           } else {
             elementToRender = slotValue;
           }
-          await asyncRenderJSXToClientJSX(elementToRender);
+          await runInLayoutSegment(() => asyncRenderJSXToClientJSX(elementToRender));
           updatedSlotElement = elementToRender;
         } catch (e) {
           if (slotFilePath) {
@@ -296,7 +299,7 @@ async function getJSX(
       let props = { params: dParams, ...updatedSlots, ...(layoutProps ?? {}) };
       try {
         const testElement = React.createElement(Layout, props, null);
-        await asyncRenderJSXToClientJSX(testElement);
+        await runInLayoutSegment(() => asyncRenderJSXToClientJSX(testElement));
         jsx = React.createElement(Layout, props, jsx);
       } catch (layoutErr) {
         console.warn(

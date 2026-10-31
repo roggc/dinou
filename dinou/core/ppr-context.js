@@ -4,6 +4,36 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 const pprStorage = new AsyncLocalStorage();
+const pageSegmentStorage = new AsyncLocalStorage();
+const layoutSegmentStorage = new AsyncLocalStorage();
+const pageRootElements = new WeakSet();
+
+export function markPageRootElement(el) {
+  if (el && typeof el === "object") {
+    pageRootElements.add(el);
+  }
+  return el;
+}
+
+export function isPageRootElement(el) {
+  return Boolean(el && typeof el === "object" && pageRootElements.has(el));
+}
+
+export function runInPageSegment(callback) {
+  return pageSegmentStorage.run({ active: true }, callback);
+}
+
+export function isInsidePageSegment() {
+  return Boolean(pageSegmentStorage.getStore()?.active);
+}
+
+export function runInLayoutSegment(callback) {
+  return layoutSegmentStorage.run({ active: true }, callback);
+}
+
+export function isInsideLayoutSegment() {
+  return Boolean(layoutSegmentStorage.getStore()?.active);
+}
 
 /**
  * Executes a function within a PPR pre-render context.
@@ -46,13 +76,14 @@ export function isInsideSuspense() {
   return Boolean(store && store.suspenseDepth > 0);
 }
 
-export function resetPprHoles() {
+export function resetPprHoles(startIndex = 0) {
   const store = getPprStore();
   if (store) {
+    const startVal = Number(startIndex) || 0;
     if (store.counter) {
-      store.counter.nextHoleIndex = 0;
+      store.counter.nextHoleIndex = startVal;
     } else {
-      store.nextHoleIndex = 0;
+      store.nextHoleIndex = startVal;
     }
     if (store.holes && typeof store.holes.clear === "function") {
       store.holes.clear();
@@ -63,6 +94,14 @@ export function resetPprHoles() {
       store.holeStack.length = 0;
     }
   }
+}
+
+export function getPprHoleCounter() {
+  const store = getPprStore();
+  if (store) {
+    return store.counter ? store.counter.nextHoleIndex : store.nextHoleIndex || 0;
+  }
+  return 0;
 }
 
 export function runInSuspense(callback, explicitHoleId = null) {
@@ -198,11 +237,14 @@ export function getRegisteredHoles() {
 }
 
 export default {
+  runInPageSegment,
+  isInsidePageSegment,
   runWithPprContext,
   getPprStore,
   isPprBuildActive,
   isInsideSuspense,
   resetPprHoles,
+  getPprHoleCounter,
   runInSuspense,
   deferPprSuspenseEffect,
   commitPprSuspenseEffects,

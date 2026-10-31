@@ -15,6 +15,8 @@ import {
   isInsideSuspense,
   deferPprSuspenseEffect,
   runWithPprContext,
+  isInsideLayoutSegment,
+  isInsidePageSegment,
 } from "./ppr-context.js";
 import { createRequire } from "node:module";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -248,11 +250,22 @@ function deserializeJSX(json) {
         props.key = node.key;
       }
       const children = props.children;
+      let elem;
       if (Array.isArray(children)) {
+        for (const ch of children) {
+          if (ch && typeof ch === "object" && ch._store) {
+            ch._store.validated = 1;
+          }
+        }
         delete props.children;
-        return React.createElement(type, props, ...children);
+        elem = React.createElement(type, props, ...children);
+      } else {
+        elem = React.createElement(type, props);
       }
-      return React.createElement(type, props);
+      if (elem && typeof elem === "object" && elem._store) {
+        elem._store.validated = 1;
+      }
+      return elem;
     }
     return node;
   }
@@ -260,7 +273,11 @@ function deserializeJSX(json) {
   return toReactElement(parsed);
 }
 
-function recordSlotTagsOnContext(tags) {
+function recordSlotTagsOnContext(
+  tags,
+  inLayout = isInsideLayoutSegment(),
+  inPage = isInsidePageSegment()
+) {
   if (!Array.isArray(tags) || tags.length === 0) return;
   try {
     const reqContext = getContext();
@@ -268,8 +285,22 @@ function recordSlotTagsOnContext(tags) {
       if (!reqContext._slotTags) {
         reqContext._slotTags = new Set();
       }
+      if (!reqContext._layoutSlotTags) {
+        reqContext._layoutSlotTags = new Set();
+      }
+      if (!reqContext._pageSlotTags) {
+        reqContext._pageSlotTags = new Set();
+      }
       for (const t of tags) {
-        if (t) reqContext._slotTags.add(t);
+        if (!t) continue;
+        reqContext._slotTags.add(t);
+        if (inLayout) {
+          reqContext._layoutSlotTags.add(t);
+        } else if (inPage) {
+          reqContext._pageSlotTags.add(t);
+        } else if (!reqContext._layoutSlotTags.has(t)) {
+          reqContext._pageSlotTags.add(t);
+        }
       }
     }
   } catch (e) {}
@@ -277,8 +308,10 @@ function recordSlotTagsOnContext(tags) {
 
 function commitSlotTags(tags) {
   if (!Array.isArray(tags) || tags.length === 0) return;
-  if (!deferPprSuspenseEffect(() => recordSlotTagsOnContext(tags))) {
-    recordSlotTagsOnContext(tags);
+  const inLayout = isInsideLayoutSegment();
+  const inPage = isInsidePageSegment();
+  if (!deferPprSuspenseEffect(() => recordSlotTagsOnContext(tags, inLayout, inPage))) {
+    recordSlotTagsOnContext(tags, inLayout, inPage);
   }
 }
 
@@ -514,7 +547,7 @@ async function DinouCacheSlot(props) {
   if (!storage || isNoCache) {
     const childElement = typeof children === "function" ? await children() : children;
     const directContent = await asyncRenderJSXToClientJSX(childElement);
-    commitSlotTags(allTags);
+    commitSlotTags(allTags.length > 0 ? allTags : [slotId]);
     return wrapWithBoundary(directContent, true);
   }
 
@@ -548,7 +581,7 @@ async function DinouCacheSlot(props) {
     if (revalidateSeconds === 0) {
       const childElement = typeof children === "function" ? await children() : children;
       const directContent = await asyncRenderJSXToClientJSX(childElement);
-      commitSlotTags(allTags);
+      commitSlotTags(allTags.length > 0 ? allTags : [slotId]);
       return wrapWithBoundary(directContent, true);
     }
 
@@ -561,7 +594,7 @@ async function DinouCacheSlot(props) {
       try {
         const restored = deserializeJSX(cached.content);
         const withRefreshedNested = await refreshNestedSlotsInTree(restored, slotId);
-        commitSlotTags(allTags);
+        commitSlotTags(allTags.length > 0 ? allTags : [slotId]);
         return wrapWithBoundary(withRefreshedNested, false);
       } catch (err) {}
     } else {
@@ -600,7 +633,7 @@ async function DinouCacheSlot(props) {
         }
 
         const withRefreshedNested = await refreshNestedSlotsInTree(staleJSX, slotId);
-        commitSlotTags(allTags);
+        commitSlotTags(allTags.length > 0 ? allTags : [slotId]);
         return wrapWithBoundary(withRefreshedNested, false);
       } catch (err) {}
     }
@@ -610,7 +643,7 @@ async function DinouCacheSlot(props) {
   if (inflightSlotRenders.has(storageKey)) {
     try {
       const deduped = await inflightSlotRenders.get(storageKey);
-      commitSlotTags(allTags);
+      commitSlotTags(allTags.length > 0 ? allTags : [slotId]);
       return wrapWithBoundary(deduped, true);
     } catch (e) {}
   }
@@ -653,7 +686,7 @@ async function DinouCacheSlot(props) {
   inflightSlotRenders.set(storageKey, renderPromise);
   try {
     const fresh = await renderPromise;
-    commitSlotTags(allTags);
+    commitSlotTags(allTags.length > 0 ? allTags : [slotId]);
     return wrapWithBoundary(fresh, true);
   } finally {
     inflightSlotRenders.delete(storageKey);
@@ -875,24 +908,6 @@ async function getSlotJSX(slotId, options = {}) {
             slotId: targetId,
             inStaticShell: Boolean(cached?.metadata?.inStaticShell),
           });
-          if (Boolean(cached?.metadata?.inStaticShell) && options.currentPath) {
-            const cleanRouteKey = String(options.currentPath)
-              .split("?")[0]
-              .replace(/^\/+/, "")
-              .replace(/\/+$/, "");
-            const htmlKey = cleanRouteKey ? `${cleanRouteKey}/index.html` : "index.html";
-            const shellHtmlKey = cleanRouteKey ? `${cleanRouteKey}/shell.html` : "shell.html";
-            const metaKey = cleanRouteKey ? `${cleanRouteKey}/metadata.json` : "metadata.json";
-            const shellRscKey = cleanRouteKey ? `${cleanRouteKey}/shell.rsc` : "shell.rsc";
-            const rscKey = cleanRouteKey ? `${cleanRouteKey}/rsc.rsc` : "rsc.rsc";
-            await Promise.all([
-              storage.delete(htmlKey),
-              storage.delete(shellHtmlKey),
-              storage.delete(metaKey),
-              storage.delete(shellRscKey),
-              storage.delete(rscKey),
-            ]);
-          }
         }
         if (options.fresh) {
           recentFreshSlotRenders.set(stampedeKey, {
@@ -903,13 +918,77 @@ async function getSlotJSX(slotId, options = {}) {
         return deserializeJSX(serialized);
       })();
 
+      let restored;
       inflightSlotRenders.set(storageKey, renderPromise);
       try {
-        const restored = await renderPromise;
-        return await refreshNestedSlotsInTree(restored, targetId, options);
+        restored = await renderPromise;
       } finally {
         inflightSlotRenders.delete(storageKey);
       }
+
+      if (
+        storage &&
+        entry.revalidate !== 0 &&
+        options.fresh &&
+        true &&
+        options.currentPath
+      ) {
+        try {
+          const cleanRouteKey = String(options.currentPath)
+            .split("?")[0]
+            .replace(/^\/+/, "")
+            .replace(/\/+$/, "");
+          const slotTagsToMatch = new Set([
+            targetId,
+            slotId,
+            ...(Array.isArray(entry.tags) ? entry.tags : []),
+          ]);
+          const metaKey = cleanRouteKey ? `${cleanRouteKey}/metadata.json` : "metadata.json";
+          const metaItem = await storage.get(metaKey);
+          let pageMeta = metaItem?.metadata;
+          if (!pageMeta && metaItem?.content) {
+            try {
+              pageMeta = JSON.parse(metaItem.content);
+            } catch (e) {}
+          }
+          if (
+            pageMeta &&
+            Array.isArray(pageMeta.slotTags) &&
+            pageMeta.slotTags.some((t) => slotTagsToMatch.has(t))
+          ) {
+            const { revalidatePage } = await import("./cache-revalidate.js");
+            await revalidatePage("/" + cleanRouteKey, { onlyRefreshSlots: true });
+          } else {
+            const segments = cleanRouteKey.split("/").filter(Boolean);
+            const candidateLayoutKeys = [""];
+            let acc = "";
+            for (const seg of segments) {
+              acc = acc ? `${acc}/${seg}` : seg;
+              candidateLayoutKeys.push(acc);
+            }
+            for (const lKey of candidateLayoutKeys) {
+              const lMetaKey = lKey ? `${lKey}/layout.metadata.json` : "layout.metadata.json";
+              const lItem = await storage.get(lMetaKey);
+              let lMeta = lItem?.metadata;
+              if (!lMeta && lItem?.content) {
+                try {
+                  lMeta = JSON.parse(lItem.content);
+                } catch (e) {}
+              }
+              if (
+                lMeta &&
+                Array.isArray(lMeta.slotTags) &&
+                lMeta.slotTags.some((t) => slotTagsToMatch.has(t))
+              ) {
+                const { revalidateLayout } = await import("./cache-revalidate.js");
+                await revalidateLayout(lKey ? "/" + lKey : "/", { onlyRefreshSlots: true });
+              }
+            }
+          }
+        } catch (e) {}
+      }
+
+      return await refreshNestedSlotsInTree(restored, targetId, options);
     } catch (e) {
       console.error(`[getSlotJSX] Failed to regenerate slot "${targetId}":`, e);
     }
@@ -931,10 +1010,12 @@ export {
   getSlotJSX,
   serializeJSX,
   deserializeJSX,
+  refreshNestedSlotsInTree,
 };
 export default {
   DinouCacheSlot,
   getSlotJSX,
   serializeJSX,
   deserializeJSX,
+  refreshNestedSlotsInTree,
 };

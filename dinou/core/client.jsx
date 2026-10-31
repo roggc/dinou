@@ -290,7 +290,9 @@ const getErrorRSCPayload = (route, error) => {
 };
 
 const fetchSlotRSC = (slotId, options = {}) => {
-  const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
+  const currentPath =
+    (options && options.currentPath) ||
+    (typeof window !== "undefined" ? window.location.pathname : "/");
   const freshQuery = options && options.fresh ? "&fresh=1" : "";
   const slotSeq = (window.__DINOU_SLOT_SEQ__ = (window.__DINOU_SLOT_SEQ__ || 0) + 1);
   const slotUrl = `/____rsc_slot____/${slotId}?t=${Date.now()}-${slotSeq}${freshQuery}`;
