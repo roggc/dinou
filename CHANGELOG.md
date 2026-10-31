@@ -52,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - Registered `dinou/core/slot.js` (`DinouPageSlot` and `DinouCacheSlotBoundary`) in the client manifest across all platform bundlers (`dinou/node/bundle-dual-engine.js`, `dinou/bun/build.js`, `dinou/deno/build.js`, and `dinou/cloudflare/build.js`).
 - **Standalone Deno Binary Compilation (`build:deno:compile*`) & Optional `HOST` / `HOSTNAME` Binding**: Added the missing `--unstable-kv` flag to `deno compile` in `dinou/cli.js` so standalone compiled Deno executables have `Deno.openKv()` enabled at runtime matching `start:deno`, and added optional `process.env.HOST` / `process.env.HOSTNAME` (`Deno.env.get`) binding support in `dinou/node/build.js`, `dinou/bun/build.js`, and `dinou/deno/build.js` while preserving default dual-stack (`undefined`) listening when omitted.
 
+### Changed
+- **Self-Contained Framework Directory (`dinou/cli.js` & `dinou/eject.js`)**: Relocated `cli.js` and `eject.js` from the package root into the `dinou/` directory (`"bin": { "dinou": "./dinou/cli.js" }`), unifying the directory layout between standard installed mode (`node_modules/dinou/dinou`) and ejected mode (`./dinou`) and enabling `dinou/cli.js` to resolve `#commander` directly through `dinou/package.json` subpath imports.
+
 ### Deprecated
 - **`{ cascade: true }` Option in `revalidatePath` and `revalidateTag`**: Passing a second `options` parameter (`{ cascade?: boolean }`) to `revalidatePath(path, options)` or `revalidateTag(tag, options)` is now deprecated and ignored (logging a runtime deprecation warning in `dinou/core/cache-revalidate.js` and marked `@deprecated` in `dinou/server.d.ts`). Zero hydration mismatch across ancestor and descendant routes is now guaranteed automatically and non-destructively via lazy `index.html` and nested `layout.rsc` re-composition without cascading full page rebuilds.
 
