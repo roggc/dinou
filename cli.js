@@ -338,7 +338,7 @@ for (const t of denoTargets) {
         .command(cmdName)
         .description(`Compile standalone Deno executable (${t.name || "host"}, ${b})`)
         .action(() => {
-          runCommand(`${runDenoBuild(b)} && deno compile ${t.flags}--no-check --no-config --allow-net --allow-read --allow-write --allow-env --allow-sys --output ${t.outfile} .dinou/deno/main.js`);
+          runCommand(`${runDenoBuild(b)} && deno compile ${t.flags}--unstable-kv --no-check --no-config --allow-net --allow-read --allow-write --allow-env --allow-sys --output ${t.outfile} .dinou/deno/main.js`);
         });
     }
   }
