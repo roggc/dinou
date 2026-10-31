@@ -525,7 +525,7 @@ program
   .description("Copy the framework to the root of the project")
   .action(async () => {
     console.log("Executing eject...");
-    const { eject } = await import("./eject.js");
+    const { eject } = await import("../eject.js");
     eject();
   });
 
