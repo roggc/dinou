@@ -402,9 +402,8 @@ async function refreshNestedSlotsInTree(node, currentSlotId, options = {}) {
   if (node.$$typeof === Symbol.for("react.transitional.element")) {
     const nestedSlotId = node.props && node.props.__dinou_slot__;
     if (nestedSlotId && nestedSlotId !== currentSlotId) {
-      if (Array.isArray(node.props.tags)) {
-        commitSlotTags(node.props.tags);
-      }
+      const nestedTags = Array.isArray(node.props.tags) ? node.props.tags : [];
+      commitSlotTags(Array.from(new Set([nestedSlotId, ...nestedTags].filter(Boolean))));
       if (!slotRegistry.has(nestedSlotId) && slotRegistry.has(currentSlotId)) {
         const parentEntry = slotRegistry.get(currentSlotId);
         if (parentEntry && typeof parentEntry.discover === "function") {
@@ -420,6 +419,7 @@ async function refreshNestedSlotsInTree(node, currentSlotId, options = {}) {
       const freshInner = await getSlotJSX(nestedSlotId, {
         ...options,
         currentPath,
+        skipHostRevalidate: true,
       });
       if (freshInner !== null) {
         const refreshedInner = await refreshNestedSlotsInTree(
@@ -484,6 +484,7 @@ async function DinouCacheSlot(props) {
     : tag
     ? [tag]
     : [];
+  const slotTagsToCommit = Array.from(new Set([slotId, ...allTags].filter(Boolean)));
 
   const storageKey = `slots/${slotId}/slot.json`;
   const storage = getStorageAdapter();
@@ -547,7 +548,7 @@ async function DinouCacheSlot(props) {
   if (!storage || isNoCache) {
     const childElement = typeof children === "function" ? await children() : children;
     const directContent = await asyncRenderJSXToClientJSX(childElement);
-    commitSlotTags(allTags.length > 0 ? allTags : [slotId]);
+    commitSlotTags(slotTagsToCommit);
     return wrapWithBoundary(directContent, true);
   }
 
@@ -581,7 +582,7 @@ async function DinouCacheSlot(props) {
     if (revalidateSeconds === 0) {
       const childElement = typeof children === "function" ? await children() : children;
       const directContent = await asyncRenderJSXToClientJSX(childElement);
-      commitSlotTags(allTags.length > 0 ? allTags : [slotId]);
+      commitSlotTags(slotTagsToCommit);
       return wrapWithBoundary(directContent, true);
     }
 
@@ -594,56 +595,17 @@ async function DinouCacheSlot(props) {
       try {
         const restored = deserializeJSX(cached.content);
         const withRefreshedNested = await refreshNestedSlotsInTree(restored, slotId);
-        commitSlotTags(allTags.length > 0 ? allTags : [slotId]);
-        return wrapWithBoundary(withRefreshedNested, false);
-      } catch (err) {}
-    } else {
-      // Stale-While-Revalidate
-      try {
-        const staleJSX = deserializeJSX(cached.content);
-
-        if (!backgroundRevalidations.has(storageKey)) {
-          backgroundRevalidations.add(storageKey);
-          const bgPromise = (async () => {
-            try {
-              const childElement = typeof children === "function" ? await children() : children;
-              const resolved = await asyncRenderJSXToClientJSX(childElement);
-              const serialized = serializeJSX(resolved);
-              await storage.set(storageKey, serialized, {
-                tags: allTags,
-                revalidate: revalidateSeconds,
-                generatedAt: Date.now(),
-                slotId,
-                inStaticShell: Boolean(meta.inStaticShell),
-              });
-            } catch (e) {
-              console.error(`[DinouCacheSlot] Background revalidation failed for slot "${slotId}":`, e);
-            } finally {
-              backgroundRevalidations.delete(storageKey);
-            }
-          })();
-
-          try {
-            const reqContext = getContext();
-            const ctx = reqContext?.ctx || reqContext?.platformContext?.ctx || reqContext?.req?.ctx;
-            if (ctx && typeof ctx.waitUntil === "function") {
-              ctx.waitUntil(bgPromise);
-            }
-          } catch (e) {}
-        }
-
-        const withRefreshedNested = await refreshNestedSlotsInTree(staleJSX, slotId);
-        commitSlotTags(allTags.length > 0 ? allTags : [slotId]);
+        commitSlotTags(slotTagsToCommit);
         return wrapWithBoundary(withRefreshedNested, false);
       } catch (err) {}
     }
   }
 
-  // 2. Cache MISS or expired without usable stale content: Deduplicate synchronous render
+  // 2. Cache MISS or expired TTL: Deduplicate synchronous render
   if (inflightSlotRenders.has(storageKey)) {
     try {
       const deduped = await inflightSlotRenders.get(storageKey);
-      commitSlotTags(allTags.length > 0 ? allTags : [slotId]);
+      commitSlotTags(slotTagsToCommit);
       return wrapWithBoundary(deduped, true);
     } catch (e) {}
   }
@@ -661,7 +623,7 @@ async function DinouCacheSlot(props) {
       revalidate: typeof revalidate === "number" ? revalidate : undefined,
       generatedAt: Date.now(),
       slotId,
-      inStaticShell: Boolean(isPprShellBuild),
+      inStaticShell: Boolean(isPprShellBuild || cached?.metadata?.inStaticShell),
     };
 
     const persistSlot = async () => {
@@ -686,7 +648,7 @@ async function DinouCacheSlot(props) {
   inflightSlotRenders.set(storageKey, renderPromise);
   try {
     const fresh = await renderPromise;
-    commitSlotTags(allTags.length > 0 ? allTags : [slotId]);
+    commitSlotTags(slotTagsToCommit);
     return wrapWithBoundary(fresh, true);
   } finally {
     inflightSlotRenders.delete(storageKey);
@@ -929,8 +891,7 @@ async function getSlotJSX(slotId, options = {}) {
       if (
         storage &&
         entry.revalidate !== 0 &&
-        options.fresh &&
-        true &&
+        !options.skipHostRevalidate &&
         options.currentPath
       ) {
         try {
@@ -958,31 +919,30 @@ async function getSlotJSX(slotId, options = {}) {
           ) {
             const { revalidatePage } = await import("./cache-revalidate.js");
             await revalidatePage("/" + cleanRouteKey, { onlyRefreshSlots: true });
-          } else {
-            const segments = cleanRouteKey.split("/").filter(Boolean);
-            const candidateLayoutKeys = [""];
-            let acc = "";
-            for (const seg of segments) {
-              acc = acc ? `${acc}/${seg}` : seg;
-              candidateLayoutKeys.push(acc);
+          }
+          const segments = cleanRouteKey.split("/").filter(Boolean);
+          const candidateLayoutKeys = [""];
+          let acc = "";
+          for (const seg of segments) {
+            acc = acc ? `${acc}/${seg}` : seg;
+            candidateLayoutKeys.push(acc);
+          }
+          for (const lKey of candidateLayoutKeys) {
+            const lMetaKey = lKey ? `${lKey}/layout.metadata.json` : "layout.metadata.json";
+            const lItem = await storage.get(lMetaKey);
+            let lMeta = lItem?.metadata;
+            if (!lMeta && lItem?.content) {
+              try {
+                lMeta = JSON.parse(lItem.content);
+              } catch (e) {}
             }
-            for (const lKey of candidateLayoutKeys) {
-              const lMetaKey = lKey ? `${lKey}/layout.metadata.json` : "layout.metadata.json";
-              const lItem = await storage.get(lMetaKey);
-              let lMeta = lItem?.metadata;
-              if (!lMeta && lItem?.content) {
-                try {
-                  lMeta = JSON.parse(lItem.content);
-                } catch (e) {}
-              }
-              if (
-                lMeta &&
-                Array.isArray(lMeta.slotTags) &&
-                lMeta.slotTags.some((t) => slotTagsToMatch.has(t))
-              ) {
-                const { revalidateLayout } = await import("./cache-revalidate.js");
-                await revalidateLayout(lKey ? "/" + lKey : "/", { onlyRefreshSlots: true });
-              }
+            if (
+              lMeta &&
+              Array.isArray(lMeta.slotTags) &&
+              lMeta.slotTags.some((t) => slotTagsToMatch.has(t))
+            ) {
+              const { revalidateLayout } = await import("./cache-revalidate.js");
+              await revalidateLayout(lKey ? "/" + lKey : "/", { onlyRefreshSlots: true });
             }
           }
         } catch (e) {}
@@ -1005,12 +965,46 @@ async function getSlotJSX(slotId, options = {}) {
   return null;
 }
 
+async function hasExpiredSlots(slotTags) {
+  if (!Array.isArray(slotTags) || slotTags.length === 0) return false;
+  const storage = getStorageAdapter();
+  if (!storage) return false;
+  const now = Date.now();
+  const checkedIds = new Set();
+  for (const rawTagOrId of slotTags) {
+    if (!rawTagOrId) continue;
+    const targetId = await resolveCanonicalSlotId(rawTagOrId, storage);
+    if (checkedIds.has(targetId)) continue;
+    checkedIds.add(targetId);
+    const storageKey = `slots/${targetId}/slot.json`;
+    const cached = await getSlotFromStorage(storage, storageKey);
+    if (!cached || !cached.content) continue;
+    const meta = cached.metadata || {};
+    const regEntry = slotRegistry.get(targetId);
+    const revalidateSeconds =
+      typeof regEntry?.revalidate === "number"
+        ? regEntry.revalidate
+        : typeof meta.revalidate === "number"
+        ? meta.revalidate
+        : undefined;
+    if (
+      typeof revalidateSeconds === "number" &&
+      revalidateSeconds > 0 &&
+      now > (meta.generatedAt || 0) + revalidateSeconds * 1000
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export {
   DinouCacheSlot,
   getSlotJSX,
   serializeJSX,
   deserializeJSX,
   refreshNestedSlotsInTree,
+  hasExpiredSlots,
 };
 export default {
   DinouCacheSlot,
@@ -1018,4 +1012,5 @@ export default {
   serializeJSX,
   deserializeJSX,
   refreshNestedSlotsInTree,
+  hasExpiredSlots,
 };

@@ -46,6 +46,7 @@ import {
   serializeJSX,
   deserializeJSX,
   refreshNestedSlotsInTree,
+  hasExpiredSlots,
 } from "./cache-slot.js";
 import {
   runWithPprContext,
@@ -149,7 +150,11 @@ const botGarbagePatterns = [
   /\.log$/i,
 ];
 
-const isDynamic = new Map();
+const IS_DYNAMIC_MAP_KEY = Symbol.for("dinou.isDynamic.map");
+if (!globalThis[IS_DYNAMIC_MAP_KEY]) {
+  globalThis[IS_DYNAMIC_MAP_KEY] = new Map();
+}
+const isDynamic = globalThis[IS_DYNAMIC_MAP_KEY];
 const pageFunctionsConfigCache = new Map();
 
 async function resolvePprForRoute(pagePath, pageFunctionsModule, reqSegments, queryObj) {
@@ -1388,12 +1393,54 @@ async function handleRequest(request, platformContext = {}) {
             const lMeta = await readMetaFromStorage(storage, lMetaKey, lRscKey, platformContext, request.url);
             entry.generatedAt = Number(lMeta?.generatedAt || 0);
             entry.suspenseCount = Number(lMeta?.suspenseCount || 0);
+            entry.revalidate = lMeta?.revalidate;
+            entry.slotTags = Array.isArray(lMeta?.slotTags) ? lMeta.slotTags : [];
           }
-          if (!platformContext?.isSSG && isLayoutReq && !isOld && !dynamicState.value && activeChain.length > 1) {
-            const maxAncestorGen = Math.max(0, ...activeChain.slice(1).map((l) => l.generatedAt || 0));
-            if (activeChain[0].generatedAt > 0 && maxAncestorGen > activeChain[0].generatedAt) {
-              const { revalidateLayout } = await import("./cache-revalidate.js");
-              await revalidateLayout(activeChain[0].layoutRoutePath);
+          if (!platformContext?.isSSG && !isOld && !dynamicState.value) {
+            for (let i = activeChain.length - 1; i >= 0; i--) {
+              const entry = activeChain[i];
+              const isLayoutTtlExpired =
+                typeof entry.revalidate === "number" &&
+                entry.revalidate >= 1 &&
+                entry.generatedAt > 0 &&
+                Date.now() > entry.generatedAt + entry.revalidate * 1000;
+              const isLayoutSlotTtlExpired =
+                !isLayoutTtlExpired &&
+                entry.slotTags.length > 0 &&
+                (await hasExpiredSlots(entry.slotTags));
+              const maxAncestorGen =
+                i < activeChain.length - 1
+                  ? Math.max(0, ...activeChain.slice(i + 1).map((l) => l.generatedAt || 0))
+                  : 0;
+              const isAncestorNewer = entry.generatedAt > 0 && maxAncestorGen > entry.generatedAt;
+              if (isLayoutTtlExpired || isLayoutSlotTtlExpired || (isLayoutReq && isAncestorNewer)) {
+                const { revalidateLayout } = await import("./cache-revalidate.js");
+                await revalidateLayout(
+                  entry.layoutRoutePath,
+                  isLayoutSlotTtlExpired && !isLayoutTtlExpired && !(isLayoutReq && isAncestorNewer)
+                    ? { onlyRefreshSlots: true }
+                    : {}
+                );
+                const lMetaKey = entry.cleanLayoutKey
+                  ? `${entry.cleanLayoutKey}/layout.metadata.json`
+                  : "layout.metadata.json";
+                const lRscKey = entry.cleanLayoutKey
+                  ? `${entry.cleanLayoutKey}/layout.rsc`
+                  : "layout.rsc";
+                const refreshedMeta = await readMetaFromStorage(
+                  storage,
+                  lMetaKey,
+                  lRscKey,
+                  platformContext,
+                  request.url
+                );
+                if (refreshedMeta?.generatedAt) {
+                  entry.generatedAt = Number(refreshedMeta.generatedAt);
+                }
+                if (refreshedMeta?.suspenseCount !== undefined) {
+                  entry.suspenseCount = Number(refreshedMeta.suspenseCount || 0);
+                }
+              }
             }
           }
           leafLayoutSuspenseCount = Number(activeChain[0]?.suspenseCount || 0);
@@ -1461,7 +1508,7 @@ async function handleRequest(request, platformContext = {}) {
         (!internalRefreshVersion &&
           internalBuildId &&
           currentGeneratedAt &&
-          internalBuildId !== String(currentGeneratedAt));
+          Number(internalBuildId) < Number(currentGeneratedAt));
 
       const actualFileName = useOld
         ? isLayoutReq
@@ -1507,10 +1554,43 @@ async function handleRequest(request, platformContext = {}) {
           }
           if (cached && cached.content) {
             let isExpired = false;
+            let isSlotOnlyExpired = false;
             if (isLayoutReq && cached.metadata) {
               const { revalidate, generatedAt } = cached.metadata;
               if (typeof revalidate === "number" && revalidate >= 1 && Date.now() > (generatedAt || 0) + revalidate * 1000) {
                 isExpired = true;
+              }
+            } else if (!isLayoutReq && !useOld && !internalBuildId) {
+              const pMetaKey = cleanRel ? `${cleanRel}/metadata.json` : "metadata.json";
+              const pRscBaseKey = cleanRel ? `${cleanRel}/page.rsc` : "page.rsc";
+              const pMeta =
+                cached.metadata ||
+                (await readMetaFromStorage(storage, pMetaKey, pRscBaseKey, platformContext, request.url));
+              if (pMeta) {
+                const pReval =
+                  pMeta.pageRevalidate !== undefined ? pMeta.pageRevalidate : pMeta.revalidate;
+                const pGen = pMeta.pageGeneratedAt || pMeta.generatedAt || 0;
+                if (typeof pReval === "number" && pReval >= 1 && pGen > 0 && Date.now() > pGen + pReval * 1000) {
+                  isExpired = true;
+                } else if (Array.isArray(pMeta.slotTags) && pMeta.slotTags.length > 0) {
+                  isSlotOnlyExpired = await hasExpiredSlots(pMeta.slotTags);
+                }
+              }
+              if (isExpired || isSlotOnlyExpired) {
+                const { revalidatePage } = await import("./cache-revalidate.js");
+                await revalidatePage(
+                  cleanPath,
+                  isSlotOnlyExpired && !isExpired ? { onlyRefreshSlots: true } : {}
+                );
+                if (!dynamicState.value) {
+                  const refreshedCached = await storage.get(rscKey);
+                  if (refreshedCached && refreshedCached.content) {
+                    cached = refreshedCached;
+                    isExpired = false;
+                  }
+                } else {
+                  isExpired = true;
+                }
               }
             }
             if (!isExpired) {
@@ -1571,7 +1651,7 @@ async function handleRequest(request, platformContext = {}) {
       if (layouts && Array.isArray(layouts)) {
         for (const [lPath, lParams] of layouts) {
           const lConfig = await resolveLayoutFunctionsConfig(lPath, lParams);
-          if (!isDevelopment && lConfig.allowISG === false) {
+          if (lConfig.allowISG === false) {
             let isPathAllowed = false;
             if (lConfig.staticPathsSet) {
               const sortedEntries = Object.entries(lParams || {})
@@ -1586,6 +1666,10 @@ async function handleRequest(request, platformContext = {}) {
               isPathAllowed = lConfig.staticPathsSet.has(serializedQuery) || lConfig.staticPathsSet.has(singleValStr);
             }
             if (!isPathAllowed) {
+              if (isDevelopment) {
+                isPathBlocked = true;
+                break;
+              }
               const cleanReq = reqPath.replace(/^\//, "").replace(/\/$/, "");
               const rscPath = path.join(process.cwd(), ".dinou/dist2", cleanReq, "layout.rsc");
               if (!existsSync(rscPath)) {
@@ -1606,7 +1690,7 @@ async function handleRequest(request, platformContext = {}) {
         if (!layoutConfig) {
           layoutConfig = await resolveLayoutFunctionsConfig(layoutPath, layoutParams);
         }
-        if (!isDevelopment && layoutConfig.allowISG === false) {
+        if (layoutConfig.allowISG === false) {
           let isPathAllowed = false;
           if (layoutConfig.staticPathsSet) {
             const sortedEntries = Object.entries(layoutParams || {})
@@ -1621,10 +1705,14 @@ async function handleRequest(request, platformContext = {}) {
             isPathAllowed = layoutConfig.staticPathsSet.has(serializedQuery) || layoutConfig.staticPathsSet.has(singleValStr);
           }
           if (!isPathAllowed) {
-            const cleanReq = reqPath.replace(/^\//, "").replace(/\/$/, "");
-            const rscPath = path.join(process.cwd(), ".dinou/dist2", cleanReq, "layout.rsc");
-            if (!existsSync(rscPath)) {
+            if (isDevelopment) {
               isPathBlocked = true;
+            } else {
+              const cleanReq = reqPath.replace(/^\//, "").replace(/\/$/, "");
+              const rscPath = path.join(process.cwd(), ".dinou/dist2", cleanReq, "layout.rsc");
+              if (!existsSync(rscPath)) {
+                isPathBlocked = true;
+              }
             }
           }
         }
@@ -1691,23 +1779,33 @@ async function handleRequest(request, platformContext = {}) {
             }
             return rendered;
           });
-        } else if (!isDevelopment && isPageReq && isRoutePpr && isEdgeRuntime(platformContext)) {
+        } else if (!isDevelopment && (isPageReq || isLayoutReq) && isRoutePpr && isEdgeRuntime(platformContext)) {
           const storage = getStorageAdapter();
           const cleanRel = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
-          const shellPageKey = cleanRel ? `${cleanRel}/shell.page.json` : "shell.page.json";
-          const shellPageJson = await readRscFromStorage(
+          const shellKey = isLayoutReq
+            ? cleanRel
+              ? `${cleanRel}/shell.layout.json`
+              : "shell.layout.json"
+            : cleanRel
+            ? `${cleanRel}/shell.page.json`
+            : "shell.page.json";
+          const shellJson = await readRscFromStorage(
             storage,
-            shellPageKey,
+            shellKey,
             platformContext,
             request.url
           );
-          if (shellPageJson) {
+          if (shellJson) {
             try {
-              let cachedShellTree = deserializeJSX(shellPageJson);
-              cachedShellTree = await refreshNestedSlotsInTree(
-                cachedShellTree,
-                "__ppr_shell__",
-                { currentPath: reqPath }
+              let cachedShellTree = deserializeJSX(shellJson);
+              const runSeg = isLayoutReq ? runInLayoutSegment : runInPageSegment;
+              const slotScope = isLayoutReq ? "__layout_shell__" : "__ppr_shell__";
+              cachedShellTree = await runSeg(() =>
+                refreshNestedSlotsInTree(
+                  cachedShellTree,
+                  slotScope,
+                  { currentPath: reqPath }
+                )
               );
               jsx = await spliceDynamicHolesIntoShell(
                 cachedShellTree,
@@ -1715,7 +1813,7 @@ async function handleRequest(request, platformContext = {}) {
                   getJSX(reqPath, queryObj, isNotFound, isDevelopment, isPathBlocked, {
                     segment,
                   }),
-                leafLayoutSuspenseCount
+                isLayoutReq ? 0 : leafLayoutSuspenseCount
               );
             } catch (spliceErr) {
               console.warn(`[Dinou PPR] Error splicing dynamic holes for ${reqPath}:`, spliceErr);
@@ -1784,6 +1882,7 @@ async function handleRequest(request, platformContext = {}) {
     dynamicParams,
     reqPath,
   );
+  let hasStaticDynamicConfig = Boolean(isDynamicConfig);
   if (isDynamicConfig) {
     dynamicState.value = true;
   }
@@ -1821,6 +1920,7 @@ async function handleRequest(request, platformContext = {}) {
 
       if (layoutConfig.isDynamic) {
         dynamicState.value = true;
+        hasStaticDynamicConfig = true;
       }
 
       if (layoutConfig.allowISG === false) {
@@ -1986,32 +2086,54 @@ async function handleRequest(request, platformContext = {}) {
               request.url
             );
             entry.generatedAt = Number(lMeta?.generatedAt || 0);
+            entry.revalidate = lMeta?.revalidate;
+            entry.slotTags = Array.isArray(lMeta?.slotTags) ? lMeta.slotTags : [];
           }
-          const leafLayout = activeLayoutChain[0];
-          if (activeLayoutChain.length > 1) {
-            const maxAncestorGen = Math.max(
-              0,
-              ...activeLayoutChain.slice(1).map((l) => l.generatedAt || 0)
-            );
-            if (leafLayout.generatedAt > 0 && maxAncestorGen > leafLayout.generatedAt) {
+          for (let i = activeLayoutChain.length - 1; i >= 0; i--) {
+            const entry = activeLayoutChain[i];
+            const isLayoutTtlExpired =
+              typeof entry.revalidate === "number" &&
+              entry.revalidate >= 1 &&
+              entry.generatedAt > 0 &&
+              Date.now() > entry.generatedAt + entry.revalidate * 1000;
+            const isLayoutSlotTtlExpired =
+              !isLayoutTtlExpired &&
+              entry.slotTags.length > 0 &&
+              (await hasExpiredSlots(entry.slotTags));
+            const maxAncestorGen =
+              i < activeLayoutChain.length - 1
+                ? Math.max(
+                    0,
+                    ...activeLayoutChain.slice(i + 1).map((l) => l.generatedAt || 0)
+                  )
+                : 0;
+            const isAncestorNewer =
+              entry.generatedAt > 0 && maxAncestorGen > entry.generatedAt;
+            if (isLayoutTtlExpired || isLayoutSlotTtlExpired || isAncestorNewer) {
               const { revalidateLayout } = await import("./cache-revalidate.js");
-              await revalidateLayout(leafLayout.layoutRoutePath);
+              await revalidateLayout(
+                entry.layoutRoutePath,
+                isLayoutSlotTtlExpired && !isLayoutTtlExpired && !isAncestorNewer
+                  ? { onlyRefreshSlots: true }
+                  : {}
+              );
               const refreshedMeta = await readMetaFromStorage(
                 storage,
-                leafLayout.cleanLayoutKey
-                  ? `${leafLayout.cleanLayoutKey}/layout.metadata.json`
+                entry.cleanLayoutKey
+                  ? `${entry.cleanLayoutKey}/layout.metadata.json`
                   : "layout.metadata.json",
-                leafLayout.cleanLayoutKey
-                  ? `${leafLayout.cleanLayoutKey}/layout.rsc`
+                entry.cleanLayoutKey
+                  ? `${entry.cleanLayoutKey}/layout.rsc`
                   : "layout.rsc",
                 platformContext,
                 request.url
               );
               if (refreshedMeta?.generatedAt) {
-                leafLayout.generatedAt = Number(refreshedMeta.generatedAt);
+                entry.generatedAt = Number(refreshedMeta.generatedAt);
               }
             }
           }
+          const leafLayout = activeLayoutChain[0];
           const pageGeneratedAt = Number(cachedItem.metadata?.generatedAt || 0);
           if ((leafLayout.generatedAt || 0) > pageGeneratedAt && platformContext?.renderHtmlStream) {
             const leafRscKey = leafLayout.cleanLayoutKey
@@ -2065,6 +2187,9 @@ async function handleRequest(request, platformContext = {}) {
               if (recomposedHtml) {
                 const updatedMeta = {
                   ...(cachedItem.metadata || {}),
+                  pageGeneratedAt:
+                    cachedItem.metadata?.pageGeneratedAt ||
+                    cachedItem.metadata?.generatedAt,
                   generatedAt: leafLayout.generatedAt,
                 };
                 cachedItem = {
@@ -2087,12 +2212,37 @@ async function handleRequest(request, platformContext = {}) {
       } catch (lazyErr) {
         console.warn(`⚠️ [Dinou] Error during lazy HTML re-composition for ${reqPath}:`, lazyErr?.message || lazyErr);
       }
+      if (Array.isArray(cachedItem.metadata?.slotTags) && cachedItem.metadata.slotTags.length > 0) {
+        try {
+          const isPageSlotTtlExpired = await hasExpiredSlots(cachedItem.metadata.slotTags);
+          if (isPageSlotTtlExpired) {
+            const { revalidatePage } = await import("./cache-revalidate.js");
+            await revalidatePage(reqPath, { onlyRefreshSlots: true });
+            let refreshedItem = await storage.get(htmlKey);
+            if (!refreshedItem && cleanPath) {
+              refreshedItem = await storage.get(cleanPath);
+            }
+            if (!refreshedItem && (cachedItem.metadata?.ppr || isPprConfig)) {
+              const shellHtmlKey = cleanPath ? `${cleanPath}/shell.html` : "shell.html";
+              refreshedItem = await storage.get(shellHtmlKey);
+            }
+            if (refreshedItem && refreshedItem.content) {
+              cachedItem = refreshedItem;
+            }
+          }
+        } catch (slotTtlErr) {}
+      }
       const metadata = cachedItem.metadata || {};
-      const { revalidate, generatedAt } = metadata;
+      const { generatedAt } = metadata;
+      const pageOwnRevalidate =
+        metadata.pageRevalidate !== undefined
+          ? metadata.pageRevalidate
+          : revalidate;
+      const pageOwnGeneratedAt = metadata.pageGeneratedAt || generatedAt;
       const isExpired =
-        typeof revalidate === "number" &&
-        revalidate >= 1 &&
-        Date.now() > (generatedAt || 0) + revalidate * 1000;
+        typeof pageOwnRevalidate === "number" &&
+        pageOwnRevalidate >= 1 &&
+        Date.now() > (pageOwnGeneratedAt || 0) + pageOwnRevalidate * 1000;
 
       if (isExpired) {
         // Trigger background revalidation on Edge!
@@ -2101,6 +2251,11 @@ async function handleRequest(request, platformContext = {}) {
           regenerating.add(reqPath);
           try {
             console.log(`[Edge ISR] Starting regeneration for ${reqPath}...`);
+            if (metadata.ppr || isPprConfig || (platformContext && platformContext.renderHtmlStream)) {
+              const { revalidatePage } = await import("./cache-revalidate.js");
+              await revalidatePage(reqPath);
+              return;
+            }
             const revalBridge = new WebResponseBridge();
             const context = createRequestContext(simReq, revalBridge, platformContext);
             const isNotFound = {};
@@ -2253,6 +2408,9 @@ async function handleRequest(request, platformContext = {}) {
         if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
           console.log(`[Edge ISG] Processing page for ${reqPath}...`);
         }
+        if (!hasStaticDynamicConfig) {
+          dynamicState.value = false;
+        }
         const context = createRequestContext(simReq, bridge, platformContext, dynamicState);
         copyCustomContextProperties(rootContext, context);
         const isNotFound = { value: !pagePath };
@@ -2315,10 +2473,13 @@ async function handleRequest(request, platformContext = {}) {
           }
         }
 
+        const nowGen = Date.now();
         const genMeta = {
           status: isError ? 500 : isNotFound.value ? 404 : 200,
-          generatedAt: Date.now(),
+          generatedAt: nowGen,
+          pageGeneratedAt: nowGen,
           revalidate: combinedRevalidate,
+          pageRevalidate: revalidate !== undefined ? revalidate : null,
           tags: tags || [],
           ppr: Boolean(isPprConfig),
           holes: pprHoles,
@@ -2375,10 +2536,14 @@ async function handleRequest(request, platformContext = {}) {
           bootstrapScriptContent += `window.__DINOU_LAYOUTS__ = ${JSON.stringify(knownLayouts)};\n`;
           if (shouldCacheISG && !isPprConfig) {
             bootstrapScriptContent += "window.__DINOU_USE_STATIC__ = true;\n";
+            bootstrapScriptContent += `window.__DINOU_BUILD_ID__ = "${nowGen}";\n`;
           } else {
             bootstrapScriptContent += "window.__DINOU_USE_STATIC__ = false;\n";
             if (isPprConfig) {
               bootstrapScriptContent += "window.__DINOU_PPR__ = true;\n";
+              if (shouldCacheISG) {
+                bootstrapScriptContent += `window.__DINOU_BUILD_ID__ = "${nowGen}";\n`;
+              }
             }
           }
           if (isDevelopment) {
@@ -2582,6 +2747,12 @@ async function handleRequest(request, platformContext = {}) {
             if (fullHtml) {
               if (!dynamicState.value || (platformContext.isSSG === true && !ssgPprUnwrappedBailout)) {
                 if (platformContext.isSSG === true && !ssgPprUnwrappedBailout) dynamicState.value = false;
+                for (const k of [reqPath, cleanPath, cleanPath ? `/${cleanPath}` : "/"]) {
+                  if (!k) continue;
+                  if (isDynamic.has(k)) {
+                    isDynamic.get(k).value = false;
+                  }
+                }
                 const pageSlotTags =
                   layouts && layouts.length > 0
                     ? context._pageSlotTags
@@ -2640,6 +2811,10 @@ async function handleRequest(request, platformContext = {}) {
                   console.error("[Edge ISG] Error caching to KV:", cacheErr);
                 }
               } else {
+                fullHtml = fullHtml.replace(
+                  "window.__DINOU_USE_STATIC__ = true;",
+                  "window.__DINOU_USE_STATIC__ = false;"
+                );
                 if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
                   console.log(`ℹ️ [Edge ISG] Dynamic bailout detected during render for ${reqPath}, skipping KV cache`);
                 }

@@ -49,6 +49,19 @@ if (!globalThis[REVAL_STATE_KEY]) {
 }
 const revalState = globalThis[REVAL_STATE_KEY];
 
+function markRouteDynamicInMap(reqPathWithSlash, cleanPath, isDyn) {
+  const map = typeof globalThis !== "undefined" ? globalThis[Symbol.for("dinou.isDynamic.map")] : null;
+  if (!map) return;
+  for (const key of [reqPathWithSlash, cleanPath]) {
+    if (!key) continue;
+    if (!map.has(key)) {
+      map.set(key, { value: Boolean(isDyn) });
+    } else {
+      map.get(key).value = Boolean(isDyn);
+    }
+  }
+}
+
 function nextMonotonicGenTime(prevGenTime = 0) {
   const now = Date.now();
   const next = Math.max(now, Number(prevGenTime || 0) + 1, revalState.lastGenTime + 1);
@@ -72,6 +85,7 @@ async function resolveRouteConfigForRevalidate(pagePath, reqSegments, existingMe
     typeof existingMeta?.ppr === "boolean" ? existingMeta.ppr : null;
   let tags = Array.isArray(existingMeta?.tags) ? existingMeta.tags : null;
   let revalidate = existingMeta?.revalidate;
+  let pageRevalidate = existingMeta?.pageRevalidate;
 
   let pfMod = null;
   let dParams = {};
@@ -150,24 +164,34 @@ async function resolveRouteConfigForRevalidate(pagePath, reqSegments, existingMe
     } catch (e) {}
   }
 
-  if (revalidate === undefined && pfMod) {
+  if ((revalidate === undefined || pageRevalidate === undefined) && pfMod) {
     try {
       const defaultExport = pfMod.default?.default
         ? pfMod.default.default
         : pfMod.default;
-      revalidate =
+      const pfRevalidate =
         typeof pfMod.revalidate === "function"
           ? await pfMod.revalidate()
           : typeof defaultExport?.revalidate === "function"
           ? await defaultExport.revalidate()
           : pfMod.revalidate ?? defaultExport?.revalidate;
+      if (revalidate === undefined) {
+        revalidate = pfRevalidate;
+      }
+      if (pageRevalidate === undefined) {
+        pageRevalidate = pfRevalidate !== undefined ? pfRevalidate : null;
+      }
     } catch (e) {}
+  }
+  if (pageRevalidate === undefined) {
+    pageRevalidate = null;
   }
 
   return {
     isRoutePpr: Boolean(isRoutePpr),
     tags: Array.isArray(tags) ? tags : [],
     revalidate,
+    pageRevalidate,
   };
 }
 
@@ -258,14 +282,9 @@ async function revalidatePage(reqPath, internalOptions = {}) {
       }
     } catch (e) {}
 
+    let existingPageRsc = null;
     try {
-      if (cached && cached.content) {
-        await storage.set(oldHtmlKey, cached.content);
-      }
-      const existingPageRsc = await storage.get(rscKey);
-      if (existingPageRsc && existingPageRsc.content) {
-        await storage.set(oldRscKey, existingPageRsc.content);
-      }
+      existingPageRsc = await storage.get(rscKey);
     } catch (e) {}
 
     const reqPathWithSlash = cleanPath.endsWith("/") ? cleanPath : cleanPath + "/";
@@ -284,6 +303,9 @@ async function revalidatePage(reqPath, internalOptions = {}) {
     }
     if (currentMeta.revalidate === undefined && routeCfg.revalidate !== undefined) {
       currentMeta.revalidate = routeCfg.revalidate;
+    }
+    if (currentMeta.pageRevalidate === undefined && routeCfg.pageRevalidate !== undefined) {
+      currentMeta.pageRevalidate = routeCfg.pageRevalidate;
     }
     if (currentMeta.status === undefined) {
       currentMeta.status = 200;
@@ -350,6 +372,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
     const now = Date.now();
     const newGenTime = nextMonotonicGenTime(prevGenTime);
     currentMeta.generatedAt = newGenTime;
+    currentMeta.pageGeneratedAt = newGenTime;
 
     let newHtml = cached ? cached.content : "";
     let renderedRsc = "";
@@ -363,20 +386,31 @@ async function revalidatePage(reqPath, internalOptions = {}) {
         host: "localhost",
         "x-forwarded-proto": "http",
       };
+      const markRevalDynamic = () => {
+        revalDynamicState.value = true;
+      };
       const revalContext = {
         req: {
-          query: createBailoutProxy({}, revalDynamicState, "req.query"),
-          cookies: createBailoutProxy({}, revalDynamicState, "req.cookies"),
-          headers: createBailoutProxy(rawHeaders, revalDynamicState, "req.headers"),
+          query: createBailoutProxy({}, "req.query", markRevalDynamic),
+          cookies: createBailoutProxy({}, "req.cookies", markRevalDynamic),
+          headers: createBailoutProxy(rawHeaders, "req.headers", markRevalDynamic),
           path: reqPathWithSlash,
           method: "GET",
         },
         res: {
           status() {},
-          setHeader() {},
-          cookie() {},
-          clearCookie() {},
-          redirect() {},
+          setHeader() {
+            markRevalDynamic();
+          },
+          cookie() {
+            markRevalDynamic();
+          },
+          clearCookie() {
+            markRevalDynamic();
+          },
+          redirect() {
+            markRevalDynamic();
+          },
         },
       };
       const clientManifest =
@@ -453,10 +487,16 @@ async function revalidatePage(reqPath, internalOptions = {}) {
                   segment: "page",
                 }
               );
+              if (revalDynamicState.value) {
+                return;
+              }
               if (rawPageJsx && !isNotFound.value) {
                 resolvedPageJsx = await runInPageSegment(() =>
                   asyncRenderJSXToClientJSX(rawPageJsx)
                 );
+                if (revalDynamicState.value) {
+                  return;
+                }
                 if (resolvedPageJsx) {
                   try {
                     await storage.set(shellPageKey, serializeJSX(resolvedPageJsx));
@@ -538,6 +578,9 @@ async function revalidatePage(reqPath, internalOptions = {}) {
               });
             } else {
               fullJsx = await getJSX(reqPathWithSlash, {}, isNotFound, false, false);
+              if (revalDynamicState.value) {
+                return;
+              }
             }
             if (fullJsx && !isNotFound.value) {
               const fullRscStream = renderRSCStream(fullJsx, clientManifest, { runtime: "edge" });
@@ -565,7 +608,22 @@ async function revalidatePage(reqPath, internalOptions = {}) {
       } catch (e) {
         console.warn(`⚠️ [Edge Revalidate] Render fallback for ${cleanPath}:`, e?.message || e);
       }
+      if (revalDynamicState.value && !isRoutePpr) {
+        markRouteDynamicInMap(reqPathWithSlash, cleanPath, true);
+        console.log(`[ISR] Bailout detected for ${cleanPath}. Switching to Dynamic.`);
+        return;
+      }
+      markRouteDynamicInMap(reqPathWithSlash, cleanPath, false);
     }
+
+    try {
+      if (cached && cached.content) {
+        await storage.set(oldHtmlKey, cached.content);
+      }
+      if (existingPageRsc && existingPageRsc.content) {
+        await storage.set(oldRscKey, existingPageRsc.content);
+      }
+    } catch (e) {}
 
     if (newHtml && ((!renderedFullRsc && !composedFromCachedLayout) || now <= prevGenTime)) {
       newHtml = newHtml.replace(
@@ -777,16 +835,18 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
           srcFolder,
           "layout",
           true,
-          true,
+          false,
           undefined,
-          reqSegments.length
+          0
         );
         if (layoutPath) {
           const layoutCfg = await resolveLayoutFunctionsConfig(layoutPath, layoutParams || {});
-          if (!Array.isArray(currentMeta.tags) || currentMeta.tags.length === 0) {
-            currentMeta.tags = layoutCfg.tags || [];
+          if (Array.isArray(layoutCfg.tags) && layoutCfg.tags.length > 0) {
+            currentMeta.tags = layoutCfg.tags;
+          } else if (!Array.isArray(currentMeta.tags)) {
+            currentMeta.tags = [];
           }
-          if (currentMeta.revalidate === undefined && layoutCfg.revalidate !== undefined) {
+          if (layoutCfg.revalidate !== undefined) {
             currentMeta.revalidate = layoutCfg.revalidate;
           }
           if (layoutCfg.ppr !== null && layoutCfg.ppr !== undefined) {
@@ -812,20 +872,31 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
           host: "localhost",
           "x-forwarded-proto": "http",
         };
+        const markRevalDynamic = () => {
+          revalDynamicState.value = true;
+        };
         const revalContext = {
           req: {
-            query: createBailoutProxy({}, revalDynamicState, "req.query"),
-            cookies: createBailoutProxy({}, revalDynamicState, "req.cookies"),
-            headers: createBailoutProxy(rawHeaders, revalDynamicState, "req.headers"),
+            query: createBailoutProxy({}, "req.query", markRevalDynamic),
+            cookies: createBailoutProxy({}, "req.cookies", markRevalDynamic),
+            headers: createBailoutProxy(rawHeaders, "req.headers", markRevalDynamic),
             path: reqPathWithSlash,
             method: "GET",
           },
           res: {
             status() {},
-            setHeader() {},
-            cookie() {},
-            clearCookie() {},
-            redirect() {},
+            setHeader() {
+              markRevalDynamic();
+            },
+            cookie() {
+              markRevalDynamic();
+            },
+            clearCookie() {
+              markRevalDynamic();
+            },
+            redirect() {
+              markRevalDynamic();
+            },
           },
         };
         const clientManifest =
