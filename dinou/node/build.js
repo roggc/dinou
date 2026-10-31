@@ -125,7 +125,7 @@ const PORT = Number(process.env.PORT || 3000);
 
 const nodeMiddlewares = [];
 
-export async function startServer(port = PORT, host = process.env.HOST || "0.0.0.0") {
+export async function startServer(port = PORT, host = process.env.HOST || undefined) {
   const server = http.createServer(async (req, res) => {
     try {
       if (res.writableEnded || res.headersSent) {

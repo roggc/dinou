@@ -849,7 +849,7 @@ export async function fetch(req) {
 
 if (typeof Deno !== "undefined" && typeof Deno.serve === "function" && import.meta.main) {
   const port = Number(Deno.env.get("PORT") || 3000);
-  Deno.serve({ port, hostname: Deno.env.get("HOST") || "0.0.0.0" }, fetch);
+  Deno.serve(Deno.env.get("HOST") ? { port, hostname: Deno.env.get("HOST") } : { port }, fetch);
 }
 
 export default { fetch };

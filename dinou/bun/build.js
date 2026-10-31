@@ -803,7 +803,7 @@ export async function fetch(req) {
 }
 
 export default {
-  port: PORT, hostname: process.env.HOST || "0.0.0.0",
+  port: PORT, ...(process.env.HOST ? { hostname: process.env.HOST } : {}),
   fetch,
   idleTimeout: IDLE_TIMEOUT,
 };
