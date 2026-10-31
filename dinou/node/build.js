@@ -125,7 +125,7 @@ const PORT = Number(process.env.PORT || 3000);
 
 const nodeMiddlewares = [];
 
-export async function startServer(port = PORT, host = "0.0.0.0") {
+export async function startServer(port = PORT, host = process.env.HOST || "0.0.0.0") {
   const server = http.createServer(async (req, res) => {
     try {
       if (res.writableEnded || res.headersSent) {
@@ -184,7 +184,7 @@ export async function startServer(port = PORT, host = "0.0.0.0") {
 
   return new Promise((resolve, reject) => {
     server.on("error", reject);
-    server.listen(port, () => {
+    server.listen(port, host, () => {
       console.log(\`🚀 Dinou (Node.js AOT Dual-Bundle) server running on http://localhost:\${port}\`);
       resolve(server);
     });
