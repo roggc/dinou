@@ -35,6 +35,12 @@ if (!globalThis[INFLIGHT_KEY]) {
 }
 const inflightSlotRenders = globalThis[INFLIGHT_KEY];
 
+const SLOT_GEN_KEY = Symbol.for("dinou.slot.render.generation");
+if (!globalThis[SLOT_GEN_KEY]) {
+  globalThis[SLOT_GEN_KEY] = new Map();
+}
+const slotRenderGenerations = globalThis[SLOT_GEN_KEY];
+
 const RECENT_FRESH_KEY = Symbol.for("dinou.slot.recent.fresh");
 if (!globalThis[RECENT_FRESH_KEY]) {
   globalThis[RECENT_FRESH_KEY] = new Map();
@@ -710,10 +716,11 @@ async function getSlotJSX(slotId, options = {}) {
   const qIdxEarly = reqUrlEarly.indexOf("?");
   const queryKeyEarly = qIdxEarly !== -1 ? reqUrlEarly.slice(qIdxEarly) : "";
   const earlyStampedeKey = `${storageKey}::${queryKeyEarly}`;
+  const earlyInflightKey = options.fresh ? earlyStampedeKey : storageKey;
 
-  if (inflightSlotRenders.has(storageKey)) {
+  if (inflightSlotRenders.has(earlyInflightKey)) {
     try {
-      const deduped = await inflightSlotRenders.get(storageKey);
+      const deduped = await inflightSlotRenders.get(earlyInflightKey);
       return await refreshNestedSlotsInTree(deduped, targetId, options);
     } catch (e) {}
   }
@@ -837,9 +844,10 @@ async function getSlotJSX(slotId, options = {}) {
     const qIdx = reqUrl.indexOf("?");
     const queryKey = qIdx !== -1 ? reqUrl.slice(qIdx) : "";
     const stampedeKey = `${storageKey}::${queryKey}`;
+    const inflightKey = options.fresh ? stampedeKey : storageKey;
     try {
-      if (inflightSlotRenders.has(storageKey)) {
-        const deduped = await inflightSlotRenders.get(storageKey);
+      if (inflightSlotRenders.has(inflightKey)) {
+        const deduped = await inflightSlotRenders.get(inflightKey);
         return await refreshNestedSlotsInTree(deduped, targetId, options);
       }
 
@@ -853,16 +861,20 @@ async function getSlotJSX(slotId, options = {}) {
         recentFreshSlotRenders.delete(stampedeKey);
       }
 
+      const renderGen = (slotRenderGenerations.get(storageKey) || 0) + 1;
+      slotRenderGenerations.set(storageKey, renderGen);
+      const isLatestGen = () => slotRenderGenerations.get(storageKey) === renderGen;
+
       const renderPromise = (async () => {
         const resolved = await entry.render();
         const serialized = serializeJSX(resolved);
-        if (options.fresh) {
+        if (options.fresh && isLatestGen()) {
           recentFreshSlotRenders.set(stampedeKey, {
             timestamp: Date.now(),
             serialized,
           });
         }
-        if (storage && entry.revalidate !== 0) {
+        if (storage && entry.revalidate !== 0 && isLatestGen()) {
           await storage.set(storageKey, serialized, {
             tags: entry.tags,
             revalidate: entry.revalidate,
@@ -871,7 +883,7 @@ async function getSlotJSX(slotId, options = {}) {
             inStaticShell: Boolean(cached?.metadata?.inStaticShell),
           });
         }
-        if (options.fresh) {
+        if (options.fresh && isLatestGen()) {
           recentFreshSlotRenders.set(stampedeKey, {
             timestamp: Date.now(),
             serialized,
@@ -881,18 +893,19 @@ async function getSlotJSX(slotId, options = {}) {
       })();
 
       let restored;
-      inflightSlotRenders.set(storageKey, renderPromise);
+      inflightSlotRenders.set(inflightKey, renderPromise);
       try {
         restored = await renderPromise;
       } finally {
-        inflightSlotRenders.delete(storageKey);
+        inflightSlotRenders.delete(inflightKey);
       }
 
       if (
         storage &&
         entry.revalidate !== 0 &&
         !options.skipHostRevalidate &&
-        options.currentPath
+        options.currentPath &&
+        isLatestGen()
       ) {
         try {
           const cleanRouteKey = String(options.currentPath)
