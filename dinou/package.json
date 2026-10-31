@@ -3,6 +3,9 @@
   "version": "9.0.3",
   "type": "module",
   "main": "index.js",
+  "bin": {
+    "dinou": "./cli.js"
+  },
   "private": true,
   "exports": {
     ".": {

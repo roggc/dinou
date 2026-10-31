@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./dinou/index.js",
   "bin": {
-    "dinou": "./cli.js"
+    "dinou": "./dinou/cli.js"
   },
   "exports": {
     ".": {

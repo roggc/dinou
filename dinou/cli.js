@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
-import fs from "node:fs";
-import { program } from "commander";
+
+import { program } from "#commander";
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dinouPath = fs.existsSync(path.resolve(__dirname, "dinou")) ? path.resolve(__dirname, "dinou") : __dirname;
+const dinouPath = __dirname;
 const projectRoot = process.cwd();
 
 // Global CLI options for Dinou v9 (Dual-Mode Vendoring)
@@ -27,7 +27,8 @@ const isUnvendorizedRequested = () =>
 const pathKey = Object.keys(process.env).find((k) => k.toLowerCase() === "path") || "PATH";
 const projectBin = path.join(projectRoot, "node_modules", ".bin");
 const dinouBin = path.join(dinouPath, "node_modules", ".bin");
-const extendedPath = [projectBin, dinouBin, process.env[pathKey]].filter(Boolean).join(path.delimiter);
+const dinouParentBin = path.resolve(dinouPath, "..", "node_modules", ".bin");
+const extendedPath = [projectBin, dinouBin, dinouParentBin, process.env[pathKey]].filter(Boolean).join(path.delimiter);
 
 const runCommand = (command, options = {}) => {
   try {
