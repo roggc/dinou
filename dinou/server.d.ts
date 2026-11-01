@@ -1,10 +1,13 @@
 /**
- * Revalidates the cache for a specific route path.
- * * It deletes the old cached HTML and RSC files and rebuilds them synchronously.
- * * When `{ cascade: true }` is specified, if a layout is present and revalidated in that path,
- * it cascades `revalidatePage` to all child routes to ensure 0 hydration mismatch.
+ * Revalidates the cache for a specific route path (both its layout segment, if present, and its page).
+ * Child routes sharing the layout have their `index.html` lazily re-composed on demand (preserving their cached `page.rsc` payloads) to ensure 0 hydration mismatch.
  * @param path The path of the route to revalidate (e.g. "/blog" or "/dashboard").
- * @param options Optional configuration: `{ cascade?: boolean }` or legacy `"layout"`.
+ */
+export declare function revalidatePath(path: string): Promise<void>;
+/**
+ * @deprecated The `options` parameter (`{ cascade }` / `"layout"`) is deprecated and ignored since 9.0.3.
+ * Zero hydration mismatch is now guaranteed automatically via lazy `index.html` re-composition,
+ * and layout-only revalidation should use `revalidateLayout(path)`.
  */
 export declare function revalidatePath(
   path: string,
@@ -13,23 +16,34 @@ export declare function revalidatePath(
 
 /**
  * Revalidates only the page component (`page.rsc`) and its HTML (`index.html`) for a specific route path,
- * without touching any layout.
+ * composing with the cached layout without re-executing `layout.tsx`.
  * @param path The path of the page to revalidate (e.g. "/dashboard/analytics").
  */
 export declare function revalidatePage(path: string): Promise<void>;
 
 /**
- * Revalidates all routes that are associated with the specified cache tag.
- * * By default, layout tags only revalidate the layout shell (`layout.rsc`) for maximum efficiency.
- * * When `{ cascade: true }` is specified, layout tags invoke `revalidatePath(path, { cascade: true })`
- * to cascade `revalidatePage` to all child pages, ensuring 0 hydration mismatch.
+ * Revalidates only the layout shell (`layout.rsc` and `layout.metadata.json`) for a specific route path,
+ * without re-rendering child pages. Affected `index.html` files are lazily re-composed on demand.
+ * @param path The path of the layout segment to revalidate (e.g. "/dashboard").
+ */
+export declare function revalidateLayout(path: string): Promise<boolean>;
+
+/**
+ * Revalidates all routes, layouts, or cache slots that are associated with the specified cache tag.
+ * Layout tags surgically revalidate only the layout shell (`layout.rsc`), while affected `index.html` files
+ * are lazily re-composed on demand to ensure 0 hydration mismatch.
  * @param tag The tag string to revalidate (e.g. "blog-posts").
- * @param options Optional configuration: `{ cascade?: boolean }` or legacy `"layout"`.
+ */
+export declare function revalidateTag(tag: string): Promise<void>;
+/**
+ * @deprecated The `options` parameter (`{ cascade }` / `"layout"`) is deprecated and ignored since 9.0.3.
+ * Zero hydration mismatch is now guaranteed automatically via lazy `index.html` re-composition.
  */
 export declare function revalidateTag(
   tag: string,
   options?: { cascade?: boolean } | "layout"
 ): Promise<void>;
+
 export type {
   PPRConfig,
   RouteSegmentConfig,

@@ -62,21 +62,24 @@ export default function serverFunctionsPlugin({
           }
 
           const cached = sfCache.get(args.path);
-          if (cached && cached.mtimeMs === stat.mtimeMs) {
+          if (cached && cached.mtimeMs === stat.mtimeMs && (!cached.isServer || cached.proxyCode)) {
             if (!cached.isServer) return null;
             serverFunctions.set(cached.relativePath, cached.exportsSet);
             return { contents: cached.proxyCode, loader: "js", watchFiles: [args.path] };
           }
 
           const code = await fs.readFile(args.path, "utf8");
+          const isModuleLevel = useServerRegex.test(code.trim());
 
-          if (!useServerRegex.test(code.trim())) {
+          if (!isModuleLevel && !hasServerFunctions(code)) {
             sfCache.set(args.path, { mtimeMs: stat.mtimeMs, isServer: false });
             return null;
           }
 
-          const exports = parseExports(code);
-          if (exports.length === 0) {
+          const exports = isModuleLevel
+            ? parseExports(code)
+            : extractServerFunctions(code, args.path);
+          if (!exports || exports.length === 0) {
             sfCache.set(args.path, { mtimeMs: stat.mtimeMs, isServer: false });
             return null;
           }
@@ -135,21 +138,45 @@ export default function serverFunctionsPlugin({
           if (serverFilesSet && serverFilesSet.size > 0) {
             for (const filePath of serverFilesSet) {
               const rel = path.relative(root, filePath).replace(/\\/g, "/");
-              if (!serverFunctions.has(rel)) {
-                try {
-                  const code = await fs.readFile(filePath, "utf8");
-                  if (useServerRegex.test(code.trim())) {
-                    const exports = parseExports(code);
-                    if (exports && exports.length > 0) {
-                      serverFunctions.set(rel, new Set(exports));
-                    }
-                  } else if (hasServerFunctions(code)) {
-                    const actions = extractServerFunctions(code, filePath);
-                    if (actions && actions.length > 0) {
-                      serverFunctions.set(rel, new Set(actions));
-                    }
+              try {
+                const stat = await fs.stat(filePath);
+                const cached = sfCache.get(filePath);
+                if (cached && cached.mtimeMs === stat.mtimeMs) {
+                  if (cached.isServer && cached.exportsSet) {
+                    serverFunctions.set(rel, cached.exportsSet);
+                  } else {
+                    serverFunctions.delete(rel);
                   }
-                } catch (e) {}
+                  continue;
+                }
+
+                const code = await fs.readFile(filePath, "utf8");
+                let exports = null;
+                if (useServerRegex.test(code.trim())) {
+                  exports = parseExports(code);
+                } else if (hasServerFunctions(code)) {
+                  exports = extractServerFunctions(code, filePath);
+                }
+
+                if (exports && exports.length > 0) {
+                  const exportsSet = new Set(exports);
+                  serverFunctions.set(rel, exportsSet);
+                  sfCache.set(filePath, {
+                    mtimeMs: stat.mtimeMs,
+                    isServer: true,
+                    relativePath: rel,
+                    exportsSet,
+                    proxyCode: cached?.proxyCode || "",
+                  });
+                } else {
+                  serverFunctions.delete(rel);
+                  sfCache.set(filePath, {
+                    mtimeMs: stat.mtimeMs,
+                    isServer: false,
+                  });
+                }
+              } catch (e) {
+                serverFunctions.delete(rel);
               }
             }
           }

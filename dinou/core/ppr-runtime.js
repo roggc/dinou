@@ -10,12 +10,227 @@ import { getClientManifest } from "./manifest-provider.js";
 import { requestStorage, setCurrentContext } from "./request-context.js";
 import getJSX from "./get-jsx.js";
 
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function isClientComponentRef(type) {
+  if (!type) return false;
+  return (
+    type.$$typeof === Symbol.for("react.client.reference") ||
+    Boolean(type.$$id) ||
+    Boolean(type.filepath)
+  );
+}
+
+/**
+ * Splices live dynamic <Suspense> subtrees from a live page evaluation into a
+ * cached PPR static shell client-JSX tree (deserialized from shell.page.json),
+ * keeping the static shell of the page 100% immutable across /____rsc_page____
+ * refreshes and soft-navigations while evaluating dynamic holes fresh.
+ */
+async function spliceDynamicHolesIntoShell(
+  cachedShellTree,
+  livePageNodeOrFn,
+  startHoleIndex = 0
+) {
+  const knownHoleIds = new Set();
+  function collectKnownHoles(node) {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const item of node) collectKnownHoles(item);
+      return;
+    }
+    if (node.$$typeof === Symbol.for("react.transitional.element")) {
+      if (node.props && typeof node.props["data-ppr-hole"] === "string") {
+        knownHoleIds.add(node.props["data-ppr-hole"]);
+      }
+      if (node.props && typeof node.props === "object") {
+        for (const val of Object.values(node.props)) {
+          if (val && typeof val === "object") collectKnownHoles(val);
+        }
+      }
+    } else {
+      for (const val of Object.values(node)) {
+        if (val && typeof val === "object") collectKnownHoles(val);
+      }
+    }
+  }
+
+  collectKnownHoles(cachedShellTree);
+  if (knownHoleIds.size === 0) {
+    return cachedShellTree;
+  }
+
+  const livePageNode =
+    typeof livePageNodeOrFn === "function"
+      ? await livePageNodeOrFn()
+      : livePageNodeOrFn;
+
+  let holeIndex = Number(startHoleIndex) || 0;
+  const liveHolesMap = new Map();
+
+  async function traverseProps(props) {
+    if (!props || typeof props !== "object") return;
+    for (const [, value] of Object.entries(props)) {
+      if (value && typeof value === "object") {
+        await traverse(value);
+      }
+    }
+  }
+
+  async function traverse(current) {
+    if (!current) return;
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        await traverse(item);
+      }
+      return;
+    }
+    if (typeof current !== "object" || current instanceof Promise) {
+      return;
+    }
+    if (
+      isClientComponentRef(current?.type) ||
+      current?.$$typeof === Symbol.for("react.client.reference")
+    ) {
+      await traverseProps(current?.props);
+      return;
+    }
+    if (typeof current?.type === "function") {
+      try {
+        const evaluated = await current.type(current.props || {});
+        await traverse(evaluated);
+      } catch (err) {
+        console.error("[Dinou PPR] Error evaluating component in hole splice:", err);
+      }
+      return;
+    }
+    if (
+      typeof current?.type === "object" &&
+      current.type !== null &&
+      current.type.$$typeof === Symbol.for("react.forward_ref")
+    ) {
+      if (isClientComponentRef(current.type)) {
+        await traverseProps(current.props);
+        return;
+      }
+      try {
+        const rendered = await current.type.render(current.props || {}, current.ref);
+        await traverse(rendered);
+      } catch (err) {
+        console.error("[Dinou PPR] Error evaluating forward_ref in hole splice:", err);
+      }
+      return;
+    }
+    if (
+      typeof current?.type === "object" &&
+      current.type !== null &&
+      current.type.$$typeof === Symbol.for("react.memo")
+    ) {
+      if (isClientComponentRef(current.type)) {
+        await traverseProps(current.props);
+        return;
+      }
+      try {
+        const innerComp = current.type.type;
+        const rendered =
+          typeof innerComp === "function" ? await innerComp(current.props || {}) : null;
+        await traverse(rendered);
+      } catch (err) {
+        console.error("[Dinou PPR] Error evaluating memo in hole splice:", err);
+      }
+      return;
+    }
+    if (
+      current?.type === Symbol.for("react.suspense") ||
+      current?.type === React.Suspense
+    ) {
+      holeIndex++;
+      const currentHoleId = `ppr-hole-${holeIndex}`;
+      if (knownHoleIds.has(currentHoleId)) {
+        liveHolesMap.set(currentHoleId, current);
+        return;
+      }
+      if (current.props?.children) {
+        await traverse(current.props.children);
+      }
+      if (current.props?.fallback) {
+        await traverse(current.props.fallback);
+      }
+      return;
+    }
+    if (current?.$$typeof === Symbol.for("react.transitional.element")) {
+      await traverseProps(current.props);
+    } else {
+      await traverseProps(current);
+    }
+  }
+
+  await traverse(livePageNode);
+
+  function replaceHoles(node) {
+    if (!node || typeof node !== "object") return node;
+    if (Array.isArray(node)) {
+      return node.map((item) => replaceHoles(item));
+    }
+    if (node.$$typeof === Symbol.for("react.transitional.element")) {
+      const holeId = node.props && node.props["data-ppr-hole"];
+      if (typeof holeId === "string" && liveHolesMap.has(holeId)) {
+        return liveHolesMap.get(holeId);
+      }
+      if (node.props && typeof node.props === "object") {
+        let changed = false;
+        const newProps = { ...node.props };
+        for (const [k, v] of Object.entries(node.props)) {
+          if (v && typeof v === "object") {
+            const updated = replaceHoles(v);
+            if (updated !== v) {
+              newProps[k] = updated;
+              changed = true;
+            }
+          }
+        }
+        if (changed) {
+          if (node.key != null) newProps.key = node.key;
+          const children = newProps.children;
+          if (Array.isArray(children)) {
+            delete newProps.children;
+            return React.createElement(node.type, newProps, ...children);
+          }
+          return React.createElement(node.type, newProps);
+        }
+      }
+      return node;
+    }
+    let changed = false;
+    const clone = { ...node };
+    for (const [k, v] of Object.entries(node)) {
+      if (v && typeof v === "object") {
+        const updated = replaceHoles(v);
+        if (updated !== v) {
+          clone[k] = updated;
+          changed = true;
+        }
+      }
+    }
+    return changed ? clone : node;
+  }
+
+  return replaceHoles(cachedShellTree);
+}
+
 /**
  * Traverses a React JSX element tree to find Suspense boundaries,
  * evaluates their dynamic children, and streams replacement chunks.
  *
  * @param {object} node - Root JSX node (layout + page)
- * @param {Array<string|object>} expectedHoles - Holes registered at build time
+ * @param {Array<string|object>|null} expectedHoles - Holes registered at build time
  * @param {WritableStreamDefaultWriter} writer - Response stream writer
  * @param {TextEncoder} encoder - Text encoder
  * @param {object} platformContext - Dinou platform context (containing renderHtmlStream)
@@ -32,29 +247,43 @@ async function streamDynamicHoles(
   let holeIndex = 0;
   const holePromises = [];
 
+  const hasExplicitHoles = Array.isArray(expectedHoles);
   const knownHoleIds = new Set(
     (expectedHoles || []).map((h) => (typeof h === "object" ? h.id : h))
   );
 
   const clientManifest = getClientManifest();
 
-function isClientComponent(type) {
-  if (!type) return false;
-  return (
-    type.$$typeof === Symbol.for("react.client.reference") ||
-    Boolean(type.$$id) ||
-    Boolean(type.filepath)
-  );
-}
+  async function traverseProps(props) {
+    if (!props || typeof props !== "object") return;
+    for (const [, value] of Object.entries(props)) {
+      if (value && typeof value === "object") {
+        await traverse(value);
+      }
+    }
+  }
 
   async function traverse(current) {
     if (!current) return;
 
-    // Handle Client Component: do NOT execute, only traverse children
-    if (isClientComponent(current?.type) || current?.$$typeof === Symbol.for("react.client.reference")) {
-      if (current?.props?.children) {
-        await traverse(current.props.children);
+    // Handle Arrays (children)
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        await traverse(item);
       }
+      return;
+    }
+
+    if (typeof current !== "object" || current instanceof Promise) {
+      return;
+    }
+
+    // Handle Client Component: do NOT execute, only traverse props in deterministic order
+    if (
+      isClientComponentRef(current?.type) ||
+      current?.$$typeof === Symbol.for("react.client.reference")
+    ) {
+      await traverseProps(current?.props);
       return;
     }
 
@@ -75,11 +304,36 @@ function isClientComponent(type) {
       current.type !== null &&
       current.type.$$typeof === Symbol.for("react.forward_ref")
     ) {
+      if (isClientComponentRef(current.type)) {
+        await traverseProps(current.props);
+        return;
+      }
       try {
-        const rendered = current.type.render(current.props || {}, current.ref);
+        const rendered = await current.type.render(current.props || {}, current.ref);
         await traverse(rendered);
       } catch (err) {
         console.error("[Dinou PPR] Error evaluating forward_ref in hole traversal:", err);
+      }
+      return;
+    }
+
+    // Handle React.memo
+    if (
+      typeof current?.type === "object" &&
+      current.type !== null &&
+      current.type.$$typeof === Symbol.for("react.memo")
+    ) {
+      if (isClientComponentRef(current.type)) {
+        await traverseProps(current.props);
+        return;
+      }
+      try {
+        const innerComp = current.type.type;
+        const rendered =
+          typeof innerComp === "function" ? await innerComp(current.props || {}) : null;
+        await traverse(rendered);
+      } catch (err) {
+        console.error("[Dinou PPR] Error evaluating memo in hole traversal:", err);
       }
       return;
     }
@@ -90,11 +344,13 @@ function isClientComponent(type) {
       current?.type === React.Suspense
     ) {
       holeIndex++;
+      const currentBoundaryIndex = holeIndex - 1;
       const currentHoleId = `ppr-hole-${holeIndex}`;
 
-      // Check if this boundary was registered as a dynamic hole
-      const shouldStream =
-        knownHoleIds.size === 0 || knownHoleIds.has(currentHoleId);
+      // Check if this boundary was registered as a dynamic hole at build time
+      const shouldStream = hasExplicitHoles
+        ? knownHoleIds.has(currentHoleId)
+        : true;
 
       if (shouldStream) {
         const children = current.props?.children;
@@ -109,33 +365,39 @@ function isClientComponent(type) {
               html = await new Response(htmlStream).text();
             }
 
-            const chunk = `\n<template id="ppr-content-${currentHoleId}">${html}</template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${holeIndex - 1}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){t.replaceWith(c.content?c.content:...c.childNodes);}}finally{c.remove();}})();</script>\n`;
+            const chunk = `\n<template id="ppr-content-${currentHoleId}">${html}</template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${currentBoundaryIndex}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){if(c.content){t.replaceWith(c.content);}else{t.replaceWith.apply(t,Array.from(c.childNodes));}}}finally{c.remove();}})();</script>\n`;
             await writer.write(encoder.encode(chunk));
           } catch (holeErr) {
             console.error(`[Dinou PPR] Error resolving dynamic hole ${currentHoleId}:`, holeErr);
-            const errMsg = isDevelopment
+            const rawErrMsg = isDevelopment
               ? (holeErr?.message || "Unknown dynamic error")
               : "Error loading dynamic content";
-            const errChunk = `\n<template id="ppr-content-${currentHoleId}"><div style="color:#e11d48;padding:8px 12px;background:#fff1f2;border:1px solid #fecdd3;border-radius:6px;font-size:0.875rem;font-family:system-ui,sans-serif;">[PPR Error: ${errMsg}]</div></template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${holeIndex - 1}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){t.replaceWith(c.content?c.content:...c.childNodes);}}finally{c.remove();}})();</script>\n`;
+            const errMsg = escapeHtml(rawErrMsg);
+            const errChunk = `\n<template id="ppr-content-${currentHoleId}"><div style="color:#e11d48;padding:8px 12px;background:#fff1f2;border:1px solid #fecdd3;border-radius:6px;font-size:0.875rem;font-family:system-ui,sans-serif;">[PPR Error: ${errMsg}]</div></template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${currentBoundaryIndex}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){if(c.content){t.replaceWith(c.content);}else{t.replaceWith.apply(t,Array.from(c.childNodes));}}}finally{c.remove();}})();</script>\n`;
             await writer.write(encoder.encode(errChunk));
           }
         })();
         holePromises.push(promise);
+        return;
+      }
+
+      // Static <Suspense> boundary: do not re-stream it, but traverse its children & fallback
+      // in the same order as asyncRenderJSXToClientJSX so nested dynamic <Suspense> holes are
+      // discovered and holeIndex remains synchronized.
+      if (current.props?.children) {
+        await traverse(current.props.children);
+      }
+      if (current.props?.fallback) {
+        await traverse(current.props.fallback);
       }
       return;
     }
 
-    // Handle Arrays (children)
-    if (Array.isArray(current)) {
-      for (const item of current) {
-        await traverse(item);
-      }
-      return;
-    }
-
-    // Traverse children props
-    if (current?.props?.children) {
-      await traverse(current.props.children);
+    // Traverse host element / Fragment props or plain props object
+    if (current?.$$typeof === Symbol.for("react.transitional.element")) {
+      await traverseProps(current.props);
+    } else {
+      await traverseProps(current);
     }
   }
 
@@ -219,7 +481,16 @@ async function handlePprResume({
           false
         );
 
-        const holes = metadata?.holes || [];
+        let holes = Array.isArray(metadata?.holes) ? metadata.holes : null;
+        if ((!holes || holes.length === 0) && typeof shellPrelude === "string") {
+          const extracted = [
+            ...shellPrelude.matchAll(/data-ppr-hole="(ppr-hole-\d+)"/g),
+          ].map((m) => m[1]);
+          if (extracted.length > 0 || Array.isArray(metadata?.holes)) {
+            holes = extracted;
+          }
+        }
+
         await streamDynamicHoles(
           jsx,
           holes,
@@ -260,8 +531,10 @@ async function handlePprResume({
 export {
   streamDynamicHoles,
   handlePprResume,
+  spliceDynamicHolesIntoShell,
 };
 export default {
   streamDynamicHoles,
   handlePprResume,
+  spliceDynamicHolesIntoShell,
 };

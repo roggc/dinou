@@ -292,6 +292,12 @@ export default async () => {
               const NormalModule = compiler.webpack ? compiler.webpack.NormalModule : webpack.NormalModule;
               const hooks = NormalModule.getCompilationHooks(compilation);
               hooks.needBuild.tap("DinouReactServerWatchPlugin", (module) => {
+                if (module.resource) {
+                  const normRes = path.resolve(module.resource).replace(/\\/g, "/").toLowerCase();
+                  if (globalThis.__DINOU_WEBPACK_MODIFIED_FILES__?.has(normRes)) {
+                    return true;
+                  }
+                }
                 if (
                   module.resource &&
                   (module.resource.includes("client.browser") ||
@@ -408,6 +414,7 @@ export default async () => {
       },
     },
     watchOptions: {
+      aggregateTimeout: 20,
       ignored: [
         "**/node_modules/**",
         "**/.git/**",
@@ -425,7 +432,7 @@ export default async () => {
         devServer: {
           port: Number(process.env.HMR_PORT || (Number(process.env.PORT || 3000) + 1)),
           hot: false,
-          liveReload: true,
+          liveReload: process.env.DINOU_STANDALONE_SERVER === "true",
           client: {
             webSocketURL: `ws://localhost:${process.env.HMR_PORT || (Number(process.env.PORT || 3000) + 1)}/ws`,
             overlay: false,
@@ -434,9 +441,7 @@ export default async () => {
             index: false,
             writeToDisk: process.env.DINOU_WRITE_TO_DISK === "true",
           },
-          watchFiles: [
-            path.resolve(process.cwd(), "src/**/*"),
-          ],
+          watchFiles: [],
           proxy: [
             {
               context: () => true,

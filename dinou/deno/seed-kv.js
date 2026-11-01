@@ -25,7 +25,7 @@ if (kvUrl) {
     if (fs.existsSync(kvPath)) fs.unlinkSync(kvPath);
     if (fs.existsSync(kvPath + "-wal")) fs.unlinkSync(kvPath + "-wal");
     if (fs.existsSync(kvPath + "-shm")) fs.unlinkSync(kvPath + "-shm");
-  } catch (e) {}
+  } catch (e) { }
   console.log(`💾 [Deno KV Seed] Pre-seeding local Deno KV at ${kvPath}...`);
   kv = await Deno.openKv(kvPath);
 }
@@ -66,14 +66,14 @@ async function processDir(dir, relPrefix = "") {
 
     if (entry.isDirectory()) {
       await processDir(fullPath, cleanRelPath);
-    } else if (entry.name === "index.html") {
+    } else if (entry.name === "index.html" || entry.name === "shell.html") {
       const html = fs.readFileSync(fullPath, "utf8");
       let metadata = null;
       const metaPath = path.join(dir, "metadata.json");
       if (fs.existsSync(metaPath)) {
         try {
           metadata = JSON.parse(fs.readFileSync(metaPath, "utf8"));
-        } catch (e) {}
+        } catch (e) { }
       }
 
       await setKvCache(kv, cleanRelPath, html, metadata);
@@ -82,26 +82,58 @@ async function processDir(dir, relPrefix = "") {
         console.log(`   ✅ Cached HTML: ${cleanRelPath}`);
       }
 
-      if (cleanRelPath.endsWith("/index.html")) {
-        const folderKey = cleanRelPath.slice(0, -11);
-        await setKvCache(kv, folderKey, html, metadata);
-      } else if (cleanRelPath === "index.html") {
-        await setKvCache(kv, "", html, metadata);
+      if (entry.name === "index.html") {
+        if (cleanRelPath.endsWith("/index.html")) {
+          const folderKey = cleanRelPath.slice(0, -11);
+          await setKvCache(kv, folderKey, html, metadata);
+        } else if (cleanRelPath === "index.html") {
+          await setKvCache(kv, "", html, metadata);
+        }
       }
     } else if (entry.name.endsWith("metadata.json")) {
       const metaContent = fs.readFileSync(fullPath, "utf8");
       let metadata = null;
       try {
         metadata = JSON.parse(metaContent);
-      } catch (e) {}
+      } catch (e) { }
       await setKvCache(kv, cleanRelPath, metaContent, metadata);
       seededCount++;
       if (process.env.DINOU_DEBUG) {
         console.log(`   ✅ Cached Meta: ${cleanRelPath}`);
       }
-    } else if (entry.name.endsWith(".rsc")) {
+    } else if (entry.name === "slot.json") {
+      const slotContent = fs.readFileSync(fullPath, "utf8");
+      let metadata = null;
+      const metaPath = path.join(dir, "slot.metadata.json");
+      if (fs.existsSync(metaPath)) {
+        try {
+          metadata = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+        } catch (e) { }
+      }
+      await setKvCache(kv, cleanRelPath, slotContent, metadata);
+      seededCount++;
+      if (process.env.DINOU_DEBUG) {
+        console.log(`   ✅ Cached Slot: ${cleanRelPath}`);
+      }
+    } else if (
+      entry.name.endsWith(".rsc") ||
+      entry.name === "shell.page.json" ||
+      entry.name === "shell.layout.json"
+    ) {
       const rsc = fs.readFileSync(fullPath, "utf8");
-      await setKvCache(kv, cleanRelPath, rsc, null);
+      if (entry.name.endsWith(".rsc") && rsc.trim().length === 0) {
+        continue;
+      }
+      let metadata = null;
+      if (entry.name === "layout.rsc") {
+        const lMetaPath = path.join(dir, "layout.metadata.json");
+        if (fs.existsSync(lMetaPath)) {
+          try {
+            metadata = JSON.parse(fs.readFileSync(lMetaPath, "utf8"));
+          } catch (e) { }
+        }
+      }
+      await setKvCache(kv, cleanRelPath, rsc, metadata);
       seededCount++;
       if (process.env.DINOU_DEBUG) {
         console.log(`   ✅ Cached RSC:  ${cleanRelPath}`);

@@ -8,6 +8,11 @@ export async function revalidatePage(path) {
   return fn(path);
 }
 
+export async function revalidateLayout(path) {
+  const { revalidateLayout: fn } = await import("./core/cache-revalidate.js");
+  return fn(path);
+}
+
 export async function revalidateTag(tag, options) {
   const { revalidateTag: fn } = await import("./core/cache-revalidate.js");
   return fn(tag, options);

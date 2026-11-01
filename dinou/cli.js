@@ -1,20 +1,20 @@
 #!/usr/bin/env node
 
-import fs from "node:fs";
-import { program } from "commander";
+
+import { program } from "#commander";
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dinouPath = fs.existsSync(path.resolve(__dirname, "dinou")) ? path.resolve(__dirname, "dinou") : __dirname;
+const dinouPath = __dirname;
 const projectRoot = process.cwd();
 
 // Global CLI options for Dinou v9 (Dual-Mode Vendoring)
 program
   .name("dinou")
   .description("Full-stack React 19 framework with native RSC, progressive streaming, and dual-mode vendoring")
-  .version("9.0.2")
+  .version("9.0.3")
   .option("-u, --unvendorized", "Run with standard node_modules dependencies instead of pre-bundled vendor packages");
 
 const isUnvendorizedRequested = () =>
@@ -27,7 +27,8 @@ const isUnvendorizedRequested = () =>
 const pathKey = Object.keys(process.env).find((k) => k.toLowerCase() === "path") || "PATH";
 const projectBin = path.join(projectRoot, "node_modules", ".bin");
 const dinouBin = path.join(dinouPath, "node_modules", ".bin");
-const extendedPath = [projectBin, dinouBin, process.env[pathKey]].filter(Boolean).join(path.delimiter);
+const dinouParentBin = path.resolve(dinouPath, "..", "node_modules", ".bin");
+const extendedPath = [projectBin, dinouBin, dinouParentBin, process.env[pathKey]].filter(Boolean).join(path.delimiter);
 
 const runCommand = (command, options = {}) => {
   try {
@@ -338,7 +339,7 @@ for (const t of denoTargets) {
         .command(cmdName)
         .description(`Compile standalone Deno executable (${t.name || "host"}, ${b})`)
         .action(() => {
-          runCommand(`${runDenoBuild(b)} && deno compile ${t.flags}--no-check --no-config --allow-net --allow-read --allow-write --allow-env --allow-sys --output ${t.outfile} .dinou/deno/main.js`);
+          runCommand(`${runDenoBuild(b)} && deno compile ${t.flags}--unstable-kv --no-check --no-config --allow-net --allow-read --allow-write --allow-env --allow-sys --output ${t.outfile} .dinou/deno/main.js`);
         });
     }
   }
@@ -524,7 +525,7 @@ program
   .description("Copy the framework to the root of the project")
   .action(async () => {
     console.log("Executing eject...");
-    const { eject } = await import("./eject.js");
+    const { eject } = await import("../eject.js");
     eject();
   });
 

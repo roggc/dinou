@@ -166,6 +166,7 @@ function findClientComponents() {
   const coreCandidates = [
     ...Array.from(candidateLinkPaths),
     ...Array.from(candidateRedirectPaths),
+    ...Array.from(candidateSlotPaths),
   ];
   for (const f of coreCandidates) {
     if (fs.existsSync(f)) {
@@ -433,6 +434,17 @@ if (!isWebpackBuild && Object.keys(parsedClientManifest).length > 0) {
       }
     }
   }
+  if (slotChunkId) {
+    imports["dinou/core/slot.js"] = slotChunkId;
+    imports["dinou/core/slot"] = slotChunkId;
+    imports["/dinou/core/slot.js"] = slotChunkId;
+    imports["./dinou/core/slot.js"] = slotChunkId;
+    for (const sp of candidateSlotPaths) {
+      for (const u of generateAllUrlVariants(sp)) {
+        imports[u] = slotChunkId;
+      }
+    }
+  }
 
   importMapHtml = `<script type="importmap">{"imports":${JSON.stringify(imports)}}</script>`;
 }
@@ -448,6 +460,8 @@ function findLayoutRoutes(dir, rel = "") {
       findLayoutRoutes(path.join(dir, entry.name), rel ? `${rel}/${entry.name}` : entry.name);
     } else if (/^layout\.[jt]sx?$/.test(entry.name)) {
       discoveredLayouts.push(rel);
+    } else if (entry.name === "no_layout") {
+      discoveredLayouts.push("!" + rel);
     }
   }
 }
@@ -584,6 +598,17 @@ if (redirectChunkId) {
     }
   }
 }
+if (slotChunkId) {
+  const slotCompIndex = clientComponents.findIndex((c) => candidateSlotPaths.has(path.resolve(c)));
+  if (slotCompIndex !== -1) {
+    addClientModule(slotChunkId, `mod_${slotCompIndex}`);
+    for (const sp of candidateSlotPaths) {
+      for (const u of generateAllUrlVariants(sp)) {
+        addClientModule(u, `mod_${slotCompIndex}`);
+      }
+    }
+  }
+}
 
 serverFunctionFiles.forEach((relPath, index) => {
   const normRel = relPath.replace(/\\/g, "/");
@@ -650,6 +675,18 @@ if (redirectChunkId) {
     addModuleMap(redirectChunkId, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
     for (const rp of candidateRedirectPaths) {
       for (const u of generateAllUrlVariants(rp)) {
+        addModuleMap(u, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
+      }
+    }
+  }
+}
+if (slotChunkId) {
+  const slotCompIndex = clientComponents.findIndex((c) => candidateSlotPaths.has(path.resolve(c)));
+  if (slotCompIndex !== -1) {
+    const fileUrl = pathToFileURL(clientComponents[slotCompIndex]).href;
+    addModuleMap(slotChunkId, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
+    for (const sp of candidateSlotPaths) {
+      for (const u of generateAllUrlVariants(sp)) {
         addModuleMap(u, `{ "*": { id: ${JSON.stringify(fileUrl)}, chunks: [], name: "*" } }`);
       }
     }

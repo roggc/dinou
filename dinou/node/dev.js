@@ -133,6 +133,7 @@ const yieldToEventLoop = () => new Promise((resolve) => setImmediate(resolve));
 // Initialize Dinou Storage
 try {
   const dist2Dir = path.resolve(projectRoot, ".dinou/dist2");
+  try { fs.rmSync(path.join(dist2Dir, "slots"), { recursive: true, force: true }); } catch (e) {}
   setStorageAdapter(new FileSystemStorage(dist2Dir));
 } catch (e) {
   setStorageAdapter(new MemoryStorage());
@@ -270,6 +271,7 @@ let redirectChunkId = null;
 let slotChunkId = null;
 const knownClientFiles = new Set();
 const knownServerFiles = new Set();
+const liveServerFunctionsMap = new Map();
 const compExportsCache = new Map();
 
 function getCachedFileExports(filePath) {
@@ -324,7 +326,17 @@ async function updateManifestsState(options = {}) {
 
   const rawSf = globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__ || readJsonSafe(sfPath);
   if (rawSf) {
-    parsedServerFunctionsManifest = rawSf;
+    parsedServerFunctionsManifest = { ...rawSf };
+  }
+  for (const [relPath, actions] of liveServerFunctionsMap.entries()) {
+    if (actions && actions.length > 0) {
+      parsedServerFunctionsManifest[relPath] = actions;
+    } else {
+      delete parsedServerFunctionsManifest[relPath];
+    }
+  }
+  if (typeof globalThis !== "undefined" && globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__) {
+    globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__ = parsedServerFunctionsManifest;
   }
 
   const rawAsset = globalThis.__DINOU_RAW_ASSET_MANIFEST__ || readJsonSafe(aPath);
@@ -781,6 +793,8 @@ function generateEntryFiles() {
         findLayoutRoutes(path.join(dir, entry.name), rel ? `${rel}/${entry.name}` : entry.name);
       } else if (/^layout\.[jt]sx?$/.test(entry.name)) {
         discoveredLayouts.push(rel);
+      } else if (entry.name === "no_layout") {
+        discoveredLayouts.push("!" + rel);
       }
     }
   }
@@ -1770,22 +1784,61 @@ async function doRebuildBatch(changesMap) {
 
       let isClientFile = false;
       let isServerFile = false;
+      let currentServerActions = [];
 
       if (fs.existsSync(absFilePath)) {
         try {
           const content = fs.readFileSync(absFilePath, "utf8");
-          isClientFile = useClientRegex.test(content.trim());
-          if (useServerRegex.test(content.trim())) {
-            isServerFile = true;
-          } else if (hasServerFunctions(content)) {
-            try {
-              const sfRes = transformServerFunctions(content, absFilePath);
-              isServerFile = Boolean(sfRes?.actions?.length > 0);
-            } catch (e) {
-              isServerFile = false;
+          const trimmed = content.trim();
+          isClientFile = useClientRegex.test(trimmed);
+          if (!isClientFile) {
+            if (useServerRegex.test(trimmed)) {
+              currentServerActions = parseExports(content) || [];
+              isServerFile = currentServerActions.length > 0;
+            } else if (hasServerFunctions(content)) {
+              try {
+                const sfRes = transformServerFunctions(content, absFilePath);
+                currentServerActions = sfRes?.actions || [];
+                isServerFile = currentServerActions.length > 0;
+              } catch (e) {
+                isServerFile = false;
+              }
             }
           }
         } catch (e) {}
+      }
+
+      const relServerPath = path.relative(projectRoot, absFilePath).replace(/\\/g, "/");
+      const prevServerActionsRaw = parsedServerFunctionsManifest[relServerPath];
+      const prevServerActions = prevServerActionsRaw
+        ? (Array.isArray(prevServerActionsRaw) ? prevServerActionsRaw : Array.from(prevServerActionsRaw))
+        : [];
+      const serverActionsChanged =
+        prevServerActions.length !== currentServerActions.length ||
+        prevServerActions.some((act, idx) => act !== currentServerActions[idx]);
+
+      if (isServerFile) {
+        liveServerFunctionsMap.set(relServerPath, currentServerActions);
+        parsedServerFunctionsManifest[relServerPath] = currentServerActions;
+        if (typeof globalThis !== "undefined") {
+          if (globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__) {
+            globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__[relServerPath] = currentServerActions;
+          }
+          if (globalThis.__DINOU_SERVER_FUNCTIONS_MANIFEST__) {
+            globalThis.__DINOU_SERVER_FUNCTIONS_MANIFEST__[relServerPath] = currentServerActions;
+          }
+        }
+      } else if (prevServerActions.length > 0 || liveServerFunctionsMap.has(relServerPath)) {
+        liveServerFunctionsMap.set(relServerPath, null);
+        delete parsedServerFunctionsManifest[relServerPath];
+        if (typeof globalThis !== "undefined") {
+          if (globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__) {
+            delete globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__[relServerPath];
+          }
+          if (globalThis.__DINOU_SERVER_FUNCTIONS_MANIFEST__) {
+            delete globalThis.__DINOU_SERVER_FUNCTIONS_MANIFEST__[relServerPath];
+          }
+        }
       }
 
       const wasClientFile = knownClientFiles.has(absFilePath);
@@ -1830,10 +1883,14 @@ async function doRebuildBatch(changesMap) {
         }
       }
 
-      if (clientDirectiveChanged || serverDirectiveChanged) {
+      if (clientDirectiveChanged || serverDirectiveChanged || serverActionsChanged) {
         needsStructureRebuild = true;
       }
-      if (clientDirectiveChanged || (isStructureChange && (isClientRelevant || isCssFile))) {
+      if (
+        clientDirectiveChanged ||
+        (serverDirectiveChanged && !isPageRoute) ||
+        (isStructureChange && (isClientRelevant || isCssFile))
+      ) {
         needsClientBundlerRestart = true;
       }
 
@@ -1852,7 +1909,7 @@ async function doRebuildBatch(changesMap) {
     if (needsClientBundlerRestart && clientBundlerHandle?.restart) {
       updateSpinner(`Directive or structure change detected. Recreating client bundle...`);
       await clientBundlerHandle.restart();
-      if (!needsStructureRebuild) {
+      if (!needsStructureRebuild && queuedChanges.size === 0 && pendingSrcChanges.size === 0) {
         await broadcastToClients({ type: "reload" });
         logSuccess(`Recreated bundle for ${baseName} in ${Date.now() - t0}ms`);
         return;
@@ -1860,6 +1917,12 @@ async function doRebuildBatch(changesMap) {
     }
 
     if (needsStructureRebuild) {
+      if (clientRebuildPromises.length > 0) {
+        await Promise.all(clientRebuildPromises);
+      }
+      if (activeClientBuildPromise) {
+        await activeClientBuildPromise;
+      }
       await updateManifestsState({ forceRescan: true });
       generateEntryFiles();
       await Promise.all([ctxA.rebuild(), ctxB.rebuild()]);
@@ -1875,7 +1938,7 @@ async function doRebuildBatch(changesMap) {
       if (activeClientBuildPromise) {
         await activeClientBuildPromise;
       }
-      if (!hasCssChanges) {
+      if ((!hasCssChanges || isWebpackBuild) && queuedChanges.size === 0 && pendingSrcChanges.size === 0) {
         await broadcastToClients({ type: "reload" });
       }
     } else {
@@ -1906,9 +1969,15 @@ async function doRebuildBatch(changesMap) {
       lastClientBuildDetails = "";
       logSuccess(`Rebuilt in ${Date.now() - t0}ms (${baseName})${buildDetails}`);
 
-      if (hasServerChanges && !hasCssChanges) {
-        for (const [absFilePath] of changesMap) {
-          broadcastToClients({ type: "rsc-update", path: absFilePath });
+      if (queuedChanges.size === 0 && pendingSrcChanges.size === 0) {
+        if (isWebpackBuild) {
+          if (hasServerChanges || hasClientChanges || hasCssChanges) {
+            await broadcastToClients({ type: "reload" });
+          }
+        } else if (hasServerChanges && !hasCssChanges) {
+          for (const [absFilePath] of changesMap) {
+            broadcastToClients({ type: "rsc-update", path: absFilePath });
+          }
         }
       }
     }
@@ -1931,7 +2000,17 @@ async function triggerRebuildBatch(changesMap) {
   isRebuilding = true;
   activeRebuildPromise = (async () => {
     try {
-      while (queuedChanges.size > 0) {
+      while (queuedChanges.size > 0 || pendingSrcChanges.size > 0) {
+        if (pendingSrcChanges.size > 0) {
+          if (srcDebounce) {
+            clearTimeout(srcDebounce);
+            srcDebounce = null;
+          }
+          for (const [p, evt] of pendingSrcChanges) {
+            queuedChanges.set(p, evt);
+          }
+          pendingSrcChanges.clear();
+        }
         const currentBatch = new Map(queuedChanges);
         queuedChanges.clear();
         await doRebuildBatch(currentBatch);
@@ -1980,7 +2059,7 @@ srcWatcher.on("all", (event, fullPath) => {
     const batch = new Map(pendingSrcChanges);
     pendingSrcChanges.clear();
     triggerRebuildBatch(batch);
-  }, 20);
+  }, 50);
 });
 
 // Watch manifest folder for client bundler output
@@ -2289,6 +2368,9 @@ async function startClientBundler(tool) {
     let devServer = null;
     let buildWaitPromise = null;
     let buildWaitResolve = null;
+    let isWebpackCompiling = false;
+    let webpackInvalidateTimer = null;
+    let webpackSafetyTimer = null;
 
     function startBuildWait() {
       notifyClientBuildStart();
@@ -2296,10 +2378,22 @@ async function startClientBundler(tool) {
         buildWaitPromise = new Promise((resolve) => {
           buildWaitResolve = resolve;
         });
+        if (webpackSafetyTimer) clearTimeout(webpackSafetyTimer);
+        webpackSafetyTimer = setTimeout(() => {
+          webpackSafetyTimer = null;
+          if (!isWebpackCompiling && buildWaitResolve) {
+            endBuildWait();
+          }
+        }, 6000);
       }
+      return buildWaitPromise;
     }
 
     function endBuildWait() {
+      if (webpackSafetyTimer) {
+        clearTimeout(webpackSafetyTimer);
+        webpackSafetyTimer = null;
+      }
       notifyClientBuildEnd();
       if (buildWaitResolve) {
         const resolve = buildWaitResolve;
@@ -2310,10 +2404,23 @@ async function startClientBundler(tool) {
     }
 
     compiler.hooks.invalid.tap("DinouBuildStart", () => {
+      if (webpackInvalidateTimer) {
+        clearTimeout(webpackInvalidateTimer);
+        webpackInvalidateTimer = null;
+      }
       startBuildWait();
     });
 
     compiler.hooks.watchRun.tap("DinouBuildStart", () => {
+      isWebpackCompiling = true;
+      if (webpackInvalidateTimer) {
+        clearTimeout(webpackInvalidateTimer);
+        webpackInvalidateTimer = null;
+      }
+      if (webpackSafetyTimer) {
+        clearTimeout(webpackSafetyTimer);
+        webpackSafetyTimer = null;
+      }
       startBuildWait();
     });
 
@@ -2321,6 +2428,12 @@ async function startClientBundler(tool) {
       let initialResolved = false;
 
       compiler.hooks.done.tapPromise("DinouClientSync", async (stats) => {
+        isWebpackCompiling = false;
+        if (webpackInvalidateTimer) {
+          clearTimeout(webpackInvalidateTimer);
+          webpackInvalidateTimer = null;
+        }
+        globalThis.__DINOU_WEBPACK_MODIFIED_FILES__?.clear();
         try {
           await onManifestUpdated();
         } finally {
@@ -2329,9 +2442,36 @@ async function startClientBundler(tool) {
         if (!initialResolved) {
           initialResolved = true;
           resolve({
+            notifyFileChanged: (filePath) => {
+              if (filePath) {
+                if (!globalThis.__DINOU_WEBPACK_MODIFIED_FILES__) {
+                  globalThis.__DINOU_WEBPACK_MODIFIED_FILES__ = new Set();
+                }
+                globalThis.__DINOU_WEBPACK_MODIFIED_FILES__.add(
+                  path.resolve(filePath).replace(/\\/g, "/").toLowerCase()
+                );
+              }
+              const p = startBuildWait();
+              if (!isWebpackCompiling && !webpackInvalidateTimer) {
+                webpackInvalidateTimer = setTimeout(() => {
+                  webpackInvalidateTimer = null;
+                  if (!isWebpackCompiling && buildWaitPromise) {
+                    try {
+                      if (devServer?.middleware?.invalidate) {
+                        devServer.middleware.invalidate();
+                      } else if (compiler.watching?.invalidate) {
+                        compiler.watching.invalidate();
+                      }
+                    } catch (e) {}
+                  }
+                }, 50);
+              }
+              return p;
+            },
             broadcast: (msg) => {
-              if (devServer?.sendMessage && devServer?.sockets) {
-                devServer.sendMessage(devServer.sockets, "ok");
+              const clients = devServer?.webSocketServer?.clients || devServer?.sockets;
+              if (devServer?.sendMessage && clients) {
+                devServer.sendMessage(clients, "static-changed");
               }
             },
             restart: async () => {
@@ -2432,6 +2572,15 @@ const server = http.createServer(async (req, res) => {
       const batch = new Map(pendingSrcChanges);
       pendingSrcChanges.clear();
       await triggerRebuildBatch(batch);
+    }
+    if (activeRebuildPromise) {
+      await activeRebuildPromise;
+    }
+    if (activeClientBuildPromise) {
+      await activeClientBuildPromise;
+    }
+    if (manifestSyncPromise) {
+      await manifestSyncPromise;
     }
 
     const host = req.headers["x-forwarded-host"] || req.headers.host || "localhost";

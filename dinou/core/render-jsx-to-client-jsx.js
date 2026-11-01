@@ -1,9 +1,40 @@
+import React from "react";
 import {
   isPprBuildActive,
-  enterSuspense,
-  exitSuspense,
+  runInSuspense,
+  commitPprSuspenseEffects,
   registerHole,
+  isPageRootElement,
+  runInPageSegment,
 } from "./ppr-context.js";
+import { getContext } from "./request-context.js";
+
+function cloneWithDevProps(jsx, newProps, resolvedKey, overrideType) {
+  const cloned = {
+    ...jsx,
+    $$typeof: Symbol.for("react.transitional.element"),
+    type: overrideType !== undefined ? overrideType : jsx.type,
+    props: newProps,
+    key: resolvedKey,
+  };
+  if ("_owner" in jsx) cloned._owner = jsx._owner;
+  if ("_store" in jsx && jsx._store) {
+    cloned._store = {};
+    Object.defineProperty(cloned._store, "validated", {
+      configurable: false,
+      enumerable: false,
+      writable: true,
+      value: jsx._store.validated || 1,
+    });
+  }
+  for (const devProp of ["ref", "_debugInfo", "_debugStack", "_debugTask"]) {
+    const desc = Object.getOwnPropertyDescriptor(jsx, devProp);
+    if (desc) {
+      Object.defineProperty(cloned, devProp, desc);
+    }
+  }
+  return cloned;
+}
 
 // Function to check if a component is a client component
 function isClientComponent(type) {
@@ -18,6 +49,20 @@ function isClientComponent(type) {
 }
 
 async function asyncRenderJSXToClientJSX(jsx, key = null) {
+  if (isPageRootElement(jsx)) {
+    return await runInPageSegment(async () => {
+      const resolved = await asyncRenderJSXToClientJSXInner(jsx, key);
+      const ctx = getContext();
+      if (ctx) {
+        ctx._resolvedPageClientJsx = resolved;
+      }
+      return resolved;
+    });
+  }
+  return await asyncRenderJSXToClientJSXInner(jsx, key);
+}
+
+async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
   if (
     typeof jsx === "string" ||
     typeof jsx === "number" ||
@@ -28,6 +73,13 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
   ) {
     return jsx;
   } else if (Array.isArray(jsx)) {
+    if (isPprBuildActive()) {
+      const results = [];
+      for (const child of jsx) {
+        results.push(await asyncRenderJSXToClientJSX(child, child?.key ?? null));
+      }
+      return results;
+    }
     return await Promise.all(
       jsx.map((child) =>
         asyncRenderJSXToClientJSX(
@@ -39,12 +91,7 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
   } else if (typeof jsx === "symbol") {
     if (jsx === Symbol.for("react.fragment")) {
       // Handle Fragment as an empty props object
-      return {
-        $$typeof: Symbol.for("react.transitional.element"),
-        type: Symbol.for("react.fragment"),
-        props: {},
-        key,
-      };
+      return React.createElement(React.Fragment, key != null ? { key } : null);
     }
     console.error("Unsupported symbol:", String(jsx));
     throw new Error(`Unsupported symbol: ${String(jsx)}`);
@@ -52,68 +99,76 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
     if (jsx.$$typeof === Symbol.for("react.transitional.element")) {
       if (jsx.type === Symbol.for("react.suspense")) {
         if (isPprBuildActive()) {
-          const holeId = enterSuspense();
-          try {
-            const renderedChildren = await asyncRenderJSXToClientJSX(jsx.props?.children);
-            exitSuspense();
-            return {
-              ...jsx,
-              props: {
-                ...jsx.props,
-                children: renderedChildren,
-                fallback: await asyncRenderJSXToClientJSX(jsx.props?.fallback),
-              },
-              key: key ?? jsx.key,
-            };
-          } catch (err) {
-            exitSuspense();
-            if (
-              (err && err.$$typeof === Symbol.for("dinou.ppr.postpone")) ||
-              (err && typeof err?.then === "function") ||
-              (err && err?.$$typeof === Symbol.for("react.postpone"))
-            ) {
-              registerHole(holeId, { type: err.pprType || "suspense" });
+          return await runInSuspense(async (holeId, suspenseStore) => {
+            try {
+              const renderedChildren = await asyncRenderJSXToClientJSX(jsx.props?.children);
               const renderedFallback = await asyncRenderJSXToClientJSX(jsx.props?.fallback);
-              return {
-                $$typeof: Symbol.for("react.transitional.element"),
-                type: "div",
-                props: {
-                  "data-ppr-hole": holeId,
-                  style: { display: "contents" },
-                  children: renderedFallback,
+              await commitPprSuspenseEffects(suspenseStore);
+              return cloneWithDevProps(
+                jsx,
+                {
+                  ...jsx.props,
+                  children: renderedChildren,
+                  fallback: renderedFallback,
                 },
-                key: key ?? jsx.key,
-              };
+                key ?? jsx.key
+              );
+            } catch (err) {
+              if (
+                (err && err.$$typeof === Symbol.for("dinou.ppr.postpone")) ||
+                (err && typeof err?.then === "function") ||
+                (err && err?.$$typeof === Symbol.for("react.postpone"))
+              ) {
+                registerHole(holeId, { type: err.pprType || "suspense" });
+                const renderedFallback = await asyncRenderJSXToClientJSX(jsx.props?.fallback);
+                return cloneWithDevProps(
+                  jsx,
+                  {
+                    "data-ppr-hole": holeId,
+                    style: { display: "contents" },
+                    children: renderedFallback,
+                  },
+                  key ?? jsx.key,
+                  "div"
+                );
+              }
+              throw err;
             }
-            throw err;
-          }
+          });
         }
-        return {
-          ...jsx,
-          props: await asyncRenderJSXToClientJSX(jsx.props),
-          key: key ?? jsx.key,
-        };
+        return cloneWithDevProps(
+          jsx,
+          await asyncRenderJSXToClientJSX(jsx.props),
+          key ?? jsx.key
+        );
       } else if (
         jsx.type === Symbol.for("react.fragment") ||
         jsx.type === Symbol.for("react.view_transition") ||
         typeof jsx.type === "string"
       ) {
-        return {
-          ...jsx,
-          props: await asyncRenderJSXToClientJSX(jsx.props),
-          key: key ?? jsx.key,
-        };
+        return cloneWithDevProps(
+          jsx,
+          await asyncRenderJSXToClientJSX(jsx.props),
+          key ?? jsx.key
+        );
       } else if (typeof jsx.type === "function") {
         const Component = jsx.type;
         const props = jsx.props;
         if (isClientComponent(Component)) {
-          return {
-            ...jsx,
-            $$typeof: Symbol.for("react.transitional.element"),
-            type: Component,
-            props: await asyncRenderJSXToClientJSX(props),
-            key: key ?? jsx.key,
-          };
+          if (jsx.__clientJsxAlreadyRendered) {
+            return cloneWithDevProps(
+              jsx,
+              props,
+              key ?? jsx.key,
+              Component
+            );
+          }
+          return cloneWithDevProps(
+            jsx,
+            await asyncRenderJSXToClientJSX(props),
+            key ?? jsx.key,
+            Component
+          );
         } else {
           // Server component: execute and process
           const returnedJsx = await Component(props);
@@ -125,13 +180,12 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
         jsx.type.$$typeof === Symbol.for("react.forward_ref")
       ) {
         if (isClientComponent(jsx.type)) {
-          return {
-            ...jsx,
-            $$typeof: Symbol.for("react.transitional.element"),
-            type: jsx.type,
-            props: await asyncRenderJSXToClientJSX(jsx.props),
-            key: key ?? jsx.key,
-          };
+          return cloneWithDevProps(
+            jsx,
+            await asyncRenderJSXToClientJSX(jsx.props),
+            key ?? jsx.key,
+            jsx.type
+          );
         } else {
           const returnedJsx = await jsx.type.render(jsx.props, jsx.ref);
           return await asyncRenderJSXToClientJSX(returnedJsx, key ?? jsx.key);
@@ -142,13 +196,12 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
         jsx.type.$$typeof === Symbol.for("react.memo")
       ) {
         if (isClientComponent(jsx.type)) {
-          return {
-            ...jsx,
-            $$typeof: Symbol.for("react.transitional.element"),
-            type: jsx.type,
-            props: await asyncRenderJSXToClientJSX(jsx.props),
-            key: key ?? jsx.key,
-          };
+          return cloneWithDevProps(
+            jsx,
+            await asyncRenderJSXToClientJSX(jsx.props),
+            key ?? jsx.key,
+            jsx.type
+          );
         } else {
           const innerComp = jsx.type.type;
           const returnedJsx = typeof innerComp === "function" ? await innerComp(jsx.props) : null;
@@ -162,6 +215,13 @@ async function asyncRenderJSXToClientJSX(jsx, key = null) {
       return jsx;
     } else {
       // Process object props (e.g., { className: "foo" })
+      if (isPprBuildActive()) {
+        const entries = [];
+        for (const [propName, value] of Object.entries(jsx)) {
+          entries.push([propName, await asyncRenderJSXToClientJSX(value)]);
+        }
+        return Object.fromEntries(entries);
+      }
       return Object.fromEntries(
         await Promise.all(
           Object.entries(jsx).map(async ([propName, value]) => [
