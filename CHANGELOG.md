@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [9.0.3] - 2026-10-31
+## [9.0.3] - 2026-11-01
 
 ### Fixed
 - **Direct Client Component Imports of Function-Level `"use server"` Functions**: Fixed an issue in the client bundler pipelines (`esbuild`, `rollup`, and `webpack`) where modules without a top-level `"use server"` directive that exported functions declaring `"use server"` inside their body were only matched against module-level directives. Importing such functions directly into `"use client"` components previously bundled the raw function implementation into the browser instead of generating an RPC proxy. All three client bundlers now inspect and extract function-level `"use server"` exports via `hasServerFunctions` and `extractServerFunctions`, emitting `createServerFunctionProxy` bindings while preserving granular manifest tree-shaking (excluding private and non-server helpers).
