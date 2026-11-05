@@ -1,6 +1,7 @@
+import { getContext } from "./core/request-context.js";
 import { noDynamic } from "./core/no-dynamic.js";
 
-export { noDynamic };
+export { getContext, noDynamic };
 
 export async function revalidatePath(path, options) {
   const { revalidatePath: fn } = await import("./core/cache-revalidate.js");
