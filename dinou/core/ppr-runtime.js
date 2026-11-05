@@ -9,6 +9,11 @@ import { renderRSCStream } from "./rsc-renderer.js";
 import { getClientManifest } from "./manifest-provider.js";
 import { requestStorage, setCurrentContext } from "./request-context.js";
 import getJSX from "./get-jsx.js";
+import {
+  SKIP_STATIC_SUSPENSE_SYMBOL,
+  runInRuntimeStaticSuspense,
+  runInRuntimeDynamicHole,
+} from "./ppr-context.js";
 
 function escapeHtml(str) {
   return String(str)
@@ -40,6 +45,7 @@ async function spliceDynamicHolesIntoShell(
   startHoleIndex = 0
 ) {
   const knownHoleIds = new Set();
+  const staticParentHoleIds = new Set();
   function collectKnownHoles(node) {
     if (!node || typeof node !== "object") return;
     if (Array.isArray(node)) {
@@ -49,6 +55,9 @@ async function spliceDynamicHolesIntoShell(
     if (node.$$typeof === Symbol.for("react.transitional.element")) {
       if (node.props && typeof node.props["data-ppr-hole"] === "string") {
         knownHoleIds.add(node.props["data-ppr-hole"]);
+      }
+      if (node.props && typeof node.props["data-ppr-static-parent"] === "string") {
+        staticParentHoleIds.add(node.props["data-ppr-static-parent"]);
       }
       if (node.props && typeof node.props === "object") {
         for (const val of Object.values(node.props)) {
@@ -85,9 +94,10 @@ async function spliceDynamicHolesIntoShell(
   }
 
   async function traverse(current) {
-    if (!current) return;
+    if (!current || liveHolesMap.size >= knownHoleIds.size) return;
     if (Array.isArray(current)) {
       for (const item of current) {
+        if (liveHolesMap.size >= knownHoleIds.size) return;
         await traverse(item);
       }
       return;
@@ -107,6 +117,9 @@ async function spliceDynamicHolesIntoShell(
         const evaluated = await current.type(current.props || {});
         await traverse(evaluated);
       } catch (err) {
+        if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
+          return;
+        }
         console.error("[Dinou PPR] Error evaluating component in hole splice:", err);
       }
       return;
@@ -124,6 +137,9 @@ async function spliceDynamicHolesIntoShell(
         const rendered = await current.type.render(current.props || {}, current.ref);
         await traverse(rendered);
       } catch (err) {
+        if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
+          return;
+        }
         console.error("[Dinou PPR] Error evaluating forward_ref in hole splice:", err);
       }
       return;
@@ -143,6 +159,9 @@ async function spliceDynamicHolesIntoShell(
           typeof innerComp === "function" ? await innerComp(current.props || {}) : null;
         await traverse(rendered);
       } catch (err) {
+        if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
+          return;
+        }
         console.error("[Dinou PPR] Error evaluating memo in hole splice:", err);
       }
       return;
@@ -157,12 +176,17 @@ async function spliceDynamicHolesIntoShell(
         liveHolesMap.set(currentHoleId, current);
         return;
       }
-      if (current.props?.children) {
-        await traverse(current.props.children);
-      }
-      if (current.props?.fallback) {
-        await traverse(current.props.fallback);
-      }
+      const runStaticScope = staticParentHoleIds.has(currentHoleId)
+        ? runInRuntimeDynamicHole
+        : runInRuntimeStaticSuspense;
+      await runStaticScope(async () => {
+        if (current.props?.children) {
+          await traverse(current.props.children);
+        }
+        if (current.props?.fallback) {
+          await traverse(current.props.fallback);
+        }
+      });
       return;
     }
     if (current?.$$typeof === Symbol.for("react.transitional.element")) {
@@ -242,7 +266,8 @@ async function streamDynamicHoles(
   writer,
   encoder,
   platformContext,
-  isDevelopment = false
+  isDevelopment = false,
+  staticParentHoles = null
 ) {
   let holeIndex = 0;
   const holePromises = [];
@@ -251,12 +276,16 @@ async function streamDynamicHoles(
   const knownHoleIds = new Set(
     (expectedHoles || []).map((h) => (typeof h === "object" ? h.id : h))
   );
+  if (hasExplicitHoles && knownHoleIds.size === 0) {
+    return;
+  }
 
   const clientManifest = getClientManifest();
 
   async function traverseProps(props) {
     if (!props || typeof props !== "object") return;
     for (const [, value] of Object.entries(props)) {
+      if (hasExplicitHoles && holePromises.length >= knownHoleIds.size) return;
       if (value && typeof value === "object") {
         await traverse(value);
       }
@@ -264,11 +293,12 @@ async function streamDynamicHoles(
   }
 
   async function traverse(current) {
-    if (!current) return;
+    if (!current || (hasExplicitHoles && holePromises.length >= knownHoleIds.size)) return;
 
     // Handle Arrays (children)
     if (Array.isArray(current)) {
       for (const item of current) {
+        if (hasExplicitHoles && holePromises.length >= knownHoleIds.size) return;
         await traverse(item);
       }
       return;
@@ -293,6 +323,9 @@ async function streamDynamicHoles(
         const evaluated = await current.type(current.props || {});
         await traverse(evaluated);
       } catch (err) {
+        if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
+          return;
+        }
         console.error("[Dinou PPR] Error evaluating component in hole traversal:", err);
       }
       return;
@@ -312,6 +345,9 @@ async function streamDynamicHoles(
         const rendered = await current.type.render(current.props || {}, current.ref);
         await traverse(rendered);
       } catch (err) {
+        if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
+          return;
+        }
         console.error("[Dinou PPR] Error evaluating forward_ref in hole traversal:", err);
       }
       return;
@@ -333,6 +369,9 @@ async function streamDynamicHoles(
           typeof innerComp === "function" ? await innerComp(current.props || {}) : null;
         await traverse(rendered);
       } catch (err) {
+        if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
+          return;
+        }
         console.error("[Dinou PPR] Error evaluating memo in hole traversal:", err);
       }
       return;
@@ -354,7 +393,7 @@ async function streamDynamicHoles(
 
       if (shouldStream) {
         const children = current.props?.children;
-        const promise = (async () => {
+        const promise = runInRuntimeDynamicHole(() => (async () => {
           try {
             let html = "";
             if (platformContext && platformContext.renderHtmlStream) {
@@ -376,7 +415,7 @@ async function streamDynamicHoles(
             const errChunk = `\n<template id="ppr-content-${currentHoleId}"><div style="color:#e11d48;padding:8px 12px;background:#fff1f2;border:1px solid #fecdd3;border-radius:6px;font-size:0.875rem;font-family:system-ui,sans-serif;">[PPR Error: ${errMsg}]</div></template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${currentBoundaryIndex}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){if(c.content){t.replaceWith(c.content);}else{t.replaceWith.apply(t,Array.from(c.childNodes));}}}finally{c.remove();}})();</script>\n`;
             await writer.write(encoder.encode(errChunk));
           }
-        })();
+        })());
         holePromises.push(promise);
         return;
       }
@@ -384,12 +423,18 @@ async function streamDynamicHoles(
       // Static <Suspense> boundary: do not re-stream it, but traverse its children & fallback
       // in the same order as asyncRenderJSXToClientJSX so nested dynamic <Suspense> holes are
       // discovered and holeIndex remains synchronized.
-      if (current.props?.children) {
-        await traverse(current.props.children);
-      }
-      if (current.props?.fallback) {
-        await traverse(current.props.fallback);
-      }
+      const runStaticScope =
+        staticParentHoles && staticParentHoles.has(currentHoleId)
+          ? runInRuntimeDynamicHole
+          : runInRuntimeStaticSuspense;
+      await runStaticScope(async () => {
+        if (current.props?.children) {
+          await traverse(current.props.children);
+        }
+        if (current.props?.fallback) {
+          await traverse(current.props.fallback);
+        }
+      });
       return;
     }
 
@@ -462,8 +507,23 @@ async function handlePprResume({
       // 1. Immediately flush static shell prelude (0ms TTFB)
       await writer.write(encoder.encode(shellPrelude));
 
+      let holes = Array.isArray(metadata?.holes) ? metadata.holes : null;
+      if ((!holes || holes.length === 0) && typeof shellPrelude === "string") {
+        const extracted = [
+          ...shellPrelude.matchAll(/data-ppr-hole="(ppr-hole-\d+)"/g),
+        ].map((m) => m[1]);
+        if (extracted.length > 0 || Array.isArray(metadata?.holes)) {
+          holes = extracted;
+        }
+      }
+
+      if (Array.isArray(holes) && holes.length === 0) {
+        return;
+      }
+
       const dynamicState = { value: true };
       const context = createRequestContext(simReq, bridge, platformContext, dynamicState);
+      context._isPprRuntimeResume = true;
       if (typeof copyCustomContextProperties === "function") {
         copyCustomContextProperties(rootContext, context);
       }
@@ -478,18 +538,20 @@ async function handlePprResume({
           queryObj,
           isNotFound,
           isDevelopment,
-          false
+          false,
+          { skipLayoutProbe: true }
         );
 
-        let holes = Array.isArray(metadata?.holes) ? metadata.holes : null;
-        if ((!holes || holes.length === 0) && typeof shellPrelude === "string") {
-          const extracted = [
-            ...shellPrelude.matchAll(/data-ppr-hole="(ppr-hole-\d+)"/g),
-          ].map((m) => m[1]);
-          if (extracted.length > 0 || Array.isArray(metadata?.holes)) {
-            holes = extracted;
-          }
-        }
+        const staticParentHoles =
+          typeof shellPrelude === "string"
+            ? new Set(
+                [
+                  ...shellPrelude.matchAll(
+                    /data-ppr-static-parent="(ppr-hole-\d+)"/g
+                  ),
+                ].map((m) => m[1])
+              )
+            : null;
 
         await streamDynamicHoles(
           jsx,
@@ -497,7 +559,8 @@ async function handlePprResume({
           writer,
           encoder,
           platformContext,
-          isDevelopment
+          isDevelopment,
+          staticParentHoles
         );
       });
     } catch (streamErr) {

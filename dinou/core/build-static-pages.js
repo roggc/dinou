@@ -912,6 +912,7 @@ async function buildStaticPages(onProgress = null) {
       const mockContext = {
         req: mockReq,
         res: mockRes,
+        _markDynamic: markAsDynamic,
       };
 
       let revalidate;
@@ -1274,6 +1275,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
     const mockContext = {
       req: mockReq,
       res: mockRes,
+      _markDynamic: markAsDynamic,
     };
 
     let revalidate;

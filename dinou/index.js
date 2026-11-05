@@ -1,5 +1,6 @@
 import { defineConfig } from "./core/config.js";
 import { getContext } from "./core/request-context.js";
+import { noDynamic } from "./core/no-dynamic.js";
 import {
   usePathname,
   useSearchParams,
@@ -14,6 +15,7 @@ import { Link } from "./core/link.jsx";
 const dinou = {
   defineConfig,
   getContext,
+  noDynamic,
   usePathname,
   useSearchParams,
   useRouter,
@@ -27,6 +29,7 @@ const dinou = {
 export {
   defineConfig,
   getContext,
+  noDynamic,
   usePathname,
   useSearchParams,
   useRouter,

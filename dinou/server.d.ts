@@ -44,6 +44,8 @@ export declare function revalidateTag(
   options?: { cascade?: boolean } | "layout"
 ): Promise<void>;
 
+import type { RequestContextStore } from "./index";
+
 export type {
   PPRConfig,
   RouteSegmentConfig,
@@ -51,6 +53,26 @@ export type {
   LayoutFunctions,
   StaticPathItem,
   StaticPathsResult,
+  RequestContextStore,
+  ResponseProxy,
+  CookieOptions,
+  Query,
+  Cookies,
+  Headers,
+  DinouConfig,
+  DinouPlugin,
+  ServerHookContext,
+  NodeMiddleware,
+  PageProps,
+  LayoutProps,
+  ErrorProps,
+  RouteParams,
+  DinouRoutePattern,
+  DinouRoute,
+  DinouRouter,
+  CleanRoutePath,
+  ExtractRouteParams,
+  ExtractSegmentParam,
 } from "./index";
 
 export interface DinouCacheSlotProps {
@@ -67,6 +89,23 @@ export interface DinouCacheSlotProps {
  * without re-evaluating the parent page or re-fetching unneeded database queries.
  */
 export declare function DinouCacheSlot(props: DinouCacheSlotProps): Promise<any>;
+
+/**
+ * Opts the enclosing `<Suspense>` boundary out of becoming a Dynamic PPR Hole
+ * when wrapping an async Server Component on a PPR route (`ppr = true`).
+ *
+ * Call `noDynamic()` synchronously at the top of your async Server Component
+ * (before its first `await`) so Dinou resolves its promise at build time and
+ * bakes the rendered output directly into the Static Shell (`shell.html`).
+ */
+export declare function noDynamic(): void;
+
+/**
+ * Gets the current request context (req and res proxy) synchronously.
+ * Must be called within a Server Component, `getProps`, or a `"use server"` Server Function.
+ * @returns The current request context store, or `undefined` if called outside a request scope.
+ */
+export declare function getContext(): RequestContextStore | undefined;
 
 // ====================================================================
 // STORAGE ADAPTER TYPES (ISR / CACHE)

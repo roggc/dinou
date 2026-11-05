@@ -1,12 +1,12 @@
 # Dinou
 
 [![Documentation](https://img.shields.io/badge/docs-dinou.dev-blue?style=flat-square)](https://dinou.dev)
-[![Version](https://img.shields.io/badge/version-9.0.3-orange?style=flat-square)](https://www.npmjs.com/package/dinou)
+[![Version](https://img.shields.io/badge/version-9.1.0-orange?style=flat-square)](https://www.npmjs.com/package/dinou)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](./LICENSE.md)
 
 **The Ejectable Full-Stack React 19 Framework.**
 
-Build full-stack web applications with native **React Server Components (RSC)**, progressive streaming SSR, compile-time type-safe routing, **3-Dimensional Caching** (**Horizontal Segmentation**, **Vertical `<DinouCacheSlot>` Micro-ISR**, and **Partial Prerendering / PPR**), **Dual-Mode Vendoring**, and universal multi-platform deployment (**Node.js**, **Bun**, **Deno**, **Cloudflare Workers**, **Netlify**, and **Static Export**) with zero vendor lock-in.
+Build full-stack web applications with native **React Server Components (RSC)**, progressive streaming SSR, compile-time type-safe routing, **3-Dimensional Caching** (**Horizontal Segmentation**, **Vertical `<DinouCacheSlot>` Micro-ISR**, and **Temporal Segmentation / Partial Prerendering (PPR)**), **Dual-Mode Vendoring**, and universal multi-platform deployment (**Node.js**, **Bun**, **Deno**, **Cloudflare Workers**, **Netlify**, and **Static Export**) with zero vendor lock-in.
 
 > 📚 **Full Documentation, Guides & Interactive Tutorials:** **[https://dinou.dev](https://dinou.dev)**
 >
@@ -22,9 +22,9 @@ Build full-stack web applications with native **React Server Components (RSC)**,
 4. [Route Lifecycles (`page_functions.ts` & `layout_functions.ts`)](#4-route-lifecycles-page_functionsts--layout_functionsts)
 5. [The 3-Dimensional Caching & Rendering Engine](#5-the-3-dimensional-caching--rendering-engine)
    - [5.1. Dimension 1: Horizontal Segmentation (Layout vs. Page Isolation)](#51-dimension-1-horizontal-segmentation-layout-vs-page-isolation)
-   - [5.2. Dimension 2: Partial Prerendering (PPR)](#52-dimension-2-partial-prerendering-ppr)
-   - [5.3. Dimension 3: Vertical Segmentation (`<DinouCacheSlot>` Micro-ISR)](#53-dimension-3-vertical-segmentation-dinoucacheslot-micro-isr)
-   - [5.4. The Triple Synergy (HS + PPR + `<DinouCacheSlot>`)](#54-the-triple-synergy-hs--ppr--dinoucacheslot)
+   - [5.2. Dimension 2: Vertical Segmentation (`<DinouCacheSlot>` Micro-ISR)](#52-dimension-2-vertical-segmentation-dinoucacheslot-micro-isr)
+   - [5.3. Dimension 3: Temporal Segmentation — Partial Prerendering (PPR)](#53-dimension-3-temporal-segmentation--partial-prerendering-ppr)
+   - [5.4. The Triple Synergy (Horizontal + Vertical + Temporal / PPR)](#54-the-triple-synergy-horizontal--vertical--temporal--ppr)
 6. [Client Navigation, Router Cache & Hooks](#6-client-navigation-router-cache--hooks)
 7. [Server Functions (`"use server"`), Context & The Dinou Pattern](#7-server-functions-use-server-context--the-dinou-pattern)
 8. [Configuration (`dinou.config.mjs`), Middleware (`onRequest`) & Storage Adapters](#8-configuration-dinouconfigmjs-middleware-onrequest--storage-adapters)
@@ -171,18 +171,18 @@ Both `page_functions.ts` and `layout_functions.ts` share the `RouteSegmentConfig
 
 ## 5. The 3-Dimensional Caching & Rendering Engine
 
-Dinou v9.0.3 features three orthogonal caching and rendering dimensions that work standalone or in **Triple Synergy**:
+Dinou features three orthogonal caching and rendering dimensions—**Horizontal**, **Vertical**, and **Temporal**—that work standalone or in **Triple Synergy**:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ 1. HORIZONTAL SEGMENTATION (HS)                                         │
 │    Independent Layout Cache (layout.rsc)  !==  Page Cache (page.rsc)    │
 ├─────────────────────────────────────────────────────────────────────────┤
-│ 2. PARTIAL PRERENDERING (PPR)                                           │
-│    Instant Static Shell (shell.html)  +  Streaming <Suspense> Holes     │
-├─────────────────────────────────────────────────────────────────────────┤
-│ 3. VERTICAL SEGMENTATION (<DinouCacheSlot> Micro-ISR)                   │
+│ 2. VERTICAL SEGMENTATION (<DinouCacheSlot> Micro-ISR)                   │
 │    Sub-tree RSC payload cached & refreshed independently by ID or Tag   │
+├─────────────────────────────────────────────────────────────────────────┤
+│ 3. TEMPORAL SEGMENTATION — PARTIAL PRERENDERING (PPR)                   │
+│    Instant Static Shell (shell.html)  +  Streaming <Suspense> Holes     │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -204,24 +204,9 @@ When you invalidate **only** a layout (`revalidateLayout("/dashboard")` or `reva
 
 ---
 
-### 5.2. Dimension 2: Partial Prerendering (PPR)
+### 5.2. Dimension 2: Vertical Segmentation (`<DinouCacheSlot>` Micro-ISR)
 
-Enable PPR globally in `dinou.config.mjs` (`ppr: true`) or per-route/layout in `page_functions.ts` / `layout_functions.ts` (`export const ppr = true`).
-
-#### How Automatic Static Bailout & Streaming Holes Work:
-1. **Static Shell Extraction:** During build (or background revalidation), Dinou pre-renders the static shell (`shell.html` and static RSC shell).
-2. **Request-Scope Bailout Triggers:** Any component wrapped inside a `<Suspense fallback={...}>` boundary that reads request-specific data:
-   - `getContext()` (reading `req.cookies`, `req.headers`, `req.query`, or mutating `res`)
-   - `useSearchParams()`
-   automatically bails out during static shell generation. Its `<Suspense>` fallback is baked into `shell.html`.
-3. **Single-Request Streaming:** On incoming HTTP requests, Dinou flushes the cached `shell.html` immediately and concurrently streams the personalized `<Suspense>` holes over the same HTTP response stream.
-4. **Dynamic Hole Collapse Optimization:** If an `async` component inside `<Suspense>` only awaits slow I/O (e.g., a database query) and **never** calls `getContext()` or `useSearchParams()`, Dinou resolves it at build time and collapses it directly into the static shell (`shell.html`) for instant delivery.
-
----
-
-### 5.3. Dimension 3: Vertical Segmentation (`<DinouCacheSlot>` Micro-ISR)
-
-`<DinouCacheSlot>` (imported from `"dinou/server"`) caches an arbitrary React Server Component subtree independently from its host page or layout.
+While Horizontal Segmentation isolates route segments (`layout.tsx` vs. `page.tsx`), **Vertical Segmentation** isolates individual component subtrees *inside* a layout or page. `<DinouCacheSlot>` (imported from `"dinou/server"`) caches an arbitrary React Server Component subtree independently from its host page or layout.
 
 ```tsx
 import { DinouCacheSlot } from "dinou/server";
@@ -246,7 +231,7 @@ export default async function DashboardPage() {
   - `children`: Either JSX (`<AsyncServerComponent />`) or a lazy factory function (`() => <AsyncServerComponent />`).
 - **Works in Both Dynamic & Static Hosts:**
   - Inside a **Dynamic Page (`revalidate = 0`)**: The host page re-renders on every request, while `<DinouCacheSlot>` subtrees hit cache without re-running their DB queries.
-  - Inside a **Static Page (`revalidate = false`)**: When a slot is invalidated via `revalidateTag(tag)` or its `revalidate` TTL expires, Dinou updates the slot and lazily re-composes the static host page so subsequent reloads serve the updated slot HTML without changing the rest of the static page.
+  - Inside a **Static Page (`revalidate = false` or `ppr = true` Static Shell)**: When a slot is invalidated via `revalidateTag(tag)`, Dinou updates the slot and re-composes the static host page/shell. When a Static Shell slot's `revalidate` TTL expires (`revalidate >= 1`), Dinou uses **non-blocking Background Stale-While-Revalidate (SWR)**: the incoming request serves the cached `index.html` / `shell.html` immediately (`0ms` TTFB) while regenerating the expired `slot.json` and recomposing the host HTML/RSC in the background.
 - **Nested `<DinouCacheSlot>` Isolation:** A `<DinouCacheSlot>` can contain inner `<DinouCacheSlot>` components. Invalidating or refreshing the **inner** slot re-evaluates **only** the inner slot while the outer slot stays cached.
 - **Client Components & Server Action Props Inside Slots:** `<DinouCacheSlot>` subtrees can render `"use client"` components and pass `"use server"` functions as props; Dinou preserves client reference manifests and action bindings across slot serialization.
 - **Stampede Protection:** Concurrent cache-miss requests for the same slot key are deduplicated in-flight onto a single render promise.
@@ -258,11 +243,30 @@ export default async function DashboardPage() {
 
 ---
 
-### 5.4. The Triple Synergy (HS + PPR + `<DinouCacheSlot>`)
+### 5.3. Dimension 3: Temporal Segmentation — Partial Prerendering (PPR)
+
+**Partial Prerendering (PPR)** is Dinou's **Temporal Segmentation** axis: it splits a single route across *time*, delivering the pre-rendered **Static Shell (`shell.html`)** at $t = 0\text{ ms}$ (build/revalidation time) while streaming personalized or live **`<Suspense>` Dynamic Holes** concurrently at request time over the same HTTP connection.
+
+Enable PPR globally in `dinou.config.mjs` (`ppr: true`) or per-route/layout in `page_functions.ts` / `layout_functions.ts` (`export const ppr = true`).
+
+#### How `<Suspense>` Boundaries, Dynamic PPR Holes & `noDynamic()` Work:
+1. **`<Suspense>` Is the Single Boundary (`ppr = true` vs. `ppr = false`):**
+   - **Outside `<Suspense>`** (top-level `async` Page/Layout, `getProps`, or unwrapped child `async` Server Components): Awaited at build/revalidation time and baked directly into the **Static Shell (`shell.html`)**. *(Accessing `req.cookies`, `req.headers`, `req.query`, or `<DinouCacheSlot revalidate={0}>` outside `<Suspense>` triggers a Full-Page Dynamic Bailout).*
+   - **Inside `<Suspense fallback={...}>` (Default = Dynamic PPR Hole):** On `ppr = true` routes, **any `async` Server Component** (postponed immediately at its first `await` with zero build latency), any component reading `getContext()` (`req.cookies`, `req.headers`, `req.query`) / `useSearchParams()`, or `<DinouCacheSlot revalidate={0}>` automatically becomes a **Dynamic PPR Hole** (`data-ppr-hole`). Its `<Suspense>` fallback is baked into `shell.html` (`0ms` TTFB) and the resolved content streams live over the same HTTP response at request time. *(On `ppr = false` routes, `async` components inside `<Suspense>` resolve at build time into `index.html`).*
+2. **Static `<Suspense>` Opt-Out via `noDynamic()` (`"dinou"` or `"dinou/server"`):**
+   - If an `async` Server Component inside `<Suspense>` on a `ppr = true` route should instead resolve at build time into the **Static Shell (`shell.html`)** (e.g., static Markdown/syntax highlighting), call **`noDynamic()`** synchronously at the top of the component **before its first `await`**.
+   - At runtime, leaf static `<Suspense>` boundaries opted out via `noDynamic()` automatically short-circuit (`0ms`, zero re-execution) when sibling dynamic holes stream. *(If `req.cookies`, `req.headers`, or `req.query` is read inside a `noDynamic()` subtree, dynamic bailout always wins).*
+3. **Single-Request Streaming:** On incoming HTTP requests, Dinou flushes the cached `shell.html` immediately and concurrently streams all Dynamic PPR Holes over the same HTTP response stream. If a `ppr = true` route has zero dynamic holes (`holes: []`), Dinou serves `shell.html` directly with zero runtime component execution.
+
+---
+
+### 5.4. The Triple Synergy (Horizontal + Vertical + Temporal / PPR)
 
 All three dimensions compose simultaneously in the same route tree:
 - **Layout Level:** Can be Static (HS), Dynamic (HS), or PPR (`layout_functions.ts` with `ppr = true`), and can contain `<DinouCacheSlot>` components both in the **Layout Static Shell** and inside **Layout Dynamic `<Suspense>` Holes**.
-- **Page Level:** Can be Static (HS), Dynamic (HS), or PPR (`page_functions.ts` with `ppr = true`), and can contain `<DinouCacheSlot>` components both in the **Page Static Shell** and inside **Page Dynamic `<Suspense>` Holes** (including nested slots and slots wrapped around or inside `<Suspense>`).
+- **Page Level:** Can be Static (HS), Dynamic (HS), or PPR (`page_functions.ts` with `ppr = true`), and can contain `<DinouCacheSlot>` components both in the **Page Static Shell** and inside **Page Dynamic `<Suspense>` Holes**:
+  - **`<DinouCacheSlot>` Outside `<Suspense>` (or Wrapping an Inner `<Suspense>`)**: Resolves at build time into the **Static Shell (`shell.html` + `slot.json`)**, preserving any inner `<Suspense>` node in `slot.json` and using non-blocking background SWR upon TTL expiration.
+  - **`<Suspense>` Wrapping `<DinouCacheSlot>` (`<Suspense><DinouCacheSlot>...</DinouCacheSlot></Suspense>`)**: Acts as a **Cached Dynamic PPR Hole** by default on `ppr = true` routes (unless opted out via `noDynamic()`), baking the `<Suspense>` fallback into `shell.html` and caching `slot.json` across runtime hole streams.
 - **Synergy Invalidation Invariants:**
   1. Invalidating a `<DinouCacheSlot>` inside a **PPR Dynamic Hole** (`revalidateTag("hole-slot")`) updates only that slot on the next request without regenerating `shell.html` or sibling slots.
   2. Invalidating a `<DinouCacheSlot>` inside a **PPR Static Shell** (`revalidateTag("shell-slot")`) purges the slot and automatically enqueues background regeneration of the host `shell.html` (and `layout.rsc` if the slot lives in the layout shell), while leaving sibling cached slots untouched.
@@ -309,7 +313,7 @@ Any file or async function marked with `"use server"` runs exclusively on the se
 - **Security:** Bundlers automatically strip the implementation from the client bundle and replace it with a Flight RPC proxy (`/____server_function____`).
 
 ### Reading & Mutating Request Context (`getContext()`)
-Call `getContext()` (from `"dinou"`) synchronously inside any Server Component, `getProps`, `validateParams`, or `"use server"` function:
+Call `getContext()` (from `"dinou"` or `"dinou/server"`) synchronously inside any Server Component, `getProps`, `validateParams`, or `"use server"` function:
 ```ts
 import { getContext } from "dinou";
 
@@ -483,18 +487,31 @@ Running `npx dinou eject` copies the complete Dinou framework into `./dinou` at 
 | `useNavigationLoading` | Hook (Client) | Boolean pending navigation state |
 | `refreshSlot` | Function (Client) | `refreshSlot(slotIdOrTag, { fresh?: boolean })` (supports `"*"` wildcard) |
 | `getContext` | Function (Server) | Returns `{ req, res, env, ctx, ...custom }` from `AsyncLocalStorage` |
+| `noDynamic` | Function (Server) | Opts enclosing `<Suspense>` out of becoming a Dynamic PPR Hole on `ppr = true` routes |
 | `defineConfig` | Function | Type-safe helper for `dinou.config.mjs` |
-| `PageProps<T>`, `LayoutProps<T>`, `ErrorProps<T>`, `PageFunctions<T, P>`, `LayoutFunctions<T, P>`, `RouteParams<T>`, `DinouRoute`, `DinouRoutePattern` | TypeScript Types | Compile-time type-safe routing helpers |
+| `PageProps<T>`, `LayoutProps<T>`, `ErrorProps<T>`, `PageFunctions<T, P>`, `LayoutFunctions<T, P>`, `RouteSegmentConfig`, `PPRConfig`, `StaticPathItem`, `StaticPathsResult`, `RouteParams<T>`, `DinouRoute`, `DinouRoutePattern`, `DinouRouter`, `CleanRoutePath`, `ExtractRouteParams`, `ExtractSegmentParam`, `LinkProps`, `ClientRedirectProps`, `NavigationOptions`, `RequestContextStore`, `ResponseProxy`, `CookieOptions`, `Query`, `Cookies`, `Headers`, `DinouConfig`, `DinouPlugin`, `ServerHookContext`, `NodeMiddleware` | TypeScript Types | Complete compile-time routing, component prop, context, and plugin types |
 
 ### Package `"dinou/server"`
 | Export | Kind | Description |
 | :--- | :--- | :--- |
 | `DinouCacheSlot` | Server Component | `<DinouCacheSlot id? tag? tags? revalidate?>{children}</DinouCacheSlot>` |
+| `getContext` | Function (Server) | Returns `{ req, res, env, ctx, ...custom }` from `AsyncLocalStorage` (also in `"dinou"`) |
+| `noDynamic` | Function (Server) | Opts enclosing `<Suspense>` out of becoming a Dynamic PPR Hole (also in `"dinou"`) |
 | `revalidateTag` | Function (Server) | `await revalidateTag(tag)` — invalidates tagged pages, layouts & slots |
 | `revalidatePath` | Function (Server) | `await revalidatePath(path)` — invalidates route layout + page |
 | `revalidatePage` | Function (Server) | `await revalidatePage(path)` — invalidates only `page.rsc` + `index.html` |
 | `revalidateLayout` | Function (Server) | `await revalidateLayout(path)` — invalidates only `layout.rsc` (lazy HTML re-composition) |
 | `StorageAdapter`, `FileSystemStorage`, `CloudflareKVStorage`, `DenoKVStorage`, `MemoryStorage`, `RedisStorage`, `getStorageAdapter`, `setStorageAdapter` | Storage API | Pluggable cache storage engines for SSG / ISR / PPR / `DinouCacheSlot` |
+| `DinouCacheSlotProps`, `StorageItem`, plus all server/route/page/layout/context/plugin types (`PageProps<T>`, `LayoutProps<T>`, `ErrorProps<T>`, `PageFunctions<T, P>`, `LayoutFunctions<T, P>`, `RouteSegmentConfig`, `PPRConfig`, `StaticPathItem`, `StaticPathsResult`, `RouteParams<T>`, `DinouRoute`, `DinouRoutePattern`, `DinouRouter`, `CleanRoutePath`, `ExtractRouteParams`, `ExtractSegmentParam`, `RequestContextStore`, `ResponseProxy`, `CookieOptions`, `Query`, `Cookies`, `Headers`, `DinouConfig`, `DinouPlugin`, `ServerHookContext`, `NodeMiddleware`) | TypeScript Types | Server-side & routing TypeScript definitions re-exported from `"dinou/server"` |
+
+### Package `"dinou/config"` & Additional Subpaths
+| Subpath | Export / Purpose | Description |
+| :--- | :--- | :--- |
+| `"dinou/config"` | `defineConfig` (+ types from `index.d.ts`) | Dedicated config-only entry point (`dinou/core/config.js`) for `dinou.config.{mjs,js,ts}` |
+| `"dinou/env"` | Ambient TypeScript definitions | `/// <reference types="dinou/env" />` — declares module types for 21+ static asset & media extensions |
+| `"dinou/adapters/{node,bun,deno,cloudflare,netlify}"` | Platform runtime adapters | Server entry points for each deployment runtime |
+
+> **Import Safety Rule:** `import { ... } from "dinou"` (and `import type`) is 100% safe in both Server Components/Functions and Client Components (`"use client"`). Runtime value imports `import { ... } from "dinou/server"` are **Server-Only** (pulling `node:*` modules), whereas `import type { ... } from "dinou/server"` is erased at compile time and safe anywhere.
 
 ---
 
