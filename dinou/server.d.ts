@@ -44,6 +44,8 @@ export declare function revalidateTag(
   options?: { cascade?: boolean } | "layout"
 ): Promise<void>;
 
+import type { RequestContextStore } from "./index";
+
 export type {
   PPRConfig,
   RouteSegmentConfig,
@@ -103,7 +105,7 @@ export declare function noDynamic(): void;
  * Must be called within a Server Component, `getProps`, or a `"use server"` Server Function.
  * @returns The current request context store, or `undefined` if called outside a request scope.
  */
-export declare function getContext(): import("./index").RequestContextStore | undefined;
+export declare function getContext(): RequestContextStore | undefined;
 
 // ====================================================================
 // STORAGE ADAPTER TYPES (ISR / CACHE)
