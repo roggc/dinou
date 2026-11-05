@@ -1,3 +1,7 @@
+import { noDynamic } from "./core/no-dynamic.js";
+
+export { noDynamic };
+
 export async function revalidatePath(path, options) {
   const { revalidatePath: fn } = await import("./core/cache-revalidate.js");
   return fn(path, options);
@@ -22,6 +26,7 @@ export async function DinouCacheSlot(props) {
   const { DinouCacheSlot: fn } = await import("./core/cache-slot.js");
   return fn(props);
 }
+DinouCacheSlot.$$dinouCacheSlot = true;
 
 export {
   StorageAdapter,

@@ -1,13 +1,57 @@
 import React from "react";
 import {
   isPprBuildActive,
+  isInsideSuspense,
+  isInsideOuterSuspenseOutsideSlot,
+  rollbackPprHolesAfter,
+  isInsideCachedSlot,
   runInSuspense,
+  getPprHoleCounter,
   commitPprSuspenseEffects,
   registerHole,
+  markDynamicAccess,
   isPageRootElement,
   runInPageSegment,
+  resetComponentNoDynamicFlag,
+  consumeComponentNoDynamicFlag,
+  isNoDynamicActive,
+  isSlotDiscoveryActive,
 } from "./ppr-context.js";
 import { getContext } from "./request-context.js";
+
+function isThenable(val) {
+  return (
+    val !== null &&
+    (typeof val === "object" || typeof val === "function") &&
+    typeof val.then === "function"
+  );
+}
+
+function isCacheSlotComponent(fn) {
+  if (!fn) return false;
+  return Boolean(fn.$$dinouCacheSlot || fn.name === "DinouCacheSlot");
+}
+
+async function invokeServerComponentInPpr(fn, callFn) {
+  resetComponentNoDynamicFlag();
+  const rawResult = callFn();
+  const optedOut = consumeComponentNoDynamicFlag();
+  if (
+    isThenable(rawResult) &&
+    !isCacheSlotComponent(fn) &&
+    isPprBuildActive() &&
+    isInsideOuterSuspenseOutsideSlot() &&
+    !isSlotDiscoveryActive() &&
+    !optedOut &&
+    !isNoDynamicActive()
+  ) {
+    try {
+      rawResult.then(null, () => {});
+    } catch (_) {}
+    markDynamicAccess("async-suspense");
+  }
+  return await rawResult;
+}
 
 function cloneWithDevProps(jsx, newProps, resolvedKey, overrideType) {
   const cloned = {
@@ -100,25 +144,36 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
       if (jsx.type === Symbol.for("react.suspense")) {
         if (isPprBuildActive()) {
           return await runInSuspense(async (holeId, suspenseStore) => {
+            const countBefore = getPprHoleCounter();
             try {
               const renderedChildren = await asyncRenderJSXToClientJSX(jsx.props?.children);
               const renderedFallback = await asyncRenderJSXToClientJSX(jsx.props?.fallback);
+              const hasNestedSuspense = getPprHoleCounter() > countBefore;
               await commitPprSuspenseEffects(suspenseStore);
               return cloneWithDevProps(
                 jsx,
                 {
                   ...jsx.props,
-                  children: renderedChildren,
+                  ...(hasNestedSuspense ? { "data-ppr-static-parent": holeId } : {}),
+                  children: hasNestedSuspense
+                    ? React.createElement(
+                        "div",
+                        { "data-ppr-static-parent": holeId, style: { display: "contents" } },
+                        renderedChildren
+                      )
+                    : renderedChildren,
                   fallback: renderedFallback,
                 },
                 key ?? jsx.key
               );
             } catch (err) {
               if (
-                (err && err.$$typeof === Symbol.for("dinou.ppr.postpone")) ||
-                (err && typeof err?.then === "function") ||
-                (err && err?.$$typeof === Symbol.for("react.postpone"))
+                (suspenseStore?.slotDepthAtSuspense || 0) === 0 &&
+                ((err && err.$$typeof === Symbol.for("dinou.ppr.postpone")) ||
+                  (err && typeof err?.then === "function") ||
+                  (err && err?.$$typeof === Symbol.for("react.postpone")))
               ) {
+                rollbackPprHolesAfter(countBefore);
                 registerHole(holeId, { type: err.pprType || "suspense" });
                 const renderedFallback = await asyncRenderJSXToClientJSX(jsx.props?.fallback);
                 return cloneWithDevProps(
@@ -133,14 +188,20 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
                 );
               }
               throw err;
+            } finally {
+              if (suspenseStore) {
+                suspenseStore.settled = true;
+              }
             }
           });
         }
-        return cloneWithDevProps(
-          jsx,
-          await asyncRenderJSXToClientJSX(jsx.props),
-          key ?? jsx.key
-        );
+        return await runInSuspense(async () => {
+          return cloneWithDevProps(
+            jsx,
+            await asyncRenderJSXToClientJSX(jsx.props),
+            key ?? jsx.key
+          );
+        });
       } else if (
         jsx.type === Symbol.for("react.fragment") ||
         jsx.type === Symbol.for("react.view_transition") ||
@@ -171,7 +232,9 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
           );
         } else {
           // Server component: execute and process
-          const returnedJsx = await Component(props);
+          const returnedJsx = await invokeServerComponentInPpr(Component, () =>
+            Component(props)
+          );
           return await asyncRenderJSXToClientJSX(returnedJsx, key ?? jsx.key);
         }
       } else if (
@@ -187,7 +250,10 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
             jsx.type
           );
         } else {
-          const returnedJsx = await jsx.type.render(jsx.props, jsx.ref);
+          const returnedJsx = await invokeServerComponentInPpr(
+            jsx.type.render,
+            () => jsx.type.render(jsx.props, jsx.ref)
+          );
           return await asyncRenderJSXToClientJSX(returnedJsx, key ?? jsx.key);
         }
       } else if (
@@ -204,7 +270,12 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
           );
         } else {
           const innerComp = jsx.type.type;
-          const returnedJsx = typeof innerComp === "function" ? await innerComp(jsx.props) : null;
+          const returnedJsx =
+            typeof innerComp === "function"
+              ? await invokeServerComponentInPpr(innerComp, () =>
+                  innerComp(jsx.props)
+                )
+              : null;
           return await asyncRenderJSXToClientJSX(returnedJsx, key ?? jsx.key);
         }
       } else {

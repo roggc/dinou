@@ -6,7 +6,83 @@ import { AsyncLocalStorage } from "node:async_hooks";
 const pprStorage = new AsyncLocalStorage();
 const pageSegmentStorage = new AsyncLocalStorage();
 const layoutSegmentStorage = new AsyncLocalStorage();
+const cachedSlotStorage = new AsyncLocalStorage();
+const slotDiscoveryStorage = new AsyncLocalStorage();
+const runtimeStaticSuspenseStorage = new AsyncLocalStorage();
 const pageRootElements = new WeakSet();
+
+const NO_DYNAMIC_HOOK_KEY = Symbol.for("dinou.ppr.noDynamic.hook");
+export const SKIP_STATIC_SUSPENSE_SYMBOL = Symbol.for("dinou.ppr.skipStatic");
+let currentComponentNoDynamic = false;
+
+export function runInRuntimeStaticSuspense(callback) {
+  const prev = runtimeStaticSuspenseStorage.getStore();
+  return runtimeStaticSuspenseStorage.run(
+    { active: true, depth: (prev?.depth || 0) + 1 },
+    callback
+  );
+}
+
+export function runInRuntimeDynamicHole(callback) {
+  return runtimeStaticSuspenseStorage.run({ active: false, depth: 0 }, callback);
+}
+
+export function isRuntimeStaticSuspenseActive() {
+  const store = runtimeStaticSuspenseStorage.getStore();
+  return Boolean(store && store.active && store.depth > 0);
+}
+
+export function noDynamic() {
+  if (isRuntimeStaticSuspenseActive() && !isPprBuildActive()) {
+    const err = new Error(
+      "[Dinou PPR] Skipping static noDynamic() subtree during runtime hole traversal"
+    );
+    err.$$typeof = SKIP_STATIC_SUSPENSE_SYMBOL;
+    throw err;
+  }
+  currentComponentNoDynamic = true;
+  const store = pprStorage.getStore();
+  if (store && store.suspenseDepth > 0) {
+    store.noDynamic = true;
+  }
+}
+
+if (typeof globalThis !== "undefined") {
+  globalThis[NO_DYNAMIC_HOOK_KEY] = noDynamic;
+}
+
+export function resetComponentNoDynamicFlag() {
+  currentComponentNoDynamic = false;
+}
+
+export function consumeComponentNoDynamicFlag() {
+  const val = currentComponentNoDynamic;
+  currentComponentNoDynamic = false;
+  return val;
+}
+
+export function isNoDynamicActive() {
+  if (currentComponentNoDynamic) return true;
+  const store = pprStorage.getStore();
+  return Boolean(store && store.noDynamic);
+}
+
+export function runInCachedSlot(callback) {
+  const prev = cachedSlotStorage.getStore();
+  return cachedSlotStorage.run({ depth: (prev?.depth || 0) + 1 }, callback);
+}
+
+export function isInsideCachedSlot() {
+  return Boolean((cachedSlotStorage.getStore()?.depth || 0) > 0);
+}
+
+export function runInSlotDiscovery(callback) {
+  return slotDiscoveryStorage.run({ active: true }, callback);
+}
+
+export function isSlotDiscoveryActive() {
+  return Boolean(slotDiscoveryStorage.getStore()?.active);
+}
 
 export function markPageRootElement(el) {
   if (el && typeof el === "object") {
@@ -76,6 +152,32 @@ export function isInsideSuspense() {
   return Boolean(store && store.suspenseDepth > 0);
 }
 
+export function isInsideOuterSuspenseOutsideSlot() {
+  const store = getPprStore();
+  return Boolean(
+    store && store.suspenseDepth > 0 && store.hasOuterSuspenseOutsideSlot
+  );
+}
+
+export function rollbackPprHolesAfter(countBefore) {
+  const store = getPprStore();
+  if (!store) return;
+  const target = Number(countBefore) || 0;
+  const current = store.counter
+    ? store.counter.nextHoleIndex
+    : store.nextHoleIndex || 0;
+  if (current > target) {
+    for (let i = target + 1; i <= current; i++) {
+      store.holes.delete(`ppr-hole-${i}`);
+    }
+    if (store.counter) {
+      store.counter.nextHoleIndex = target;
+    } else {
+      store.nextHoleIndex = target;
+    }
+  }
+}
+
 export function resetPprHoles(startIndex = 0) {
   const store = getPprStore();
   if (store) {
@@ -123,11 +225,19 @@ export function runInSuspense(callback, explicitHoleId = null) {
     ? [...store.holeStack, holeId]
     : [holeId];
   const pendingEffects = [];
+  const slotDepthAtSuspense = cachedSlotStorage.getStore()?.depth || 0;
+  const hasOuterSuspenseOutsideSlot = Boolean(
+    store.hasOuterSuspenseOutsideSlot || slotDepthAtSuspense === 0
+  );
   const childStore = {
     ...store,
     suspenseDepth: store.suspenseDepth + 1,
     currentHoleId: holeId,
     holeStack: nextStack,
+    noDynamic: false,
+    settled: false,
+    slotDepthAtSuspense,
+    hasOuterSuspenseOutsideSlot,
     pendingEffects,
     parentPendingEffects: Array.isArray(store.pendingEffects)
       ? store.pendingEffects
@@ -145,6 +255,9 @@ export function deferPprSuspenseEffect(effectFn) {
     Array.isArray(store.pendingEffects) &&
     typeof effectFn === "function"
   ) {
+    if (store.settled) {
+      return true;
+    }
     store.pendingEffects.push(effectFn);
     return true;
   }
@@ -204,7 +317,12 @@ export function exitSuspense() {
 
 export function markDynamicAccess(type = "dynamic") {
   const store = getPprStore();
-  if (store && store.isPpr && store.suspenseDepth > 0) {
+  if (
+    store &&
+    store.isPpr &&
+    store.suspenseDepth > 0 &&
+    store.hasOuterSuspenseOutsideSlot
+  ) {
     const idx = store.counter ? store.counter.nextHoleIndex : store.nextHoleIndex;
     const holeId = store.currentHoleId || `ppr-hole-${idx}`;
     const error = new Error(
@@ -237,12 +355,26 @@ export function getRegisteredHoles() {
 }
 
 export default {
+  noDynamic,
+  SKIP_STATIC_SUSPENSE_SYMBOL,
+  runInRuntimeStaticSuspense,
+  runInRuntimeDynamicHole,
+  isRuntimeStaticSuspenseActive,
+  resetComponentNoDynamicFlag,
+  consumeComponentNoDynamicFlag,
+  isNoDynamicActive,
+  runInCachedSlot,
+  isInsideCachedSlot,
+  runInSlotDiscovery,
+  isSlotDiscoveryActive,
   runInPageSegment,
   isInsidePageSegment,
   runWithPprContext,
   getPprStore,
   isPprBuildActive,
   isInsideSuspense,
+  isInsideOuterSuspenseOutsideSlot,
+  rollbackPprHolesAfter,
   resetPprHoles,
   getPprHoleCounter,
   runInSuspense,

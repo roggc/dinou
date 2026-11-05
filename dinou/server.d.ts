@@ -68,6 +68,16 @@ export interface DinouCacheSlotProps {
  */
 export declare function DinouCacheSlot(props: DinouCacheSlotProps): Promise<any>;
 
+/**
+ * Opts the enclosing `<Suspense>` boundary out of becoming a Dynamic PPR Hole
+ * when wrapping an async Server Component on a PPR route (`ppr = true`).
+ *
+ * Call `noDynamic()` synchronously at the top of your async Server Component
+ * (before its first `await`) so Dinou resolves its promise at build time and
+ * bakes the rendered output directly into the Static Shell (`shell.html`).
+ */
+export declare function noDynamic(): void;
+
 // ====================================================================
 // STORAGE ADAPTER TYPES (ISR / CACHE)
 // ====================================================================

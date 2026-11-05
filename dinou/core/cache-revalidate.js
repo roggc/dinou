@@ -79,6 +79,43 @@ function enqueueRevalidation(fn) {
   return nextPromise;
 }
 
+async function readEdgeStorageOrAsset(storage, key) {
+  if (!storage || !key) return null;
+  try {
+    const item = await storage.get(key);
+    if (item && item.content) return item;
+  } catch (e) {}
+  if (typeof storage.isDeleted === "function" && storage.isDeleted(key)) {
+    return null;
+  }
+  try {
+    const reqContext = getContext();
+    const assets =
+      reqContext?.env?.ASSETS ||
+      reqContext?.platformContext?.env?.ASSETS ||
+      reqContext?.req?.env?.ASSETS ||
+      (typeof globalThis !== "undefined" ? globalThis.__DINOU_ENV__?.ASSETS : null);
+    if (assets && typeof assets.fetch === "function") {
+      const cleanKey = String(key).replace(/^\/+/, "");
+      const res = await assets.fetch(new Request(`http://localhost/${cleanKey}`));
+      if (res && res.status === 200) {
+        const ct = res.headers?.get?.("content-type") || "";
+        const content = await res.text();
+        const isHtmlExpected = cleanKey.endsWith(".html");
+        if (
+          content &&
+          (isHtmlExpected || (!ct.includes("text/html") && !content.trimStart().startsWith("<")))
+        ) {
+          const item = { content };
+          await storage.set(cleanKey, content);
+          return item;
+        }
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
 async function resolveRouteConfigForRevalidate(pagePath, reqSegments, existingMeta = {}) {
   const srcFolder = path.resolve(process.cwd(), "src");
   let isRoutePpr =
@@ -274,9 +311,12 @@ async function revalidatePage(reqPath, internalOptions = {}) {
     if (!cached) {
       cached = await storage.get(shellHtmlKey);
     }
+    if (!cached) {
+      cached = await readEdgeStorageOrAsset(storage, htmlKey);
+    }
     let currentMeta = (cached && cached.metadata) || {};
     try {
-      const metaItem = await storage.get(metaKey);
+      const metaItem = await readEdgeStorageOrAsset(storage, metaKey);
       if (metaItem && metaItem.content) {
         currentMeta = JSON.parse(metaItem.content);
       }
@@ -284,7 +324,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
 
     let existingPageRsc = null;
     try {
-      existingPageRsc = await storage.get(rscKey);
+      existingPageRsc = await readEdgeStorageOrAsset(storage, rscKey);
     } catch (e) {}
 
     const reqPathWithSlash = cleanPath.endsWith("/") ? cleanPath : cleanPath + "/";
@@ -322,7 +362,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
           const lMetaKey = entry.cleanLayoutKey
             ? `${entry.cleanLayoutKey}/layout.metadata.json`
             : "layout.metadata.json";
-          const lItem = await storage.get(lMetaKey);
+          const lItem = await readEdgeStorageOrAsset(storage, lMetaKey);
           let lMetaObj = lItem?.metadata || null;
           if (!lMetaObj && lItem?.content) {
             try {
@@ -343,7 +383,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
           const refreshedMetaKey = leafLayout.cleanLayoutKey
             ? `${leafLayout.cleanLayoutKey}/layout.metadata.json`
             : "layout.metadata.json";
-          const refreshedItem = await storage.get(refreshedMetaKey);
+          const refreshedItem = await readEdgeStorageOrAsset(storage, refreshedMetaKey);
           if (refreshedItem?.content) {
             try {
               const parsed = JSON.parse(refreshedItem.content);
@@ -361,7 +401,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
         const leafRscKey = leafLayout.cleanLayoutKey
           ? `${leafLayout.cleanLayoutKey}/layout.rsc`
           : "layout.rsc";
-        const leafRscItem = await storage.get(leafRscKey);
+        const leafRscItem = await readEdgeStorageOrAsset(storage, leafRscKey);
         if (leafRscItem && leafRscItem.content && !leafRscItem.content.trimStart().startsWith("<")) {
           activeLayoutRscText = leafRscItem.content;
         }
@@ -389,6 +429,13 @@ async function revalidatePage(reqPath, internalOptions = {}) {
       const markRevalDynamic = () => {
         revalDynamicState.value = true;
       };
+      const outerCtx = getContext();
+      const activeEnv =
+        outerCtx?.env ||
+        outerCtx?.platformContext?.env ||
+        outerCtx?.req?.env ||
+        (typeof globalThis !== "undefined" ? globalThis.__DINOU_ENV__ : undefined) ||
+        {};
       const revalContext = {
         req: {
           query: createBailoutProxy({}, "req.query", markRevalDynamic),
@@ -396,6 +443,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
           headers: createBailoutProxy(rawHeaders, "req.headers", markRevalDynamic),
           path: reqPathWithSlash,
           method: "GET",
+          env: activeEnv,
         },
         res: {
           status() {},
@@ -412,6 +460,8 @@ async function revalidatePage(reqPath, internalOptions = {}) {
             markRevalDynamic();
           },
         },
+        env: activeEnv,
+        platformContext: outerCtx?.platformContext || { env: activeEnv },
       };
       const clientManifest =
         (typeof globalThis !== "undefined" && globalThis.__DINOU_CLIENT_MANIFEST__) || {};
@@ -423,7 +473,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
 
           if (onlyRefreshSlots) {
             try {
-              const existingShellPage = await storage.get(shellPageKey);
+              const existingShellPage = await readEdgeStorageOrAsset(storage, shellPageKey);
               if (existingShellPage && existingShellPage.content) {
                 const deserialized = deserializeJSX(existingShellPage.content);
                 resolvedPageJsx = await runInPageSegment(() =>
@@ -811,10 +861,10 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
       const layoutMetaKey = cleanPathKey ? `${cleanPathKey}/layout.metadata.json` : "layout.metadata.json";
       const shellLayoutKey = cleanPathKey ? `${cleanPathKey}/shell.layout.json` : "shell.layout.json";
 
-      let cached = await storage.get(layoutRscKey);
+      let cached = await readEdgeStorageOrAsset(storage, layoutRscKey);
       let currentMeta = (cached && cached.metadata) || {};
       try {
-        const metaItem = await storage.get(layoutMetaKey);
+        const metaItem = await readEdgeStorageOrAsset(storage, layoutMetaKey);
         if (metaItem && metaItem.content) {
           currentMeta = JSON.parse(metaItem.content);
         }
@@ -853,6 +903,10 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
             currentMeta.ppr = Boolean(layoutCfg.ppr);
           }
         }
+        if (typeof currentMeta.ppr !== "boolean") {
+          const layoutRouteCfg = await resolveRouteConfigForRevalidate(null, reqSegments, currentMeta);
+          currentMeta.ppr = Boolean(layoutRouteCfg.isRoutePpr);
+        }
       } catch (e) {}
 
       const prevGenTime = (currentMeta && currentMeta.generatedAt) || 0;
@@ -875,6 +929,13 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
         const markRevalDynamic = () => {
           revalDynamicState.value = true;
         };
+        const outerCtx = getContext();
+        const activeEnv =
+          outerCtx?.env ||
+          outerCtx?.platformContext?.env ||
+          outerCtx?.req?.env ||
+          (typeof globalThis !== "undefined" ? globalThis.__DINOU_ENV__ : undefined) ||
+          {};
         const revalContext = {
           req: {
             query: createBailoutProxy({}, "req.query", markRevalDynamic),
@@ -882,6 +943,7 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
             headers: createBailoutProxy(rawHeaders, "req.headers", markRevalDynamic),
             path: reqPathWithSlash,
             method: "GET",
+            env: activeEnv,
           },
           res: {
             status() {},
@@ -898,6 +960,8 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
               markRevalDynamic();
             },
           },
+          env: activeEnv,
+          platformContext: outerCtx?.platformContext || { env: activeEnv },
         };
         const clientManifest =
           (typeof globalThis !== "undefined" && globalThis.__DINOU_CLIENT_MANIFEST__) || {};
@@ -905,7 +969,7 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
           let resolvedLayoutJsx = null;
           if (onlyRefreshSlots) {
             try {
-              const existingShellLayout = await storage.get(shellLayoutKey);
+              const existingShellLayout = await readEdgeStorageOrAsset(storage, shellLayoutKey);
               if (existingShellLayout && existingShellLayout.content) {
                 const deserialized = deserializeJSX(existingShellLayout.content);
                 resolvedLayoutJsx = await runInLayoutSegment(() =>
@@ -922,7 +986,10 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
             }
           }
           if (!resolvedLayoutJsx) {
-            await runWithPprContext({ isPpr: true }, async () => {
+            const isLayoutPpr = Boolean(
+              currentMeta.ppr || (Array.isArray(currentMeta.holes) && currentMeta.holes.length > 0)
+            );
+            await runWithPprContext({ isPpr: isLayoutPpr }, async () => {
               const rawJsx = await getJSX(reqPathWithSlash, {}, {}, false, false, {
                 segment: "layout",
               });

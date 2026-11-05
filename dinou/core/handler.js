@@ -120,7 +120,7 @@ if (typeof globalThis !== "undefined" && globalThis.__DINOU_CONFIG__) {
 function copyCustomContextProperties(source, target) {
   if (!source || !target) return;
   for (const key of Object.keys(source)) {
-    if (!["req", "res", "env", "ctx"].includes(key)) {
+    if (!["req", "res", "env", "ctx", "platformContext", "_markDynamic"].includes(key)) {
       target[key] = source[key];
     }
   }
@@ -886,6 +886,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
     env: platformContext.env || {},
     ctx: platformContext.ctx || null,
     platformContext,
+    _markDynamic: markDynamic,
   };
 
   if (dinouConfig.plugins && Array.isArray(dinouConfig.plugins)) {
@@ -974,6 +975,9 @@ function createServerFunctionContext(simReq, resBridge, platformContext = {}) {
         resBridge.write(`D:{"type":"cookie","cookie":${JSON.stringify(cookieStr)}}\n`);
       },
     },
+    env: platformContext.env || {},
+    ctx: platformContext.ctx || null,
+    platformContext,
   };
   setCurrentContext(context);
   return context;
@@ -986,8 +990,13 @@ function createServerFunctionContext(simReq, resBridge, platformContext = {}) {
  * @returns {Promise<Response>}
  */
 async function handleRequest(request, platformContext = {}) {
-  if (typeof globalThis !== "undefined" && platformContext?.renderHtmlStream) {
-    globalThis.__DINOU_RENDER_HTML_STREAM__ = platformContext.renderHtmlStream;
+  if (typeof globalThis !== "undefined") {
+    if (platformContext?.renderHtmlStream) {
+      globalThis.__DINOU_RENDER_HTML_STREAM__ = platformContext.renderHtmlStream;
+    }
+    if (platformContext?.env) {
+      globalThis.__DINOU_ENV__ = platformContext.env;
+    }
   }
   const url = new URL(request.url);
   const pathname = url.pathname;
@@ -1413,14 +1422,26 @@ async function handleRequest(request, platformContext = {}) {
                   ? Math.max(0, ...activeChain.slice(i + 1).map((l) => l.generatedAt || 0))
                   : 0;
               const isAncestorNewer = entry.generatedAt > 0 && maxAncestorGen > entry.generatedAt;
-              if (isLayoutTtlExpired || isLayoutSlotTtlExpired || (isLayoutReq && isAncestorNewer)) {
+              if (isLayoutSlotTtlExpired && !isLayoutTtlExpired && !(isLayoutReq && isAncestorNewer)) {
+                const layoutSlotRevalKey = `layout-slot:${entry.layoutRoutePath}`;
+                const layoutSlotRevalPromise = (async () => {
+                  if (regenerating.has(layoutSlotRevalKey)) return;
+                  regenerating.add(layoutSlotRevalKey);
+                  try {
+                    const { revalidateLayout } = await import("./cache-revalidate.js");
+                    await revalidateLayout(entry.layoutRoutePath, { onlyRefreshSlots: true });
+                  } catch (err) {
+                    console.error(`❌ [Slot ISR] Error refreshing layout slots for ${entry.layoutRoutePath}:`, err);
+                  } finally {
+                    regenerating.delete(layoutSlotRevalKey);
+                  }
+                })();
+                if (platformContext && platformContext.ctx && typeof platformContext.ctx.waitUntil === "function") {
+                  platformContext.ctx.waitUntil(layoutSlotRevalPromise);
+                }
+              } else if (isLayoutTtlExpired || (isLayoutReq && isAncestorNewer)) {
                 const { revalidateLayout } = await import("./cache-revalidate.js");
-                await revalidateLayout(
-                  entry.layoutRoutePath,
-                  isLayoutSlotTtlExpired && !isLayoutTtlExpired && !(isLayoutReq && isAncestorNewer)
-                    ? { onlyRefreshSlots: true }
-                    : {}
-                );
+                await revalidateLayout(entry.layoutRoutePath, {});
                 const lMetaKey = entry.cleanLayoutKey
                   ? `${entry.cleanLayoutKey}/layout.metadata.json`
                   : "layout.metadata.json";
@@ -1576,12 +1597,26 @@ async function handleRequest(request, platformContext = {}) {
                   isSlotOnlyExpired = await hasExpiredSlots(pMeta.slotTags);
                 }
               }
-              if (isExpired || isSlotOnlyExpired) {
+              if (isSlotOnlyExpired && !isExpired) {
+                const slotRevalKey = `slot:${cleanPath}`;
+                const slotRevalPromise = (async () => {
+                  if (regenerating.has(slotRevalKey) || regenerating.has(cleanPath)) return;
+                  regenerating.add(slotRevalKey);
+                  try {
+                    const { revalidatePage } = await import("./cache-revalidate.js");
+                    await revalidatePage(cleanPath, { onlyRefreshSlots: true });
+                  } catch (err) {
+                    console.error(`❌ [Slot ISR] Error refreshing slots for ${cleanPath}:`, err);
+                  } finally {
+                    regenerating.delete(slotRevalKey);
+                  }
+                })();
+                if (platformContext && platformContext.ctx && typeof platformContext.ctx.waitUntil === "function") {
+                  platformContext.ctx.waitUntil(slotRevalPromise);
+                }
+              } else if (isExpired) {
                 const { revalidatePage } = await import("./cache-revalidate.js");
-                await revalidatePage(
-                  cleanPath,
-                  isSlotOnlyExpired && !isExpired ? { onlyRefreshSlots: true } : {}
-                );
+                await revalidatePage(cleanPath, {});
                 if (!dynamicState.value) {
                   const refreshedCached = await storage.get(rscKey);
                   if (refreshedCached && refreshedCached.content) {
@@ -1747,7 +1782,10 @@ async function handleRequest(request, platformContext = {}) {
       try {
         let jsx;
         if (platformContext?.isSSG) {
-          jsx = await runWithPprContext({ isPpr: true }, async () => {
+          const ssgIsPpr = isLayoutReq
+            ? Boolean(isRoutePpr || (await resolvePprForRoute(null, null, reqSegments, queryObj)))
+            : Boolean(isRoutePpr);
+          jsx = await runWithPprContext({ isPpr: ssgIsPpr }, async () => {
             const rawJsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, isPathBlocked, {
               segment,
             });
@@ -1780,8 +1818,37 @@ async function handleRequest(request, platformContext = {}) {
             return rendered;
           });
         } else if (!isDevelopment && (isPageReq || isLayoutReq) && isRoutePpr && isEdgeRuntime(platformContext)) {
+          context._isPprRuntimeResume = true;
           const storage = getStorageAdapter();
           const cleanRel = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
+          if (isPageReq) {
+            try {
+              const pMetaKey = cleanRel ? `${cleanRel}/metadata.json` : "metadata.json";
+              const pRscBaseKey = cleanRel ? `${cleanRel}/page.rsc` : "page.rsc";
+              const pMeta = await readMetaFromStorage(storage, pMetaKey, pRscBaseKey, platformContext, request.url);
+              if (pMeta && Array.isArray(pMeta.slotTags) && pMeta.slotTags.length > 0) {
+                const isPprPageSlotExpired = await hasExpiredSlots(pMeta.slotTags);
+                if (isPprPageSlotExpired) {
+                  const slotRevalKey = `slot:${reqPath}`;
+                  const slotRevalPromise = (async () => {
+                    if (regenerating.has(slotRevalKey) || regenerating.has(reqPath)) return;
+                    regenerating.add(slotRevalKey);
+                    try {
+                      const { revalidatePage } = await import("./cache-revalidate.js");
+                      await revalidatePage(reqPath, { onlyRefreshSlots: true });
+                    } catch (err) {
+                      console.error(`❌ [Slot ISR] Error refreshing slots for ${reqPath}:`, err);
+                    } finally {
+                      regenerating.delete(slotRevalKey);
+                    }
+                  })();
+                  if (platformContext && platformContext.ctx && typeof platformContext.ctx.waitUntil === "function") {
+                    platformContext.ctx.waitUntil(slotRevalPromise);
+                  }
+                }
+              }
+            } catch (e) {}
+          }
           const shellKey = isLayoutReq
             ? cleanRel
               ? `${cleanRel}/shell.layout.json`
@@ -2038,12 +2105,19 @@ async function handleRequest(request, platformContext = {}) {
     }
 
     // 2b. If PPR route shell was invalidated (e.g. by revalidateTag on a static shell slot),
+    // or is a dynamic-param ISG route being visited for the first time,
     // regenerate the static shell in an isolated SSG pass before resuming dynamic holes.
+    const shellHtmlKeyForCheck = cleanPath ? `${cleanPath}/shell.html` : "shell.html";
+    const isShellDeletedInStorage =
+      isRouteDeletedInStorage ||
+      (typeof storage.isDeleted === "function" && storage.isDeleted(shellHtmlKeyForCheck));
+    const hasDynamicUrlParams = Boolean(dynamicParams && Object.keys(dynamicParams).length > 0);
     if (
       !isDevelopment &&
       !cachedItem &&
       !dynamicState.value &&
       isPprConfig &&
+      (isShellDeletedInStorage || (hasDynamicUrlParams && allowISGValue !== false)) &&
       !isPathBlocked &&
       queryObj.ssr_crash !== "true" &&
       !platformContext?.isSSG
@@ -2109,14 +2183,26 @@ async function handleRequest(request, platformContext = {}) {
                 : 0;
             const isAncestorNewer =
               entry.generatedAt > 0 && maxAncestorGen > entry.generatedAt;
-            if (isLayoutTtlExpired || isLayoutSlotTtlExpired || isAncestorNewer) {
+            if (isLayoutSlotTtlExpired && !isLayoutTtlExpired && !isAncestorNewer) {
+              const layoutSlotRevalKey = `layout-slot:${entry.layoutRoutePath}`;
+              const layoutSlotRevalPromise = (async () => {
+                if (regenerating.has(layoutSlotRevalKey)) return;
+                regenerating.add(layoutSlotRevalKey);
+                try {
+                  const { revalidateLayout } = await import("./cache-revalidate.js");
+                  await revalidateLayout(entry.layoutRoutePath, { onlyRefreshSlots: true });
+                } catch (err) {
+                  console.error(`❌ [Slot ISR] Error refreshing layout slots for ${entry.layoutRoutePath}:`, err);
+                } finally {
+                  regenerating.delete(layoutSlotRevalKey);
+                }
+              })();
+              if (platformContext && platformContext.ctx && typeof platformContext.ctx.waitUntil === "function") {
+                platformContext.ctx.waitUntil(layoutSlotRevalPromise);
+              }
+            } else if (isLayoutTtlExpired || isAncestorNewer) {
               const { revalidateLayout } = await import("./cache-revalidate.js");
-              await revalidateLayout(
-                entry.layoutRoutePath,
-                isLayoutSlotTtlExpired && !isLayoutTtlExpired && !isAncestorNewer
-                  ? { onlyRefreshSlots: true }
-                  : {}
-              );
+              await revalidateLayout(entry.layoutRoutePath, {});
               const refreshedMeta = await readMetaFromStorage(
                 storage,
                 entry.cleanLayoutKey
@@ -2216,18 +2302,21 @@ async function handleRequest(request, platformContext = {}) {
         try {
           const isPageSlotTtlExpired = await hasExpiredSlots(cachedItem.metadata.slotTags);
           if (isPageSlotTtlExpired) {
-            const { revalidatePage } = await import("./cache-revalidate.js");
-            await revalidatePage(reqPath, { onlyRefreshSlots: true });
-            let refreshedItem = await storage.get(htmlKey);
-            if (!refreshedItem && cleanPath) {
-              refreshedItem = await storage.get(cleanPath);
-            }
-            if (!refreshedItem && (cachedItem.metadata?.ppr || isPprConfig)) {
-              const shellHtmlKey = cleanPath ? `${cleanPath}/shell.html` : "shell.html";
-              refreshedItem = await storage.get(shellHtmlKey);
-            }
-            if (refreshedItem && refreshedItem.content) {
-              cachedItem = refreshedItem;
+            const slotRevalKey = `slot:${reqPath}`;
+            const slotRevalPromise = (async () => {
+              if (regenerating.has(slotRevalKey) || regenerating.has(reqPath)) return;
+              regenerating.add(slotRevalKey);
+              try {
+                const { revalidatePage } = await import("./cache-revalidate.js");
+                await revalidatePage(reqPath, { onlyRefreshSlots: true });
+              } catch (slotTtlErr) {
+                console.error(`❌ [Slot ISR] Error refreshing slots for ${reqPath}:`, slotTtlErr);
+              } finally {
+                regenerating.delete(slotRevalKey);
+              }
+            })();
+            if (platformContext && platformContext.ctx && typeof platformContext.ctx.waitUntil === "function") {
+              platformContext.ctx.waitUntil(slotRevalPromise);
             }
           }
         } catch (slotTtlErr) {}
@@ -2772,7 +2861,7 @@ async function handleRequest(request, platformContext = {}) {
                       );
                       pageRscText = await new Response(pageStream).text();
                     } catch (e) {}
-                    if (genMeta.ppr) {
+                    if (genMeta.ppr || (Array.isArray(genMeta.slotTags) && genMeta.slotTags.length > 0)) {
                       try {
                         const shellPageKey = cleanPath ? `${cleanPath}/shell.page.json` : "shell.page.json";
                         await storage.set(shellPageKey, serializeJSX(context._resolvedPageClientJsx));
@@ -2811,6 +2900,9 @@ async function handleRequest(request, platformContext = {}) {
                   console.error("[Edge ISG] Error caching to KV:", cacheErr);
                 }
               } else {
+                if (inFlightKey) {
+                  inFlightGenerations.delete(inFlightKey);
+                }
                 fullHtml = fullHtml.replace(
                   "window.__DINOU_USE_STATIC__ = true;",
                   "window.__DINOU_USE_STATIC__ = false;"

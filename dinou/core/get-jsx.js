@@ -297,27 +297,31 @@ async function getJSX(
       }
       const layoutProps = await getLayoutProps(layoutPath, dParams);
       let props = { params: dParams, ...updatedSlots, ...(layoutProps ?? {}) };
-      try {
-        const testElement = React.createElement(Layout, props, null);
-        await runInLayoutSegment(() => asyncRenderJSXToClientJSX(testElement));
+      if (options?.skipLayoutProbe) {
         jsx = React.createElement(Layout, props, jsx);
-      } catch (layoutErr) {
-        console.warn(
-          `[Dinou] Layout ${layoutPath} failed during render, isolating layout error:`,
-          layoutErr?.message || layoutErr
-        );
-        const serializedError = {
-          message: layoutErr.message || "Unknown Error",
-          name: layoutErr.name || "Error",
-          stack: isDevelopment ? layoutErr.stack : undefined,
-        };
-        jsx = await getErrorJSX(
-          reqPath,
-          query,
-          serializedError,
-          isDevelopment,
-          { segment: "page" }
-        );
+      } else {
+        try {
+          const testElement = React.createElement(Layout, props, null);
+          await runInLayoutSegment(() => asyncRenderJSXToClientJSX(testElement));
+          jsx = React.createElement(Layout, props, jsx);
+        } catch (layoutErr) {
+          console.warn(
+            `[Dinou] Layout ${layoutPath} failed during render, isolating layout error:`,
+            layoutErr?.message || layoutErr
+          );
+          const serializedError = {
+            message: layoutErr.message || "Unknown Error",
+            name: layoutErr.name || "Error",
+            stack: isDevelopment ? layoutErr.stack : undefined,
+          };
+          jsx = await getErrorJSX(
+            reqPath,
+            query,
+            serializedError,
+            isDevelopment,
+            { segment: "page" }
+          );
+        }
       }
       if (resetLayoutPath) {
         break;
