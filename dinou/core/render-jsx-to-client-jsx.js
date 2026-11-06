@@ -620,7 +620,12 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
             );
           });
         }
-        if (Boolean(getPprStore()) || Boolean(getActiveRuntimeDynamicHoleStore())) {
+        const shouldEagerlyResolveSuspense =
+          Boolean(getPprStore()) ||
+          Boolean(getActiveRuntimeDynamicHoleStore()) ||
+          Boolean(getContext()?.platformContext?.isSSG) ||
+          process.env.NODE_ENV === "production";
+        if (shouldEagerlyResolveSuspense) {
           return await runInSuspense(async (holeId) => {
             const renderedChildren = await runInRuntimeDynamicHole(
               () => asyncRenderJSXToClientJSX(jsx.props?.children),
