@@ -1818,7 +1818,6 @@ async function handleRequest(request, platformContext = {}) {
             return rendered;
           });
         } else if (!isDevelopment && (isPageReq || isLayoutReq) && isRoutePpr && isEdgeRuntime(platformContext)) {
-          context._isPprRuntimeResume = true;
           const storage = getStorageAdapter();
           const cleanRel = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
           if (isPageReq) {
@@ -1863,6 +1862,7 @@ async function handleRequest(request, platformContext = {}) {
             request.url
           );
           if (shellJson) {
+            context._isPprRuntimeResume = true;
             try {
               let cachedShellTree = deserializeJSX(shellJson);
               const runSeg = isLayoutReq ? runInLayoutSegment : runInPageSegment;
@@ -1887,6 +1887,7 @@ async function handleRequest(request, platformContext = {}) {
             }
           }
           if (!jsx) {
+            context._isPprRuntimeResume = false;
             jsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, isPathBlocked, {
               segment,
             });
@@ -1910,7 +1911,9 @@ async function handleRequest(request, platformContext = {}) {
       } catch (err) {
         console.error(`[Dinou] Error rendering RSC ${segment}:`, err);
         const serializedError = {
-          message: err.message || "Unknown Error",
+          message: isDevelopment
+            ? (err.message || "An error occurred in the Server Components render")
+            : "An error occurred in the Server Components render",
           name: err.name || "Error",
           stack: isDevelopment ? err.stack : undefined,
         };
