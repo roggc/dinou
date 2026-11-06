@@ -1645,6 +1645,14 @@ async function doInitialBuild() {
   }
 }
 
+if (process.env.DINOU_BUILD_DEV_ONLY === "true") {
+  await Promise.all([ctxA.rebuild(), ctxB.rebuild()]);
+  await ctxA.dispose();
+  await ctxB.dispose();
+  stopSpinner();
+  process.exit(0);
+}
+
 if (process.env.DINOU_STANDALONE_SERVER === "true") {
   await doInitialBuild();
 } else {
@@ -2030,11 +2038,16 @@ async function triggerRebuild(filePath = "", eventType = "change") {
   return triggerRebuildBatch(map);
 }
 
-// Watch src/ with chokidar
+// Watch src/ (and ejected dinou/core/ if present) with chokidar
 let srcDebounce = null;
 const pendingSrcChanges = new Map();
+const watchTargets = [srcDir];
+const ejectedCoreDir = path.resolve(projectRoot, "dinou/core");
+if (fs.existsSync(ejectedCoreDir)) {
+  watchTargets.push(ejectedCoreDir);
+}
 
-const srcWatcher = chokidar.watch(srcDir, {
+const srcWatcher = chokidar.watch(watchTargets, {
   ignoreInitial: true,
   ignored: [/node_modules/, /\.git/],
   awaitWriteFinish: {

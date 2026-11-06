@@ -3,6 +3,7 @@
 
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
+import { ensureServerHooksPatched } from "./render-jsx-to-client-jsx.js";
 
 const require = createRequire(import.meta.url);
 
@@ -55,6 +56,8 @@ function getEdgeRenderer() {
  * @returns {ReadableStream | { pipe: Function, abort: Function }}
  */
 function renderRSCStream(model, manifest, options = {}) {
+  ensureServerHooksPatched();
+
   if (isEdgeRuntime(options)) {
     const edge = getEdgeRenderer();
     const clientManifest =
