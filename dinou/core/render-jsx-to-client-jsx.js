@@ -363,6 +363,18 @@ function isCacheSlotComponent(fn) {
   return Boolean(fn.$$dinouCacheSlot || fn.name === "DinouCacheSlot");
 }
 
+function containsCacheSlot(node) {
+  if (!node || typeof node !== "object") return false;
+  if (Array.isArray(node)) {
+    return node.some(containsCacheSlot);
+  }
+  if (node.$$typeof === Symbol.for("react.transitional.element")) {
+    if (isCacheSlotComponent(node.type)) return true;
+    return containsCacheSlot(node.props?.children);
+  }
+  return false;
+}
+
 async function invokeServerComponentInPpr(fn, callFn) {
   while (true) {
     resetComponentNoDynamicFlag();
@@ -624,7 +636,8 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
           Boolean(getPprStore()) ||
           Boolean(getActiveRuntimeDynamicHoleStore()) ||
           Boolean(getContext()?.platformContext?.isSSG) ||
-          process.env.NODE_ENV === "production";
+          process.env.NODE_ENV === "production" ||
+          containsCacheSlot(jsx.props?.children);
         if (shouldEagerlyResolveSuspense) {
           return await runInSuspense(async (holeId) => {
             const renderedChildren = await runInRuntimeDynamicHole(
@@ -689,6 +702,8 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
             key ?? jsx.key,
             Component
           );
+        } else if (Component.$$dinouDeferredSuspenseStream) {
+          return jsx;
         } else {
           // Server component: execute and process
           const returnedJsx = await invokeServerComponentInPpr(Component, () =>

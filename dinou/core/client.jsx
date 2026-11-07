@@ -313,10 +313,15 @@ const fetchSlotRSC = (slotId, options = {}) => {
 
 export const refreshSlot = (slotId, options) => {
   if (typeof window !== "undefined") {
+    const promises = [];
     window.dispatchEvent(
-      new CustomEvent("dinou:refresh-slot", { detail: { id: slotId, options } })
+      new CustomEvent("dinou:refresh-slot", {
+        detail: { id: slotId, options, promises },
+      })
     );
+    return Promise.all(promises).then(() => undefined);
   }
+  return Promise.resolve();
 };
 
 if (typeof globalThis !== "undefined") {

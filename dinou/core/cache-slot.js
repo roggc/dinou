@@ -14,6 +14,7 @@ import {
   isPprBuildActive,
   isInsideSuspense,
   isInsideOuterSuspenseOutsideSlot,
+  isInsideRuntimeSuspenseOutsideSlot,
   deferPprSuspenseEffect,
   runWithPprContext,
   isInsideLayoutSegment,
@@ -503,6 +504,15 @@ async function refreshNestedSlotsInTree(node, currentSlotId, options = {}) {
   return node;
 }
 
+async function DinouDeferredSlotStream({ promise }) {
+  const [res] = await Promise.all([
+    promise,
+    new Promise((r) => setTimeout(r, 0)),
+  ]);
+  return res;
+}
+DinouDeferredSlotStream.$$dinouDeferredSuspenseStream = true;
+
 /**
  * DinouCacheSlot component.
  *
@@ -516,6 +526,19 @@ async function refreshNestedSlotsInTree(node, currentSlotId, options = {}) {
 async function DinouCacheSlot(props) {
   const { id, tag, tags, revalidate, children } = props || {};
   const isNoCache = typeof revalidate === "number" && revalidate < 1;
+  const reqCtxInitial = getContext();
+  const shouldStreamSlotInSuspense =
+    isInsideRuntimeSuspenseOutsideSlot() &&
+    !isPprBuildActive() &&
+    !reqCtxInitial?.platformContext?.isSSG &&
+    !isRevalidationActive() &&
+    !isSlotDiscoveryActive() &&
+    !reqCtxInitial?._isPprRuntimeResume &&
+    (Boolean(reqCtxInitial?._dynamicState?.value) ||
+      isNoCache ||
+      Object.keys(reqCtxInitial?.req?.query || {}).length > 0 ||
+      process.env.DINOU_DEV === "true" ||
+      process.env.NODE_ENV !== "production");
 
   const slotId = id || tag || (Array.isArray(tags) ? tags[0] : null);
   if (!slotId) {
@@ -529,10 +552,17 @@ async function DinouCacheSlot(props) {
       }
     }
     const runScope = isNoCache ? (fn) => fn() : runInCachedSlot;
-    return await runScope(async () => {
-      const childElement = typeof children === "function" ? await children() : children;
-      return await asyncRenderJSXToClientJSX(childElement);
-    });
+    const computeAnon = () =>
+      runScope(async () => {
+        const childElement = typeof children === "function" ? await children() : children;
+        return await asyncRenderJSXToClientJSX(childElement);
+      });
+    if (shouldStreamSlotInSuspense) {
+      const anonPromise = computeAnon();
+      anonPromise.catch(() => {});
+      return React.createElement(DinouDeferredSlotStream, { promise: anonPromise });
+    }
+    return await computeAnon();
   }
 
   const allTags = Array.isArray(tags)
@@ -621,6 +651,20 @@ async function DinouCacheSlot(props) {
   }
 
   if (!storage || isNoCache) {
+    if (shouldStreamSlotInSuspense) {
+      commitSlotTags(slotTagsToCommit);
+      const noCacheStreamPromise = (async () => {
+        const directContent = await runSlotScope(async () => {
+          const childElement = typeof children === "function" ? await children() : children;
+          return await asyncRenderJSXToClientJSX(childElement);
+        });
+        return await asyncRenderJSXToClientJSX(wrapWithBoundary(directContent, true));
+      })();
+      noCacheStreamPromise.catch(() => {});
+      return React.createElement(DinouDeferredSlotStream, {
+        promise: noCacheStreamPromise,
+      });
+    }
     const directContent = await runSlotScope(async () => {
       const childElement = typeof children === "function" ? await children() : children;
       return await asyncRenderJSXToClientJSX(childElement);
@@ -665,6 +709,20 @@ async function DinouCacheSlot(props) {
             getContext()?._markDynamic?.();
           } catch (e) {}
         }
+      }
+      if (shouldStreamSlotInSuspense) {
+        commitSlotTags(slotTagsToCommit);
+        const noCacheStreamPromise = (async () => {
+          const directContent = await runSlotScope(async () => {
+            const childElement = typeof children === "function" ? await children() : children;
+            return await asyncRenderJSXToClientJSX(childElement);
+          });
+          return await asyncRenderJSXToClientJSX(wrapWithBoundary(directContent, true));
+        })();
+        noCacheStreamPromise.catch(() => {});
+        return React.createElement(DinouDeferredSlotStream, {
+          promise: noCacheStreamPromise,
+        });
       }
       const directContent = await runSlotScope(async () => {
         const childElement = typeof children === "function" ? await children() : children;
@@ -725,8 +783,19 @@ async function DinouCacheSlot(props) {
 
   // 2. Cache MISS or expired TTL: Deduplicate synchronous render
   if (inflightSlotRenders.has(storageKey)) {
+    const existingPromise = inflightSlotRenders.get(storageKey);
+    if (shouldStreamSlotInSuspense) {
+      commitSlotTags(slotTagsToCommit);
+      const dedupedStreamPromise = existingPromise.then(async (deduped) => {
+        return await asyncRenderJSXToClientJSX(wrapWithBoundary(deduped, true));
+      });
+      dedupedStreamPromise.catch(() => {});
+      return React.createElement(DinouDeferredSlotStream, {
+        promise: dedupedStreamPromise,
+      });
+    }
     try {
-      const deduped = await inflightSlotRenders.get(storageKey);
+      const deduped = await existingPromise;
       commitSlotTags(slotTagsToCommit);
       return wrapWithBoundary(deduped, !isPprBuildActive());
     } catch (e) {}
@@ -778,6 +847,21 @@ async function DinouCacheSlot(props) {
   })();
 
   inflightSlotRenders.set(storageKey, renderPromise);
+  if (shouldStreamSlotInSuspense) {
+    commitSlotTags(slotTagsToCommit);
+    const streamPromise = (async () => {
+      try {
+        const fresh = await renderPromise;
+        return await asyncRenderJSXToClientJSX(wrapWithBoundary(fresh, true));
+      } finally {
+        inflightSlotRenders.delete(storageKey);
+      }
+    })();
+    streamPromise.catch(() => {});
+    return React.createElement(DinouDeferredSlotStream, {
+      promise: streamPromise,
+    });
+  }
   try {
     const fresh = await renderPromise;
     commitSlotTags(slotTagsToCommit);

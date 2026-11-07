@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [9.3.0] - 2026-11-07
+
+### Added
+- **Smart Cache-Aware `<Suspense>` Streaming for `<DinouCacheSlot>` in Dynamic SSR Routes**: Enabled non-blocking TTFB streaming on cache misses and zero-fallback inlining on cache hits whenever `<DinouCacheSlot>` is wrapped inside `<Suspense>` on a dynamic SSR route (`revalidate = 0` or routes accessing request-time `cookies`, `headers`, or `query` with `ppr = false`):
+  - **Non-Blocking TTFB on Cold Cache Misses & After `revalidateTag()` Purges**: When a `<DinouCacheSlot>` inside an outer `<Suspense>` boundary (`isInsideRuntimeSuspenseOutsideSlot()`) misses storage cache (1st request, after `revalidateTag()`, or `revalidate={0}`), it immediately flushes the dynamic page shell and the `<Suspense>` `fallback` via `<DinouDeferredSlotStream>` without blocking `getJSX`, streaming the resolved widget (`$RC(...)`) in the same HTTP response and persisting `slot.json` for subsequent requests.
+  - **Zero Fallback Flash on Warm Cache Hits & Expired TTLs (Background SWR)**: When `slot.json` is present in storage, `DinouCacheSlot` deserializes and inlines the cached subtree synchronously during `getJSX` across both `development` and `production` (`containsCacheSlot`), never emitting the `<Suspense>` `fallback` on warm hits or during non-blocking background SWR revalidations (`inStaticShell: true`).
+- **Awaitable `refreshSlot(slotId, options): Promise<void>` Client API**: Updated `refreshSlot` and `useRouter().refreshSlot` across ESM, Rollup, and Webpack client runtimes (`client.jsx`, `client-webpack.jsx`, `navigation.js`, `slot.js`, and `index.d.ts`) to return a `Promise<void>` that settles once all matching `<DinouCacheSlotBoundary>` and unmounted slot refreshes complete, enabling `await refreshSlot(...)` inside `React.useTransition()` for non-destructive loading indicators while reconciling slot content in-place without unmounting to the outer `<Suspense>` `fallback`.
+
 ## [9.2.0] - 2026-11-06
 
 ### Added
