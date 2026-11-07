@@ -354,12 +354,12 @@ function isThenable(val) {
   return (
     val !== null &&
     (typeof val === "object" || typeof val === "function") &&
-    typeof val.then === "function"
+    val.$$typeof !== CLIENT_REFERENCE_TAG && !isClientComponent(val) && typeof val.then === "function"
   );
 }
 
 function isCacheSlotComponent(fn) {
-  if (!fn) return false;
+  if (!fn || fn.$$typeof === CLIENT_REFERENCE_TAG || isClientComponent(fn)) return false;
   return Boolean(fn.$$dinouCacheSlot || fn.name === "DinouCacheSlot");
 }
 
@@ -549,7 +549,22 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
   } else if (Array.isArray(jsx)) {
     const results = [];
     for (const child of jsx) {
-      results.push(await asyncRenderJSXToClientJSX(child, child?.key ?? null));
+      if (isThenable(child)) {
+        if (
+          isPprBuildActive() &&
+          isInsideOuterSuspenseOutsideSlot() &&
+          !isSlotDiscoveryActive() &&
+          !isNoDynamicActive()
+        ) {
+          try {
+            child.then(null, () => {});
+          } catch (_) {}
+          markDynamicAccess("async-suspense");
+        }
+        results.push(child);
+      } else {
+        results.push(await asyncRenderJSXToClientJSX(child, child?.key ?? null));
+      }
     }
     return results;
   } else if (typeof jsx === "symbol") {
@@ -768,7 +783,22 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
       // Process object props (e.g., { className: "foo" })
       const entries = [];
       for (const [propName, value] of Object.entries(jsx)) {
-        entries.push([propName, await asyncRenderJSXToClientJSX(value)]);
+        if (isThenable(value)) {
+          if (
+            isPprBuildActive() &&
+            isInsideOuterSuspenseOutsideSlot() &&
+            !isSlotDiscoveryActive() &&
+            !isNoDynamicActive()
+          ) {
+            try {
+              value.then(null, () => {});
+            } catch (_) {}
+            markDynamicAccess("async-suspense");
+          }
+          entries.push([propName, value]);
+        } else {
+          entries.push([propName, await asyncRenderJSXToClientJSX(value)]);
+        }
       }
       return Object.fromEntries(entries);
     }

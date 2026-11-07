@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [9.3.1] - 2026-11-08
+
+### Fixed
+- **Un-awaited `Promise` Props Passed from Server Components or `getProps` to Client Components (`render-jsx-to-client-jsx.js`)**: Previously, passing an un-awaited `Promise` (or array of `Promise`s) as a prop from a Server Component (`Strategy 9`) or `getProps` (`Strategy 12`) to a `"use client"` component inside `<Suspense>` caused `asyncRenderJSXToClientJSX` to recursively `await` and unwrap the `Promise` into a plain object on the server, blocking TTFB and throwing `TypeError: An unsupported type was passed to use(): [object Object]` in the browser. `asyncRenderJSXToClientJSX` now detects thenables via `isThenable()` (while guarding against `react-server-dom-webpack` Client Reference Proxies) and preserves raw `Promise` instances untouched so React Flight streams them directly to `use(promise)` on the client.
+- **PPR Dynamic Holes (`export const ppr = true`) for `<Suspense>` Wrapping Client Components with `Promise` Props (`render-jsx-to-client-jsx.js`, `ppr-runtime.js`, `edge-ssr.js`)**: Previously, on Partial Prerendering routes, `<Suspense>` boundaries only registered a dynamic PPR hole (`ppr-hole-*`) when they contained an `async` Server Component, ignoring `<Suspense>` boundaries wrapping a Client Component with an un-awaited `Promise` prop (`holes: []`). Detecting a thenable prop inside `<Suspense>` during a PPR build now triggers `markDynamicAccess("async-suspense")` to register the `ppr-hole-*` in `shell.html` and `metadata.json`, and `handlePprResume` streams the resolved hole with React 19 `<Suspense>` hydration markers (`<!--$-->...<!--/$-->`) before executing the trailing client entry `<script>` so it hydrates with zero mismatch (`#418`).
+
 ## [9.3.0] - 2026-11-07
 
 ### Added

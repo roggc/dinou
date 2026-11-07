@@ -123,7 +123,7 @@ export async function renderRscStreamToHtmlStream(rscStream, consumerManifest, o
       await htmlStream.allReady;
     }
 
-    const importMapHtml = options.importMapHtml || (typeof globalThis !== "undefined" && globalThis.__DINOU_IMPORT_MAP_HTML__) || "";
+    const importMapHtml = options.importMapHtml !== undefined ? options.importMapHtml : ((typeof globalThis !== "undefined" && globalThis.__DINOU_IMPORT_MAP_HTML__) || "");
     if (importMapHtml) {
       const encoder = new TextEncoder();
       const importMapBytes = encoder.encode(importMapHtml);
