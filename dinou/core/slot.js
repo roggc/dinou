@@ -313,7 +313,7 @@ if (
           entry.pendingPromise = promise;
           entry.pendingReqId = reqId;
           const baseRef = entry.baseChildren;
-          promise.then(
+          const settledPromise = promise.then(
             (resolved) => {
               if (entry.latestReqId !== reqId) {
                 return;
@@ -335,6 +335,9 @@ if (
               }
             }
           );
+          if (Array.isArray(e?.detail?.promises)) {
+            e.detail.promises.push(settledPromise);
+          }
         }
       }
     }
@@ -459,7 +462,7 @@ export function DinouCacheSlotBoundary({ id, tags, children }) {
               curEntry.pendingPromise = promise;
               curEntry.pendingReqId = reqId;
             }
-            promise.then(
+            const settledPromise = promise.then(
               (resolved) => {
                 if (curEntry && curEntry.latestReqId !== reqId) {
                   return;
@@ -476,6 +479,9 @@ export function DinouCacheSlotBoundary({ id, tags, children }) {
                 console.error(`[Dinou] Failed to refresh slot "${id}":`, err);
               }
             );
+            if (Array.isArray(e?.detail?.promises)) {
+              e.detail.promises.push(settledPromise);
+            }
           } else if (promise) {
             if (curEntry) {
               curEntry.pendingPromise = null;

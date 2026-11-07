@@ -120,7 +120,7 @@ if (typeof globalThis !== "undefined" && globalThis.__DINOU_CONFIG__) {
 function copyCustomContextProperties(source, target) {
   if (!source || !target) return;
   for (const key of Object.keys(source)) {
-    if (!["req", "res", "env", "ctx", "platformContext", "_markDynamic"].includes(key)) {
+    if (!["req", "res", "env", "ctx", "platformContext", "_markDynamic", "_dynamicState"].includes(key)) {
       target[key] = source[key];
     }
   }
@@ -887,6 +887,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
     ctx: platformContext.ctx || null,
     platformContext,
     _markDynamic: markDynamic,
+    _dynamicState: dynamicState,
   };
 
   if (dinouConfig.plugins && Array.isArray(dinouConfig.plugins)) {

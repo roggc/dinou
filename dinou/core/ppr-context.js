@@ -27,6 +27,10 @@ export function runInRuntimeStaticSuspense(callback) {
 
 export function runInRuntimeDynamicHole(callback, holeId = null) {
   const prev = runtimeStaticSuspenseStorage.getStore();
+  const slotDepthAtSuspense =
+    prev && typeof prev.slotDepthAtSuspense === "number"
+      ? prev.slotDepthAtSuspense
+      : cachedSlotStorage.getStore()?.depth || 0;
   return runtimeStaticSuspenseStorage.run(
     {
       active: false,
@@ -34,6 +38,7 @@ export function runInRuntimeDynamicHole(callback, holeId = null) {
       holeId: holeId || prev?.holeId || null,
       idCount: 0,
       childHoleCount: 0,
+      slotDepthAtSuspense,
     },
     callback
   );
@@ -42,6 +47,16 @@ export function runInRuntimeDynamicHole(callback, holeId = null) {
 export function getActiveRuntimeDynamicHoleStore() {
   const store = runtimeStaticSuspenseStorage.getStore();
   return store && store.holeId ? store : null;
+}
+
+export function isInsideRuntimeSuspenseOutsideSlot() {
+  const currentSlotDepth = cachedSlotStorage.getStore()?.depth || 0;
+  if (currentSlotDepth > 0) return false;
+  const holeStore = getActiveRuntimeDynamicHoleStore();
+  if (holeStore && (holeStore.slotDepthAtSuspense || 0) === 0) {
+    return true;
+  }
+  return isInsideOuterSuspenseOutsideSlot();
 }
 
 export function isRuntimeStaticSuspenseActive() {
