@@ -5,37 +5,18 @@ import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
 import { getFilePathAndDynamicParams } from "./get-file-path-and-dynamic-params.js";
 import importModule from "./import-module.js";
 import { requestStorage } from "./request-context.js";
-import { getLayoutProps, resolveLayoutFunctionsConfig, getLayoutFunctionsPath } from "./layout-functions.js";
-import { runWithPprContext, getRegisteredHoles, resetPprHoles } from "./ppr-context.js";
+import { getLayoutProps, resolveLayoutFunctionsConfig, getLayoutFunctionsPath, resolveLayoutChainPpr } from "./layout-functions.js";
+import { runWithPprContext, getRegisteredHoles, resetPprHoles, markPageRootElement, markLayoutRootElement } from "./ppr-context.js";
 import { resolveModulePpr } from "./resolve-module-ppr.js";
 import { getDinouConfig } from "./load-dinou-config.js";
 import { createBailoutProxy } from "./bailout-proxy.js";
 
 async function resolveBuildPprForRoute(segments, pagePath, pageFunctionsPath, srcFolder) {
-  const globalCfg = await getDinouConfig();
-  let inheritedPpr = Boolean(globalCfg?.ppr);
-  try {
-    const parentLayouts = getFilePathAndDynamicParams(
-      segments || [],
-      {},
-      srcFolder,
-      "layout",
-      true,
-      false,
-      undefined,
-      0,
-      {},
-      true
-    );
-    if (parentLayouts && Array.isArray(parentLayouts)) {
-      for (const [lPath, lParams] of parentLayouts) {
-        const lConfig = await resolveLayoutFunctionsConfig(lPath, lParams);
-        if (lConfig && lConfig.ppr !== null && lConfig.ppr !== undefined) {
-          inheritedPpr = Boolean(lConfig.ppr);
-        }
-      }
-    }
-  } catch (e) {}
+  const { layoutPprMap, defaultPpr, anyLayoutPpr } = await resolveLayoutChainPpr(
+    segments || [],
+    {},
+    srcFolder,
+  );
 
   let explicitPagePpr = null;
   if (pageFunctionsPath) {
@@ -54,7 +35,11 @@ async function resolveBuildPprForRoute(segments, pagePath, pageFunctionsPath, sr
     }
   }
 
-  return explicitPagePpr !== null ? explicitPagePpr : inheritedPpr;
+  const pageEffectivePpr =
+    explicitPagePpr !== null ? explicitPagePpr : Boolean(defaultPpr);
+  const isRoutePpr = Boolean(pageEffectivePpr || anyLayoutPpr);
+
+  return { isRoutePpr, pageEffectivePpr, layoutPprMap };
 }
 
 const staticRoutes = new Set();
@@ -788,7 +773,8 @@ async function buildStaticPages(onProgress = null) {
       } catch (e) {}
     }
 
-    const isPpr = await resolveBuildPprForRoute(segments, pagePath, pageFunctionsPath, srcFolder);
+    const { isRoutePpr: isPpr, pageEffectivePpr, layoutPprMap } =
+      await resolveBuildPprForRoute(segments, pagePath, pageFunctionsPath, srcFolder);
 
     if (pagePath && (!(await isDynamicRoute(revalidate)) || isPpr) && !doNotPushAtEnd) {
       pages.push({
@@ -796,6 +782,8 @@ async function buildStaticPages(onProgress = null) {
         segments,
         params: dParams,
         ppr: isPpr,
+        pagePpr: pageEffectivePpr,
+        layoutPprMap,
       });
       const routeName = segments.join("/") ? "/" + segments.join("/") : "/";
       if (typeof onProgress === "function") {
@@ -813,7 +801,14 @@ async function buildStaticPages(onProgress = null) {
   const pages = await collectPages(srcFolder);
 
   let pageIdx = 0;
-  for (const { path: folderPath, segments, params, ppr: pageIsPpr } of pages) {
+  for (const {
+    path: folderPath,
+    segments,
+    params,
+    ppr: pageIsPpr,
+    pagePpr: pageEffectivePpr,
+    layoutPprMap,
+  } of pages) {
     pageIdx++;
     try {
       const reqPath = segments.length ? "/" + segments.join("/") + "/" : "/";
@@ -967,8 +962,10 @@ async function buildStaticPages(onProgress = null) {
           props = { ...props, ...(pageFunctionsProps ?? {}) };
         }
 
-        let jsx = React.createElement(Page, props);
-        jsx = { ...jsx, __modulePath: pagePath };
+        let jsx = markPageRootElement(
+          { ...React.createElement(Page, props), __modulePath: pagePath },
+          Boolean(pageEffectivePpr),
+        );
 
         // Resolve and nest layout components from the page folder up to the source root
         const noLayoutPath = path.join(folderPath, "no_layout");
@@ -999,6 +996,10 @@ async function buildStaticPages(onProgress = null) {
                 "reset_layout",
                 false,
               )[0];
+              const normLayoutPath = layoutPath.replace(/\\/g, "/");
+              const layoutEffectivePpr = layoutPprMap?.has(normLayoutPath)
+                ? Boolean(layoutPprMap.get(normLayoutPath))
+                : Boolean(pageIsPpr);
               const updatedSlots = {};
               for (const [slotName, slotValue] of Object.entries(slots)) {
                 let updatedSlotElement;
@@ -1021,6 +1022,10 @@ async function buildStaticPages(onProgress = null) {
                       __modulePath: slotFilePath ?? null,
                     };
                   }
+                  elementToRender = markLayoutRootElement(
+                    elementToRender,
+                    layoutEffectivePpr,
+                  );
                   await asyncRenderJSXToClientJSX(elementToRender);
                   updatedSlotElement = elementToRender;
                 } catch (e) {
@@ -1074,8 +1079,10 @@ async function buildStaticPages(onProgress = null) {
                 ...updatedSlots,
                 ...(layoutProps ?? {}),
               };
-              jsx = React.createElement(Layout, props, jsx);
-              jsx = { ...jsx, __modulePath: layoutPath };
+              jsx = markLayoutRootElement(
+                { ...React.createElement(Layout, props, jsx), __modulePath: layoutPath },
+                layoutEffectivePpr,
+              );
               if (resetLayoutPath) {
                 break;
               }
@@ -1117,6 +1124,7 @@ async function buildStaticPages(onProgress = null) {
         effects: sideEffects,
         tags: cacheTags,
         ppr: Boolean(pageIsPpr),
+        pagePpr: Boolean(pageEffectivePpr),
         holes,
       });
       if (process.env.DINOU_DEBUG) {
@@ -1281,6 +1289,8 @@ async function buildStaticPage(reqPath, isDynamic = null) {
     let revalidate;
     let cacheTags = [];
     let pageIsPpr = false;
+    let pageEffectivePpr = false;
+    let capturedHoles = [];
     const jsx = await requestStorage.run(mockContext, async () => {
       const [pagePath, dParams] = getFilePathAndDynamicParams(
         segments,
@@ -1308,8 +1318,10 @@ async function buildStaticPage(reqPath, isDynamic = null) {
         segments.length,
       );
 
-      pageIsPpr = await resolveBuildPprForRoute(segments, pagePath, pageFunctionsPath, srcFolder);
-      let capturedHoles = [];
+      const pprInfo = await resolveBuildPprForRoute(segments, pagePath, pageFunctionsPath, srcFolder);
+      pageIsPpr = pprInfo.isRoutePpr;
+      pageEffectivePpr = pprInfo.pageEffectivePpr;
+      const layoutPprMap = pprInfo.layoutPprMap;
 
       return await runWithPprContext({ isPpr: pageIsPpr }, async () => {
         let props = { params: dParams };
@@ -1336,8 +1348,10 @@ async function buildStaticPage(reqPath, isDynamic = null) {
         props = { ...props, ...(pageFunctionsProps ?? {}) };
       }
 
-      let jsx = React.createElement(Page, props);
-      jsx = { ...jsx, __modulePath: pagePath };
+      let jsx = markPageRootElement(
+        { ...React.createElement(Page, props), __modulePath: pagePath },
+        Boolean(pageEffectivePpr),
+      );
 
       const noLayoutPath = path.join(folderPath, "no_layout");
       if (!existsSync(noLayoutPath)) {
@@ -1366,6 +1380,10 @@ async function buildStaticPage(reqPath, isDynamic = null) {
               "reset_layout",
               false,
             )[0];
+            const normLayoutPath = layoutPath.replace(/\\/g, "/");
+            const layoutEffectivePpr = layoutPprMap?.has(normLayoutPath)
+              ? Boolean(layoutPprMap.get(normLayoutPath))
+              : Boolean(pageIsPpr);
             const updatedSlots = {};
             for (const [slotName, slotValue] of Object.entries(slots)) {
               let updatedSlotElement;
@@ -1388,6 +1406,10 @@ async function buildStaticPage(reqPath, isDynamic = null) {
                     __modulePath: slotFilePath ?? null,
                   };
                 }
+                elementToRender = markLayoutRootElement(
+                  elementToRender,
+                  layoutEffectivePpr,
+                );
                 await asyncRenderJSXToClientJSX(elementToRender);
                 updatedSlotElement = elementToRender;
               } catch (e) {
@@ -1444,8 +1466,10 @@ async function buildStaticPage(reqPath, isDynamic = null) {
               ...layoutProps,
               ...(customLayoutProps ?? {}),
             };
-            jsx = React.createElement(Layout, layoutProps, jsx);
-            jsx = { ...jsx, __modulePath: layoutPath };
+            jsx = markLayoutRootElement(
+              { ...React.createElement(Layout, layoutProps, jsx), __modulePath: layoutPath },
+              layoutEffectivePpr,
+            );
             if (resetLayoutPath) {
               break;
             }
@@ -1489,6 +1513,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
       effects: sideEffects,
       tags: cacheTags,
       ppr: pageIsPpr,
+      pagePpr: Boolean(pageEffectivePpr),
       holes,
     });
     console.warn(`Registered rebuilt static page at ${reqPath}${pageIsPpr ? " (PPR)" : ""}`);

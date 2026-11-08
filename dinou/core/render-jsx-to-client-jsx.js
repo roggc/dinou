@@ -16,7 +16,10 @@ import {
   registerHole,
   markDynamicAccess,
   isPageRootElement,
+  getPageRootPpr,
   isLayoutRootElement,
+  getLayoutRootPpr,
+  runWithSegmentPpr,
   isLayoutChildrenPlaceholder,
   runInPageSegment,
   runInLayoutSegment,
@@ -483,7 +486,14 @@ function replaceLayoutChildrenPlaceholder(node, replacement, placeholder) {
     }
     return node;
   }
-  if (node instanceof Promise) return node;
+  if (
+    node instanceof Promise ||
+    isThenable(node) ||
+    node.$$typeof === CLIENT_REFERENCE_TAG ||
+    isClientComponent(node)
+  ) {
+    return node;
+  }
   let changed = false;
   const clone = { ...node };
   for (const [k, v] of Object.entries(node)) {
@@ -510,28 +520,44 @@ function isClientComponent(type) {
   );
 }
 
-async function DinouSuspenseHoleBoundary({ holeId, children }) {
-  return await runInRuntimeDynamicHole(
+const holeBoundaryPromiseCache = new WeakMap();
+async function DinouSuspenseHoleBoundary(props) {
+  if (props && typeof props === "object" && holeBoundaryPromiseCache.has(props)) {
+    return await holeBoundaryPromiseCache.get(props);
+  }
+  const { holeId, children } = props || {};
+  const promise = runInRuntimeDynamicHole(
     () => asyncRenderJSXToClientJSX(children),
     holeId
   );
+  if (props && typeof props === "object") {
+    holeBoundaryPromiseCache.set(props, promise);
+  }
+  return await promise;
 }
+DinouSuspenseHoleBoundary.$$dinouDeferredSuspenseStream = true;
 
 async function asyncRenderJSXToClientJSX(jsx, key = null) {
   if (isPageRootElement(jsx)) {
-    return await runInPageSegment(async () => {
-      const resolved = await asyncRenderJSXToClientJSXInner(jsx, key);
-      const ctx = getContext();
-      if (ctx && getPprStore()) {
-        ctx._resolvedPageClientJsx = resolved;
-      }
-      return resolved;
-    });
+    const pagePpr = getPageRootPpr(jsx);
+    return await runWithSegmentPpr(pagePpr, () =>
+      runInPageSegment(async () => {
+        const resolved = await asyncRenderJSXToClientJSXInner(jsx, key);
+        const ctx = getContext();
+        if (ctx) {
+          ctx._resolvedPageClientJsx = resolved;
+        }
+        return resolved;
+      })
+    );
   }
   if (isLayoutRootElement(jsx)) {
-    return await runInLayoutSegment(async () => {
-      return await asyncRenderJSXToClientJSXInner(jsx, key);
-    });
+    const layoutPpr = getLayoutRootPpr(jsx);
+    return await runWithSegmentPpr(layoutPpr, () =>
+      runInLayoutSegment(async () => {
+        return await asyncRenderJSXToClientJSXInner(jsx, key);
+      })
+    );
   }
   return await asyncRenderJSXToClientJSXInner(jsx, key);
 }

@@ -271,9 +271,7 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false, options
                 const SlotError = slotErrorModule.default ?? slotErrorModule;
 
                 const serializedError = {
-                  message: isDevelopment
-                    ? (e.message || "Unknown Error")
-                    : "An error occurred in the Server Components render",
+                  message: e.message || "Unknown Error",
                   name: e.name,
                   stack: isDevelopment ? e.stack : undefined,
                 };

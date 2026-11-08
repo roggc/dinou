@@ -10,6 +10,10 @@ const createContext =
     _currentValue: defaultValue,
   }));
 const useContext = React.useContext || (() => null);
+const useState =
+  React.useState ||
+  ((init) => [typeof init === "function" ? init() : init, () => {}]);
+const useEffect = React.useEffect || (() => {});
 
 // 🔄 CHANGE: Now default value is a compatible object
 export const RouterContext = createContext({
@@ -168,6 +172,22 @@ export function useSearchParams() {
 
   // 🔵 2. CLIENT LOGIC
   const context = useContext(RouterContext);
+  const [isStaticHydrating, setIsStaticHydrating] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      Boolean(window.__DINOU_USE_STATIC__) &&
+      document.body?.getAttribute("data-hydrated") !== "true"
+  );
+
+  useEffect(() => {
+    if (isStaticHydrating) {
+      setIsStaticHydrating(false);
+    }
+  }, [isStaticHydrating]);
+
+  if (isStaticHydrating) {
+    return new URLSearchParams();
+  }
 
   // ⚠️ CRITICAL CHANGE: We extract .url
   const fullRoute = typeof context === "string" ? context : context?.url;

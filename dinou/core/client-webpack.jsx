@@ -137,6 +137,69 @@ const isHashChangeOnly = (finalPath) => {
   );
 };
 
+const consumeInlineRscResponse = (kind) => {
+  if (typeof window === "undefined" || !window.__DINOU_INLINE_RSC__) {
+    return null;
+  }
+  const consumedFlag = `__DINOU_RSC_${kind}_CONSUMED__`;
+  if (window[consumedFlag]) {
+    return null;
+  }
+  window[consumedFlag] = true;
+
+  const arrName = `__DINOU_RSC_${kind}__`;
+  const doneName = `__DINOU_RSC_${kind}_DONE__`;
+  const pushFnName = `__DINOU_RSC_${kind}_PUSH__`;
+  const closeFnName = `__DINOU_RSC_${kind}_CLOSE__`;
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      let closed = false;
+      const existing = window[arrName];
+      if (Array.isArray(existing)) {
+        for (const chunk of existing) {
+          if (chunk) controller.enqueue(encoder.encode(chunk));
+        }
+        existing.length = 0;
+      }
+      if (window[doneName]) {
+        closed = true;
+        controller.close();
+        return;
+      }
+      window[pushFnName] = (chunk) => {
+        if (closed || !chunk) return;
+        try {
+          controller.enqueue(encoder.encode(chunk));
+        } catch (e) {}
+      };
+      window[closeFnName] = () => {
+        if (closed) return;
+        closed = true;
+        try {
+          controller.close();
+        } catch (e) {}
+      };
+      if (document.readyState === "complete" && !window[doneName]) {
+        setTimeout(() => {
+          if (!closed) {
+            closed = true;
+            try {
+              controller.close();
+            } catch (e) {}
+          }
+        }, 0);
+      }
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: { "Content-Type": "text/x-component" },
+  });
+};
+
 const getPagePayload = (route, isPrefetch = false, version = 0) => {
   const url = route.split("::")[0];
   if (pageCache.has(url)) {
@@ -168,22 +231,27 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
     payloadUrl += (payloadUrl.includes("?") ? "&" : "?") + "____v____=" + version;
   }
 
-  const promise = createFromFetch(
-    fetch(payloadUrl).then((res) => {
-      if (res.headers.has("x-rsc-redirect")) {
-        const redirectUrl = res.headers.get("x-rsc-redirect");
-        pageCache.delete(url);
-        if (!isPrefetch) {
-          if (window.__DINOU_ROUTER_NAVIGATE__) {
-            window.__DINOU_ROUTER_NAVIGATE__(redirectUrl, { replace: true });
-          } else {
-            window.location.href = redirectUrl;
+  const inlineRes = isInitialHydration && !version ? consumeInlineRscResponse("P") : null;
+  const fetchPromise = inlineRes
+    ? Promise.resolve(inlineRes)
+    : fetch(payloadUrl).then((res) => {
+        if (res.headers.has("x-rsc-redirect")) {
+          const redirectUrl = res.headers.get("x-rsc-redirect");
+          pageCache.delete(url);
+          if (!isPrefetch) {
+            if (window.__DINOU_ROUTER_NAVIGATE__) {
+              window.__DINOU_ROUTER_NAVIGATE__(redirectUrl, { replace: true });
+            } else {
+              window.location.href = redirectUrl;
+            }
           }
+          return new Promise(() => {});
         }
-        return new Promise(() => {});
-      }
-      return res;
-    }),
+        return res;
+      });
+
+  const promise = createFromFetch(
+    fetchPromise,
     {
       callServer: async (id, args) => {
         const proxy = createServerFunctionProxy(id);
@@ -222,15 +290,20 @@ const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
     layoutUrl += (layoutUrl.includes("?") ? "&" : "?") + "____v____=" + version;
   }
 
+  const inlineRes = isInitialHydration && !version ? consumeInlineRscResponse("L") : null;
+  const fetchPromise = inlineRes
+    ? Promise.resolve(inlineRes)
+    : fetch(layoutUrl).then((res) => {
+        if (!res.ok) {
+          console.warn(
+            `[Dinou Router] Layout ${layoutKey} fetch returned status ${res.status}`
+          );
+        }
+        return res;
+      });
+
   const promise = createFromFetch(
-    fetch(layoutUrl).then((res) => {
-      if (!res.ok) {
-        console.warn(
-          `[Dinou Router] Layout ${layoutKey} fetch returned status ${res.status}`
-        );
-      }
-      return res;
-    }),
+    fetchPromise,
     {
       callServer: async (id, args) => {
         const proxy = createServerFunctionProxy(id);

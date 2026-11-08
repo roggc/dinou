@@ -121,6 +121,9 @@ async function generateStatic() {
               if (suspenseCountHeader !== null) {
                 layoutMeta.suspenseCount = Number(suspenseCountHeader) || 0;
               }
+              if (layoutRes.headers.get("x-dinou-ppr") === "true") {
+                layoutMeta.ppr = true;
+              }
               if (layoutRes.headers.get("x-dinou-dynamic") === "true") {
                 layoutMeta.dynamic = true;
               }
@@ -199,6 +202,9 @@ async function generateStatic() {
             await storage.set(shellHtmlKey, htmlItem.content, {
               ...(htmlItem.metadata || {}),
               ppr: true,
+              ...(routeMeta && typeof routeMeta.pagePpr === "boolean"
+                ? { pagePpr: routeMeta.pagePpr }
+                : {}),
               holes: effectiveHoles,
             });
           }
@@ -208,6 +214,9 @@ async function generateStatic() {
             metaObj = metaItem ? JSON.parse(metaItem.content || "{}") : {};
           } catch (e) {}
           metaObj.ppr = true;
+          if (routeMeta && typeof routeMeta.pagePpr === "boolean") {
+            metaObj.pagePpr = routeMeta.pagePpr;
+          }
           metaObj.holes =
             Array.isArray(metaObj.holes) && metaObj.holes.length > 0
               ? metaObj.holes

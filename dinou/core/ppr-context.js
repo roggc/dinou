@@ -9,8 +9,8 @@ const layoutSegmentStorage = new AsyncLocalStorage();
 const cachedSlotStorage = new AsyncLocalStorage();
 const slotDiscoveryStorage = new AsyncLocalStorage();
 const runtimeStaticSuspenseStorage = new AsyncLocalStorage();
-const pageRootElements = new WeakSet();
-const layoutRootElements = new WeakSet();
+const pageRootElements = new WeakMap();
+const layoutRootElements = new WeakMap();
 const layoutChildrenPlaceholders = new WeakSet();
 
 const NO_DYNAMIC_HOOK_KEY = Symbol.for("dinou.ppr.noDynamic.hook");
@@ -132,9 +132,11 @@ export function isSlotDiscoveryActive() {
   return Boolean(slotDiscoveryStorage.getStore()?.active);
 }
 
-export function markPageRootElement(el) {
+export function markPageRootElement(el, segmentPpr = null) {
   if (el && typeof el === "object") {
-    pageRootElements.add(el);
+    pageRootElements.set(el, {
+      isPpr: typeof segmentPpr === "boolean" ? segmentPpr : null,
+    });
   }
   return el;
 }
@@ -143,15 +145,52 @@ export function isPageRootElement(el) {
   return Boolean(el && typeof el === "object" && pageRootElements.has(el));
 }
 
-export function markLayoutRootElement(el) {
+export function getPageRootPpr(el) {
+  if (el && typeof el === "object" && pageRootElements.has(el)) {
+    return pageRootElements.get(el)?.isPpr ?? null;
+  }
+  return null;
+}
+
+export function markLayoutRootElement(el, segmentPpr = null) {
   if (el && typeof el === "object") {
-    layoutRootElements.add(el);
+    layoutRootElements.set(el, {
+      isPpr: typeof segmentPpr === "boolean" ? segmentPpr : null,
+    });
   }
   return el;
 }
 
 export function isLayoutRootElement(el) {
   return Boolean(el && typeof el === "object" && layoutRootElements.has(el));
+}
+
+export function getLayoutRootPpr(el) {
+  if (el && typeof el === "object" && layoutRootElements.has(el)) {
+    return layoutRootElements.get(el)?.isPpr ?? null;
+  }
+  return null;
+}
+
+export function runWithSegmentPpr(segmentPpr, callback) {
+  const runClearedRuntimeHole = () =>
+    runtimeStaticSuspenseStorage.run(null, callback);
+  const store = getPprStore();
+  if (!store) {
+    return runClearedRuntimeHole();
+  }
+  const nextStore = {
+    ...store,
+    isPpr: typeof segmentPpr === "boolean" ? segmentPpr : store.isPpr,
+    suspenseDepth: 0,
+    currentHoleId: null,
+    holeStack: [],
+    noDynamic: false,
+    hasOuterSuspenseOutsideSlot: false,
+    pendingEffects: null,
+    parentPendingEffects: null,
+  };
+  return pprStorage.run(nextStore, runClearedRuntimeHole);
 }
 
 export function createLayoutChildrenPlaceholder() {
@@ -304,7 +343,7 @@ export function getPprHoleCounter() {
 
 export function runInSuspense(callback, explicitHoleId = null) {
   const store = getPprStore();
-  if (!store) {
+  if (!store || !store.isPpr) {
     let holeId = explicitHoleId;
     if (!holeId) {
       const holeStore = getActiveRuntimeDynamicHoleStore();
@@ -488,8 +527,11 @@ export default {
   isSlotDiscoveryActive,
   markPageRootElement,
   isPageRootElement,
+  getPageRootPpr,
   markLayoutRootElement,
   isLayoutRootElement,
+  getLayoutRootPpr,
+  runWithSegmentPpr,
   createLayoutChildrenPlaceholder,
   isLayoutChildrenPlaceholder,
   runInPageSegment,

@@ -184,6 +184,13 @@ export interface DinouConfig {
   ppr?: boolean;
 
   /**
+   * Global default for Incremental Static Generation (allowISG) on dynamic segments.
+   * Can be overridden per segment in page_functions.ts or layout_functions.ts.
+   * @default true
+   */
+  allowISG?: boolean;
+
+  /**
    * Custom storage adapter for ISR / ISG page caching.
    */
   storage?: any;
