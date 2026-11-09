@@ -35,6 +35,10 @@ import { getContext } from "./request-context.js";
 const REACT_MEMO_CACHE_SENTINEL = Symbol.for("react.memo_cache_sentinel");
 const REACT_CONTEXT_TYPE = Symbol.for("react.context");
 const CLIENT_REFERENCE_TAG = Symbol.for("react.client.reference");
+const SERVER_HOOKS_IMPL_KEY = Symbol.for("dinou.server.hooks.impl");
+const HOLE_BOUNDARY_PROMISE_CACHE_KEY = Symbol.for(
+  "dinou.hole.boundary.promise.cache"
+);
 
 let fallbackRenderSeq = 0;
 
@@ -207,6 +211,14 @@ const DinouServerHooksDispatcher = {
     return unsupportedRefresh;
   },
   useEffectEvent: unsupportedHook,
+  _dinouIsServerHooksDispatcher: true,
+};
+if (typeof globalThis !== "undefined") {
+  globalThis[SERVER_HOOKS_IMPL_KEY] = {
+    useServerId,
+    snapshotActiveIdCounts,
+    restoreActiveIdCounts,
+  };
 };
 
 function getCallerComponentSite() {
@@ -230,7 +242,12 @@ function getCallerComponentSite() {
 }
 
 function patchDispatcherObject(dispatcher, internals) {
-  if (!dispatcher || typeof dispatcher !== "object" || dispatcher === DinouServerHooksDispatcher) {
+  if (
+    !dispatcher ||
+    typeof dispatcher !== "object" ||
+    dispatcher === DinouServerHooksDispatcher ||
+    dispatcher._dinouIsServerHooksDispatcher
+  ) {
     return;
   }
   if (dispatcher._dinouWrappedDispatcher) {
@@ -245,9 +262,14 @@ function patchDispatcherObject(dispatcher, internals) {
       const owner = internals?.A?.getOwner?.() || getCallerComponentSite();
       if (owner !== activeOwnerKey || !activeIdSnap) {
         activeOwnerKey = owner;
-        activeIdSnap = snapshotActiveIdCounts();
+        activeIdSnap = (
+          globalThis[SERVER_HOOKS_IMPL_KEY]?.snapshotActiveIdCounts ||
+          snapshotActiveIdCounts
+        )();
       }
-      return useServerId();
+      return (
+        globalThis[SERVER_HOOKS_IMPL_KEY]?.useServerId || useServerId
+      )();
     };
     if (origUse && origUse !== useServerUsable) {
       dispatcher.use = function dinouPatchedUse(usable) {
@@ -256,7 +278,10 @@ function patchDispatcherObject(dispatcher, internals) {
           return origUse.call(this, usable);
         } catch (err) {
           if (activeIdSnap && (!owner || !activeOwnerKey || owner === activeOwnerKey)) {
-            restoreActiveIdCounts(activeIdSnap);
+            (
+              globalThis[SERVER_HOOKS_IMPL_KEY]?.restoreActiveIdCounts ||
+              restoreActiveIdCounts
+            )(activeIdSnap);
           }
           activeIdSnap = null;
           activeOwnerKey = null;
@@ -307,22 +332,23 @@ function getReactInternalsList() {
     const s = mod.__SERVER_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
     const c = mod.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
     if (s && typeof s === "object" && "H" in s) {
+      s._dinouIsServerInternals = true;
       patchInternalsDispatcherSetter(s);
       set.add(s);
     }
     if (c && typeof c === "object" && "H" in c) {
-      patchInternalsDispatcherSetter(c);
+      // Do not install setter on __CLIENT_INTERNALS__ (used by react-dom/server SSR)
       set.add(c);
     }
   };
   addFromModule(React);
   try {
-    const req = createRequire(import.meta.url);
+    const createReq = createRequire; const req = createReq(import.meta.url); const reactPkgPath = req.resolve("react/package.json"); const reactDir = reactPkgPath.slice(0, reactPkgPath.length - "package.json".length);
     try {
-      addFromModule(req("react/index.js"));
+      addFromModule(req(reactDir + "index.js"));
     } catch (_) {}
     try {
-      addFromModule(req("react/react.react-server.js"));
+      addFromModule(req(reactDir + "react.react-server.js"));
     } catch (_) {}
   } catch (_) {}
   _cachedReactInternalsList = Array.from(set);
@@ -332,7 +358,7 @@ function getReactInternalsList() {
 function ensureServerHooksPatched() {
   const list = getReactInternalsList();
   for (const internals of list) {
-    patchInternalsDispatcherSetter(internals);
+    if (internals._dinouIsServerInternals) patchInternalsDispatcherSetter(internals);
   }
 }
 
@@ -520,7 +546,10 @@ function isClientComponent(type) {
   );
 }
 
-const holeBoundaryPromiseCache = new WeakMap();
+if (!globalThis[HOLE_BOUNDARY_PROMISE_CACHE_KEY]) {
+  globalThis[HOLE_BOUNDARY_PROMISE_CACHE_KEY] = new WeakMap();
+}
+const holeBoundaryPromiseCache = globalThis[HOLE_BOUNDARY_PROMISE_CACHE_KEY];
 async function DinouSuspenseHoleBoundary(props) {
   if (props && typeof props === "object" && holeBoundaryPromiseCache.has(props)) {
     return await holeBoundaryPromiseCache.get(props);
@@ -697,7 +726,11 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
             );
           });
         }
-        if (jsx.props?.children?.type === DinouSuspenseHoleBoundary) {
+        if (
+          jsx.props?.children?.type === DinouSuspenseHoleBoundary ||
+          (!isClientComponent(jsx.props?.children?.type) &&
+            jsx.props?.children?.type?.$$dinouDeferredSuspenseStream)
+        ) {
           return jsx;
         }
         return await runInSuspense(async (holeId) => {

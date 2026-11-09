@@ -4,7 +4,11 @@ import { existsSync, copyFileSync } from "node:fs";
 import { safeRename } from "./safe-rename.js";
 import { updateStatus } from "./status-manifest.js";
 
-const regenerating = new Set();
+const REGENERATING_SET_KEY = Symbol.for("dinou.regenerating.set");
+if (!globalThis[REGENERATING_SET_KEY]) {
+  globalThis[REGENERATING_SET_KEY] = new Set();
+}
+const regenerating = globalThis[REGENERATING_SET_KEY];
 
 function revalidating(reqPath, isDynamicFromServer) {
   const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
@@ -96,7 +100,11 @@ function revalidating(reqPath, isDynamicFromServer) {
     }).catch((err) => { });
 }
 
-const inFlightGenerations = new Map();
+const INFLIGHT_GENERATIONS_KEY = Symbol.for("dinou.inflight.generations");
+if (!globalThis[INFLIGHT_GENERATIONS_KEY]) {
+  globalThis[INFLIGHT_GENERATIONS_KEY] = new Map();
+}
+const inFlightGenerations = globalThis[INFLIGHT_GENERATIONS_KEY];
 
 export { revalidating, regenerating, inFlightGenerations };
 export default { revalidating, regenerating, inFlightGenerations };

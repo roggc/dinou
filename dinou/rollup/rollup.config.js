@@ -302,7 +302,7 @@ export default async function () {
       },
     ],
     onwarn(warning, warn) {
-      if (warning.code === "CIRCULAR_DEPENDENCY" || warning.code === "EVAL") {
+      if (warning.code === "CIRCULAR_DEPENDENCY" || warning.code === "EVAL" || warning.code === "MODULE_LEVEL_DIRECTIVE") {
         return;
       }
       warn(warning);

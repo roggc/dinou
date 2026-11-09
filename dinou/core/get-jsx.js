@@ -44,7 +44,7 @@ function createDinouPageSlotElement() {
     } catch (e) {}
     if (!regFn) {
       try {
-        const pkg = require("@roggc/react-server-dom-esm/server.node.js");
+        const pkg = require("@roggc/react-server-dom-esm/server.node");
         regFn = pkg.registerClientReference;
       } catch (e) {}
     }

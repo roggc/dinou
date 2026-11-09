@@ -95,7 +95,7 @@ function getRegisterServerReference() {
     }
   } catch (e) {}
   try {
-    const pkg = require("@roggc/react-server-dom-esm/server.node.js");
+    const pkg = require("@roggc/react-server-dom-esm/server.node");
     if (typeof pkg.registerServerReference === "function") {
       _registerServerRefFn = pkg.registerServerReference;
       return _registerServerRefFn;
@@ -130,7 +130,7 @@ function getCacheSlotBoundary() {
       }
       if (!regFn) {
         try {
-          const pkg = require("@roggc/react-server-dom-esm/server.node.js");
+          const pkg = require("@roggc/react-server-dom-esm/server.node");
           regFn = pkg.registerClientReference;
         } catch (e) {}
       }

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { existsSync, readdirSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import React from "react";
 import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
 import { getFilePathAndDynamicParams } from "./get-file-path-and-dynamic-params.js";
@@ -8,7 +8,6 @@ import { requestStorage } from "./request-context.js";
 import { getLayoutProps, resolveLayoutFunctionsConfig, getLayoutFunctionsPath, resolveLayoutChainPpr } from "./layout-functions.js";
 import { runWithPprContext, getRegisteredHoles, resetPprHoles, markPageRootElement, markLayoutRootElement } from "./ppr-context.js";
 import { resolveModulePpr } from "./resolve-module-ppr.js";
-import { getDinouConfig } from "./load-dinou-config.js";
 import { createBailoutProxy } from "./bailout-proxy.js";
 
 async function resolveBuildPprForRoute(segments, pagePath, pageFunctionsPath, srcFolder) {
@@ -23,7 +22,7 @@ async function resolveBuildPprForRoute(segments, pagePath, pageFunctionsPath, sr
     try {
       const module = await importModule(pageFunctionsPath);
       explicitPagePpr = await resolveModulePpr(module);
-    } catch (e) {}
+    } catch (e) { }
   }
   if (explicitPagePpr === null && typeof globalThis !== "undefined" && globalThis.__DINOU_ROUTE_METADATA__) {
     const normKey = pageFunctionsPath ? pageFunctionsPath.replace(/\\/g, "/") : "";
@@ -770,7 +769,7 @@ async function buildStaticPages(onProgress = null) {
       try {
         const module = await importModule(pageFunctionsPath);
         revalidate = module.revalidate || module.default?.revalidate;
-      } catch (e) {}
+      } catch (e) { }
     }
 
     const { isRoutePpr: isPpr, pageEffectivePpr, layoutPprMap } =
@@ -916,186 +915,186 @@ async function buildStaticPages(onProgress = null) {
       const jsx = await requestStorage.run(mockContext, async () => {
         return await runWithPprContext({ isPpr: Boolean(pageIsPpr) }, async () => {
           const [pagePath] = getFilePathAndDynamicParams(
-          segments,
-          {},
-          folderPath,
-          "page",
-          true,
-          true,
-          undefined,
-          segments.length,
-        );
-        const pageModule = await importModule(pagePath);
-        const Page = pageModule.default ?? pageModule;
-
-        let props = { params };
-
-        const [pageFunctionsPath] = getFilePathAndDynamicParams(
-          segments,
-          {},
-          folderPath,
-          "page_functions",
-          true,
-          true,
-          undefined,
-          segments.length,
-        );
-
-        let pageFunctionsProps;
-
-        if (pageFunctionsPath) {
-          const pageFunctionsModule = await importModule(pageFunctionsPath);
-          const defMod = pageFunctionsModule.default?.default ? pageFunctionsModule.default.default : pageFunctionsModule.default;
-          const getProps = pageFunctionsModule.getProps || defMod?.getProps;
-          revalidate = pageFunctionsModule.revalidate || defMod?.revalidate;
-          const rawTags = pageFunctionsModule.getCacheTags ?? defMod?.getCacheTags;
-          if (typeof rawTags === "function") {
-            try {
-              cacheTags = await rawTags(params);
-            } catch (e) {
-              console.error("Error running getCacheTags in buildStaticPages:", e);
-            }
-          } else if (Array.isArray(rawTags)) {
-            cacheTags = rawTags;
-          }
-          pageFunctionsProps = await getProps?.(params);
-          props = { ...props, ...(pageFunctionsProps ?? {}) };
-        }
-
-        let jsx = markPageRootElement(
-          { ...React.createElement(Page, props), __modulePath: pagePath },
-          Boolean(pageEffectivePpr),
-        );
-
-        // Resolve and nest layout components from the page folder up to the source root
-        const noLayoutPath = path.join(folderPath, "no_layout");
-        if (!existsSync(noLayoutPath)) {
-          const layouts = getFilePathAndDynamicParams(
             segments,
             {},
-            srcFolder,
-            "layout",
+            folderPath,
+            "page",
             true,
-            false,
+            true,
             undefined,
-            0,
+            segments.length,
+          );
+          const pageModule = await importModule(pagePath);
+          const Page = pageModule.default ?? pageModule;
+
+          let props = { params };
+
+          const [pageFunctionsPath] = getFilePathAndDynamicParams(
+            segments,
             {},
+            folderPath,
+            "page_functions",
             true,
+            true,
+            undefined,
+            segments.length,
           );
 
-          if (layouts && Array.isArray(layouts)) {
-            let index = 0;
-            for (const [layoutPath, dParams, slots] of layouts.reverse()) {
-              const layoutModule = await importModule(layoutPath);
-              const Layout = layoutModule.default ?? layoutModule;
-              const layoutFolderPath = path.dirname(layoutPath);
-              const resetLayoutPath = getFilePathAndDynamicParams(
-                [],
-                {},
-                layoutFolderPath,
-                "reset_layout",
-                false,
-              )[0];
-              const normLayoutPath = layoutPath.replace(/\\/g, "/");
-              const layoutEffectivePpr = layoutPprMap?.has(normLayoutPath)
-                ? Boolean(layoutPprMap.get(normLayoutPath))
-                : Boolean(pageIsPpr);
-              const updatedSlots = {};
-              for (const [slotName, slotValue] of Object.entries(slots)) {
-                let updatedSlotElement;
-                const slotFilePath = slotValue?.slotPath || slotValue?.props?.__modulePath;
-                const slotParams = slotValue?.slotParams || slotValue?.props?.params || {};
+          let pageFunctionsProps;
 
-                try {
-                  let elementToRender;
-                  if (slotValue && slotValue.slotPath) {
-                    const slotModule = await importModule(slotValue.slotPath);
-                    const Slot = slotModule.default ?? slotModule;
-                    elementToRender = React.createElement(Slot, {
-                      params: slotParams,
-                      key: slotName,
-                      __modulePath: slotValue.slotPath,
-                    });
-                  } else {
-                    elementToRender = {
-                      ...slotValue,
-                      __modulePath: slotFilePath ?? null,
-                    };
-                  }
-                  elementToRender = markLayoutRootElement(
-                    elementToRender,
-                    layoutEffectivePpr,
-                  );
-                  await asyncRenderJSXToClientJSX(elementToRender);
-                  updatedSlotElement = elementToRender;
-                } catch (e) {
-                  if (slotFilePath) {
-                    const realSlotFolder = path.dirname(slotFilePath);
-                    const [slotErrorPath, slotErrorParams] =
-                      getFilePathAndDynamicParams(
-                        segments,
-                        {},
-                        realSlotFolder,
-                        "error",
-                        true,
-                        true,
-                        undefined,
-                        segments.length,
-                      );
+          if (pageFunctionsPath) {
+            const pageFunctionsModule = await importModule(pageFunctionsPath);
+            const defMod = pageFunctionsModule.default?.default ? pageFunctionsModule.default.default : pageFunctionsModule.default;
+            const getProps = pageFunctionsModule.getProps || defMod?.getProps;
+            revalidate = pageFunctionsModule.revalidate || defMod?.revalidate;
+            const rawTags = pageFunctionsModule.getCacheTags ?? defMod?.getCacheTags;
+            if (typeof rawTags === "function") {
+              try {
+                cacheTags = await rawTags(params);
+              } catch (e) {
+                console.error("Error running getCacheTags in buildStaticPages:", e);
+              }
+            } else if (Array.isArray(rawTags)) {
+              cacheTags = rawTags;
+            }
+            pageFunctionsProps = await getProps?.(params);
+            props = { ...props, ...(pageFunctionsProps ?? {}) };
+          }
 
-                    if (slotErrorPath) {
-                      const slotErrorModule = await importModule(slotErrorPath);
-                      const SlotError = slotErrorModule.default ?? slotErrorModule;
+          let jsx = markPageRootElement(
+            { ...React.createElement(Page, props), __modulePath: pagePath },
+            Boolean(pageEffectivePpr),
+          );
 
-                      const serializedError = {
-                        message: e.message || "Unknown Error",
-                        name: e.name,
-                        stack: process.env.NODE_ENV !== "production" ? e.stack : undefined,
-                      };
+          // Resolve and nest layout components from the page folder up to the source root
+          const noLayoutPath = path.join(folderPath, "no_layout");
+          if (!existsSync(noLayoutPath)) {
+            const layouts = getFilePathAndDynamicParams(
+              segments,
+              {},
+              srcFolder,
+              "layout",
+              true,
+              false,
+              undefined,
+              0,
+              {},
+              true,
+            );
 
-                      updatedSlotElement = React.createElement(SlotError, {
-                        params: slotErrorParams,
+            if (layouts && Array.isArray(layouts)) {
+              let index = 0;
+              for (const [layoutPath, dParams, slots] of layouts.reverse()) {
+                const layoutModule = await importModule(layoutPath);
+                const Layout = layoutModule.default ?? layoutModule;
+                const layoutFolderPath = path.dirname(layoutPath);
+                const resetLayoutPath = getFilePathAndDynamicParams(
+                  [],
+                  {},
+                  layoutFolderPath,
+                  "reset_layout",
+                  false,
+                )[0];
+                const normLayoutPath = layoutPath.replace(/\\/g, "/");
+                const layoutEffectivePpr = layoutPprMap?.has(normLayoutPath)
+                  ? Boolean(layoutPprMap.get(normLayoutPath))
+                  : Boolean(pageIsPpr);
+                const updatedSlots = {};
+                for (const [slotName, slotValue] of Object.entries(slots)) {
+                  let updatedSlotElement;
+                  const slotFilePath = slotValue?.slotPath || slotValue?.props?.__modulePath;
+                  const slotParams = slotValue?.slotParams || slotValue?.props?.params || {};
+
+                  try {
+                    let elementToRender;
+                    if (slotValue && slotValue.slotPath) {
+                      const slotModule = await importModule(slotValue.slotPath);
+                      const Slot = slotModule.default ?? slotModule;
+                      elementToRender = React.createElement(Slot, {
+                        params: slotParams,
                         key: slotName,
-                        error: serializedError,
+                        __modulePath: slotValue.slotPath,
                       });
                     } else {
-                      console.warn(
-                        `[Dinou Build] Slot @${slotName} failed and does not have error.tsx`,
+                      elementToRender = {
+                        ...slotValue,
+                        __modulePath: slotFilePath ?? null,
+                      };
+                    }
+                    elementToRender = markLayoutRootElement(
+                      elementToRender,
+                      layoutEffectivePpr,
+                    );
+                    await asyncRenderJSXToClientJSX(elementToRender);
+                    updatedSlotElement = elementToRender;
+                  } catch (e) {
+                    if (slotFilePath) {
+                      const realSlotFolder = path.dirname(slotFilePath);
+                      const [slotErrorPath, slotErrorParams] =
+                        getFilePathAndDynamicParams(
+                          segments,
+                          {},
+                          realSlotFolder,
+                          "error",
+                          true,
+                          true,
+                          undefined,
+                          segments.length,
+                        );
+
+                      if (slotErrorPath) {
+                        const slotErrorModule = await importModule(slotErrorPath);
+                        const SlotError = slotErrorModule.default ?? slotErrorModule;
+
+                        const serializedError = {
+                          message: e.message || "Unknown Error",
+                          name: e.name,
+                          stack: process.env.NODE_ENV !== "production" ? e.stack : undefined,
+                        };
+
+                        updatedSlotElement = React.createElement(SlotError, {
+                          params: slotErrorParams,
+                          key: slotName,
+                          error: serializedError,
+                        });
+                      } else {
+                        console.warn(
+                          `[Dinou Build] Slot @${slotName} failed and does not have error.tsx`,
+                        );
+                        updatedSlotElement = null;
+                      }
+                    } else {
+                      console.error(
+                        `[Dinou Build] Slot @${slotName} failed and has no module path`,
                       );
                       updatedSlotElement = null;
                     }
-                  } else {
-                    console.error(
-                      `[Dinou Build] Slot @${slotName} failed and has no module path`,
-                    );
-                    updatedSlotElement = null;
                   }
+                  updatedSlots[slotName] = updatedSlotElement;
                 }
-                updatedSlots[slotName] = updatedSlotElement;
+                const layoutProps = await getLayoutProps(layoutPath, dParams);
+                let props = {
+                  params: dParams,
+                  ...updatedSlots,
+                  ...(layoutProps ?? {}),
+                };
+                jsx = markLayoutRootElement(
+                  { ...React.createElement(Layout, props, jsx), __modulePath: layoutPath },
+                  layoutEffectivePpr,
+                );
+                if (resetLayoutPath) {
+                  break;
+                }
+                index++;
               }
-              const layoutProps = await getLayoutProps(layoutPath, dParams);
-              let props = {
-                params: dParams,
-                ...updatedSlots,
-                ...(layoutProps ?? {}),
-              };
-              jsx = markLayoutRootElement(
-                { ...React.createElement(Layout, props, jsx), __modulePath: layoutPath },
-                layoutEffectivePpr,
-              );
-              if (resetLayoutPath) {
-                break;
-              }
-              index++;
             }
           }
-        }
 
-        // Render the layout-nested React element tree to client-side RSC JSON format
-        resetPprHoles();
-        const renderedSingleJsx = await asyncRenderJSXToClientJSX(jsx);
-        capturedHoles = pageIsPpr ? getRegisteredHoles() : [];
-        return renderedSingleJsx;
+          // Render the layout-nested React element tree to client-side RSC JSON format
+          resetPprHoles();
+          const renderedSingleJsx = await asyncRenderJSXToClientJSX(jsx);
+          capturedHoles = pageIsPpr ? getRegisteredHoles() : [];
+          return renderedSingleJsx;
         });
       });
 
@@ -1326,157 +1325,157 @@ async function buildStaticPage(reqPath, isDynamic = null) {
       return await runWithPprContext({ isPpr: pageIsPpr }, async () => {
         let props = { params: dParams };
 
-      let pageFunctionsProps;
-      if (pageFunctionsPath) {
-        const pageFunctionsModule = await importModule(pageFunctionsPath);
-        const defMod = pageFunctionsModule.default?.default ? pageFunctionsModule.default.default : pageFunctionsModule.default;
-        const getProps = pageFunctionsModule.getProps || defMod?.getProps;
-        revalidate = pageFunctionsModule.revalidate || defMod?.revalidate;
-        if (isDynamic && (isDynamic.value = await isDynamicRoute(revalidate)))
-          return;
-        const rawTags = pageFunctionsModule.getCacheTags ?? defMod?.getCacheTags;
-        if (typeof rawTags === "function") {
-          try {
-            cacheTags = await rawTags(dParams);
-          } catch (e) {
-            console.error("Error running getCacheTags:", e);
+        let pageFunctionsProps;
+        if (pageFunctionsPath) {
+          const pageFunctionsModule = await importModule(pageFunctionsPath);
+          const defMod = pageFunctionsModule.default?.default ? pageFunctionsModule.default.default : pageFunctionsModule.default;
+          const getProps = pageFunctionsModule.getProps || defMod?.getProps;
+          revalidate = pageFunctionsModule.revalidate || defMod?.revalidate;
+          if (isDynamic && (isDynamic.value = await isDynamicRoute(revalidate)))
+            return;
+          const rawTags = pageFunctionsModule.getCacheTags ?? defMod?.getCacheTags;
+          if (typeof rawTags === "function") {
+            try {
+              cacheTags = await rawTags(dParams);
+            } catch (e) {
+              console.error("Error running getCacheTags:", e);
+            }
+          } else if (Array.isArray(rawTags)) {
+            cacheTags = rawTags;
           }
-        } else if (Array.isArray(rawTags)) {
-          cacheTags = rawTags;
+          pageFunctionsProps = await getProps?.(dParams);
+          props = { ...props, ...(pageFunctionsProps ?? {}) };
         }
-        pageFunctionsProps = await getProps?.(dParams);
-        props = { ...props, ...(pageFunctionsProps ?? {}) };
-      }
 
-      let jsx = markPageRootElement(
-        { ...React.createElement(Page, props), __modulePath: pagePath },
-        Boolean(pageEffectivePpr),
-      );
-
-      const noLayoutPath = path.join(folderPath, "no_layout");
-      if (!existsSync(noLayoutPath)) {
-        const layouts = getFilePathAndDynamicParams(
-          segments,
-          {},
-          srcFolder,
-          "layout",
-          true,
-          false,
-          undefined,
-          0,
-          {},
-          true,
+        let jsx = markPageRootElement(
+          { ...React.createElement(Page, props), __modulePath: pagePath },
+          Boolean(pageEffectivePpr),
         );
-        if (layouts && Array.isArray(layouts)) {
-          let index = 0;
-          for (const [layoutPath, dParams, slots] of layouts.reverse()) {
-            const layoutModule = await importModule(layoutPath);
-            const Layout = layoutModule.default ?? layoutModule;
-            const layoutFolderPath = path.dirname(layoutPath);
-            const resetLayoutPath = getFilePathAndDynamicParams(
-              [],
-              {},
-              layoutFolderPath,
-              "reset_layout",
-              false,
-            )[0];
-            const normLayoutPath = layoutPath.replace(/\\/g, "/");
-            const layoutEffectivePpr = layoutPprMap?.has(normLayoutPath)
-              ? Boolean(layoutPprMap.get(normLayoutPath))
-              : Boolean(pageIsPpr);
-            const updatedSlots = {};
-            for (const [slotName, slotValue] of Object.entries(slots)) {
-              let updatedSlotElement;
-              const slotFilePath = slotValue?.slotPath || slotValue?.props?.__modulePath;
-              const slotParams = slotValue?.slotParams || slotValue?.props?.params || {};
 
-              try {
-                let elementToRender;
-                if (slotValue && slotValue.slotPath) {
-                  const slotModule = await importModule(slotValue.slotPath);
-                  const Slot = slotModule.default ?? slotModule;
-                  elementToRender = React.createElement(Slot, {
-                    params: slotParams,
-                    key: slotName,
-                    __modulePath: slotValue.slotPath,
-                  });
-                } else {
-                  elementToRender = {
-                    ...slotValue,
-                    __modulePath: slotFilePath ?? null,
-                  };
-                }
-                elementToRender = markLayoutRootElement(
-                  elementToRender,
-                  layoutEffectivePpr,
-                );
-                await asyncRenderJSXToClientJSX(elementToRender);
-                updatedSlotElement = elementToRender;
-              } catch (e) {
-                if (slotFilePath) {
-                  const realSlotFolder = path.dirname(slotFilePath);
-                  const [slotErrorPath, slotErrorParams] =
-                    getFilePathAndDynamicParams(
-                      segments,
-                      {},
-                      realSlotFolder,
-                      "error",
-                      true, // withExtension
-                      true, // finalDestination
-                      undefined, // lastFound
-                      segments.length,
-                    );
+        const noLayoutPath = path.join(folderPath, "no_layout");
+        if (!existsSync(noLayoutPath)) {
+          const layouts = getFilePathAndDynamicParams(
+            segments,
+            {},
+            srcFolder,
+            "layout",
+            true,
+            false,
+            undefined,
+            0,
+            {},
+            true,
+          );
+          if (layouts && Array.isArray(layouts)) {
+            let index = 0;
+            for (const [layoutPath, dParams, slots] of layouts.reverse()) {
+              const layoutModule = await importModule(layoutPath);
+              const Layout = layoutModule.default ?? layoutModule;
+              const layoutFolderPath = path.dirname(layoutPath);
+              const resetLayoutPath = getFilePathAndDynamicParams(
+                [],
+                {},
+                layoutFolderPath,
+                "reset_layout",
+                false,
+              )[0];
+              const normLayoutPath = layoutPath.replace(/\\/g, "/");
+              const layoutEffectivePpr = layoutPprMap?.has(normLayoutPath)
+                ? Boolean(layoutPprMap.get(normLayoutPath))
+                : Boolean(pageIsPpr);
+              const updatedSlots = {};
+              for (const [slotName, slotValue] of Object.entries(slots)) {
+                let updatedSlotElement;
+                const slotFilePath = slotValue?.slotPath || slotValue?.props?.__modulePath;
+                const slotParams = slotValue?.slotParams || slotValue?.props?.params || {};
 
-                  if (slotErrorPath) {
-                    const slotErrorModule = await importModule(slotErrorPath);
-                    const SlotError = slotErrorModule.default ?? slotErrorModule;
-
-                    const serializedError = {
-                      message: e.message || "Unknown Error",
-                      name: e.name,
-                      stack: process.env.NODE_ENV !== "production" ? e.stack : undefined,
-                    };
-
-                    updatedSlotElement = React.createElement(SlotError, {
-                      params: slotErrorParams,
+                try {
+                  let elementToRender;
+                  if (slotValue && slotValue.slotPath) {
+                    const slotModule = await importModule(slotValue.slotPath);
+                    const Slot = slotModule.default ?? slotModule;
+                    elementToRender = React.createElement(Slot, {
+                      params: slotParams,
                       key: slotName,
-                      error: serializedError,
+                      __modulePath: slotValue.slotPath,
                     });
                   } else {
-                    console.warn(
-                      `[Dinou Build] Slot @${slotName} failed and does not have error.tsx`,
+                    elementToRender = {
+                      ...slotValue,
+                      __modulePath: slotFilePath ?? null,
+                    };
+                  }
+                  elementToRender = markLayoutRootElement(
+                    elementToRender,
+                    layoutEffectivePpr,
+                  );
+                  await asyncRenderJSXToClientJSX(elementToRender);
+                  updatedSlotElement = elementToRender;
+                } catch (e) {
+                  if (slotFilePath) {
+                    const realSlotFolder = path.dirname(slotFilePath);
+                    const [slotErrorPath, slotErrorParams] =
+                      getFilePathAndDynamicParams(
+                        segments,
+                        {},
+                        realSlotFolder,
+                        "error",
+                        true, // withExtension
+                        true, // finalDestination
+                        undefined, // lastFound
+                        segments.length,
+                      );
+
+                    if (slotErrorPath) {
+                      const slotErrorModule = await importModule(slotErrorPath);
+                      const SlotError = slotErrorModule.default ?? slotErrorModule;
+
+                      const serializedError = {
+                        message: e.message || "Unknown Error",
+                        name: e.name,
+                        stack: process.env.NODE_ENV !== "production" ? e.stack : undefined,
+                      };
+
+                      updatedSlotElement = React.createElement(SlotError, {
+                        params: slotErrorParams,
+                        key: slotName,
+                        error: serializedError,
+                      });
+                    } else {
+                      console.warn(
+                        `[Dinou Build] Slot @${slotName} failed and does not have error.tsx`,
+                      );
+                      updatedSlotElement = null;
+                    }
+                  } else {
+                    console.error(
+                      `[Dinou Build] Slot @${slotName} failed and has no module path`,
                     );
                     updatedSlotElement = null;
                   }
-                } else {
-                  console.error(
-                    `[Dinou Build] Slot @${slotName} failed and has no module path`,
-                  );
-                  updatedSlotElement = null;
                 }
+                updatedSlots[slotName] = updatedSlotElement;
               }
-              updatedSlots[slotName] = updatedSlotElement;
+              let layoutProps = {
+                params: dParams,
+                ...updatedSlots,
+              };
+              const customLayoutProps = await getLayoutProps(layoutPath, dParams);
+              layoutProps = {
+                ...layoutProps,
+                ...(customLayoutProps ?? {}),
+              };
+              jsx = markLayoutRootElement(
+                { ...React.createElement(Layout, layoutProps, jsx), __modulePath: layoutPath },
+                layoutEffectivePpr,
+              );
+              if (resetLayoutPath) {
+                break;
+              }
+              index++;
             }
-            let layoutProps = {
-              params: dParams,
-              ...updatedSlots,
-            };
-            const customLayoutProps = await getLayoutProps(layoutPath, dParams);
-            layoutProps = {
-              ...layoutProps,
-              ...(customLayoutProps ?? {}),
-            };
-            jsx = markLayoutRootElement(
-              { ...React.createElement(Layout, layoutProps, jsx), __modulePath: layoutPath },
-              layoutEffectivePpr,
-            );
-            if (resetLayoutPath) {
-              break;
-            }
-            index++;
           }
         }
-      }
 
         resetPprHoles();
         const renderedSingleJsx = await asyncRenderJSXToClientJSX(jsx);

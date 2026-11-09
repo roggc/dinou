@@ -3,19 +3,65 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 
-const pprStorage = new AsyncLocalStorage();
-const pageSegmentStorage = new AsyncLocalStorage();
-const layoutSegmentStorage = new AsyncLocalStorage();
-const cachedSlotStorage = new AsyncLocalStorage();
-const slotDiscoveryStorage = new AsyncLocalStorage();
-const runtimeStaticSuspenseStorage = new AsyncLocalStorage();
-const pageRootElements = new WeakMap();
-const layoutRootElements = new WeakMap();
-const layoutChildrenPlaceholders = new WeakSet();
+const PPR_STORAGE_KEY = Symbol.for("dinou.ppr.storage");
+const PAGE_SEGMENT_STORAGE_KEY = Symbol.for("dinou.page.segment.storage");
+const LAYOUT_SEGMENT_STORAGE_KEY = Symbol.for("dinou.layout.segment.storage");
+const CACHED_SLOT_STORAGE_KEY = Symbol.for("dinou.cached.slot.storage");
+const SLOT_DISCOVERY_STORAGE_KEY = Symbol.for("dinou.slot.discovery.storage");
+const RUNTIME_STATIC_SUSPENSE_STORAGE_KEY = Symbol.for(
+  "dinou.runtime.static.suspense.storage"
+);
+const PAGE_ROOT_ELEMENTS_KEY = Symbol.for("dinou.page.root.elements");
+const LAYOUT_ROOT_ELEMENTS_KEY = Symbol.for("dinou.layout.root.elements");
+const LAYOUT_CHILDREN_PLACEHOLDERS_KEY = Symbol.for(
+  "dinou.layout.children.placeholders"
+);
+const NO_DYNAMIC_STATE_KEY = Symbol.for("dinou.ppr.noDynamic.state");
+
+if (!globalThis[PPR_STORAGE_KEY]) {
+  globalThis[PPR_STORAGE_KEY] = new AsyncLocalStorage();
+}
+if (!globalThis[PAGE_SEGMENT_STORAGE_KEY]) {
+  globalThis[PAGE_SEGMENT_STORAGE_KEY] = new AsyncLocalStorage();
+}
+if (!globalThis[LAYOUT_SEGMENT_STORAGE_KEY]) {
+  globalThis[LAYOUT_SEGMENT_STORAGE_KEY] = new AsyncLocalStorage();
+}
+if (!globalThis[CACHED_SLOT_STORAGE_KEY]) {
+  globalThis[CACHED_SLOT_STORAGE_KEY] = new AsyncLocalStorage();
+}
+if (!globalThis[SLOT_DISCOVERY_STORAGE_KEY]) {
+  globalThis[SLOT_DISCOVERY_STORAGE_KEY] = new AsyncLocalStorage();
+}
+if (!globalThis[RUNTIME_STATIC_SUSPENSE_STORAGE_KEY]) {
+  globalThis[RUNTIME_STATIC_SUSPENSE_STORAGE_KEY] = new AsyncLocalStorage();
+}
+if (!globalThis[PAGE_ROOT_ELEMENTS_KEY]) {
+  globalThis[PAGE_ROOT_ELEMENTS_KEY] = new WeakMap();
+}
+if (!globalThis[LAYOUT_ROOT_ELEMENTS_KEY]) {
+  globalThis[LAYOUT_ROOT_ELEMENTS_KEY] = new WeakMap();
+}
+if (!globalThis[LAYOUT_CHILDREN_PLACEHOLDERS_KEY]) {
+  globalThis[LAYOUT_CHILDREN_PLACEHOLDERS_KEY] = new WeakSet();
+}
+if (!globalThis[NO_DYNAMIC_STATE_KEY]) {
+  globalThis[NO_DYNAMIC_STATE_KEY] = { currentComponentNoDynamic: false };
+}
+
+const pprStorage = globalThis[PPR_STORAGE_KEY];
+const pageSegmentStorage = globalThis[PAGE_SEGMENT_STORAGE_KEY];
+const layoutSegmentStorage = globalThis[LAYOUT_SEGMENT_STORAGE_KEY];
+const cachedSlotStorage = globalThis[CACHED_SLOT_STORAGE_KEY];
+const slotDiscoveryStorage = globalThis[SLOT_DISCOVERY_STORAGE_KEY];
+const runtimeStaticSuspenseStorage = globalThis[RUNTIME_STATIC_SUSPENSE_STORAGE_KEY];
+const pageRootElements = globalThis[PAGE_ROOT_ELEMENTS_KEY];
+const layoutRootElements = globalThis[LAYOUT_ROOT_ELEMENTS_KEY];
+const layoutChildrenPlaceholders = globalThis[LAYOUT_CHILDREN_PLACEHOLDERS_KEY];
 
 const NO_DYNAMIC_HOOK_KEY = Symbol.for("dinou.ppr.noDynamic.hook");
 export const SKIP_STATIC_SUSPENSE_SYMBOL = Symbol.for("dinou.ppr.skipStatic");
-let currentComponentNoDynamic = false;
+const noDynamicState = globalThis[NO_DYNAMIC_STATE_KEY];
 
 export function runInRuntimeStaticSuspense(callback) {
   const prev = runtimeStaticSuspenseStorage.getStore();
@@ -72,7 +118,7 @@ export function noDynamic() {
     err.$$typeof = SKIP_STATIC_SUSPENSE_SYMBOL;
     throw err;
   }
-  currentComponentNoDynamic = true;
+  noDynamicState.currentComponentNoDynamic = true;
   const store = pprStorage.getStore();
   if (store && store.suspenseDepth > 0) {
     store.noDynamic = true;
@@ -84,17 +130,17 @@ if (typeof globalThis !== "undefined") {
 }
 
 export function resetComponentNoDynamicFlag() {
-  currentComponentNoDynamic = false;
+  noDynamicState.currentComponentNoDynamic = false;
 }
 
 export function consumeComponentNoDynamicFlag() {
-  const val = currentComponentNoDynamic;
-  currentComponentNoDynamic = false;
+  const val = noDynamicState.currentComponentNoDynamic;
+  noDynamicState.currentComponentNoDynamic = false;
   return val;
 }
 
 export function isNoDynamicActive() {
-  if (currentComponentNoDynamic) return true;
+  if (noDynamicState.currentComponentNoDynamic) return true;
   const store = pprStorage.getStore();
   return Boolean(store && store.noDynamic);
 }
@@ -218,7 +264,9 @@ export function runInPageSegment(callback, storeOverride = null) {
   const prev = pageSegmentStorage.getStore();
   const store =
     storeOverride || prev || { active: true, idCount: 0, holeCount: 0 };
-  return pageSegmentStorage.run(store, callback);
+  return layoutSegmentStorage.run(null, () =>
+    pageSegmentStorage.run(store, callback)
+  );
 }
 
 export function getActivePageSegmentStore() {
@@ -233,7 +281,9 @@ export function runInLayoutSegment(callback, storeOverride = null) {
   const prev = layoutSegmentStorage.getStore();
   const store =
     storeOverride || prev || { active: true, idCount: 0, holeCount: 0 };
-  return layoutSegmentStorage.run(store, callback);
+  return pageSegmentStorage.run(null, () =>
+    layoutSegmentStorage.run(store, callback)
+  );
 }
 
 export function getActiveLayoutSegmentStore() {
