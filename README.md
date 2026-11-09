@@ -10,7 +10,7 @@ Build full-stack web applications with native **React Server Components (RSC)**,
 
 > 📚 **Full Documentation, Guides & Interactive Tutorials:** **[https://dinou.dev](https://dinou.dev)**
 >
-> 🤖 **AI Agent Ready:** This `README.md` is intentionally engineered as a **high-density, single-pass technical specification (< 700 lines / < 38 KB)** so AI coding agents can read the entire framework architecture, public APIs, and caching invariants in a single tool call.
+> 🤖 **AI Agent Ready:** This `README.md` is intentionally engineered as a **high-density, single-pass technical specification (< 700 lines / < 45 KB)** so AI coding agents can read the entire framework architecture, public APIs, and caching invariants in a single tool call.
 
 ---
 
@@ -73,8 +73,8 @@ Routes live directly inside **`src/`** (not `src/app/`). A directory becomes a r
 my-app/
 ├── public/                     # Static files served at "/" (copied to .dinou/dist3)
 ├── src/
-│   ├── layout.tsx              # Root Layout (wraps<html>, <head>, <body>)
-│   ├── layout_functions.ts     # Root Layout server lifecycle (getProps, revalidate, getCacheTags, ppr)
+│   ├── layout.tsx              # Root Layout (wraps <html>, <head>, <body>)
+│   ├── layout_functions.ts     # Root Layout server lifecycle (getProps, getStaticPaths, allowISG, revalidate, getCacheTags, ppr)
 │   ├── page.tsx                # Home route ("/")
 │   ├── page_functions.ts       # Home route server lifecycle (getProps, revalidate, getCacheTags, ppr)
 │   ├── error.tsx               # Root 500 error boundary page
@@ -95,7 +95,7 @@ my-app/
 | `page.{tsx,jsx,ts,js}` | Universal (`async` RSC or `"use client"`) | Primary UI for the URL segment. Receives `{ params }` plus all props returned by `getProps`. |
 | `layout.{tsx,jsx,ts,js}` | Universal (`async` RSC or `"use client"`) | Persistent wrapper around child routes. Does **not** remount on child SPA navigation. Receives `{ children, params, ...parallelSlots }` plus props from `layout_functions.ts` `getProps`. |
 | `page_functions.{ts,js}` | Server-Only | Exports `getProps`, `getStaticPaths`, `validateParams`, `allowISG`, `revalidate`, `getCacheTags`, `ppr`. |
-| `layout_functions.{ts,js}` | Server-Only | Exports `getProps`, `validateParams`, `revalidate`, `getCacheTags`, `ppr` for the layout segment independently of child pages. |
+| `layout_functions.{ts,js}` | Server-Only | Exports `getProps`, `getStaticPaths`, `validateParams`, `allowISG`, `revalidate`, `getCacheTags`, `ppr` for the layout segment independently of child pages. |
 | `error.{tsx,jsx,ts,js}` | Universal | Renders when an unhandled error occurs in the segment or its descendants (bubbles up to closest ancestor `error.*`). Receives `{ error, params }`. |
 | `not_found.{tsx,jsx,ts,js}` | Universal | Renders on unmatched URLs or when `validateParams` returns `false` / `allowISG = false` (bubbles up to closest ancestor `not_found.*`). Receives `{ params }` plus props from `getProps` if present. |
 
@@ -160,12 +160,12 @@ Both `page_functions.ts` and `layout_functions.ts` share the `RouteSegmentConfig
 | Export | Signature / Type | Default | Behavior |
 | :--- | :--- | :--- | :--- |
 | `revalidate` | `number \| false \| (() => number \| false \| Promise<...>)` | `false` | **`false`**: Permanent SSG/ISG until on-demand invalidation.<br>**`0` (or `< 1`)**: Dynamic SSR on every request.<br>**`>= 1`**: Time-based ISR (TTL in seconds; stale-while-revalidate in background). |
-| `ppr` | `boolean \| (() => boolean \| Promise<boolean>)` | `false` (or global `dinou.config.mjs`) | Enables **Partial Prerendering** for this segment (static shell + streaming `<Suspense>` holes). |
+| `ppr` | `boolean \| (() => boolean \| Promise<boolean>)` | `false` (or global `dinou.config.mjs`) | Enables **Partial Prerendering** strictly for **this segment** (no parent-to-child inheritance; falls back directly to `dinou.config.mjs`). |
 | `getCacheTags` | `string[] \| ((params) => string[] \| Promise<string[]>)` | `[]` | Tags associated with this page or layout segment for surgical invalidation via `revalidateTag(tag)`. |
-| `getProps` | `(params) => TProps \| Promise<TProps>` | `{}` | Server-only data loader. Returned object properties are spread directly as props onto `page.tsx` (and `not_found.tsx`) or `layout.tsx`. |
+| `getProps` | `(params) => TProps \| Promise<TProps>` | `{}` | Server-only data loader. Returned properties are spread as props onto `page.tsx` (and `not_found.tsx`) or `layout.tsx`. Can include un-awaited `Promise` (or `Promise[]`) values streamed directly to `"use client"` components using React 19 `use(promise)` inside `<Suspense>` without blocking TTFB. |
 | `getStaticPaths` | `StaticPathItem[] \| (() => StaticPathsResult)` | `[]` | *(Pages/Layouts)* Pre-generates paths at build time. Supports returning strings (`["a", "b"]`), numbers, string arrays for catch-all (`[["a", "b"]]`), or param objects (`[{ slug: "a" }]`). |
-| `validateParams` | `(params) => boolean \| Promise<boolean>` | `() => true` | Perimeter guard evaluated **before** `getProps` or rendering. Returning `false` halts execution and renders `not_found.tsx` with HTTP 404. In `layout_functions.ts`, protects the entire child subtree. |
-| `allowISG` | `boolean \| (() => boolean \| Promise<boolean>)` | `true` | When `true`, dynamic paths not returned by `getStaticPaths` are generated on-demand on first visit and cached (ISG). When `false`, unknown paths immediately return HTTP 404. |
+| `validateParams` | `(params) => boolean \| Promise<boolean>` | `() => true` | Perimeter guard evaluated per active segment **before** `getProps` or rendering using that segment's accumulated dynamic `params`. Returning `false` halts execution and returns HTTP 404 consistently across HTML, layout RSC, and page RSC. |
+| `allowISG` | `boolean \| (() => boolean \| Promise<boolean>)` | `true` (or global `dinou.config.mjs`) | Evaluated per segment on its own dynamic parameters. When `true`, paths not in `getStaticPaths` are generated on-demand on first visit and cached (ISG). When `false`, unknown params return HTTP 404. Static layouts (no dynamic params) ignore `allowISG = false`, and valid pre-rendered dynamic parent layouts preserve child `allowISG = true`. |
 
 ---
 
@@ -247,12 +247,12 @@ export default async function DashboardPage() {
 
 **Partial Prerendering (PPR)** is Dinou's **Temporal Segmentation** axis: it splits a single route across *time*, delivering the pre-rendered **Static Shell (`shell.html`)** at $t = 0\text{ ms}$ (build/revalidation time) while streaming personalized or live **`<Suspense>` Dynamic Holes** concurrently at request time over the same HTTP connection.
 
-Enable PPR globally in `dinou.config.mjs` (`ppr: true`) or per-route/layout in `page_functions.ts` / `layout_functions.ts` (`export const ppr = true`).
+Enable PPR globally in `dinou.config.mjs` (`ppr: true`) or per-segment in `page_functions.ts` / `layout_functions.ts` (`export const ppr = true` / `false`). **`ppr` is strictly per-segment with zero parent-to-child inheritance**: each layout and page resolves its own `ppr` flag independently (falling back directly to `dinou.config.mjs`, `false` by default), supporting mixed-PPR routes (e.g., a `ppr = true` layout wrapping a `ppr = false` page, or vice versa) in isolated execution scopes.
 
 #### How `<Suspense>` Boundaries, Dynamic PPR Holes & `noDynamic()` Work:
 1. **`<Suspense>` Is the Single Boundary (`ppr = true` vs. `ppr = false`):**
    - **Outside `<Suspense>`** (top-level `async` Page/Layout, `getProps`, or unwrapped child `async` Server Components): Awaited at build/revalidation time and baked directly into the **Static Shell (`shell.html`)**. *(Accessing `req.cookies`, `req.headers`, `req.query`, or `<DinouCacheSlot revalidate={0}>` outside `<Suspense>` triggers a Full-Page Dynamic Bailout).*
-   - **Inside `<Suspense fallback={...}>` (Default = Dynamic PPR Hole):** On `ppr = true` routes, **any `async` Server Component** (postponed immediately at its first `await` with zero build latency), any component reading `getContext()` (`req.cookies`, `req.headers`, `req.query`) / `useSearchParams()`, or `<DinouCacheSlot revalidate={0}>` automatically becomes a **Dynamic PPR Hole** (`data-ppr-hole`). Its `<Suspense>` fallback is baked into `shell.html` (`0ms` TTFB) and the resolved content streams live over the same HTTP response at request time. *(On `ppr = false` routes, `async` components inside `<Suspense>` resolve at build time into `index.html`).*
+   - **Inside `<Suspense fallback={...}>` (Default = Dynamic PPR Hole):** On `ppr = true` segments, **any `async` Server Component** (postponed immediately at its first `await` with zero build latency), any `"use client"` component receiving an **un-awaited `Promise` (or `Promise[]`) prop**, any component reading `getContext()` (`req.cookies`, `req.headers`, `req.query`) / `useSearchParams()`, or `<DinouCacheSlot revalidate={0}>` automatically becomes a **Dynamic PPR Hole** (`data-ppr-hole`). Its `<Suspense>` fallback is baked into `shell.html` (`0ms` TTFB) and the resolved content streams live over the same HTTP response at request time. *(On `ppr = false` segments, `<Suspense>` subtrees resolve statically at build time into `index.html`).*
 2. **Static `<Suspense>` Opt-Out via `noDynamic()` (`"dinou"` or `"dinou/server"`):**
    - If an `async` Server Component inside `<Suspense>` on a `ppr = true` route should instead resolve at build time into the **Static Shell (`shell.html`)** (e.g., static Markdown/syntax highlighting), call **`noDynamic()`** synchronously at the top of the component **before its first `await`**.
    - At runtime, leaf static `<Suspense>` boundaries opted out via `noDynamic()` automatically short-circuit (`0ms`, zero re-execution) when sibling dynamic holes stream. *(If `req.cookies`, `req.headers`, or `req.query` is read inside a `noDynamic()` subtree, dynamic bailout always wins).*
@@ -271,6 +271,9 @@ All three dimensions compose simultaneously in the same route tree:
   1. Invalidating a `<DinouCacheSlot>` inside a **PPR Dynamic Hole** (`revalidateTag("hole-slot")`) updates only that slot on the next request without regenerating `shell.html` or sibling slots.
   2. Invalidating a `<DinouCacheSlot>` inside a **PPR Static Shell** (`revalidateTag("shell-slot")`) purges the slot and automatically enqueues background regeneration of the host `shell.html` (and `layout.rsc` if the slot lives in the layout shell), while leaving sibling cached slots untouched.
   3. Calling `refreshSlot(idOrTag, { fresh: true })` (or `refreshSlot("*", { fresh: true })`) from the browser updates slots live in the DOM across the Layout Shell, Layout Holes, Page Shell, and Page Holes simultaneously, **and** enqueues background regeneration of any affected static shells so a subsequent F5 hard reload serves the exact updated slot tokens with **zero hydration mismatch**.
+- **Single-Pass Inline RSC Streaming & Scoped Server `useId()`:**
+  - **Single-Pass Inline RSC Streaming (`__DINOU_RSC_L__` & `__DINOU_RSC_P__`):** On dynamic SSR routes, PPR runtime resumes, and first-time ISG renders/bailouts, Dinou evaluates the layout chain and page **once per request** and multiplexes the segmented Flight RSC streams inline inside `<script>` tags in the initial HTML stream—eliminating secondary `GET /____rsc_layout____` and `GET /____rsc_page____` hydration round-trips and preventing hydration mismatch (`#418`) from non-deterministic server values.
+  - **Deterministic Segment-Scoped `useId()` in Server Components:** Sync and `async` Server Components support `useId()` (plus stateless `useMemo` / `useCallback`), generating collision-free IDs scoped per segment (`_layout_...`, `_page_...`, `_slot_...`, `_hole_...`) across Horizontal Segmentation, `<DinouCacheSlot>` refreshes, and PPR holes.
 
 ---
 
@@ -301,14 +304,15 @@ import {
 | `useNavigationLoading()` | Client | `() => boolean` | Returns `true` while a client-side route transition is in flight. |
 | `redirect(url)` | Universal | `(destination: string) => ReactNode` | In `getProps` or Server Functions/Components before headers flush: sends real HTTP `307 Temporary Redirect` (or `X-Dinou-Redirect` in RPC). If streaming has already started or on client: renders `<ClientRedirect to={destination} />`. |
 | `<ClientRedirect>` | Client | `<ClientRedirect to="/login" />` | Triggers immediate client-side `replace` navigation upon mount. |
-| `refreshSlot()` | Client | `(slotIdOrTag: string, opts?: { fresh?: boolean }) => void` | Standalone helper (identical to `useRouter().refreshSlot`) to refresh one or all (`"*"`) `<DinouCacheSlot>` instances live in the browser. |
+| `refreshSlot()` | Client | `(slotIdOrTag: string, opts?: { fresh?: boolean }) => Promise<void>` | Standalone helper (identical to `useRouter().refreshSlot`) to refresh one or all (`"*"`) `<DinouCacheSlot>` instances live in the browser; resolves once refreshes settle. |
 
 ---
 
 ## 7. Server Functions (`"use server"`), Context & The Dinou Pattern
 
 ### Server Functions & Actions (`"use server"`)
-Any file or async function marked with `"use server"` runs exclusively on the server and can be imported directly into Client Components (`"use client"`):
+Any file or async function marked with `"use server"` runs exclusively on the server and can be passed to or imported directly into Client Components (`"use client"`):
+- **Three Supported Scopes:** (1) Module-level `"use server"` files, (2) Function-body `"use server"` inside mixed utility files (granular manifest tree-shaking exposes only marked functions while allowing direct `"use client"` imports), and (3) Inline `"use server"` functions defined inside Server Components (including lexical closure capture).
 - Supports standard React 19 form actions (`<form action={myAction}>`, `useActionState`, `useFormStatus`, `useOptimistic`) and direct RPC calls (`await myAction(arg1, arg2)`), including `FormData` uploads.
 - **Security:** Bundlers automatically strip the implementation from the client bundle and replace it with a Flight RPC proxy (`/____server_function____`).
 
@@ -332,6 +336,9 @@ export async function updateThemeAction(theme: string) {
 - `ctx.req`: `{ query, cookies, headers, path, method, env, ctx }`
 - `ctx.res`: `{ cookie(name, val, opts?), clearCookie(name, opts?), setHeader(name, val), status(code), redirect(statusOrUrl, url?) }`
 - `ctx.env` / `ctx.ctx`: Platform bindings (e.g., Cloudflare Workers `env.DB`, `env.KV`, `ctx.waitUntil`).
+
+### Server-to-Client Promise Streaming (`use(promise)`)
+Server Components and `getProps()` can pass raw, un-awaited `Promise` (or `Promise[]`) props directly to `"use client"` components wrapped in `<Suspense>`, streaming resolution over React Flight to React 19's `use(promise)` on the client without blocking TTFB (and registering a Dynamic PPR Hole automatically on `ppr = true` segments).
 
 ### The Dinou Pattern (Streaming Server Components from Server Functions)
 In Dinou, a `"use server"` function can return **rendered JSX (including async Server Components and `<Suspense>` trees)** directly to a Client Component over React Flight RPC:
@@ -391,7 +398,8 @@ import { RedisStorage } from "dinou/server";
 
 export default defineConfig({
   reactStrictMode: true, // Default: true
-  ppr: false,            // Global PPR default (can be overridden per route/layout)
+  ppr: false,            // Global PPR default per segment (can be overridden in page_functions / layout_functions)
+  allowISG: true,        // Global ISG default for dynamic segments (set false for strict SSG-only 404 mode)
   setupFiles: ["./dinou.setup.ts"],
   // storage: new RedisStorage(redisClient, "dinou:"),
   plugins: [
@@ -423,7 +431,7 @@ export default defineConfig({
 ```
 
 ### Pluggable ISR Storage Adapters (`"dinou/server"`)
-- `FileSystemStorage(baseDir?)`: Default on Node.js & Bun (persists to `.dinou/cache`).
+- `FileSystemStorage(baseDir?)`: Default on Node.js & Bun (persists to `.dinou/dist2`).
 - `CloudflareKVStorage(kvNamespace)`: Default on Cloudflare Workers when `env.DINOU_CACHE` KV binding is present.
 - `DenoKVStorage(kvInstance?)`: Default on Deno / Deno Deploy.
 - `MemoryStorage()`: In-memory fallback when no persistent store is configured.
@@ -485,7 +493,7 @@ Running `npx dinou eject` copies the complete Dinou framework into `./dinou` at 
 | `usePathname` | Hook (Universal) | Current URL pathname string |
 | `useSearchParams` | Hook (Universal) | Current `URLSearchParams` |
 | `useNavigationLoading` | Hook (Client) | Boolean pending navigation state |
-| `refreshSlot` | Function (Client) | `refreshSlot(slotIdOrTag, { fresh?: boolean })` (supports `"*"` wildcard) |
+| `refreshSlot` | Function (Client) | `refreshSlot(slotIdOrTag, { fresh?: boolean }): Promise<void>` (supports `"*"` wildcard) |
 | `getContext` | Function (Server) | Returns `{ req, res, env, ctx, ...custom }` from `AsyncLocalStorage` |
 | `noDynamic` | Function (Server) | Opts enclosing `<Suspense>` out of becoming a Dynamic PPR Hole on `ppr = true` routes |
 | `defineConfig` | Function | Type-safe helper for `dinou.config.mjs` |
