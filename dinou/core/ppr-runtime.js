@@ -633,6 +633,21 @@ async function handlePprResume({
         `<script>window.__DINOU_USE_STATIC__ = false; window.__DINOU_PPR__ = true;</script></head>`
       );
     }
+    if (!shellHtml.includes("window.__DINOU_PPR_RESUME__")) {
+      if (/window\.__DINOU_PPR__\s*=\s*true;?/.test(shellHtml)) {
+        shellHtml = shellHtml.replace(
+          /window\.__DINOU_PPR__\s*=\s*true;?/,
+          "window.__DINOU_PPR__ = true; window.__DINOU_PPR_RESUME__ = true;"
+        );
+      } else if (shellHtml.includes("</head>")) {
+        shellHtml = shellHtml.replace(
+          "</head>",
+          `<script>window.__DINOU_PPR_RESUME__ = true;</script></head>`
+        );
+      } else {
+        shellHtml = `<script>window.__DINOU_PPR_RESUME__ = true;</script>${shellHtml}`;
+      }
+    }
   }
 
   // Separate shell into prelude (up to </body>) and postlude

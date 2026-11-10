@@ -14,6 +14,9 @@ const useState =
   React.useState ||
   ((init) => [typeof init === "function" ? init() : init, () => {}]);
 const useEffect = React.useEffect || (() => {});
+const useSyncExternalStore =
+  React.useSyncExternalStore || ((_sub, getSnap) => getSnap());
+const emptySubscribe = () => () => {};
 
 // 🔄 CHANGE: Now default value is a compatible object
 export const RouterContext = createContext({
@@ -157,7 +160,19 @@ export function useSearchParams() {
   if (typeof window === "undefined") {
     try {
       const storage = globalThis[DINOU_CONTEXT_KEY];
-      const ctx = storage && typeof storage.getStore === "function" ? storage.getStore() : null;
+      const ctx =
+        (storage && typeof storage.getStore === "function"
+          ? storage.getStore()
+          : null) || globalThis[Symbol.for("dinou.request.context.current")];
+      const clientH =
+        React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?.H;
+      const isClientSsrRender =
+        typeof React.useState === "function" &&
+        Boolean(clientH) &&
+        !clientH._dinouIsServerHooksDispatcher;
+      if (ctx && ctx._isPprRuntimeResume && isClientSsrRender) {
+        return new URLSearchParams();
+      }
       if (ctx && ctx.req && ctx.req.query) {
         const params = new URLSearchParams();
         Object.entries(ctx.req.query).forEach(([key, val]) => {
@@ -166,24 +181,30 @@ export function useSearchParams() {
         });
         return params;
       }
-    } catch (e) { }
+    } catch (e) {
+      if (
+        e &&
+        (e.$$typeof === Symbol.for("dinou.ppr.postpone") ||
+          e.$$typeof === Symbol.for("react.postpone") ||
+          e.$$typeof === Symbol.for("dinou.ppr.skipStatic"))
+      ) {
+        throw e;
+      }
+    }
     return new URLSearchParams();
   }
 
   // 🔵 2. CLIENT LOGIC
   const context = useContext(RouterContext);
-  const [isStaticHydrating, setIsStaticHydrating] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      Boolean(window.__DINOU_USE_STATIC__) &&
-      document.body?.getAttribute("data-hydrated") !== "true"
+  const isReactHydrating = useSyncExternalStore(
+    emptySubscribe,
+    () => false,
+    () => true
   );
-
-  useEffect(() => {
-    if (isStaticHydrating) {
-      setIsStaticHydrating(false);
-    }
-  }, [isStaticHydrating]);
+  const isStaticHydrating =
+    isReactHydrating &&
+    typeof window !== "undefined" &&
+    Boolean(window.__DINOU_USE_STATIC__ || window.__DINOU_PPR_RESUME__);
 
   if (isStaticHydrating) {
     return new URLSearchParams();

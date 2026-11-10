@@ -12,6 +12,8 @@ if (typeof window === "undefined") {
     try {
       if (typeof globalThis.__dinou_require__ === "function") {
         AsyncLocalStorageClass = globalThis.__dinou_require__("node:async_hooks")?.AsyncLocalStorage;
+      } else if (typeof process !== "undefined" && typeof process.getBuiltinModule === "function") {
+        AsyncLocalStorageClass = process.getBuiltinModule("node:async_hooks")?.AsyncLocalStorage;
       } else if (typeof process !== "undefined" && process.versions && (process.versions.node || process.versions.bun)) {
         const getRequire = new Function("return typeof require !== 'undefined' ? require : null");
         const nodeRequire = getRequire();

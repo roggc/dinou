@@ -2634,7 +2634,10 @@ async function handleRequest(request, platformContext = {}) {
               }
               bootstrapScriptContent += `window.__DINOU_BUILD_ID__ = "${leafLayout.generatedAt}";\n`;
               const clientEntry = getAssetFromManifest("main.js");
-              const recomposeCtx = createRequestContext(simReq, bridge, platformContext);
+              const recomposeSimReq = simReq
+                ? { ...simReq, query: {}, cookies: {} }
+                : { query: {}, cookies: {}, headers: {}, path: reqPath, method: "GET" };
+              const recomposeCtx = createRequestContext(recomposeSimReq, bridge, platformContext);
               copyCustomContextProperties(rootContext, recomposeCtx);
               let htmlStream;
               await requestStorage.run(recomposeCtx, async () => {
