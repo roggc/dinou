@@ -20,7 +20,10 @@ import {
 } from "../core/scan-dependency-components.js";
 import { getDinouConfig } from "../core/load-dinou-config.js";
 import { resolveSetupFiles } from "../core/resolve-setup-files.js";
-import { esbuildContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
+import {
+  esbuildContextualDinouPlugin,
+  filterEscapedClientManifest,
+} from "../core/resolve-contextual-dinou.js";
 import { discoverLayoutsFromFs, sortEntriesByName } from "../core/discover-layouts.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -96,7 +99,10 @@ export async function bundleDualEngine(options = {}) {
   let parsedClientManifest = {};
   if (clientManifestPath && fs.existsSync(clientManifestPath)) {
     try {
-      parsedClientManifest = JSON.parse(fs.readFileSync(clientManifestPath, "utf8"));
+      parsedClientManifest = filterEscapedClientManifest(
+        JSON.parse(fs.readFileSync(clientManifestPath, "utf8")),
+        projectRoot
+      );
     } catch (e) {}
   }
 

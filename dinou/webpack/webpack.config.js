@@ -21,7 +21,10 @@ import {
 } from "../core/scan-dependency-components.js";
 import { useClientRegex } from "../constants.js";
 import { generateRouteTypes } from "../core/generate-route-types.js";
-import { webpackContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
+import {
+  createWebpackUnderscoreDirExclude,
+  webpackContextualDinouPlugin,
+} from "../core/resolve-contextual-dinou.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -281,6 +284,7 @@ export default async () => {
             directory: "./src",
             recursive: true,
             include: /\.(js|ts|jsx|tsx)$/,
+            exclude: createWebpackUnderscoreDirExclude(process.cwd()),
           },
           {
             directory: path.resolve(__dirname, "../core"),

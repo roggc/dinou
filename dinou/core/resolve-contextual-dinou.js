@@ -1,6 +1,7 @@
 // dinou/core/resolve-contextual-dinou.js
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const CONTEXTUAL_DINOU_FILTER = /^\.\.?[\\/](?:.*[\\/])?dinou(?:\.js)?(?:[?#].*)?$/;
 const UNDERSCORE_SEGMENT_HINT_RE = /(?:^|[\\/])_[^\\/]+(?:[\\/]|$)/;
@@ -52,6 +53,57 @@ export function isUnderscoreEscapedSrcPath(
   const parts = rel.split("/").filter(Boolean);
   const dirParts = isDirectory ? parts : parts.slice(0, -1);
   return dirParts.some((seg) => seg.startsWith("_"));
+}
+
+/**
+ * Returns a native `RegExp` suitable for Webpack `ContextModuleFactory` /
+ * `ReactServerWebpackPlugin` `clientReferences[].exclude` (which requires a
+ * genuine `RegExp` instance for `_prettyRegExp` and cache serialization).
+ *
+ * Anchored to `<projectRoot>/src` so underscores in ancestor directories
+ * (e.g. `/Users/_dev/app/src/...`) never cause false positives, while:
+ * - Immediately excluding `_`-prefixed directories (`src/_foo`, `src/blog/_bar`)
+ *   before `fs.stat` / `fs.readdir`, as well as any path nested inside them.
+ * - Allowing `_`-prefixed client module files (`_AllowedClient.tsx`) inside
+ *   active directories.
+ */
+export function createWebpackUnderscoreDirExclude(
+  projectRoot = process.cwd()
+) {
+  const srcDir = path.resolve(projectRoot, "src");
+  const escapedSrc = srcDir
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/(\\\\|\/)/g, "[\\\\/]");
+  const flags = process.platform === "win32" ? "i" : "";
+  return new RegExp(
+    `^${escapedSrc}[\\\\/](?:.*[\\\\/])?_(?:[^\\\\/]*[\\\\/]|(?![^\\\\/]*\\.(?:js|ts|jsx|tsx)$)[^\\\\/]+$)`,
+    flags
+  );
+}
+
+/**
+ * Defense-in-depth filter that strips any `file://` keys pointing into
+ * `_`-prefixed directories under `src/` from a parsed `react-client-manifest.json`.
+ */
+export function filterEscapedClientManifest(
+  manifest,
+  projectRoot = process.cwd()
+) {
+  if (!manifest || typeof manifest !== "object") return {};
+  const filtered = {};
+  for (const [k, v] of Object.entries(manifest)) {
+    const fileUrl = k.split("#")[0];
+    if (fileUrl.startsWith("file:///")) {
+      try {
+        const filePath = fileURLToPath(fileUrl);
+        if (isUnderscoreEscapedSrcPath(filePath, projectRoot)) {
+          continue;
+        }
+      } catch (e) {}
+    }
+    filtered[k] = v;
+  }
+  return filtered;
 }
 
 /**
@@ -382,6 +434,8 @@ export function webpackContextualDinouPlugin({
 export default {
   UNDERSCORE_GLOB_IGNORE,
   isUnderscoreEscapedSrcPath,
+  createWebpackUnderscoreDirExclude,
+  filterEscapedClientManifest,
   checkForbiddenUnderscoreImport,
   resolveContextualDinouImport,
   esbuildContextualDinouPlugin,
