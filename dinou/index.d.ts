@@ -299,19 +299,28 @@ export type PageFunctions<
   TRouteOrParams extends DinouRoutePattern | object = any,
   TProps = any
 > = RouteSegmentConfig<
-  [TRouteOrParams] extends [string] ? RouteParams<TRouteOrParams> : TRouteOrParams,
+  0 extends 1 & TRouteOrParams
+    ? any
+    : [TRouteOrParams] extends [DinouRoutePattern]
+      ? RouteParams<Extract<TRouteOrParams, DinouRoutePattern>>
+      : TRouteOrParams,
   TProps
 >;
 
 /**
  * Type-safe interface representing the available exports in `layout_functions.ts`.
- * Accepts either a route pattern string (e.g. `"/[organization]"`) or a direct parameters dictionary.
+ * Accepts either a layout segment pattern string (e.g. `"/[organization]"`, including intermediate layouts without a sibling `page.tsx`)
+ * or a direct parameters dictionary.
  */
 export type LayoutFunctions<
-  TRouteOrParams extends DinouRoutePattern | object = any,
+  TRouteOrParams extends DinouLayoutPattern | object = any,
   TProps = any
 > = RouteSegmentConfig<
-  [TRouteOrParams] extends [string] ? RouteParams<TRouteOrParams> : TRouteOrParams,
+  0 extends 1 & TRouteOrParams
+    ? any
+    : [TRouteOrParams] extends [DinouLayoutPattern]
+      ? LayoutParams<Extract<TRouteOrParams, DinouLayoutPattern>>
+      : TRouteOrParams,
   TProps
 >;
 
@@ -444,7 +453,7 @@ export interface NavigationOptions {
  * router.refresh();
  */
 // ====================================================================
-// TYPE-SAFE ROUTING (Level 1 & Level 2)
+// TYPE-SAFE ROUTING (Level 1 & Level 2 — Hierarchical & Horizontal)
 // ====================================================================
 
 export namespace DinouRouter {
@@ -454,7 +463,7 @@ export namespace DinouRouter {
 }
 
 /**
- * Union of all valid routes in the application.
+ * Union of all valid navigable routes in the application (`page.*`).
  * When typed routes are generated, autocompletes known routes.
  * Falls back to string if not yet generated or in loose mode.
  */
@@ -487,80 +496,798 @@ export type ExtractRouteParams<Path extends string> =
     ? ExtractSegmentParam<Start> & ExtractRouteParams<Rest>
     : ExtractSegmentParam<Path>;
 
+export type SimplifyParams<T> = { [K in keyof T]: T[K] };
+
+export type FallbackRouteParams<Path extends string> =
+  [string] extends [Path]
+    ? Record<string, string | string[] | undefined>
+    : [`/@${string}`] extends [Path]
+      ? Record<string, string | string[] | undefined>
+      : keyof ExtractRouteParams<Path> extends never
+        ? Record<string, never>
+        : SimplifyParams<ExtractRouteParams<Path>>;
+
+export type FormatPatternKeys<K extends string> =
+  [K] extends [never]
+    ? string
+    : K | (K extends `/${infer Rest}` ? (Rest extends "" ? never : Rest) : never);
+
+export type FormatOptionalPatternKeys<K extends string> =
+  [K] extends [never]
+    ? never
+    : K | (K extends `/${infer Rest}` ? (Rest extends "" ? never : Rest) : never);
+
+export type IsUnion<T, U = T> = T extends any ? ([U] extends [T] ? false : true) : never;
+
+export type CleanRoutePath<T extends string> =
+  T extends "" ? "/" : T extends `/${string}` ? T : `/${T}`;
+
 /**
- * All known route patterns in the application (e.g. "/blog/[slug]", "/t-params/[[slug]]").
- * Autocompletes all project routes when typing PageProps<"..." or LayoutProps<"...".
+ * All known page route patterns in the application (e.g. "/blog/[slug]", "/t-params/[[slug]]").
+ * Autocompletes all project page routes when typing PageProps<"..."> or PageFunctions<"...">.
  */
 export type DinouRoutePattern = DinouRouter.Register extends { params: infer P }
-  ? (keyof P extends string ? keyof P | (keyof P extends `/${infer Rest}` ? Rest : never) : string)
+  ? FormatPatternKeys<Extract<keyof P, string>>
   : string;
 
-export type CleanRoutePath<T extends string> = T extends `/${string}` ? T : `/${T}`;
+/**
+ * Registered parallel `@slot` patterns when `.dinou/types/routes.d.ts` is present (`never` if the project has no `@slot` folders).
+ */
+export type DinouRegisteredSlotPattern = DinouRouter.Register extends { slotParams: infer SP }
+  ? FormatOptionalPatternKeys<Extract<keyof SP, string>>
+  : DinouRouter.Register extends { params: unknown }
+    ? never
+    : string;
 
 /**
- * Resolved route parameter types for a route.
- * Prioritizes the generated route parameters map from .dinou/types/routes.d.ts,
+ * All known parallel `@slot` patterns in the application (e.g. "/dashboard/[org]/@analytics", "/@modal").
+ * Autocompletes `@slot` folders when typing SlotProps<"...">.
+ */
+export type DinouSlotPattern = DinouRouter.Register extends { slotParams: infer SP }
+  ? ([Extract<keyof SP, string>] extends [never]
+      ? `/@${string}` | `${string}/@${string}`
+      : FormatOptionalPatternKeys<Extract<keyof SP, string>>)
+  : string;
+
+/**
+ * All known layout segment patterns in the application (e.g. "/", "/workspace/[org]"),
+ * including intermediate horizontal layouts that have no sibling `page.tsx`.
+ */
+export type DinouLayoutPattern = DinouRouter.Register extends { layoutParams: infer LP }
+  ? FormatPatternKeys<Extract<keyof LP, string>>
+  : DinouRoutePattern;
+
+/**
+ * All known error boundary segment patterns in the application (`error.tsx`),
+ * including page routes, intermediate folders, and parallel `@slot` folders.
+ */
+export type DinouErrorPattern = DinouRouter.Register extends { errorParams: infer EP }
+  ? FormatPatternKeys<Extract<keyof EP, string>>
+  : DinouRoutePattern;
+
+/**
+ * All known segment patterns valid for `not_found.tsx` boundaries (root, page routes,
+ * intermediate `not_found.tsx` folders, and intermediate layout folders), excluding `@slot` folders.
+ */
+export type DinouNotFoundPattern = DinouRouter.Register extends { params: infer P }
+  ? FormatPatternKeys<
+      | Extract<keyof P, string>
+      | (DinouRouter.Register extends { layoutParams: infer LP }
+          ? Extract<keyof LP, string>
+          : never)
+    >
+  : string;
+
+/**
+ * Union of all valid horizontal & hierarchical segment patterns (pages, layouts, parallel `@slots`, and error boundaries).
+ */
+export type DinouSegmentPattern =
+  | DinouRoutePattern
+  | DinouLayoutPattern
+  | DinouRegisteredSlotPattern
+  | DinouErrorPattern;
+
+/**
+ * Internal helper that resolves segment parameter dictionaries across generated maps
+ * (`params`, `layoutParams`, `slotParams`, `errorParams`) with template-literal fallback.
+ */
+export type LookupSingleSegmentParams<K extends string> =
+  DinouRouter.Register extends { params: infer P }
+    ? K extends keyof P
+      ? P[K]
+      : DinouRouter.Register extends { layoutParams: infer LP }
+        ? K extends keyof LP
+          ? LP[K]
+          : DinouRouter.Register extends { slotParams: infer SP }
+            ? K extends keyof SP
+              ? SP[K]
+              : DinouRouter.Register extends { errorParams: infer EP }
+                ? K extends keyof EP
+                  ? EP[K]
+                  : FallbackRouteParams<K>
+                : FallbackRouteParams<K>
+            : FallbackRouteParams<K>
+        : FallbackRouteParams<K>
+    : FallbackRouteParams<K>;
+
+export type LookupSegmentParams<T extends string> =
+  [string] extends [T]
+    ? Record<string, string | string[] | undefined>
+    : [`/@${string}`] extends [T]
+      ? Record<string, string | string[] | undefined>
+      : T extends string
+        ? LookupSingleSegmentParams<CleanRoutePath<T>>
+        : never;
+
+/**
+ * Resolved route parameter types for a route, layout, or parallel slot segment.
+ * Prioritizes the generated parameter maps from `.dinou/types/routes.d.ts`,
  * and falls back to template literal extraction.
  */
-export type RouteParams<T extends DinouRoutePattern = DinouRoutePattern> =
-  DinouRouter.Register extends { params: infer P }
-    ? (CleanRoutePath<T> extends keyof P
-        ? P[CleanRoutePath<T>]
-        : (T extends keyof P ? P[T] : ExtractRouteParams<T>))
-    : ExtractRouteParams<T>;
+export type RouteParams<T extends DinouSegmentPattern = DinouRoutePattern> =
+  LookupSegmentParams<T>;
 
 /**
- * Props for Dinou Page components.
- * 
+ * Resolved cumulative dynamic parameters for a Layout segment (`layout.tsx` / `layout_functions.ts`),
+ * including intermediate layouts without a sibling `page.tsx`.
+ */
+export type LayoutParams<T extends DinouLayoutPattern = DinouLayoutPattern> =
+  [string] extends [T]
+    ? Record<string, string | string[] | undefined>
+    : T extends string
+      ? DinouRouter.Register extends { layoutParams: infer LP }
+        ? CleanRoutePath<T> extends keyof LP
+          ? LP[CleanRoutePath<T>]
+          : LookupSegmentParams<T>
+        : LookupSegmentParams<T>
+      : never;
+
+/**
+ * Auto-inferred parallel `@slot` ReactNode props injected into a Layout at segment `T`
+ * (e.g. `{ sidebar?: ReactNode; analytics?: ReactNode }`).
+ */
+export type LayoutSlots<T extends string = string> =
+  [T] extends [never]
+    ? {}
+    : [string] extends [T]
+      ? {}
+      : true extends IsUnion<CleanRoutePath<T>>
+        ? {}
+        : DinouRouter.Register extends { layoutSlots: infer LS }
+          ? CleanRoutePath<T> extends keyof LS
+            ? SimplifyParams<LS[CleanRoutePath<T>]>
+            : {}
+          : {};
+
+/**
+ * Resolved cumulative dynamic parameters for a Parallel `@slot` page (`@slot/page.tsx`).
+ */
+export type SlotParams<T extends DinouSlotPattern = DinouSlotPattern> =
+  [string] extends [T]
+    ? Record<string, string | string[] | undefined>
+    : [`/@${string}`] extends [T]
+      ? Record<string, string | string[] | undefined>
+      : T extends string
+        ? DinouRouter.Register extends { slotParams: infer SP }
+          ? CleanRoutePath<T> extends keyof SP
+            ? SP[CleanRoutePath<T>]
+            : LookupSegmentParams<T>
+          : LookupSegmentParams<T>
+        : never;
+
+/**
+ * Resolved cumulative dynamic parameters for an Error boundary (`error.tsx`),
+ * including intermediate directory boundaries and `@slot/error.tsx`.
+ */
+export type ErrorParams<T extends DinouErrorPattern = DinouErrorPattern> =
+  [string] extends [T]
+    ? Record<string, string | string[] | undefined>
+    : T extends string
+      ? DinouRouter.Register extends { errorParams: infer EP }
+        ? CleanRoutePath<T> extends keyof EP
+          ? EP[CleanRoutePath<T>]
+          : LookupSegmentParams<T>
+        : LookupSegmentParams<T>
+      : never;
+
+/**
+ * Props for Dinou Page components (`page.tsx`, `not_found.tsx`, or `@slot/page.tsx`).
+ * Optionally accepts a second type argument `TProps` for custom props returned by `page_functions.ts` (`getProps`).
+ *
  * @example
  * export default function Page({ params }: PageProps<"/blog/[id]">) {
  *   return <h1>Post {params.id}</h1>;
  * }
  */
-export interface PageProps<T extends DinouRoutePattern = DinouRoutePattern> {
-  params: RouteParams<T>;
-}
+export type PageProps<
+  T extends DinouRoutePattern | DinouRegisteredSlotPattern = DinouRoutePattern,
+  TProps extends object = {}
+> = SimplifyParams<
+  {
+    params: RouteParams<T>;
+  } & TProps
+>;
 
 /**
- * Props for Dinou Layout components.
- * 
+ * Props for Dinou Parallel Slot Page components (`@slot/page.tsx`).
+ *
  * @example
- * export default function Layout({ children, params }: LayoutProps<"/blog/[id]">) {
- *   return <div>{children}</div>;
+ * export default function AnalyticsSlot({ params }: SlotProps<"/workspace/[org]/@analytics">) {
+ *   return <aside>Org: {params.org}</aside>;
  * }
  */
-export interface LayoutProps<T extends DinouRoutePattern = DinouRoutePattern> {
-  children: React.ReactNode;
-  params: RouteParams<T>;
+export interface SlotProps<T extends DinouSlotPattern = DinouSlotPattern> {
+  params: SlotParams<T>;
 }
 
 /**
- * Props for Dinou Error Page components (error.tsx).
- * 
+ * Props for Dinou Layout components (`layout.tsx`), including intermediate layouts without a sibling `page.tsx`.
+ * Automatically includes any sibling parallel `@slot` props (`ReactNode`) defined at that segment,
+ * and optionally accepts a second type argument `TProps` for custom props returned by `layout_functions.ts` (`getProps`).
+ *
+ * @example
+ * export default function WorkspaceLayout({ children, params, sidebar }: LayoutProps<"/workspace/[org]">) {
+ *   return <div>{sidebar}<main>{children}</main></div>;
+ * }
+ */
+export type LayoutProps<
+  T extends DinouLayoutPattern = DinouLayoutPattern,
+  TProps extends object = {}
+> = SimplifyParams<
+  {
+    children: ReactNode;
+    params: LayoutParams<T>;
+  } & LayoutSlots<T> &
+    TProps
+>;
+
+/**
+ * Props for Dinou Error Page components (`error.tsx`), including intermediate and `@slot/error.tsx` boundaries.
+ *
  * @example
  * export default function ErrorPage({ error, params }: ErrorProps<"/blog/[id]">) {
  *   return <h1>Error loading {params.id}: {error.message}</h1>;
  * }
  */
-export interface ErrorProps<T extends DinouRoutePattern = DinouRoutePattern> {
+export interface ErrorProps<T extends DinouErrorPattern = DinouErrorPattern> {
   error: Error;
-  params: RouteParams<T>;
+  params: ErrorParams<T>;
 }
+
+/**
+ * Props for Dinou Not-Found Page components (`not_found.tsx`), including root, leaf,
+ * and intermediate directory 404 boundaries (with or without a sibling `page.tsx`).
+ * Optionally accepts a second type argument `TProps` for custom props returned by a sibling `page_functions.ts` (`getProps`).
+ *
+ * @example
+ * export default function WorkspaceNotFound({ params }: NotFoundProps<"/workspace/[org]">) {
+ *   return <h1>Nothing found in {params.org}</h1>;
+ * }
+ */
+export type NotFoundProps<
+  T extends DinouNotFoundPattern = DinouNotFoundPattern,
+  TProps extends object = {}
+> = SimplifyParams<
+  {
+    params: RouteParams<T>;
+  } & TProps
+>;
+
+// ====================================================================
+// DYNAMIC ROUTE PATTERN, STRICT RELATIVE (`from`) & PARAMS TYPES
+// ====================================================================
+
+export type ToLinkInputParamValue<V> =
+  [V] extends [never]
+    ? never
+    : [Exclude<V, undefined>] extends [ReadonlyArray<string>]
+      ? ReadonlyArray<string | number> | Extract<V, undefined>
+      : [Exclude<V, undefined>] extends [string]
+        ? string | number | Extract<V, undefined>
+        : V;
+
+export type ToLinkInputParams<P> = {
+  [K in keyof P]: ToLinkInputParamValue<P[K]>;
+};
+
+export type DinouNavigableRoutePatternMap =
+  DinouRouter.Register extends { navigableParams: infer NP }
+    ? NP
+    : DinouRouter.Register extends { params: infer P }
+      ? P
+      : never;
+
+export type DinouNavigableRouteKey =
+  [DinouNavigableRoutePatternMap] extends [never]
+    ? never
+    : Extract<keyof DinouNavigableRoutePatternMap, string>;
+
+export type DinouDynamicRoutePattern =
+  [DinouNavigableRoutePatternMap] extends [never]
+    ? never
+    : Extract<DinouNavigableRouteKey, `${string}[${string}]${string}`>;
+
+export type DinouDynamicRouteWithSuffix =
+  | DinouDynamicRoutePattern
+  | ((
+      | `${DinouDynamicRoutePattern}?${string}`
+      | `${DinouDynamicRoutePattern}#${string}`
+    ) & Record<never, never>);
+
+/**
+ * Union of all valid non-relative targets accepted by `<Link>`, `router.push()`, and `router.replace()`
+ * when `from` is omitted. Combines concrete/interpolated `DinouRoute` URLs with exact dynamic route patterns
+ * (e.g. `"/blog/[slug]"`) so IDEs surface dynamic routes in `Ctrl + Space` autocomplete
+ * while requiring a typed `params` object whenever a `[param]` pattern is selected.
+ */
+export type DinouLinkTarget = DinouRoute | DinouDynamicRouteWithSuffix;
+
+export type BuildDirectoryPrefixes<
+  Segs extends string[],
+  Acc extends string = ""
+> = Segs extends [infer Head extends string, ...infer Tail extends string[]]
+  ? `${Acc}/${Head}` | BuildDirectoryPrefixes<Tail, `${Acc}/${Head}`>
+  : "/";
+
+export type ExtractParentDirectories<Path extends string> =
+  Path extends any ? BuildDirectoryPrefixes<SplitRouteSegments<Path>> : never;
+
+export type PeelOptionalRouteSegments<Path extends string> =
+  | Path
+  | (Path extends `${infer Prefix}/[[${string}]]`
+      ? PeelOptionalRouteSegments<Prefix extends "" ? "/" : Prefix>
+      : never);
+
+export type DinouEffectiveRoutePattern =
+  PeelOptionalRouteSegments<DinouNavigableRouteKey>;
+
+export type DinouFromSlashRoute =
+  | DinouNavigableRouteKey
+  | (DinouRouter.Register extends { layoutParams: infer LP }
+      ? Extract<keyof LP, string>
+      : never)
+  | (DinouRouter.Register extends { layoutSlots: infer LS }
+      ? Extract<keyof LS, string>
+      : never)
+  | (DinouRouter.Register extends { errorParams: infer EP }
+      ? Exclude<Extract<keyof EP, string>, `${string}/@${string}`>
+      : never)
+  | ExtractParentDirectories<DinouNavigableRouteKey>;
+
+/**
+ * Valid origin directory patterns accepted by the `from` prop on `<Link>` and `{ from }` option on `useRouter()`.
+ * Autocompletes leading-slash route/directory patterns (e.g. `"/t-slots/[slug]/contact"`) while also accepting
+ * non-leading-slash equivalents (e.g. `"t-slots/[slug]/contact"`).
+ */
+export type DinouFromRoute =
+  [DinouNavigableRoutePatternMap] extends [never]
+    ? string
+    : | DinouFromSlashRoute
+      | ((DinouFromSlashRoute extends `/${infer Rest}`
+          ? Rest extends ""
+            ? never
+            : Rest
+          : never) & Record<never, never>);
+
+export type SplitRouteSegments<Path extends string> =
+  Path extends "/" | ""
+    ? []
+    : Path extends `/${infer Rest}`
+      ? SplitRouteSegments<Rest>
+      : Path extends `${infer Head}/${infer Tail}`
+        ? [Head, ...SplitRouteSegments<Tail>]
+        : [Path];
+
+export type StripCommonPrefix<
+  FromSegs extends string[],
+  TargetSegs extends string[]
+> = FromSegs extends [infer FHead extends string, ...infer FTail extends string[]]
+  ? TargetSegs extends [FHead, ...infer TTail extends string[]]
+    ? StripCommonPrefix<FTail, TTail>
+    : [FromSegs, TargetSegs]
+  : [FromSegs, TargetSegs];
+
+export type HasVariableLengthSegment<Segs extends string[]> =
+  Segs extends [infer Head extends string, ...infer Tail extends string[]]
+    ? Head extends `[...${string}]` | `[[${string}]]`
+      ? true
+      : HasVariableLengthSegment<Tail>
+    : false;
+
+export type HasDynamicSegment<Segs extends string[]> =
+  Segs extends [infer Head extends string, ...infer Tail extends string[]]
+    ? Head extends `[${string}]`
+      ? true
+      : HasDynamicSegment<Tail>
+    : false;
+
+export type ToDotDotSegments<Segs extends string[]> =
+  Segs extends [string, ...infer Tail extends string[]]
+    ? ["..", ...ToDotDotSegments<Tail>]
+    : [];
+
+export type JoinSlash<Segs extends string[]> =
+  Segs extends []
+    ? ""
+    : Segs extends [infer Only extends string]
+      ? Only
+      : Segs extends [infer Head extends string, ...infer Tail extends string[]]
+        ? `${Head}/${JoinSlash<Tail>}`
+        : "";
+
+export type SegmentToTemplate<Seg extends string> =
+  Seg extends `[[...${string}]]`
+    ? `${string}`
+    : Seg extends `[[${string}]]`
+      ? `${string | number}`
+      : Seg extends `[...${string}]`
+        ? `${string}`
+        : Seg extends `[${string}]`
+          ? `${string | number}`
+          : Seg;
+
+export type MapSegmentsToTemplate<Segs extends string[]> =
+  Segs extends [infer Head extends string, ...infer Tail extends string[]]
+    ? [SegmentToTemplate<Head>, ...MapSegmentsToTemplate<Tail>]
+    : [];
+
+export type SharesFirstSegment<
+  FromSegs extends string[],
+  TargetSegs extends string[]
+> = FromSegs extends [infer FH extends string, ...string[]]
+  ? TargetSegs extends [FH, ...string[]]
+    ? true
+    : false
+  : true;
+
+export type ComputeRelativeCompletionSingle<
+  FromSegs extends string[],
+  TargetSegs extends string[]
+> = StripCommonPrefix<FromSegs, TargetSegs> extends [
+  infer RemFrom extends string[],
+  infer RemTarget extends string[]
+]
+  ? RemFrom extends []
+    ? RemTarget extends []
+      ? "."
+      : `${JoinSlash<RemTarget>}` | `./${JoinSlash<RemTarget>}`
+    : HasVariableLengthSegment<RemFrom> extends true
+      ? never
+      : RemTarget extends []
+        ? JoinSlash<ToDotDotSegments<RemFrom>>
+        : SharesFirstSegment<FromSegs, TargetSegs> extends true
+          ? JoinSlash<[...ToDotDotSegments<RemFrom>, ...RemTarget]>
+          : never
+  : never;
+
+export type ComputeRelativeAllPatternsSingle<
+  FromSegs extends string[],
+  TargetSegs extends string[]
+> = StripCommonPrefix<FromSegs, TargetSegs> extends [
+  infer RemFrom extends string[],
+  infer RemTarget extends string[]
+]
+  ? RemFrom extends []
+    ? RemTarget extends []
+      ? "." | "./"
+      : `${JoinSlash<RemTarget>}` | `./${JoinSlash<RemTarget>}`
+    : HasVariableLengthSegment<RemFrom> extends true
+      ? never
+      : JoinSlash<[...ToDotDotSegments<RemFrom>, ...RemTarget]>
+  : never;
+
+export type ComputeRelativeTemplateSingle<
+  FromSegs extends string[],
+  TargetSegs extends string[]
+> = StripCommonPrefix<FromSegs, TargetSegs> extends [
+  infer RemFrom extends string[],
+  infer RemTarget extends string[]
+]
+  ? HasDynamicSegment<RemTarget> extends false
+    ? never
+    : RemFrom extends []
+      ? | JoinSlash<MapSegmentsToTemplate<RemTarget>>
+        | `./${JoinSlash<MapSegmentsToTemplate<RemTarget>>}`
+      : HasVariableLengthSegment<RemFrom> extends true
+        ? never
+        : JoinSlash<[...ToDotDotSegments<RemFrom>, ...MapSegmentsToTemplate<RemTarget>]>
+  : never;
+
+export type DistributeRelativeCompletions<
+  FromPath extends string,
+  Targets extends string
+> = Targets extends any
+  ? ComputeRelativeCompletionSingle<
+      SplitRouteSegments<FromPath>,
+      SplitRouteSegments<Targets>
+    >
+  : never;
+
+export type DistributeAllRelativePatterns<
+  FromPath extends string,
+  Targets extends string
+> = Targets extends any
+  ? ComputeRelativeAllPatternsSingle<
+      SplitRouteSegments<FromPath>,
+      SplitRouteSegments<Targets>
+    >
+  : never;
+
+export type DistributeRelativeTemplates<
+  FromPath extends string,
+  Targets extends string
+> = Targets extends any
+  ? ComputeRelativeTemplateSingle<
+      SplitRouteSegments<FromPath>,
+      SplitRouteSegments<Targets>
+    >
+  : never;
+
+export type DinouRelativeDynamicPattern<TFrom extends string> = Extract<
+  DistributeAllRelativePatterns<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>,
+  `${string}[${string}]${string}`
+>;
+
+/**
+ * Valid relative navigation targets from origin `TFrom` (supporting both bare `"sub"` and `"./sub"`,
+ * as well as `".."` / `"../sibling"`, query/hash suffixes, and dynamic relative segments).
+ */
+export type DinouRelativeLinkTarget<TFrom extends string> =
+  [DinouNavigableRoutePatternMap] extends [never]
+    ? string
+    : [string] extends [TFrom]
+      ? string
+      : | DistributeRelativeCompletions<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>
+        | ((
+            | Exclude<
+                DistributeAllRelativePatterns<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>,
+                DistributeRelativeCompletions<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>
+              >
+            | DistributeRelativeTemplates<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>
+            | `${
+                | DistributeAllRelativePatterns<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>
+                | DistributeRelativeTemplates<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>
+              }?${string}`
+            | `${
+                | DistributeAllRelativePatterns<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>
+                | DistributeRelativeTemplates<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>
+              }#${string}`
+          ) & Record<never, never>);
+
+export type DinouLinkTargetForFrom<TFrom extends string | undefined> =
+  [TFrom] extends [undefined]
+    ? DinouLinkTarget
+    : DinouRelativeLinkTarget<Extract<TFrom, string>>;
+
+/**
+ * Unified target union for route-contextual `<Link>` and `useRouter()` imported from `"./dinou"`.
+ * Combines strictly validated relative paths from `TFrom` (`"sub"`, `"./sub"`, `"../..."`)
+ * with all valid absolute static routes, dynamic route patterns, queries, hashes, and external URLs.
+ */
+export type DinouScopedLinkTarget<TFrom extends string> =
+  | DinouRelativeLinkTarget<TFrom>
+  | DinouLinkTarget;
+
+export type ScopedLinkTargetForFrom<
+  TDefaultFrom extends string,
+  TFrom extends DinouFromRoute | undefined
+> =
+  [TFrom] extends [undefined]
+    ? DinouScopedLinkTarget<TDefaultFrom>
+    : DinouLinkTargetForFrom<TFrom>;
+
+export type StripUrlSuffix<T extends string> =
+  T extends `${infer Base}?${string}`
+    ? StripUrlSuffix<Base>
+    : T extends `${infer Base}#${string}`
+      ? StripUrlSuffix<Base>
+      : T;
+
+export type IsExternalLinkHref<T extends string> =
+  T extends
+    | `http://${string}`
+    | `https://${string}`
+    | `//${string}`
+    | `mailto:${string}`
+    | `tel:${string}`
+    ? true
+    : false;
+
+export type IsInternalBracketPattern<T extends string> =
+  IsExternalLinkHref<T> extends true
+    ? false
+    : StripUrlSuffix<T> extends `${string}[${string}]${string}`
+      ? true
+      : false;
+
+export type ValidatedLinkHref<THref extends string> =
+  [string] extends [THref]
+    ? THref
+    : DinouRouter.Register extends { route: unknown }
+      ? THref extends any
+        ? IsInternalBracketPattern<THref> extends true
+          ? StripUrlSuffix<THref> extends DinouDynamicRoutePattern
+            ? THref
+            : never
+          : THref
+        : never
+      : THref;
+
+export type HasInvalidBracketPatternForFrom<
+  TFrom extends string | undefined,
+  THref extends string
+> =
+  [string] extends [THref]
+    ? never
+    : DinouRouter.Register extends { route: unknown }
+      ? THref extends any
+        ? IsInternalBracketPattern<THref> extends true
+          ? [TFrom] extends [undefined]
+            ? StripUrlSuffix<THref> extends DinouDynamicRoutePattern
+              ? never
+              : true
+            : [string] extends [Extract<TFrom, string>]
+              ? never
+              : StripUrlSuffix<THref> extends `/${string}`
+                ? StripUrlSuffix<THref> extends DinouDynamicRoutePattern
+                  ? never
+                  : true
+                : StripUrlSuffix<THref> extends DinouRelativeDynamicPattern<Extract<TFrom, string>>
+                  ? never
+                  : true
+          : never
+        : never
+      : never;
+
+export type HasInvalidBracketPattern<THref extends string> =
+  HasInvalidBracketPatternForFrom<undefined, THref>;
+
+export type HasBracketPattern<THref extends string> =
+  [string] extends [THref]
+    ? never
+    : THref extends any
+      ? IsInternalBracketPattern<THref> extends true
+        ? true
+        : never
+      : never;
+
+export type UnionToIntersection<U> =
+  (U extends any ? (k: U) => void : never) extends (k: infer I) => void
+    ? I
+    : never;
+
+export type ResolveSingleLinkParams<Path extends string> =
+  [DinouNavigableRoutePatternMap] extends [never]
+    ? SimplifyParams<ToLinkInputParams<FallbackRouteParams<CleanRoutePath<Path>>>>
+    : CleanRoutePath<Path> extends keyof DinouNavigableRoutePatternMap
+      ? SimplifyParams<ToLinkInputParams<DinouNavigableRoutePatternMap[CleanRoutePath<Path>]>>
+      : SimplifyParams<ToLinkInputParams<FallbackRouteParams<CleanRoutePath<Path>>>>;
+
+export type ResolveLinkParams<THref extends string> = SimplifyParams<
+  UnionToIntersection<
+    THref extends any
+      ? IsInternalBracketPattern<THref> extends true
+        ? ResolveSingleLinkParams<StripUrlSuffix<THref>>
+        : {}
+      : never
+  >
+>;
+
+export type LinkParamsPropsForFrom<
+  TFrom extends string | undefined,
+  THref extends string
+> =
+  [HasInvalidBracketPatternForFrom<TFrom, THref>] extends [never]
+    ? [HasBracketPattern<THref>] extends [never]
+      ? { params?: never }
+      : {} extends ResolveLinkParams<THref>
+        ? { params?: ResolveLinkParams<THref> }
+        : { params: ResolveLinkParams<THref> }
+    : { params: never };
+
+export type LinkParamsProps<THref extends string> =
+  LinkParamsPropsForFrom<undefined, THref>;
+
+export type RouterNavigationArgs<THref extends string> =
+  [HasInvalidBracketPattern<THref>] extends [never]
+    ? [HasBracketPattern<THref>] extends [never]
+      ? [options?: NavigationOptions & { from?: never; params?: never }]
+      : {} extends ResolveLinkParams<THref>
+        ? [options?: NavigationOptions & { from?: never; params?: ResolveLinkParams<THref> }]
+        : [options: NavigationOptions & { from?: never; params: ResolveLinkParams<THref> }]
+    : [options: never];
+
+export type RouterRelativeNavigationOptions<
+  TFrom extends DinouFromRoute,
+  THref extends string
+> =
+  [HasInvalidBracketPatternForFrom<TFrom, THref>] extends [never]
+    ? [HasBracketPattern<THref>] extends [never]
+      ? NavigationOptions & { from: TFrom; params?: never }
+      : {} extends ResolveLinkParams<THref>
+        ? NavigationOptions & { from: TFrom; params?: ResolveLinkParams<THref> }
+        : NavigationOptions & { from: TFrom; params: ResolveLinkParams<THref> }
+    : never;
+
+export interface DinouRouterNavigateFn {
+  /**
+   * Navigate to an absolute route, dynamic route pattern (with `{ params }`), query/hash, or external URL.
+   */
+  <THref extends DinouLinkTarget = DinouRoute>(
+    href: THref,
+    ...args: RouterNavigationArgs<NoInfer<THref>>
+  ): void;
+
+  /**
+   * Navigate to a strictly validated relative route (`"sub"`, `"./sub"`, `"../other"`) from `options.from`.
+   */
+  <
+    TFrom extends DinouFromRoute,
+    THref extends DinouRelativeLinkTarget<TFrom> = DinouRelativeLinkTarget<TFrom>
+  >(
+    href: THref,
+    options: RouterRelativeNavigationOptions<TFrom, NoInfer<THref>>
+  ): void;
+}
+
+export type ScopedRouterNavigationArgs<
+  TDefaultFrom extends string,
+  THref extends string
+> =
+  [HasInvalidBracketPatternForFrom<TDefaultFrom, THref>] extends [never]
+    ? [HasBracketPattern<THref>] extends [never]
+      ? [options?: NavigationOptions & { from?: never; params?: never }]
+      : {} extends ResolveLinkParams<THref>
+        ? [options?: NavigationOptions & { from?: never; params?: ResolveLinkParams<THref> }]
+        : [options: NavigationOptions & { from?: never; params: ResolveLinkParams<THref> }]
+    : [options: never];
+
+export interface ScopedDinouRouterNavigateFn<TDefaultFrom extends string> {
+  /**
+   * Navigate to a strictly validated relative route from this folder (`"sub"`, `"./sub"`, `"../other"`),
+   * an absolute route, a dynamic route pattern (with `{ params }`), query/hash, or external URL —
+   * without needing to pass `{ from }`.
+   */
+  <THref extends DinouScopedLinkTarget<TDefaultFrom> = DinouScopedLinkTarget<TDefaultFrom>>(
+    href: THref,
+    ...args: ScopedRouterNavigationArgs<TDefaultFrom, NoInfer<THref>>
+  ): void;
+
+  /**
+   * Navigate to a strictly validated relative route from an explicit `options.from` origin override.
+   */
+  <
+    TFrom extends DinouFromRoute,
+    THref extends DinouRelativeLinkTarget<TFrom> = DinouRelativeLinkTarget<TFrom>
+  >(
+    href: THref,
+    options: RouterRelativeNavigationOptions<TFrom, NoInfer<THref>>
+  ): void;
+}
+
+export type ScopedUseRouterHook<TDefaultFrom extends string> = () => {
+  push: ScopedDinouRouterNavigateFn<TDefaultFrom>;
+  replace: ScopedDinouRouterNavigateFn<TDefaultFrom>;
+  back: () => void;
+  forward: () => void;
+  refresh: (options?: { layout?: boolean }) => void;
+  refreshSlot: (slotId: string, options?: { fresh?: boolean }) => Promise<void>;
+};
 
 export declare function useRouter(): {
   /**
    * Navigate to the provided href. Pushes a new entry into the history stack.
-   * @param href - The URL to navigate to (e.g., "/about").
-   * @param options - Optional configuration for the navigation (e.g., force fresh data).
+   * Supports interpolated URLs (`/blog/${slug}`), autocompleted dynamic patterns with `{ params }`,
+   * and strict relative paths with `{ from }` (`router.push("sub", { from: "/blog/[slug]" })`).
    */
-  push: (href: DinouRoute, options?: NavigationOptions) => void;
+  push: DinouRouterNavigateFn;
 
   /**
    * Navigate to the provided href. Replaces the current entry in the history stack.
-   * @param href - The URL to navigate to.
-   * @param options - Optional configuration for the navigation.
+   * Supports interpolated URLs (`/blog/${slug}`), autocompleted dynamic patterns with `{ params }`,
+   * and strict relative paths with `{ from }` (`router.replace("sub", { from: "/blog/[slug]" })`).
    */
-  replace: (href: DinouRoute, options?: NavigationOptions) => void;
+  replace: DinouRouterNavigateFn;
 
   /**
    * Navigate back in the browser's history.
@@ -622,21 +1349,30 @@ import type { AnchorHTMLAttributes } from "react";
 
 /**
  * Props for the Dinou Link component.
- * It extends standard HTML <a> attributes, allowing className, style, etc.
+ * Extends standard HTML `<a>` attributes and supports:
+ * - Static & interpolated URLs (`href="/about"`, `href={\`/blog/\${slug}\`}`)
+ * - Autocompleted dynamic route patterns with required `params` (`to="/blog/[slug]" params={{ slug }}`)
+ * - Strictly validated relative paths with required `from` (`from="/blog/[slug]" to="sub"` or `to="./sub"`)
  */
-export interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> {
+export type LinkProps<
+  TFrom extends DinouFromRoute | undefined = undefined,
+  THref extends DinouLinkTargetForFrom<TFrom> = DinouLinkTargetForFrom<TFrom>
+> = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & {
   /**
-   * The destination URL or path.
-   * * Autocompletes all known routes discovered by Dinou.
-   * * Supports absolute paths (e.g., `/dashboard`).
-   * * Supports relative paths (e.g., `../settings` or `details`).
+   * Origin route/directory pattern (e.g. `"/workspace/[org]/contact"`) used to strictly
+   * validate and autocomplete relative navigation targets (`"sub"`, `"./sub"`, `"../other"`).
    */
-  href?: DinouRoute;
+  from?: TFrom;
+
+  /**
+   * The destination URL, dynamic route pattern, or (when `from` is specified) relative path.
+   */
+  href?: THref;
 
   /**
    * Alias for `href` (React Router / Remix compatibility).
    */
-  to?: DinouRoute;
+  to?: THref;
 
   /**
    * Whether to prefetch the RSC payload when the mouse enters the link area (hover).
@@ -653,7 +1389,7 @@ export interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>,
    * @default false
    */
   fresh?: boolean;
-}
+} & LinkParamsPropsForFrom<NoInfer<TFrom>, NoInfer<THref>>;
 
 /**
  * A client-side navigation component that renders an `<a>` tag.
@@ -661,18 +1397,45 @@ export interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>,
  * 1. **Soft Navigation:** Transitions between pages without a full browser reload.
  * 2. **Prefetching:** Loads the target route data on hover (if enabled).
  * 3. **Freshness:** Can force a re-fetch of data via the `fresh` prop.
- * 4. **Relative Routing:** Resolves paths like standard filesystem navigation.
- * 5. **Scroll Management:** Preserves or resets scroll position intelligently.
- *
- * @example
- * <Link href="/about" className="text-blue-500">
- * Go to About
- * </Link>
- *
- * @example
- * <Link href="/dashboard" fresh>
- * Dashboard (Force Refresh)
- * </Link>
+ * 4. **Dynamic Params Interpolation:** Accepts `params={{ slug }}` when `href`/`to` uses a `[param]` pattern.
+ * 5. **Strict Relative Routing:** Validates and autocompletes `"sub"`, `"./sub"`, and `"../..."` when `from` is specified.
+ * 6. **Scroll Management:** Preserves or resets scroll position intelligently.
  */
-export declare function Link(props: LinkProps): ReactNode;
+export declare function Link<
+  TFrom extends DinouFromRoute | undefined = undefined,
+  THref extends DinouLinkTargetForFrom<TFrom> = DinouLinkTargetForFrom<TFrom>
+>(props: LinkProps<TFrom, THref>): ReactNode;
 
+/**
+ * Props for a route-contextual `<Link>` imported from `"./dinou"`.
+ * Pre-binds `from` to `TDefaultFrom` so relative targets (`"sub"`, `"./sub"`, `"../other"`)
+ * autocomplete and validate automatically without passing `from`, while also accepting
+ * absolute/dynamic routes and optional `from` overrides.
+ */
+export type ScopedLinkProps<
+  TDefaultFrom extends string,
+  TFrom extends DinouFromRoute | undefined = undefined,
+  THref extends ScopedLinkTargetForFrom<TDefaultFrom, TFrom> = ScopedLinkTargetForFrom<
+    TDefaultFrom,
+    TFrom
+  >
+> = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & {
+  from?: TFrom;
+  href?: THref;
+  to?: THref;
+  prefetch?: boolean;
+  fresh?: boolean;
+} & LinkParamsPropsForFrom<
+  [NoInfer<TFrom>] extends [undefined] ? TDefaultFrom : NoInfer<TFrom>,
+  NoInfer<THref>
+>;
+
+export type ScopedLinkComponent<TDefaultFrom extends string> = <
+  TFrom extends DinouFromRoute | undefined = undefined,
+  THref extends ScopedLinkTargetForFrom<TDefaultFrom, TFrom> = ScopedLinkTargetForFrom<
+    TDefaultFrom,
+    TFrom
+  >
+>(
+  props: ScopedLinkProps<TDefaultFrom, TFrom, THref>
+) => ReactNode;

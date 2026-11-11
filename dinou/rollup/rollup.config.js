@@ -20,6 +20,8 @@ import { regex } from "../core/asset-extensions.js";
 import manifestGeneratorPlugin from "./rollup-plugins/manifest-generator-plugin.js";
 import rollupMemoryPlugin from "./rollup-plugins/rollup-plugin-memory.js";
 import rollupSwcPlugin from "./rollup-plugins/rollup-plugin-swc.js";
+import { generateRouteTypes } from "../core/generate-route-types.js";
+import { rollupContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
 
 const babel = babelModule?.default || babelModule;
 const resolve = resolveModule?.default || resolveModule;
@@ -35,6 +37,9 @@ console.log(
 );
 
 export default async function () {
+  try {
+    generateRouteTypes(process.cwd());
+  } catch (e) {}
   const isDevelopment = process.env.NODE_ENV !== "production";
   const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
   const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDevelopment;
@@ -135,6 +140,7 @@ export default async function () {
           runOnce: true,
           hook: "buildStart",
         }),
+      rollupContextualDinouPlugin({ projectRoot: process.cwd() }),
       tsconfigPaths(),
       replace({
         preventAssignment: true,
@@ -279,6 +285,7 @@ export default async function () {
         "process.env.NODE_ENV": JSON.stringify("production"),
       }),
       json(),
+      rollupContextualDinouPlugin({ projectRoot: process.cwd() }),
       resolve({
         exportConditions: ["react-server", "node", "import"],
         preferBuiltins: true,

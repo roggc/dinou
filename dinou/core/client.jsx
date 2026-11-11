@@ -56,15 +56,97 @@ const scrollToCurrentHash = (rawHash = typeof window !== "undefined" ? window.lo
 // 2. PURE HELPERS
 // ====================================================================
 
+const safeDecodeSeg = (val) => {
+  try {
+    return val ? decodeURIComponent(val) : val;
+  } catch (e) {
+    return val;
+  }
+};
+
+const isRouterSyntaxSeg = (rawSeg) => {
+  const seg = safeDecodeSeg(rawSeg);
+  return Boolean(
+    seg &&
+      ((seg.startsWith("(") && seg.endsWith(")")) ||
+        (seg.startsWith("[") && seg.endsWith("]")) ||
+        seg.startsWith("@") ||
+        seg.startsWith("_"))
+  );
+};
+
+const matchRoutePattern = (pSegs, uSegs, pIdx = 0, uIdx = 0) => {
+  if (pIdx === pSegs.length) return uIdx === uSegs.length;
+  const p = pSegs[pIdx];
+  if (p.startsWith("[[...") && p.endsWith("]]")) {
+    if (pIdx === pSegs.length - 1) return uIdx <= uSegs.length;
+    for (let k = uIdx; k <= uSegs.length; k++) {
+      if (matchRoutePattern(pSegs, uSegs, pIdx + 1, k)) return true;
+    }
+    return false;
+  }
+  if (p.startsWith("[...") && p.endsWith("]")) {
+    if (uIdx >= uSegs.length) return false;
+    if (pIdx === pSegs.length - 1) return true;
+    for (let k = uIdx + 1; k <= uSegs.length; k++) {
+      if (matchRoutePattern(pSegs, uSegs, pIdx + 1, k)) return true;
+    }
+    return false;
+  }
+  if (p.startsWith("[[") && p.endsWith("]]")) {
+    if (
+      uIdx < uSegs.length &&
+      matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx + 1)
+    ) {
+      return true;
+    }
+    return matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx);
+  }
+  if (p.startsWith("[") && p.endsWith("]")) {
+    if (uIdx >= uSegs.length) return false;
+    return matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx + 1);
+  }
+  if (uIdx >= uSegs.length || isRouterSyntaxSeg(uSegs[uIdx])) {
+    return false;
+  }
+  if (uSegs[uIdx] !== p && safeDecodeSeg(uSegs[uIdx]) !== p) {
+    return false;
+  }
+  return matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx + 1);
+};
+
 // Helper to determine active layout folder for a pathname
 const getLayoutKey = (pathname) => {
   const rawLayouts = (typeof window !== "undefined" && window.__DINOU_LAYOUTS__) || ["", "docs"];
-  const layouts = rawLayouts.filter((l) => typeof l === "string" && !l.startsWith("!"));
+  const pageRules = rawLayouts.filter((l) => typeof l === "string" && l.startsWith("="));
+  const layouts = rawLayouts.filter(
+    (l) => typeof l === "string" && !l.startsWith("!") && !l.startsWith("=")
+  );
   const noLayouts = rawLayouts
     .filter((l) => typeof l === "string" && l.startsWith("!"))
     .map((l) => l.slice(1));
   const cleanPath0 = pathname.split("?")[0].split("#")[0];
   const segments0 = cleanPath0.split("/").filter(Boolean);
+
+  for (const rule of pageRules) {
+    const colonIdx = rule.lastIndexOf(":");
+    if (colonIdx === -1) continue;
+    const pattern = rule.slice(1, colonIdx);
+    const spec = rule.slice(colonIdx + 1);
+    const pSegs = pattern ? pattern.split("/").filter(Boolean) : [];
+    if (matchRoutePattern(pSegs, segments0)) {
+      if (spec === "-1") return null;
+      if (spec.startsWith("*-")) {
+        const trailing = Number(spec.slice(2)) || 0;
+        const take = Math.max(0, segments0.length - trailing);
+        return take === 0 ? "/" : "/" + segments0.slice(0, take).join("/");
+      }
+      const depth = Number(spec);
+      if (depth <= 0) return "/";
+      return "/" + segments0.slice(0, depth).join("/");
+    }
+  }
+
   const fullCandidate = segments0.join("/");
   if (
     noLayouts.includes(fullCandidate) ||

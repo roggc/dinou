@@ -357,7 +357,7 @@ async function getJSX(
       for (const [slotName, slotValue] of Object.entries(slots)) {
         let updatedSlotElement;
         const slotFilePath = slotValue?.slotPath || slotValue?.props?.__modulePath;
-        const slotParams = slotValue?.slotParams || slotValue?.props?.params || {};
+        const slotParams = slotValue?.slotParams || slotValue?.props?.params || dParams || {};
         const prevSlotIdCount = layoutSegmentStore.idCount;
         const prevSlotHoleCount = layoutSegmentStore.holeCount;
         try {
@@ -401,6 +401,7 @@ async function getJSX(
                 true, // finalDestination
                 undefined, // lastFound
                 reqSegments.length,
+                slotParams,
               );
 
             if (slotErrorPath) {

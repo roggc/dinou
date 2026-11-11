@@ -28,6 +28,7 @@ import { revalidating, regenerating, inFlightGenerations } from "./revalidating.
 import { generatingISG } from "./generating-isg.js";
 import { requestStorage, setCurrentContext } from "./request-context.js";
 import { getStatus } from "./status-manifest.js";
+import { discoverLayoutsFromFileRelPaths, discoverLayoutsFromFs } from "./discover-layouts.js";
 
 import {
   isManifestReady,
@@ -744,35 +745,38 @@ function getDiscoveredLayouts() {
   if (discoveredLayoutsCache && now - lastLayoutsDiscoveryTime < 1000) {
     return discoveredLayoutsCache;
   }
-  const discovered = [];
+  let discovered = [];
 
-  // 1. Edge/Workers: Discover layouts from VFS
+  // 1. Edge/Workers: Discover layouts and page rules from VFS
   if (typeof globalThis !== "undefined" && globalThis.__DINOU_VFS__) {
     const vfs = globalThis.__DINOU_VFS__;
+    const vfsFiles = [];
     for (const key of Object.keys(vfs)) {
-      if (vfs[key]?.type === "file" && /(?:^|\/)layout\.[jt]sx?$/.test(key)) {
-        const clean = key.replace(/^\/?src\/?/, "").replace(/\/?layout\.[jt]sx?$/, "");
-        if (!discovered.includes(clean)) {
-          discovered.push(clean);
-        }
-      } else if (vfs[key]?.type === "file" && /(?:^|\/)no_layout$/.test(key)) {
-        const clean = "!" + key.replace(/^\/?src\/?/, "").replace(/\/?no_layout$/, "");
-        if (!discovered.includes(clean)) {
-          discovered.push(clean);
+      if (vfs[key]?.type === "file") {
+        const idx = key.indexOf("src/");
+        if (idx !== -1) {
+          vfsFiles.push(key.slice(idx + 4));
         }
       }
     }
+    if (vfsFiles.length > 0) {
+      discovered = discoverLayoutsFromFileRelPaths(vfsFiles);
+    }
   }
 
-  // 2. Edge/Workers: Discover layouts from Route Modules registry
+  // 2. Edge/Workers: Discover layouts and page rules from Route Modules registry
   if (discovered.length === 0 && typeof globalThis !== "undefined" && globalThis.__DINOU_ROUTE_MODULES__) {
+    const modFiles = [];
     for (const key of Object.keys(globalThis.__DINOU_ROUTE_MODULES__)) {
-      if (/(?:^|\/)layout\.[jt]sx?$/.test(key)) {
-        const clean = key.replace(/^\/?src\/?/, "").replace(/\/?layout\.[jt]sx?$/, "");
-        if (!discovered.includes(clean)) {
-          discovered.push(clean);
-        }
+      const idx = key.indexOf("src/");
+      if (idx !== -1) {
+        modFiles.push(key.slice(idx + 4));
+      } else {
+        modFiles.push(key);
       }
+    }
+    if (modFiles.length > 0) {
+      discovered = discoverLayoutsFromFileRelPaths(modFiles);
     }
   }
 
@@ -780,25 +784,7 @@ function getDiscoveredLayouts() {
   if (discovered.length === 0) {
     try {
       const srcFolder = path.resolve(process.cwd(), "src");
-      function find(dir, rel = "") {
-        if (!existsSync(dir)) return;
-        let entries;
-        try {
-          entries = readdirSync(dir, { withFileTypes: true });
-        } catch {
-          return;
-        }
-        for (const entry of entries) {
-          if (entry.isDirectory()) {
-            find(path.join(dir, entry.name), rel ? `${rel}/${entry.name}` : entry.name);
-          } else if (/^layout\.[jt]sx?$/.test(entry.name)) {
-            discovered.push(rel);
-          } else if (entry.name === "no_layout") {
-            discovered.push("!" + rel);
-          }
-        }
-      }
-      find(srcFolder);
+      discovered = discoverLayoutsFromFs(srcFolder, { existsSync, readdirSync });
     } catch (e) {}
   }
 

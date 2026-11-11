@@ -5,6 +5,8 @@ import getEsbuildEntries from "./helpers-esbuild/get-esbuild-entries.js";
 import { fileURLToPath } from "url";
 import path from "node:path";
 import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-module.js";
+import { generateRouteTypes } from "../core/generate-route-types.js";
+import { esbuildContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
 import ensureVendorMode from "../core/ensure-vendor-mode.js";
 if (!ensureVendorMode()) {
   await new Promise(() => {});
@@ -48,6 +50,9 @@ const frameworkEntryPoints = {
 };
 
 try {
+  try {
+    generateRouteTypes(process.cwd());
+  } catch (e) {}
   const manifest = {};
 
   const [
@@ -132,6 +137,7 @@ try {
     banner: {
       js: "import { createRequire as ___createRequire } from 'node:module'; import { fileURLToPath as ___fileURLToPath } from 'node:url'; import ___path from 'node:path'; const require = ___createRequire(import.meta.url || ___path.resolve(process.cwd(), 'package.json')); const __filename = import.meta.url ? ___fileURLToPath(import.meta.url) : ___path.resolve(process.cwd(), 'index.js'); const __dirname = ___path.dirname(__filename); process.env.NODE_ENV = process.env.NODE_ENV || 'production';",
     },
+    plugins: [esbuildContextualDinouPlugin({ projectRoot: process.cwd() })],
     sourcemap: true,
   });
   await fs.writeFile(

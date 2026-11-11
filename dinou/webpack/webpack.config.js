@@ -20,6 +20,8 @@ import {
   scanProjectDependenciesForClientComponentsAsync,
 } from "../core/scan-dependency-components.js";
 import { useClientRegex } from "../constants.js";
+import { generateRouteTypes } from "../core/generate-route-types.js";
+import { webpackContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -73,6 +75,9 @@ function cleanDir(dir) {
 }
 
 export default async () => {
+  try {
+    generateRouteTypes(process.cwd());
+  } catch (e) {}
   const outputDir = path.resolve(process.cwd(), outputDirectory);
 
   const shouldWriteToDisk =
@@ -268,6 +273,7 @@ export default async () => {
       ],
     },
     plugins: [
+      webpackContextualDinouPlugin({ projectRoot: process.cwd() }),
       new ReactServerWebpackPlugin({
         isServer: false,
         clientReferences: [
@@ -420,6 +426,8 @@ export default async () => {
         "**/.git/**",
         "**/.dinou/node-dev/**",
         "**/.dinou/dist2/**",
+        "**/.dinou/routes/**",
+        "**/.dinou/types/**",
         ...outputDirs.map((dir) => `${dir}/**`),
       ],
     },
@@ -499,6 +507,7 @@ export default async () => {
       /Critical dependency/,
     ],
     plugins: [
+      webpackContextualDinouPlugin({ projectRoot: process.cwd() }),
       new webpack.BannerPlugin({
         banner: "import { createRequire as ___createRequire } from 'node:module'; import { fileURLToPath as ___fileURLToPath } from 'node:url'; import ___path from 'node:path'; const require = ___createRequire(import.meta.url || ___path.resolve(process.cwd(), 'package.json')); globalThis.__dinou_require__ = require; const __filename = import.meta.url ? ___fileURLToPath(import.meta.url) : ___path.resolve(process.cwd(), 'index.js'); const __dirname = ___path.dirname(__filename); process.env.NODE_ENV = process.env.NODE_ENV || 'production';",
         raw: true,

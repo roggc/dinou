@@ -9,6 +9,7 @@ import { getLayoutProps, resolveLayoutFunctionsConfig, getLayoutFunctionsPath, r
 import { runWithPprContext, getRegisteredHoles, resetPprHoles, markPageRootElement, markLayoutRootElement } from "./ppr-context.js";
 import { resolveModulePpr } from "./resolve-module-ppr.js";
 import { createBailoutProxy } from "./bailout-proxy.js";
+import { sortEntriesByName } from "./discover-layouts.js";
 
 async function resolveBuildPprForRoute(segments, pagePath, pageFunctionsPath, srcFolder) {
   const { layoutPprMap, defaultPpr, anyLayoutPpr } = await resolveLayoutChainPpr(
@@ -81,7 +82,7 @@ async function buildStaticPages(onProgress = null) {
     dynamicStructure = [],
     doNotPushAtEnd = false,
   ) {
-    const entries = readdirSync(currentPath, { withFileTypes: true });
+    const entries = sortEntriesByName(readdirSync(currentPath, { withFileTypes: true }));
     const pages = [];
 
     // 🛡️ Descubrir layout en esta carpeta si existe
@@ -670,8 +671,12 @@ async function buildStaticPages(onProgress = null) {
                     : getStaticPaths);
                   for (const pathItem of paths) {
                     const currentStructure = dynamicStructure;
+                    const dynamicKeys = currentStructure.filter((k) => typeof k === "string");
+                    const targetParamName = dynamicKeys[dynamicKeys.length - 1];
                     const isObject =
-                      typeof pathItem === "object" && pathItem !== null;
+                      typeof pathItem === "object" &&
+                      pathItem !== null &&
+                      !Array.isArray(pathItem);
 
                     let segmentsToAdd;
 
@@ -696,14 +701,22 @@ async function buildStaticPages(onProgress = null) {
                       });
                       if (notValidRoute) continue;
                     } else {
-                      segmentsToAdd = [pathItem];
+                      segmentsToAdd = currentStructure.map((key) =>
+                        typeof key === "object" && key !== null
+                          ? key.STATIC_PARAM_NAME
+                          : pathItem,
+                      );
                     }
 
-                    const validSegmentsToAdd = segmentsToAdd.flat();
+                    const validSegmentsToAdd = segmentsToAdd
+                      .flat()
+                      .filter((s) => s !== undefined && s !== null && s !== "");
 
                     const paramsToAdd = isObject
                       ? pathItem
-                      : { [paramName]: pathItem };
+                      : targetParamName
+                        ? { [targetParamName]: pathItem }
+                        : {};
 
                     pages.push(
                       ...(await collectPages(
@@ -1040,6 +1053,7 @@ async function buildStaticPages(onProgress = null) {
                           true,
                           undefined,
                           segments.length,
+                          slotParams,
                         );
 
                       if (slotErrorPath) {
@@ -1150,46 +1164,19 @@ async function buildStaticPage(reqPath, isDynamic = null) {
 
   try {
     const segments = reqPath.split("/").filter(Boolean);
-    let folderPath = srcFolder;
-    let dynamicParams = {};
-
-    for (let i = 0; i < segments.length; i++) {
-      const segment = segments[i];
-      const isRouterSyntaxInSegment =
-        segment &&
-        ((segment.startsWith("(") && segment.endsWith(")")) ||
-          (segment.startsWith("[") && segment.endsWith("]")) ||
-          segment.startsWith("@") ||
-          segment.startsWith("_"));
-      const currentPath = path.join(folderPath, segment);
-      if (existsSync(currentPath) && !isRouterSyntaxInSegment) {
-        folderPath = currentPath;
-        continue;
-      }
-
-      const entries = readdirSync(folderPath, { withFileTypes: true });
-      const dynamicEntry = entries.find(
-        (entry) =>
-          entry.isDirectory() &&
-          ((entry.name.startsWith("[") && entry.name.endsWith("]")) ||
-            (entry.name.startsWith("[[") && entry.name.endsWith("]]"))),
-      );
-
-      if (dynamicEntry) {
-        folderPath = path.join(folderPath, dynamicEntry.name);
-        const paramName = dynamicEntry.name
-          .replace(/^\[\[?|\]\]?$/g, "")
-          .replace("...", "");
-        if (dynamicEntry.name.includes("...")) {
-          dynamicParams[paramName] = segments.slice(i).map(safeDecode);
-          break;
-        } else {
-          dynamicParams[paramName] = safeDecode(segment);
-        }
-      } else {
-        throw new Error(`No matching route found for ${reqPath}`);
-      }
+    const [resolvedPagePath, resolvedParams] = getFilePathAndDynamicParams(
+      segments,
+      {},
+      srcFolder,
+      "page",
+      true,
+      true,
+    );
+    if (!resolvedPagePath) {
+      throw new Error(`No matching route found for ${reqPath}`);
     }
+    const folderPath = path.dirname(resolvedPagePath);
+    const dynamicParams = resolvedParams || {};
     // ====================================================================
     // 1. MOCK RES: Fulfilling the ResponseProxy interface
     // ====================================================================
@@ -1424,6 +1411,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
                         true, // finalDestination
                         undefined, // lastFound
                         segments.length,
+                        slotParams,
                       );
 
                     if (slotErrorPath) {

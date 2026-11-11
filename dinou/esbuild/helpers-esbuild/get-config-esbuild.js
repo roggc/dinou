@@ -6,6 +6,7 @@ import stableChunkNamesAndMapsPlugin from "../plugins-esbuild/stable-chunk-names
 import assetsPlugin from "../plugins-esbuild/assets-plugin.js";
 import skipMissingEntryPointsPlugin from "../plugins-esbuild/skip-missing-entry-points-plugin.js";
 import { swcRedirectPlugin } from "./swc-disk-cache.js";
+import { esbuildContextualDinouPlugin } from "../../core/resolve-contextual-dinou.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -23,6 +24,7 @@ export default function getConfigEsbuild({
 }) {
   let esbuildRebuildStart = 0;
   let plugins = [
+    esbuildContextualDinouPlugin({ projectRoot: process.cwd() }),
     swcRedirectPlugin({ projectRoot: process.cwd() }),
     ...(onBuildStart
       ? [

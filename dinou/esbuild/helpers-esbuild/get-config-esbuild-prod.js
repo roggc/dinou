@@ -7,6 +7,7 @@ import copyStaticFiles from "#esbuild-copy-static-files";
 import manifestGeneratorPlugin from "../plugins-esbuild/manifest-generator-plugin.js";
 import writePlugin from "../plugins-esbuild/write-plugin.js";
 import babelReactCompilerPlugin from "../plugins-esbuild/babel-react-compiler-plugin.js";
+import { esbuildContextualDinouPlugin } from "../../core/resolve-contextual-dinou.js";
 import { existsSync } from "node:fs";
 
 export default function getConfigEsbuildProd({
@@ -17,6 +18,7 @@ export default function getConfigEsbuildProd({
 }) {
   const manifestData = {};
   let plugins = [
+    esbuildContextualDinouPlugin({ projectRoot: process.cwd() }),
     babelReactCompilerPlugin(),
     TsconfigPathsPlugin({}),
     cssProcessorPlugin({ outdir }),

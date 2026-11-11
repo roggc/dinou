@@ -20,6 +20,8 @@ import {
 } from "../core/scan-dependency-components.js";
 import { getDinouConfig } from "../core/load-dinou-config.js";
 import { resolveSetupFiles } from "../core/resolve-setup-files.js";
+import { esbuildContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
+import { discoverLayoutsFromFs, sortEntriesByName } from "../core/discover-layouts.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -402,28 +404,14 @@ export async function bundleDualEngine(options = {}) {
 
   manifestInlines += `\nglobalThis.__DINOU_IMPORT_MAP_HTML__ = ${JSON.stringify(importMapHtml)};\n`;
 
-  const discoveredLayouts = [];
-  function findLayoutRoutes(dir, rel = "") {
-    if (!fs.existsSync(dir)) return;
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        findLayoutRoutes(path.join(dir, entry.name), rel ? `${rel}/${entry.name}` : entry.name);
-      } else if (/^layout\.[jt]sx?$/.test(entry.name)) {
-        discoveredLayouts.push(rel);
-      } else if (entry.name === "no_layout") {
-        discoveredLayouts.push("!" + rel);
-      }
-    }
-  }
-  findLayoutRoutes(srcDir);
+  const discoveredLayouts = discoverLayoutsFromFs(srcDir, fs);
   manifestInlines += `\nglobalThis.__DINOU_LAYOUTS__ = ${JSON.stringify(discoveredLayouts)};\n`;
 
   // 4. In-memory VFS snapshot for routing
   const vfsSnapshot = {};
   function walkVfs(dir) {
     if (!fs.existsSync(dir)) return;
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    const entries = sortEntriesByName(fs.readdirSync(dir, { withFileTypes: true }));
     const children = [];
     for (const entry of entries) {
       const isDir = entry.isDirectory();
@@ -977,7 +965,7 @@ var __webpack_chunk_load__ = function(chunkId) {
     external: externalList,
     banner,
     inject: setupFiles,
-    plugins: [clientReferencesPlugin, serverReferencesPlugin, serverAssetPlugin],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
@@ -1002,7 +990,7 @@ var __webpack_chunk_load__ = function(chunkId) {
     external: externalList,
     banner,
     inject: setupFiles,
-    plugins: [serverReferencesPluginSsr, serverAssetPlugin],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",

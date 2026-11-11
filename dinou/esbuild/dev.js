@@ -16,6 +16,7 @@ import {
   transformToDisk,
   getMirrorPath,
 } from "./helpers-esbuild/swc-disk-cache.js";
+import { generateRouteTypes } from "../core/generate-route-types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -81,6 +82,9 @@ export async function startEsbuildDev(options = {}) {
   let outfileNameToPath = new Map();
 
   async function updateEntriesAndComponents() {
+    try {
+      generateRouteTypes(process.cwd());
+    } catch (e) {}
     manifest = {};
     const [
       esbuildEntries,
