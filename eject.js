@@ -171,7 +171,8 @@ export function eject() {
         "export-static:esbuild",
         "export-static:rollup",
         "export-static:webpack",
-        "build:vendors"
+        "build:vendors",
+        "typegen"
     ];
 
     const ejectedScripts = Object.fromEntries(
