@@ -162,6 +162,7 @@ async function getCSSEntries({
   const files = await glob(["**/*.{js,jsx,ts,tsx}"], {
     cwd: srcDir,
     absolute: true,
+    ignore: ["_*/**", "**/_*/**"],
   });
 
   const serverFiles = new Set();

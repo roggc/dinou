@@ -127,7 +127,7 @@ function findClientComponents() {
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        walk(full);
+        if (!entry.name.startsWith("_")) walk(full);
       } else if (/\.[jt]sx?$/.test(entry.name)) {
         try {
           const content = fs.readFileSync(full, "utf8");
@@ -440,6 +440,7 @@ function walkVfs(dir) {
   const children = [];
   for (const entry of entries) {
     const isDir = entry.isDirectory();
+    if (isDir && entry.name.startsWith("_")) continue;
     children.push({ name: entry.name, isDirectory: isDir });
     const fullPath = path.join(dir, entry.name);
     const relFromSrc = path.relative(srcDir, fullPath).replace(/\\/g, "/");

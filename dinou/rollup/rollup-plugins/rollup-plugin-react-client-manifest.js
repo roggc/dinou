@@ -11,6 +11,7 @@ import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
 import { useClientRegex, useServerRegex } from "../../constants.js";
 import { hasServerFunctions } from "../../core/transform-server-functions.js";
 import parseExports from "../../core/parse-exports.js";
+import { isUnderscoreEscapedSrcPath } from "../../core/resolve-contextual-dinou.js";
 
 const require = createRequire(import.meta.url);
 let swc = null;
@@ -389,6 +390,7 @@ function setManifestEntry(fileUrl, expName, entry) {
         try {
           const freshSrcFiles = await glob(["**/*.{js,jsx,ts,tsx}"], {
             cwd: srcDir,
+            ignore: ["_*/**", "**/_*/**"],
             absolute: true,
           });
           for (const absPath of freshSrcFiles) {
@@ -418,6 +420,7 @@ function setManifestEntry(fileUrl, expName, entry) {
 
       const srcFiles = await glob(["**/*.{js,jsx,ts,tsx}"], {
         cwd: srcDir,
+        ignore: ["_*/**", "**/_*/**"],
         absolute: true,
       });
 
@@ -542,6 +545,9 @@ function setManifestEntry(fileUrl, expName, entry) {
       }
     },
     async watchChange(id) {
+      if (isUnderscoreEscapedSrcPath(id, path.dirname(srcDir))) {
+        return;
+      }
       const lower = id.toLowerCase();
       if (lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less")) {
         hasPendingCssChange = true;

@@ -98,7 +98,7 @@ export async function transformToDisk(srcPath, projectRoot = process.cwd()) {
 }
 
 export async function syncAllSwcFiles(srcDir = path.resolve("src"), projectRoot = process.cwd()) {
-  const files = await glob(["**/*.{js,jsx,ts,tsx}"], { cwd: srcDir, absolute: true });
+  const files = await glob(["**/*.{js,jsx,ts,tsx}"], { cwd: srcDir, absolute: true, ignore: ["_*/**", "**/_*/**"] });
   const tasks = [];
 
   for (const f of files) {

@@ -21,7 +21,13 @@ import { hydrateRoot } from "react-dom/client";
 import { RouterContext } from "./navigation.js";
 import { resolveUrl, isExternalUrl } from "./navigation-utils.js";
 import { createServerFunctionProxy } from "./server-function-proxy.js";
-import { DinouPageContext, DinouPageSlot, cleanErrorStack } from "./slot.js";
+import {
+  DinouPageContext,
+  DinouPageSlot,
+  cleanErrorStack,
+  flushPendingSsrStreams,
+  pruneOrphanedSsrStreams,
+} from "./slot.js";
 
 // ====================================================================
 // 1. GLOBAL STATE (Outside the component)
@@ -468,6 +474,7 @@ const fetchSlotRSC = (slotId, options = {}) => {
 
 export const refreshSlot = (slotId, options) => {
   if (typeof window !== "undefined") {
+    flushPendingSsrStreams();
     const promises = [];
     window.dispatchEvent(
       new CustomEvent("dinou:refresh-slot", {
@@ -664,6 +671,7 @@ function Router() {
       window.history.pushState(null, "", finalPath);
     }
 
+    flushPendingSsrStreams();
     startTransition(() => {
       setIsPopState(false);
       setRoute(finalPath);
@@ -693,6 +701,7 @@ function Router() {
       }
     }
 
+    flushPendingSsrStreams();
     startTransition(() => {
       setVersion((v) => v + 1);
       if (shouldRefreshLayout) {
@@ -719,6 +728,7 @@ function Router() {
     window.__DINOU_ROUTER_REFRESH__ = refresh;
 
     // Hydration
+    flushPendingSsrStreams();
     document.body.setAttribute("data-hydrated", "true");
 
     return () => {
@@ -774,6 +784,7 @@ function Router() {
         window.__DINOU_ACTIVE_LAYOUT__ = null;
       }
       const target = getCurrentRoute();
+      flushPendingSsrStreams();
       startTransition(() => {
         setIsPopState(true);
         setRoute(target);
@@ -888,6 +899,7 @@ function Router() {
   }, [route, version, navError]);
 
   useLayoutEffect(() => {
+    pruneOrphanedSsrStreams();
     if (
       typeof document !== "undefined" &&
       document.body &&

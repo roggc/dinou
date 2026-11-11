@@ -14,6 +14,34 @@ const createElement = React.createElement;
 const Suspense = React.Suspense;
 const Component = typeof React.Component === "function" ? React.Component : class {};
 
+export function flushPendingSsrStreams() {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.$RV === "function" &&
+    Array.isArray(window.$RB) &&
+    window.$RB.length > 0
+  ) {
+    try {
+      window.$RV(window.$RB);
+    } catch (e) {}
+  }
+}
+
+export function pruneOrphanedSsrStreams() {
+  if (typeof window === "undefined" || !Array.isArray(window.$RB)) return;
+  const rb = window.$RB;
+  for (let i = rb.length - 2; i >= 0; i -= 2) {
+    const boundaryTpl = rb[i];
+    const hiddenSlot = rb[i + 1];
+    if (!boundaryTpl || !boundaryTpl.parentNode) {
+      if (hiddenSlot && hiddenSlot.parentNode) {
+        hiddenSlot.parentNode.removeChild(hiddenSlot);
+      }
+      rb.splice(i, 2);
+    }
+  }
+}
+
 export const DinouPageContext =
   typeof globalThis !== "undefined" && globalThis.__DINOU_PAGE_CONTEXT__
     ? globalThis.__DINOU_PAGE_CONTEXT__
@@ -221,6 +249,7 @@ class SlotErrorBoundary extends Component {
 function PageConsumer({ pagePromise, pageElement }) {
   if (typeof useLayoutEffect === "function" && typeof window !== "undefined") {
     useLayoutEffect(() => {
+      pruneOrphanedSsrStreams();
       if (
         typeof document !== "undefined" &&
         document.body &&
@@ -384,9 +413,18 @@ export function DinouCacheSlotBoundary({ id, tags, children }) {
     }
   }
 
+  if (typeof useLayoutEffect === "function" && isBrowser) {
+    useLayoutEffect(() => {
+      if (override.content !== null) {
+        pruneOrphanedSsrStreams();
+      }
+    }, [override.content]);
+  }
+
   useEffect(() => {
     mountedClientSlots.add(id);
     const applyResolved = (resolved, baseRef = childrenRef.current) => {
+      flushPendingSsrStreams();
       slotOverrideCache.set(id, {
         baseChildren: baseRef,
         content: resolved,

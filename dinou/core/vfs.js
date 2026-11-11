@@ -38,6 +38,7 @@ export function buildVfs(dir, baseDir = dir) {
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     const isDirectory = entry.isDirectory();
+    if (isDirectory && entry.name.startsWith("_")) continue;
     children.push({
       name: entry.name,
       isDirectory

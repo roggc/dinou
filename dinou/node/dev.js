@@ -34,7 +34,7 @@ import { getDinouConfig } from "../core/load-dinou-config.js";
 import { resolveSetupFiles } from "../core/resolve-setup-files.js";
 import { generateRouteModulesCode, generateRouteTypes } from "../core/route-generator.js";
 import { discoverLayoutsFromFs } from "../core/discover-layouts.js";
-import { esbuildContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
+import { esbuildContextualDinouPlugin, isUnderscoreEscapedSrcPath } from "../core/resolve-contextual-dinou.js";
 import parseExports from "../core/parse-exports.js";
 import { useClientRegex, useServerRegex } from "../constants.js";
 import { transformServerFunctions, hasServerFunctions } from "../core/transform-server-functions.js";
@@ -179,7 +179,7 @@ async function findClientComponents(parsedClientManifest = {}) {
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        await walk(full);
+        if (!entry.name.startsWith("_")) await walk(full);
       } else if (/\.[jt]sx?$/.test(entry.name)) {
         try {
           const content = fs.readFileSync(full, "utf8");
@@ -1767,6 +1767,26 @@ async function doRebuildBatch(changesMap) {
     const clientRebuildPromises = [];
 
     for (const [absFilePath, eventType] of changesMap) {
+      if (eventType === "addDir") {
+        continue;
+      }
+      if (eventType === "unlinkDir") {
+        needsStructureRebuild = true;
+        const dirPrefix = (absFilePath.endsWith(path.sep) ? absFilePath : absFilePath + path.sep).toLowerCase();
+        for (const cf of Array.from(knownClientFiles)) {
+          if (cf.toLowerCase().startsWith(dirPrefix)) {
+            knownClientFiles.delete(cf);
+            needsClientBundlerRestart = true;
+          }
+        }
+        for (const sf of Array.from(knownServerFiles)) {
+          if (sf.toLowerCase().startsWith(dirPrefix)) {
+            knownServerFiles.delete(sf);
+            needsClientBundlerRestart = true;
+          }
+        }
+        continue;
+      }
       const isStructureChange = eventType === "add" || eventType === "unlink";
       if (isStructureChange) {
         needsStructureRebuild = true;
@@ -2047,9 +2067,13 @@ const srcWatcher = chokidar.watch(watchTargets, {
 srcWatcher.on("all", (event, fullPath) => {
   globalThis.__TIMELINE_T0__ = Date.now();
   logTimeline(`File change detected: ${event} ${path.basename(fullPath)}`);
-  pendingSrcChanges.set(path.resolve(fullPath), event);
+  const isDirEvt = event === "addDir" || event === "unlinkDir";
+  const isEscapedPath = isUnderscoreEscapedSrcPath(fullPath, projectRoot, { isDirectory: isDirEvt });
+  if (!isEscapedPath && event !== "addDir") {
+    pendingSrcChanges.set(path.resolve(fullPath), event);
+  }
   if (
-    event === "unlinkDir" ||
+    isDirEvt ||
     ((event === "add" || event === "unlink") &&
       /(?:^|[\\/])(?:page|page_functions|layout|layout_functions|layout\.functions|error|not_found|dinou)\.(?:[jt]sx?|mjs)$/i.test(fullPath))
   ) {
@@ -2057,6 +2081,7 @@ srcWatcher.on("all", (event, fullPath) => {
       generateRouteTypes(projectRoot);
     } catch (e) {}
   }
+  if (pendingSrcChanges.size === 0) return;
   if (srcDebounce) clearTimeout(srcDebounce);
   srcDebounce = setTimeout(() => {
     srcDebounce = null;

@@ -173,6 +173,7 @@ export default async function getEsbuildEntries({
   const files = await glob(["**/*.{js,jsx,ts,tsx}"], {
     cwd: srcDir,
     absolute: true,
+    ignore: ["_*/**", "**/_*/**"],
   });
 
   // Gather client modules and update manifest entries
@@ -238,6 +239,7 @@ export default async function getEsbuildEntries({
   const csss = await glob(["**/*.css"], {
     cwd: srcDir,
     absolute: true,
+    ignore: ["_*/**", "**/_*/**"],
   });
   // console.log("detected css entries from glob:", csss);
 
@@ -252,6 +254,7 @@ export default async function getEsbuildEntries({
   const assets = await glob([assetGlobPattern], {
     cwd: srcDir,
     absolute: true,
+    ignore: ["_*/**", "**/_*/**"],
   });
 
   for (const absPath of assets) {

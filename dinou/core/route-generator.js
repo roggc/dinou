@@ -11,6 +11,8 @@ function collectSourceFiles(dir, baseDir = dir) {
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
+      // Folders prefixed with "_" are completely ignored by Dinou's router and bundlers
+      if (entry.name.startsWith("_")) continue;
       files = files.concat(collectSourceFiles(fullPath, baseDir));
     } else if (/\.(?:[jt]sx?|mjs)$/.test(entry.name) && !entry.name.endsWith(".d.ts")) {
       const relPath = path.relative(baseDir, fullPath).replace(/\\/g, "/");

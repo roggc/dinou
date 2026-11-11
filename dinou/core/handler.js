@@ -1470,7 +1470,8 @@ async function handleRequest(request, platformContext = {}) {
       }
 
       const normalizedRelativePath = path.normalize(relativePath).replace(/\\/g, "/");
-      if (!normalizedRelativePath.startsWith("src/") && normalizedRelativePath !== "src") {
+      const hasEscapedDir = normalizedRelativePath.split("/").slice(1, -1).some((seg) => seg.startsWith("_"));
+      if ((!normalizedRelativePath.startsWith("src/") && normalizedRelativePath !== "src") || hasEscapedDir) {
         return Response.json({ error: "Forbidden access" }, { status: 403 });
       }
 
