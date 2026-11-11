@@ -377,7 +377,7 @@ async function getJSX(
             elementToRender,
             layoutEffectivePpr,
           );
-          const resolvedSlot = await runInLayoutSegment(
+          const resolvedSlot = options?.skipLayoutProbe ? elementToRender : await runInLayoutSegment(
             () => asyncRenderJSXToClientJSX(elementToRender),
             layoutSegmentStore
           );

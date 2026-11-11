@@ -126,6 +126,8 @@ async function generateStatic() {
               }
               if (layoutRes.headers.get("x-dinou-dynamic") === "true") {
                 layoutMeta.dynamic = true;
+                layoutMeta.ppr = false;
+                delete layoutMeta.holes;
               }
             } catch (e) {}
 

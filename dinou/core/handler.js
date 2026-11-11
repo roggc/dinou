@@ -2180,7 +2180,7 @@ async function handleRequest(request, platformContext = {}) {
             if (rscDynamicState.value) {
               bridge.setHeader("X-Dinou-Dynamic", "true");
             }
-            if (rendered && isEdgeRuntime(platformContext)) {
+            if (rendered && !rscDynamicState.value && isEdgeRuntime(platformContext)) {
               try {
                 const storage = getStorageAdapter();
                 const cleanRel = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
@@ -2190,7 +2190,7 @@ async function handleRequest(request, platformContext = {}) {
             }
             return rendered;
           });
-        } else if (!isDevelopment && (isPageReq || isLayoutReq) && isRoutePpr && isEdgeRuntime(platformContext)) {
+        } else if (!isDevelopment && !dynamicState.value && (isPageReq || isLayoutReq) && isRoutePpr && isEdgeRuntime(platformContext)) {
           const storage = getStorageAdapter();
           const cleanRel = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
           if (isPageReq) {
@@ -2250,7 +2250,7 @@ async function handleRequest(request, platformContext = {}) {
               jsx = await spliceDynamicHolesIntoShell(
                 cachedShellTree,
                 () =>
-                  getJSX(reqPath, queryObj, isNotFound, isDevelopment, isPathBlocked, {
+                  getJSX(reqPath, queryObj, isNotFound, isDevelopment, isPathBlocked, { skipLayoutProbe: true,
                     segment,
                   }),
                 isLayoutReq ? 0 : leafLayoutSuspenseCount
