@@ -316,7 +316,7 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
   const inlineRes = isInitialHydration && !version ? consumeInlineRscResponse("P") : null;
   const fetchPromise = inlineRes
     ? Promise.resolve(inlineRes)
-    : fetch(payloadUrl).then((res) => {
+    : fetch(payloadUrl, { cache: "no-store" }).then((res) => {
         if (res.headers.has("x-rsc-redirect")) {
           const redirectUrl = res.headers.get("x-rsc-redirect");
           pageCache.delete(url);
@@ -375,7 +375,7 @@ const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
   const inlineRes = isInitialHydration && !version ? consumeInlineRscResponse("L") : null;
   const fetchPromise = inlineRes
     ? Promise.resolve(inlineRes)
-    : fetch(layoutUrl).then((res) => {
+    : fetch(layoutUrl, { cache: "no-store" }).then((res) => {
         if (!res.ok) {
           console.warn(
             `[Dinou Router] Layout ${layoutKey} fetch returned status ${res.status}`
@@ -666,6 +666,9 @@ function Router() {
     startTransition(() => {
       setIsPopState(false);
       setRoute(finalPath);
+      if (options.fresh) {
+        setVersion((v) => v + 1);
+      }
       setNavError(null);
       setNavCount((c) => c + 1);
     });
