@@ -49,7 +49,7 @@ npm run dev
 
 ### Core CLI Commands (`npx dinou <command>`)
 
-All commands accept the global **`-u` / `--unvendorized`** flag (or `DINOU_UNVENDORIZED=true`) to resolve internal toolchain dependencies from standard `node_modules` instead of Dinou's pre-bundled `dinou/compiled/` vendor bundles.
+All commands accept **`-u` / `--unvendorized`** (e.g. `npm run dev -- -u`, `npx dinou dev -u`, or `DINOU_UNVENDORIZED=true`) to resolve toolchain packages from `node_modules` instead of `dinou/compiled/`.
 
 | Command | Bundler Variants (`:esbuild` default, `:rollup`, `:webpack`) | Description |
 | :--- | :--- | :--- |
@@ -61,6 +61,7 @@ All commands accept the global **`-u` / `--unvendorized`** flag (or `DINOU_UNVEN
 | `dinou build:deno` / `start:deno` | `build:deno:{esbuild,rollup,webpack}` | Build and seed Deno KV for Deno / Deno Deploy. |
 | `dinou build:{node,bun,deno}:compile` | `...compile:{linux,linux_arm,mac,win}:{bundler}` | Compile standalone single-file native executable (`dist/`). |
 | `dinou export-static` | `export-static:{esbuild,rollup,webpack}` | Export pure static site to `dist/` (HTML + RSC payloads + assets). |
+| `dinou typegen` | — | Generate `.dinou/types/routes.d.ts` & `.dinou/routes/**/dinou.{js,d.ts}`. |
 | `dinou eject` | — | Eject full Dinou compiler & runtime into `./dinou` at project root. |
 
 ---
@@ -85,7 +86,8 @@ my-app/
 │           └── page_functions.ts
 ├── dinou.config.mjs            # Optional framework config, plugins, storage & middleware
 ├── dinou.setup.ts              # Optional early setup/polyfill file injected into all environments
-└── tsconfig.json               # TypeScript config (includes ".dinou/types/routes.d.ts")
+├── dinou-env.d.ts              # Ambient asset declarations (/// <reference types="dinou/env" />)
+└── tsconfig.json               # TypeScript config (rootDirs: ["src", ".dinou/routes"] + ".dinou/types/**/*.d.ts")
 ```
 
 ### Special Route Files (`src/**/`)
@@ -123,33 +125,49 @@ Create an empty file (no extension) inside any route folder to alter layout inhe
 | `_escaped` | `src/_legacy/page.tsx` | *(Ignored)* | Folders starting with `_` are ignored by the route scanner. |
 | `@slot` | `src/dashboard/@analytics/page.tsx` | `/dashboard` | **Parallel Route Slot:** injected as prop `analytics` into `src/dashboard/layout.tsx`. Isolated error boundary per slot. |
 
-> **Strict No-Gap Rule:** Every intermediate route segment that has a `layout.tsx` or dynamic parameter along a branch should be properly structured; however, pass-through folders without `page.tsx` (e.g. `src/api/v1/users/page.tsx`) are supported and resolved in memory.
+> **Specificity, Backtracking & Pass-Through Folders:** The router resolves competing branches deterministically using full multi-branch and `(group)` backtracking ordered by specificity (`static` > `[slug]` > `[[slug]]` > `[...slug]` > `[[...slug]]`), rejects literal router-syntax segments (`(group)`, `[param]`, `@slot`, `_private`) in URLs, and supports pass-through folders without `page.tsx` (e.g. `src/api/v1/users/page.tsx`).
 
-### Compile-Time Type-Safe Routing (`.dinou/types/routes.d.ts`)
-Dinou automatically generates `.dinou/types/routes.d.ts` during `dev` and `build`. Include it in `tsconfig.json`:
+### Compile-Time Type-Safe Routing & Contextual `"./dinou"` Modules
+Dinou generates `.dinou/types/routes.d.ts` and per-folder `.dinou/routes/<relDir>/dinou.{js,d.ts}` modules during `dev`, `build`, or `npx dinou typegen`. Configure `tsconfig.json` with `rootDirs`:
 ```json
 {
-  "include": ["src", ".dinou/types/routes.d.ts"]
+  "compilerOptions": {
+    "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "jsx": "react-jsx",
+    "strict": true, "noEmit": true, "skipLibCheck": true,
+    "rootDirs": ["src", ".dinou/routes"], "paths": { "@/*": ["./src/*"] }
+  },
+  "include": ["src", "dinou-env.d.ts", ".dinou/types/**/*.d.ts"]
 }
 ```
-Use the exported types from `"dinou"`:
-```tsx
-import type { PageProps, LayoutProps, ErrorProps, PageFunctions, LayoutFunctions } from "dinou";
 
+#### 1. Zero-Boilerplate Route-Contextual Imports (`from "./dinou"`)
+Inside any route or `@slot` folder in `src/`, import from `"./dinou"`—or `"../dinou"` from a nested helper subfolder like `_components/` (resolved via TS `rootDirs` and bundler plugins; defers to any user `dinou.*` file in `src/`). Segment contracts (`PageProps`, `LayoutProps` with auto-inferred `@slot` props, `SlotProps`, `ErrorProps`, `NotFoundProps`, `PageFunctions`, `LayoutFunctions`, `RouteParams`, `ROUTE`) and relative navigation (`<Link>`, `useRouter()`) are pre-bound to that folder:
+```tsx
 // src/blog/[slug]/page_functions.ts
-export const getProps: PageFunctions<"/blog/[slug]">["getProps"] = async (params) => {
+import type { PageFunctions } from "./dinou";
+
+export const getProps: PageFunctions["getProps"] = async (params) => {
   // params is typed as { slug: string }
   return { title: `Post ${params.slug}` };
 };
 
 // src/blog/[slug]/page.tsx
-export default async function BlogPage({
-  params,
-  title,
-}: PageProps<"/blog/[slug]"> & { title: string }) {
-  return <h1>{title} ({params.slug})</h1>;
+import { Link, type PageProps } from "./dinou";
+
+export default async function BlogPage({ params, title }: PageProps<{ title: string }>) {
+  return (
+    <article>
+      <h1>{title} ({params.slug})</h1>
+      {/* Strict relative link (no `from` needed) & dynamic `params` interpolation */}
+      <Link to="comments">Comments</Link>
+      <Link to="/blog/[slug]" params={{ slug: "next-post" }}>Next</Link>
+    </article>
+  );
 }
 ```
+
+#### 2. Explicit Global Imports (`from "dinou"` — Anywhere, Including `src/components/`)
+Outside a specific route folder (or when using explicit route literals), pass the segment pattern to `"dinou"` generics (`PageProps<"/blog/[slug]", { title: string }>`, `LayoutProps<"/dashboard">` with auto-inferred `@slot` props, `SlotProps<"/dashboard/@analytics">`, `ErrorProps<"/blog/[slug]">`, `NotFoundProps<"/blog/[slug]">`, `PageFunctions<"/blog/[slug]">`, `LayoutFunctions<"/dashboard">`), and pass `from` for strict relative links (`<Link from="/blog/[slug]" to="comments" />` or `router.push("comments", { from: "/blog/[slug]" })`).
 
 ---
 
@@ -160,12 +178,12 @@ Both `page_functions.ts` and `layout_functions.ts` share the `RouteSegmentConfig
 | Export | Signature / Type | Default | Behavior |
 | :--- | :--- | :--- | :--- |
 | `revalidate` | `number \| false \| (() => number \| false \| Promise<...>)` | `false` | **`false`**: Permanent SSG/ISG until on-demand invalidation.<br>**`0` (or `< 1`)**: Dynamic SSR on every request.<br>**`>= 1`**: Time-based ISR (TTL in seconds; stale-while-revalidate in background). |
-| `ppr` | `boolean \| (() => boolean \| Promise<boolean>)` | `false` (or global `dinou.config.mjs`) | Enables **Partial Prerendering** strictly for **this segment** (no parent-to-child inheritance; falls back directly to `dinou.config.mjs`). |
+| `ppr` | `boolean \| (() => boolean \| Promise<boolean>)` | `false` (or global `dinou.config.mjs`) | Enables **Partial Prerendering** strictly for **this segment** (no parent-to-child inheritance; falls back to `dinou.config.mjs`). |
 | `getCacheTags` | `string[] \| ((params) => string[] \| Promise<string[]>)` | `[]` | Tags associated with this page or layout segment for surgical invalidation via `revalidateTag(tag)`. |
-| `getProps` | `(params) => TProps \| Promise<TProps>` | `{}` | Server-only data loader. Returned properties are spread as props onto `page.tsx` (and `not_found.tsx`) or `layout.tsx`. Can include un-awaited `Promise` (or `Promise[]`) values streamed directly to `"use client"` components using React 19 `use(promise)` inside `<Suspense>` without blocking TTFB. |
-| `getStaticPaths` | `StaticPathItem[] \| (() => StaticPathsResult)` | `[]` | *(Pages/Layouts)* Pre-generates paths at build time. Supports returning strings (`["a", "b"]`), numbers, string arrays for catch-all (`[["a", "b"]]`), or param objects (`[{ slug: "a" }]`). |
-| `validateParams` | `(params) => boolean \| Promise<boolean>` | `() => true` | Perimeter guard evaluated per active segment **before** `getProps` or rendering using that segment's accumulated dynamic `params`. Returning `false` halts execution and returns HTTP 404 consistently across HTML, layout RSC, and page RSC. |
-| `allowISG` | `boolean \| (() => boolean \| Promise<boolean>)` | `true` (or global `dinou.config.mjs`) | Evaluated per segment on its own dynamic parameters. When `true`, paths not in `getStaticPaths` are generated on-demand on first visit and cached (ISG). When `false`, unknown params return HTTP 404. Static layouts (no dynamic params) ignore `allowISG = false`, and valid pre-rendered dynamic parent layouts preserve child `allowISG = true`. |
+| `getProps` | `(params) => TProps \| Promise<TProps>` | `{}` | Server-only loader; spreads props onto `page.tsx` (`not_found.tsx`) or `layout.tsx`. Un-awaited `Promise`/`Promise[]` values stream directly to `"use client"` `use(promise)` inside `<Suspense>` without blocking TTFB. |
+| `getStaticPaths` | `StaticPathItem[] \| (() => StaticPathsResult)` | `[]` | Pre-generates paths at build time (`["a"]`, numbers, catch-all `[["a", "b"]]`, or param objects `[{ slug: "a" }]`). |
+| `validateParams` | `(params) => boolean \| Promise<boolean>` | `() => true` | Per-segment guard run **before** `getProps`/rendering with accumulated `params`; returning `false` returns HTTP 404 across HTML, layout RSC, and page RSC. |
+| `allowISG` | `boolean \| (() => boolean \| Promise<boolean>)` | `true` (or global `dinou.config.mjs`) | Per-segment ISG control: `true` caches unknown params on demand; `false` returns 404. Static layouts ignore `allowISG = false`; valid pre-rendered dynamic layouts preserve child `allowISG = true`. |
 
 ---
 
@@ -174,16 +192,9 @@ Both `page_functions.ts` and `layout_functions.ts` share the `RouteSegmentConfig
 Dinou features three orthogonal caching and rendering dimensions—**Horizontal**, **Vertical**, and **Temporal**—that work standalone or in **Triple Synergy**:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 1. HORIZONTAL SEGMENTATION (HS)                                         │
-│    Independent Layout Cache (layout.rsc)  !==  Page Cache (page.rsc)    │
-├─────────────────────────────────────────────────────────────────────────┤
-│ 2. VERTICAL SEGMENTATION (<DinouCacheSlot> Micro-ISR)                   │
-│    Sub-tree RSC payload cached & refreshed independently by ID or Tag   │
-├─────────────────────────────────────────────────────────────────────────┤
-│ 3. TEMPORAL SEGMENTATION — PARTIAL PRERENDERING (PPR)                   │
-│    Instant Static Shell (shell.html)  +  Streaming <Suspense> Holes     │
-└─────────────────────────────────────────────────────────────────────────┘
+1. HORIZONTAL (HS)  : Layout Cache (layout.rsc) !== Page Cache (page.rsc)
+2. VERTICAL (Slot)  : <DinouCacheSlot> sub-tree RSC cached/refreshed by ID or Tag
+3. TEMPORAL (PPR)   : Instant Static Shell (shell.html) + Streaming <Suspense> Holes
 ```
 
 ### 5.1. Dimension 1: Horizontal Segmentation (Layout vs. Page Isolation)
@@ -200,13 +211,13 @@ In Dinou, **`layout.tsx` (`layout_functions.ts`)** and **`page.tsx` (`page_funct
 #### Surgical Revalidation & Zero Hydration Mismatch (`Lazy HTML Re-Composition`):
 When you invalidate **only** a layout (`revalidateLayout("/dashboard")` or `revalidateTag("layout-tag")`):
 - Dinou regenerates **only** `layout.rsc` without re-executing child `page.tsx` components (preserving all cached child `page.rsc` payloads).
-- Whenever a hard request (`GET /dashboard/settings`) or F5 reload arrives and detects that the ancestor `layout.rsc` is newer than the child's cached `index.html`, Dinou **lazily re-composes `index.html`** from the fresh `layout.rsc` + the existing cached `page.rsc` (and synchronizes the hydration RSC payload). This guarantees **zero React hydration mismatch** on hard reloads without cascading page re-renders.
+- On the next hard request or F5 reload, if an ancestor `layout.rsc` is newer than the cached `index.html`, Dinou **lazily re-composes `index.html`** from the fresh `layout.rsc` + cached `page.rsc`, guaranteeing **zero React hydration mismatch** without cascading page re-renders.
 
 ---
 
 ### 5.2. Dimension 2: Vertical Segmentation (`<DinouCacheSlot>` Micro-ISR)
 
-While Horizontal Segmentation isolates route segments (`layout.tsx` vs. `page.tsx`), **Vertical Segmentation** isolates individual component subtrees *inside* a layout or page. `<DinouCacheSlot>` (imported from `"dinou/server"`) caches an arbitrary React Server Component subtree independently from its host page or layout.
+**Vertical Segmentation** isolates component subtrees *inside* a layout or page: `<DinouCacheSlot>` (`"dinou/server"`) caches any RSC subtree independently from its host.
 
 ```tsx
 import { DinouCacheSlot } from "dinou/server";
@@ -231,7 +242,7 @@ export default async function DashboardPage() {
   - `children`: Either JSX (`<AsyncServerComponent />`) or a lazy factory function (`() => <AsyncServerComponent />`).
 - **Works in Both Dynamic & Static Hosts:**
   - Inside a **Dynamic Page (`revalidate = 0`)**: The host page re-renders on every request, while `<DinouCacheSlot>` subtrees hit cache without re-running their DB queries.
-  - Inside a **Static Page (`revalidate = false` or `ppr = true` Static Shell)**: When a slot is invalidated via `revalidateTag(tag)`, Dinou updates the slot and re-composes the static host page/shell. When a Static Shell slot's `revalidate` TTL expires (`revalidate >= 1`), Dinou uses **non-blocking Background Stale-While-Revalidate (SWR)**: the incoming request serves the cached `index.html` / `shell.html` immediately (`0ms` TTFB) while regenerating the expired `slot.json` and recomposing the host HTML/RSC in the background.
+  - Inside a **Static Page (`revalidate = false` or `ppr = true` Static Shell)**: `revalidateTag(tag)` updates the slot and re-composes the static host/shell. On TTL expiry (`revalidate >= 1`), Dinou uses **non-blocking Background SWR**: serving cached `index.html`/`shell.html` immediately (`0ms` TTFB) while regenerating `slot.json` and recomposing host HTML/RSC in the background.
 - **Nested `<DinouCacheSlot>` Isolation:** A `<DinouCacheSlot>` can contain inner `<DinouCacheSlot>` components. Invalidating or refreshing the **inner** slot re-evaluates **only** the inner slot while the outer slot stays cached.
 - **Client Components & Server Action Props Inside Slots:** `<DinouCacheSlot>` subtrees can render `"use client"` components and pass `"use server"` functions as props; Dinou preserves client reference manifests and action bindings across slot serialization.
 - **Stampede Protection:** Concurrent cache-miss requests for the same slot key are deduplicated in-flight onto a single render promise.
@@ -247,7 +258,7 @@ export default async function DashboardPage() {
 
 **Partial Prerendering (PPR)** is Dinou's **Temporal Segmentation** axis: it splits a single route across *time*, delivering the pre-rendered **Static Shell (`shell.html`)** at $t = 0\text{ ms}$ (build/revalidation time) while streaming personalized or live **`<Suspense>` Dynamic Holes** concurrently at request time over the same HTTP connection.
 
-Enable PPR globally in `dinou.config.mjs` (`ppr: true`) or per-segment in `page_functions.ts` / `layout_functions.ts` (`export const ppr = true` / `false`). **`ppr` is strictly per-segment with zero parent-to-child inheritance**: each layout and page resolves its own `ppr` flag independently (falling back directly to `dinou.config.mjs`, `false` by default), supporting mixed-PPR routes (e.g., a `ppr = true` layout wrapping a `ppr = false` page, or vice versa) in isolated execution scopes.
+Enable PPR globally (`dinou.config.mjs` `ppr: true`) or per-segment (`export const ppr = true | false` in `page_functions.ts` / `layout_functions.ts`). **`ppr` is strictly per-segment with zero parent-to-child inheritance** (falling back to `dinou.config.mjs`, default `false`), supporting mixed-PPR chains (e.g. `ppr = false` layout -> `ppr = true` nested layout -> `ppr = false` page) in isolated scopes.
 
 #### How `<Suspense>` Boundaries, Dynamic PPR Holes & `noDynamic()` Work:
 1. **`<Suspense>` Is the Single Boundary (`ppr = true` vs. `ppr = false`):**
@@ -272,14 +283,14 @@ All three dimensions compose simultaneously in the same route tree:
   2. Invalidating a `<DinouCacheSlot>` inside a **PPR Static Shell** (`revalidateTag("shell-slot")`) purges the slot and automatically enqueues background regeneration of the host `shell.html` (and `layout.rsc` if the slot lives in the layout shell), while leaving sibling cached slots untouched.
   3. Calling `refreshSlot(idOrTag, { fresh: true })` (or `refreshSlot("*", { fresh: true })`) from the browser updates slots live in the DOM across the Layout Shell, Layout Holes, Page Shell, and Page Holes simultaneously, **and** enqueues background regeneration of any affected static shells so a subsequent F5 hard reload serves the exact updated slot tokens with **zero hydration mismatch**.
 - **Single-Pass Inline RSC Streaming & Scoped Server `useId()`:**
-  - **Single-Pass Inline RSC Streaming (`__DINOU_RSC_L__` & `__DINOU_RSC_P__`):** On dynamic SSR routes, PPR runtime resumes, and first-time ISG renders/bailouts, Dinou evaluates the layout chain and page **once per request** and multiplexes the segmented Flight RSC streams inline inside `<script>` tags in the initial HTML stream—eliminating secondary `GET /____rsc_layout____` and `GET /____rsc_page____` hydration round-trips and preventing hydration mismatch (`#418`) from non-deterministic server values.
+  - **Single-Pass Inline RSC Streaming (`__DINOU_RSC_L__` & `__DINOU_RSC_P__`):** On dynamic SSR, PPR resumes, and first-time ISG renders/bailouts, Dinou evaluates layouts and page **once per request** and streams segmented Flight payloads inline in `<script>` tags, eliminating extra `/____rsc_layout____` & `/____rsc_page____` round-trips and `#418` hydration mismatches.
   - **Deterministic Segment-Scoped `useId()` in Server Components:** Sync and `async` Server Components support `useId()` (plus stateless `useMemo` / `useCallback`), generating collision-free IDs scoped per segment (`_layout_...`, `_page_...`, `_slot_...`, `_hole_...`) across Horizontal Segmentation, `<DinouCacheSlot>` refreshes, and PPR holes.
 
 ---
 
 ## 6. Client Navigation, Router Cache & Hooks
 
-Import navigation primitives from `"dinou"`:
+Import navigation primitives from `"dinou"` (or from route-contextual `"./dinou"` inside route folders to pre-bind `from` for relative targets):
 
 ```tsx
 "use client";
@@ -297,10 +308,10 @@ import {
 
 | Primitive | Scope | Signature / Props | Key Behavior |
 | :--- | :--- | :--- | :--- |
-| `<Link>` | Universal | `href` (or `to`), `prefetch?: boolean` (`true`), `fresh?: boolean` (`false`) | Performs soft SPA navigation. Prefetches RSC payload on hover when `prefetch={true}`. Pass `fresh` to bypass the client-side router cache (`pageCache`). Supports relative paths (`"sub"`, `"../other"`). |
-| `useRouter()` | Client | `{ push, replace, back, forward, refresh, refreshSlot }` | `push(href, { fresh? })`, `replace(href, { fresh? })`, `refresh({ layout?: boolean })` (re-fetches current page RSC payload; pass `{ layout: true }` to also re-fetch layouts), `refreshSlot(idOrTag, { fresh? })`. |
+| `<Link>` | Universal | `href` (or `to`), `params?`, `from?`, `prefetch?: boolean` (`true`), `fresh?: boolean` (`false`) | Soft SPA navigation; hover RSC prefetch (`prefetch`); `fresh` bypasses `pageCache`. Interpolates `[param]`/`[[param]]`/`[...slug]`/`[[...slug]]` via `params` and validates/resolves relative paths (`"sub"`, `"./sub"`, `"../other"`) via `from` (pre-bound in `"./dinou"`). |
+| `useRouter()` | Client | `{ push, replace, back, forward, refresh, refreshSlot }` | `push`/`replace(href, { fresh?, params?, from? })` (`from` pre-bound in `"./dinou"`), `refresh({ layout?: boolean })` (page RSC, or layout + page when `layout: true`), `refreshSlot(idOrTag, { fresh? })`. |
 | `usePathname()` | Universal | `() => string` | Returns current URL pathname (e.g. `"/blog/hello"`). Works in both Server Components and Client Components. |
-| `useSearchParams()` | Universal | `() => URLSearchParams` | Returns read-only `URLSearchParams`. In **Server Components**, reads `ctx.req.query` (registers a Dynamic PPR Hole inside `<Suspense>` on `ppr = true` segments, or triggers a full-route dynamic bailout outside `<Suspense>`). In **Client Components (`"use client"`)**, preserves the Static/PPR Shell, hydrates with an empty `URLSearchParams` via `useSyncExternalStore` (zero `#418` mismatch even under selective `<Suspense>` hydration), and immediately syncs with the live URL query. |
+| `useSearchParams()` | Universal | `() => URLSearchParams` | Read-only `URLSearchParams`. **Server Components:** reads `ctx.req.query` (PPR hole inside `<Suspense>` on `ppr = true`; dynamic bailout outside `<Suspense>`). **Client Components:** stays in Static/PPR Shell, hydrates empty via `useSyncExternalStore` (zero `#418`), then syncs with live URL. |
 | `useNavigationLoading()` | Client | `() => boolean` | Returns `true` while a client-side route transition is in flight. |
 | `redirect(url)` | Universal | `(destination: string) => ReactNode` | In `getProps` or Server Functions/Components before headers flush: sends real HTTP `307 Temporary Redirect` (or `X-Dinou-Redirect` in RPC). If streaming has already started or on client: renders `<ClientRedirect to={destination} />`. |
 | `<ClientRedirect>` | Client | `<ClientRedirect to="/login" />` | Triggers immediate client-side `replace` navigation upon mount. |
@@ -449,7 +460,7 @@ export default defineConfig({
   <link rel="stylesheet" href="/styles.css" precedence="default" />
   ```
 - **CSS Modules:** Any `*.module.css` file returns scoped class names (`import styles from "./card.module.css"`).
-- **Media & Asset Imports:** Import 21+ formats (`.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.avif`, `.ico`, `.mp4`, `.webm`, `.ogg`, `.mp3`, `.wav`, `.flac`, `.aac`, `.woff`, `.woff2`, `.eot`, `.ttf`, `.otf`, `.pdf`) directly in Server or Client Components to receive their hashed public URL string. Add `/// <reference types="dinou/env" />` in `src/env.d.ts` for TypeScript support.
+- **Media & Asset Imports:** Import 21+ formats (`.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.avif`, `.ico`, `.mp4`, `.webm`, `.ogg`, `.mp3`, `.wav`, `.flac`, `.aac`, `.woff`, `.woff2`, `.eot`, `.ttf`, `.otf`, `.pdf`) in Server or Client Components for hashed URLs; reference `dinou/env` in `dinou-env.d.ts` for TS types.
 - **Public Directory (`public/`):** Files in `public/` are copied verbatim to `.dinou/dist3/` and served at the root URL (`/favicon.ico`, `/robots.txt`).
 - **Path Aliases (`tsconfig.json`):** Configure `compilerOptions.paths` (e.g. `"@/*": ["./src/*"]`) in `tsconfig.json`. Dinou automatically resolves aliases across TypeScript/JSX, CSS `@import`, and asset imports in all three bundlers (esbuild, Rollup, Webpack).
 - **Environment Variables:** `.env` files are loaded on the server via `dotenv`. For security, `process.env` secrets are **server-only** and never bundled into client code; pass public values explicitly as props from Server Components to Client Components.
@@ -474,7 +485,7 @@ Dinou provides 100% feature parity across three bundlers:
 
 ### Dual-Mode Vendoring (`--unvendorized` / `-u`)
 By default, Dinou runs in **Vendorized Mode**, resolving Babel, PostCSS, Tailwind, Rollup/Webpack plugins, `ws`, `chokidar`, etc. from pre-compiled zero-install bundles in `dinou/compiled/` via `package.json` `#imports`.
-Pass `-u` / `--unvendorized` (e.g. `npx dinou dev -u` or `DINOU_UNVENDORIZED=true`) to resolve those packages from standard `node_modules` via Node's `--conditions=unvendorized`.
+Pass `-u` / `--unvendorized` (e.g. `npm run dev -- -u`, `npx dinou build -u`, or `DINOU_UNVENDORIZED=true`) to resolve those packages from your `node_modules` via `--conditions=unvendorized`.
 
 ### Ejecting (`npx dinou eject`)
 Running `npx dinou eject` copies the complete Dinou framework into `./dinou` at your project root and rewrites `package.json` scripts and imports to use `./dinou/index.js`, `./dinou/server.js`, and `./dinou/cli.js`, giving you 100% ownership of the compiler and runtime.
@@ -486,7 +497,7 @@ Running `npx dinou eject` copies the complete Dinou framework into `./dinou` at 
 ### Package `"dinou"`
 | Export | Kind | Description |
 | :--- | :--- | :--- |
-| `Link` | Component | Client SPA navigation `<Link href="..." prefetch? fresh? />` |
+| `Link` | Component | Client SPA navigation `<Link href/to="..." params? from? prefetch? fresh? />` |
 | `ClientRedirect` | Component | Client mount redirect `<ClientRedirect to="..." />` |
 | `redirect` | Function | Universal redirect `redirect("/path")` (HTTP 307 or SPA redirect) |
 | `useRouter` | Hook (Client) | `{ push, replace, back, forward, refresh, refreshSlot }` |
@@ -497,7 +508,15 @@ Running `npx dinou eject` copies the complete Dinou framework into `./dinou` at 
 | `getContext` | Function (Server) | Returns `{ req, res, env, ctx, ...custom }` from `AsyncLocalStorage` |
 | `noDynamic` | Function (Server) | Opts enclosing `<Suspense>` out of becoming a Dynamic PPR Hole on `ppr = true` routes |
 | `defineConfig` | Function | Type-safe helper for `dinou.config.mjs` |
-| `PageProps<T>`, `LayoutProps<T>`, `ErrorProps<T>`, `PageFunctions<T, P>`, `LayoutFunctions<T, P>`, `RouteSegmentConfig`, `PPRConfig`, `StaticPathItem`, `StaticPathsResult`, `RouteParams<T>`, `DinouRoute`, `DinouRoutePattern`, `DinouRouter`, `CleanRoutePath`, `ExtractRouteParams`, `ExtractSegmentParam`, `LinkProps`, `ClientRedirectProps`, `NavigationOptions`, `RequestContextStore`, `ResponseProxy`, `CookieOptions`, `Query`, `Cookies`, `Headers`, `DinouConfig`, `DinouPlugin`, `ServerHookContext`, `NodeMiddleware` | TypeScript Types | Complete compile-time routing, component prop, context, and plugin types |
+| `PageProps<T, P>`, `LayoutProps<T, P>`, `SlotProps<T>`, `ErrorProps<T>`, `NotFoundProps<T, P>`, `PageFunctions<T, P>`, `LayoutFunctions<T, P>`, `RouteSegmentConfig`, `PPRConfig`, `StaticPathItem`, `StaticPathsResult`, `RouteParams<T>`, `LayoutParams<T>`, `LayoutSlots<T>`, `SlotParams<T>`, `ErrorParams<T>`, `DinouRoute`, `DinouLinkTarget`, `DinouFromRoute`, `DinouRoutePattern`, `DinouLayoutPattern`, `DinouSlotPattern`, `DinouErrorPattern`, `DinouNotFoundPattern`, `DinouSegmentPattern`, `DinouRouter`, `CleanRoutePath`, `ExtractRouteParams`, `ExtractSegmentParam`, `LinkProps`, `ScopedLinkProps`, `ScopedLinkComponent`, `ScopedUseRouterHook`, `ClientRedirectProps`, `NavigationOptions`, `RequestContextStore`, `ResponseProxy`, `CookieOptions`, `Query`, `Cookies`, `Headers`, `DinouConfig`, `DinouPlugin`, `ServerHookContext`, `NodeMiddleware` | TypeScript Types | Complete compile-time routing, segment prop, slot, relative navigation, context, and plugin types |
+
+### Contextual Virtual Module `"./dinou"` (Inside `src/` Route & `@slot` Folders, or `"../dinou"` from Nested `_components/`)
+| Export | Kind | Description |
+| :--- | :--- | :--- |
+| `ROUTE` | Constant (`string`) | Exact URL route pattern of that folder (e.g. `"/blog/[slug]"`) |
+| `Link`, `useRouter` | Component / Hook | Pre-bound to `from={ROUTE}` so relative paths (`"sub"`, `"./sub"`, `"../other"`) validate & resolve without `from` |
+| `PageProps<TProps?>`, `LayoutProps<TProps?>`, `SlotProps`, `ErrorProps`, `NotFoundProps<TProps?>`, `PageFunctions<TProps?>`, `LayoutFunctions<TProps?>`, `RouteParams<T?>`, `LinkProps` | TypeScript Types | Zero-boilerplate segment & link contracts pre-bound to that folder (`LayoutProps` auto-infers sibling `@slot` props) |
+| All other `"dinou"` values & types | Re-exports | Full parity with `"dinou"` (`defineConfig`, `getContext`, `noDynamic`, hooks, `redirect`, `ClientRedirect`, types) |
 
 ### Package `"dinou/server"`
 | Export | Kind | Description |
@@ -510,7 +529,7 @@ Running `npx dinou eject` copies the complete Dinou framework into `./dinou` at 
 | `revalidatePage` | Function (Server) | `await revalidatePage(path)` — invalidates only `page.rsc` + `index.html` |
 | `revalidateLayout` | Function (Server) | `await revalidateLayout(path)` — invalidates only `layout.rsc` (lazy HTML re-composition) |
 | `StorageAdapter`, `FileSystemStorage`, `CloudflareKVStorage`, `DenoKVStorage`, `MemoryStorage`, `RedisStorage`, `getStorageAdapter`, `setStorageAdapter` | Storage API | Pluggable cache storage engines for SSG / ISR / PPR / `DinouCacheSlot` |
-| `DinouCacheSlotProps`, `StorageItem`, plus all server/route/page/layout/context/plugin types (`PageProps<T>`, `LayoutProps<T>`, `ErrorProps<T>`, `PageFunctions<T, P>`, `LayoutFunctions<T, P>`, `RouteSegmentConfig`, `PPRConfig`, `StaticPathItem`, `StaticPathsResult`, `RouteParams<T>`, `DinouRoute`, `DinouRoutePattern`, `DinouRouter`, `CleanRoutePath`, `ExtractRouteParams`, `ExtractSegmentParam`, `RequestContextStore`, `ResponseProxy`, `CookieOptions`, `Query`, `Cookies`, `Headers`, `DinouConfig`, `DinouPlugin`, `ServerHookContext`, `NodeMiddleware`) | TypeScript Types | Server-side & routing TypeScript definitions re-exported from `"dinou/server"` |
+| `DinouCacheSlotProps`, `StorageItem`, plus all routing, segment, slot, context & plugin types from `"dinou"` | TypeScript Types | Complete server-side & routing TypeScript definitions re-exported from `"dinou/server"` |
 
 ### Package `"dinou/config"` & Additional Subpaths
 | Subpath | Export / Purpose | Description |
@@ -519,7 +538,7 @@ Running `npx dinou eject` copies the complete Dinou framework into `./dinou` at 
 | `"dinou/env"` | Ambient TypeScript definitions | `/// <reference types="dinou/env" />` — declares module types for 21+ static asset & media extensions |
 | `"dinou/adapters/{node,bun,deno,cloudflare,netlify}"` | Platform runtime adapters | Server entry points for each deployment runtime |
 
-> **Import Safety Rule:** `import { ... } from "dinou"` (and `import type`) is 100% safe in both Server Components/Functions and Client Components (`"use client"`). Runtime value imports `import { ... } from "dinou/server"` are **Server-Only** (pulling `node:*` modules), whereas `import type { ... } from "dinou/server"` is erased at compile time and safe anywhere.
+> **Import Safety:** `"dinou"`, contextual `"./dinou"`, and any `import type` are safe in both Server and `"use client"` modules. Runtime value imports from `"dinou/server"` are **Server-Only** (`node:*`).
 
 ---
 
