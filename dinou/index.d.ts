@@ -215,19 +215,43 @@ export interface DinouConfig {
  */
 export type PPRConfig = boolean | (() => boolean | Promise<boolean>);
 
+export type AllowUndefinedStaticPath<TParams> =
+  0 extends 1 & TParams
+    ? undefined
+    : [TParams[keyof TParams]] extends [never]
+      ? never
+      : {} extends TParams
+        ? undefined
+        : never;
+
+export type ToStaticPathParamValue<V> =
+  [V] extends [never]
+    ? never
+    : [Exclude<V, undefined>] extends [ReadonlyArray<string>]
+      ? string[] | Extract<V, undefined>
+      : [Exclude<V, undefined>] extends [string]
+        ? string | number | Extract<V, undefined>
+        : V;
+
+export type ToStaticPathParams<P> = {
+  [K in keyof P]: ToStaticPathParamValue<P[K]>;
+};
+
 /**
  * A single static path item returned or defined by `getStaticPaths`.
  * Can be:
  * - A string: e.g. `"alpha"` for dynamic segment `[slug]`
  * - A number: e.g. `1` for dynamic segment `[id]`
- * - A string array: e.g. `["docs", "getting-started"]` for catch-all segment `[...slug]`
- * - A parameter object: e.g. `{ slug: "alpha", id: "1" }`
+ * - A string array: e.g. `["docs", "getting-started"]` for catch-all segment `[...slug]` or `[]` for `[[...slug]]`
+ * - `undefined`: when all dynamic segments in the route are optional (e.g. `[[category]]` or `[[...slug]]`)
+ * - A parameter object: e.g. `{ slug: "alpha", id: 1 }`
  */
 export type StaticPathItem<TParams = Record<string, string | number | string[] | undefined>> =
   | string
   | number
   | string[]
-  | TParams;
+  | TParams
+  | AllowUndefinedStaticPath<TParams>;
 
 /**
  * Result array or promise of array for `getStaticPaths`.
@@ -236,7 +260,11 @@ export type StaticPathsResult<TParams = Record<string, string | number | string[
   | StaticPathItem<TParams>[]
   | Promise<StaticPathItem<TParams>[]>;
 
-export interface RouteSegmentConfig<TParams = any, TProps = any> {
+export interface RouteSegmentConfig<
+  TParams = any,
+  TProps = any,
+  TStaticPathParams = TParams
+> {
   /**
    * Partial Prerendering (PPR) flag.
    * Can be declared as a constant or a function (sync or async) in page_functions or layout_functions.
@@ -266,13 +294,14 @@ export interface RouteSegmentConfig<TParams = any, TProps = any> {
    * - Array of strings (e.g. `["alpha", "beta"]`)
    * - Array of numbers (e.g. `[1, 2, 3]`)
    * - Array of string arrays for catch-all routes (e.g. `[["docs", "intro"], ["docs", "setup"]]`)
+   * - `undefined` entries when all dynamic segments are optional (e.g. `[undefined, "electronics"]`)
    * - Array of parameter objects (e.g. `[{ slug: "alpha" }, { slug: "beta" }]`)
    *
    * Can be declared as a sync or async function, or as a constant array in `page_functions.ts` or `layout_functions.ts`.
    */
   getStaticPaths?:
-    | StaticPathItem<TParams>[]
-    | (() => StaticPathsResult<TParams>);
+    | StaticPathItem<TStaticPathParams>[]
+    | (() => StaticPathsResult<TStaticPathParams>);
 
   /**
    * Server-side loader that fetches or calculates props passed directly to the Page or Layout component.
@@ -304,7 +333,12 @@ export type PageFunctions<
     : [TRouteOrParams] extends [DinouRoutePattern]
       ? RouteParams<Extract<TRouteOrParams, DinouRoutePattern>>
       : TRouteOrParams,
-  TProps
+  TProps,
+  0 extends 1 & TRouteOrParams
+    ? any
+    : [TRouteOrParams] extends [DinouRoutePattern]
+      ? StaticPathParams<Extract<TRouteOrParams, DinouRoutePattern>>
+      : ToStaticPathParams<TRouteOrParams>
 >;
 
 /**
@@ -321,11 +355,16 @@ export type LayoutFunctions<
     : [TRouteOrParams] extends [DinouLayoutPattern]
       ? LayoutParams<Extract<TRouteOrParams, DinouLayoutPattern>>
       : TRouteOrParams,
-  TProps
+  TProps,
+  0 extends 1 & TRouteOrParams
+    ? any
+    : [TRouteOrParams] extends [DinouLayoutPattern]
+      ? StaticPathParams<Extract<TRouteOrParams, DinouLayoutPattern>>
+      : ToStaticPathParams<TRouteOrParams>
 >;
 
 /**
- * Type-safe configuration helper for dinou.config.js / dinou.config.mjs.
+ * Type-safe configuration helper for dinou.config.ts / dinou.config.js / dinou.config.mjs.
  */
 export declare function defineConfig(config: DinouConfig): DinouConfig;
 
@@ -472,15 +511,15 @@ export type DinouRoute = DinouRouter.Register extends { route: infer R extends s
   : string;
 
 /**
- * Utility types to parse dynamic route parameters from a route string pattern.
+ * Utility types to parse received runtime dynamic route parameters from a route string pattern.
  * e.g. ExtractRouteParams<"/blog/[id]"> => { id: string }
  * e.g. ExtractRouteParams<"/docs/[...slug]"> => { slug: string[] }
- * e.g. ExtractRouteParams<"/shop/[[...slug]]"> => { slug?: string[] }
+ * e.g. ExtractRouteParams<"/shop/[[...slug]]"> => { slug: string[] } (normalized to [] at runtime on root path)
  * e.g. ExtractRouteParams<"/item/[[code]]"> => { code?: string }
  */
 export type ExtractSegmentParam<Segment extends string> =
   Segment extends `[[...${infer Param}]]`
-    ? { [K in Param]?: string[] }
+    ? { [K in Param]: string[] }
     : Segment extends `[[${infer Param}]]`
     ? { [K in Param]?: string }
     : Segment extends `[...${infer Param}]`
@@ -496,6 +535,28 @@ export type ExtractRouteParams<Path extends string> =
     ? ExtractSegmentParam<Start> & ExtractRouteParams<Rest>
     : ExtractSegmentParam<Path>;
 
+/**
+ * Utility types to parse input route parameters (for `<Link params>`, `router.push`, and `getStaticPaths`),
+ * where optional catch-all segments `[[...slug]]` remain optional (`{ slug?: string[] }`).
+ */
+export type ExtractNavigableSegmentParam<Segment extends string> =
+  Segment extends `[[...${infer Param}]]`
+    ? { [K in Param]?: string[] }
+    : Segment extends `[[${infer Param}]]`
+    ? { [K in Param]?: string }
+    : Segment extends `[...${infer Param}]`
+    ? { [K in Param]: string[] }
+    : Segment extends `[${infer Param}]`
+    ? { [K in Param]: string }
+    : {};
+
+export type ExtractNavigableRouteParams<Path extends string> =
+  Path extends `/${infer Rest}`
+    ? ExtractNavigableRouteParams<Rest>
+    : Path extends `${infer Start}/${infer Rest}`
+    ? ExtractNavigableSegmentParam<Start> & ExtractNavigableRouteParams<Rest>
+    : ExtractNavigableSegmentParam<Path>;
+
 export type SimplifyParams<T> = { [K in keyof T]: T[K] };
 
 export type FallbackRouteParams<Path extends string> =
@@ -506,6 +567,32 @@ export type FallbackRouteParams<Path extends string> =
       : keyof ExtractRouteParams<Path> extends never
         ? Record<string, never>
         : SimplifyParams<ExtractRouteParams<Path>>;
+
+export type FallbackNavigableParams<Path extends string> =
+  [string] extends [Path]
+    ? Record<string, string | string[] | undefined>
+    : [`/@${string}`] extends [Path]
+      ? Record<string, string | string[] | undefined>
+      : keyof ExtractNavigableRouteParams<Path> extends never
+        ? Record<string, never>
+        : SimplifyParams<ExtractNavigableRouteParams<Path>>;
+
+/**
+ * Resolved parameter dictionary accepted by `getStaticPaths` object items for a segment pattern `Path`.
+ * Keeps optional catch-all segments (`[[...slug]]`) optional and allows `string | number` for single segments.
+ */
+export type StaticPathParams<Path extends string> =
+  [string] extends [Path]
+    ? Record<string, string | number | string[] | undefined>
+    : [`/@${string}`] extends [Path]
+      ? Record<string, string | number | string[] | undefined>
+      : Path extends string
+        ? DinouRouter.Register extends { navigableParams: infer NP }
+          ? CleanRoutePath<Path> extends keyof NP
+            ? SimplifyParams<ToStaticPathParams<NP[CleanRoutePath<Path>]>>
+            : SimplifyParams<ToStaticPathParams<FallbackNavigableParams<CleanRoutePath<Path>>>>
+          : SimplifyParams<ToStaticPathParams<FallbackNavigableParams<CleanRoutePath<Path>>>>
+        : never;
 
 export type FormatPatternKeys<K extends string> =
   [K] extends [never]
@@ -1158,10 +1245,10 @@ export type UnionToIntersection<U> =
 
 export type ResolveSingleLinkParams<Path extends string> =
   [DinouNavigableRoutePatternMap] extends [never]
-    ? SimplifyParams<ToLinkInputParams<FallbackRouteParams<CleanRoutePath<Path>>>>
+    ? SimplifyParams<ToLinkInputParams<FallbackNavigableParams<CleanRoutePath<Path>>>>
     : CleanRoutePath<Path> extends keyof DinouNavigableRoutePatternMap
       ? SimplifyParams<ToLinkInputParams<DinouNavigableRoutePatternMap[CleanRoutePath<Path>]>>
-      : SimplifyParams<ToLinkInputParams<FallbackRouteParams<CleanRoutePath<Path>>>>;
+      : SimplifyParams<ToLinkInputParams<FallbackNavigableParams<CleanRoutePath<Path>>>>;
 
 export type ResolveLinkParams<THref extends string> = SimplifyParams<
   UnionToIntersection<

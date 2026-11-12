@@ -46,12 +46,12 @@ function formatTsKey(key) {
   return VALID_IDENTIFIER_RE.test(key) ? key : JSON.stringify(key);
 }
 
-function extractParamsFromSegments(segments) {
+function extractParamsFromSegments(segments, { forNavigation = false } = {}) {
   const params = {};
   for (const seg of segments) {
     if (seg.startsWith("[[...") && seg.endsWith("]]")) {
       const paramName = seg.slice(5, -2);
-      params[paramName] = "string[] | undefined";
+      params[paramName] = forNavigation ? "string[] | undefined" : "string[]";
     } else if (seg.startsWith("[[") && seg.endsWith("]]")) {
       const paramName = seg.slice(2, -2);
       params[paramName] = "string | undefined";
@@ -452,7 +452,7 @@ function generateRouteDefinitions(routesOrTopology) {
     const segments = route.segments;
     navigableParamsMap[route.path] = {
       ...(navigableParamsMap[route.path] || {}),
-      ...extractParamsFromSegments(segments),
+      ...extractParamsFromSegments(segments, { forNavigation: true }),
     };
     const isDynamic = segments.some((s) => s.startsWith("[") && s.endsWith("]"));
 
@@ -714,7 +714,8 @@ export type NotFoundProps<TProps extends object = {}> = Dinou.SimplifyParams<
  */
 export type PageFunctions<TProps = any> = Dinou.RouteSegmentConfig<
   RouteParams,
-  TProps
+  TProps,
+  Dinou.StaticPathParams<${isEscaped ? "string" : lookupLiteral}>
 >;
 
 /**
@@ -722,7 +723,8 @@ export type PageFunctions<TProps = any> = Dinou.RouteSegmentConfig<
  */
 export type LayoutFunctions<TProps = any> = Dinou.RouteSegmentConfig<
   Dinou.LookupSingleSegmentParams<${layoutParamsLookup}>,
-  TProps
+  TProps,
+  Dinou.StaticPathParams<${isEscaped ? "string" : layoutParamsLookup}>
 >;
 
 /**
@@ -774,6 +776,10 @@ export type {
   DinouPlugin,
   DinouConfig,
   PPRConfig,
+  AllowUndefinedStaticPath,
+  ToStaticPathParamValue,
+  ToStaticPathParams,
+  StaticPathParams,
   StaticPathItem,
   StaticPathsResult,
   RouteSegmentConfig,
