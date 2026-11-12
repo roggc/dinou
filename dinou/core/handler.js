@@ -1521,7 +1521,9 @@ async function handleRequest(request, platformContext = {}) {
       bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
 
       const manifest = getClientManifest();
-      pipeRSC(returnValue, bridge, manifest, platformContext);
+      requestStorage.run(context, () => {
+        pipeRSC(returnValue, bridge, manifest, platformContext);
+      });
       return bridge.toResponse();
     } catch (err) {
       console.error("[Dinou] Error executing server function:", err);
@@ -3278,7 +3280,9 @@ async function handleRequest(request, platformContext = {}) {
               };
             }
 
-            const errorRscStream = renderRSCStream(errorJsx, clientManifest, { runtime: "edge" });
+            const errorRscStream = requestStorage.run(context, () =>
+              renderRSCStream(errorJsx, clientManifest, { runtime: "edge" })
+            );
             const errorClientEntry = getAssetFromManifest("main.js");
             const errorBootstrapModules = isDevelopment
               ? [
