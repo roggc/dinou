@@ -125,6 +125,21 @@ export function refreshSlot(slotId, options) {
 }
 
 const DINOU_CONTEXT_KEY = Symbol.for("dinou.request.context.storage");
+const BAILOUT_RAW_TARGET = Symbol.for("dinou.bailout.raw");
+
+function queryObjectToURLSearchParams(query) {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, val]) => {
+    if (Array.isArray(val)) {
+      val.forEach((v) => {
+        if (v !== undefined && v !== null) params.append(key, String(v));
+      });
+    } else if (val !== undefined && val !== null) {
+      params.append(key, String(val));
+    }
+  });
+  return params;
+}
 
 export function usePathname() {
   // 🟢 1. SERVER LOGIC (SSR)
@@ -171,16 +186,21 @@ export function useSearchParams() {
         typeof React.useState === "function" &&
         Boolean(clientH) &&
         !clientH._dinouIsServerHooksDispatcher;
-      if (ctx && ctx._isPprRuntimeResume && isClientSsrRender) {
+      if (isClientSsrRender) {
+        if (!ctx || ctx._isPprRuntimeResume || ctx._isStaticHtmlRender) {
+          return new URLSearchParams();
+        }
+        const rawQuery =
+          ctx.req && ctx.req.query
+            ? ctx.req.query[BAILOUT_RAW_TARGET] || ctx.req.query
+            : null;
+        if (rawQuery) {
+          return queryObjectToURLSearchParams(rawQuery);
+        }
         return new URLSearchParams();
       }
       if (ctx && ctx.req && ctx.req.query) {
-        const params = new URLSearchParams();
-        Object.entries(ctx.req.query).forEach(([key, val]) => {
-          if (Array.isArray(val)) val.forEach((v) => params.append(key, v));
-          else if (val) params.append(key, val);
-        });
-        return params;
+        return queryObjectToURLSearchParams(ctx.req.query);
       }
     } catch (e) {
       if (

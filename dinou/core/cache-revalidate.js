@@ -454,6 +454,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
         },
         env: activeEnv,
         platformContext: outerCtx?.platformContext || { env: activeEnv },
+        _isStaticHtmlRender: true,
       };
       const clientManifest =
         (typeof globalThis !== "undefined" && globalThis.__DINOU_CLIENT_MANIFEST__) || {};
@@ -960,6 +961,7 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
           },
           env: activeEnv,
           platformContext: outerCtx?.platformContext || { env: activeEnv },
+          _isStaticHtmlRender: true,
         };
         const clientManifest =
           (typeof globalThis !== "undefined" && globalThis.__DINOU_CLIENT_MANIFEST__) || {};

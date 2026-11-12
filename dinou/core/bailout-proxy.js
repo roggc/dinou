@@ -8,6 +8,15 @@ function triggerBailout(label, onBailout) {
   }
 }
 
+export const BAILOUT_RAW_TARGET = Symbol.for("dinou.bailout.raw");
+
+export function unwrapBailoutProxy(value) {
+  if (value && (typeof value === "object" || typeof value === "function")) {
+    return value[BAILOUT_RAW_TARGET] || value;
+  }
+  return value;
+}
+
 /**
  * Creates a transparent proxy that spies on property accesses
  * to detect dynamic usage and trigger a bailout callback.
@@ -22,6 +31,9 @@ export function createBailoutProxy(target, label = "Context", onBailout) {
 
   return new Proxy(safeTarget, {
     get(t, prop, receiver) {
+      if (prop === BAILOUT_RAW_TARGET) {
+        return t;
+      }
       if (
         typeof prop === "symbol" ||
         prop === "inspect" ||
@@ -57,5 +69,7 @@ export function createBailoutProxy(target, label = "Context", onBailout) {
 }
 
 export default {
+  BAILOUT_RAW_TARGET,
+  unwrapBailoutProxy,
   createBailoutProxy,
 };
