@@ -783,6 +783,9 @@ await updateManifestsState({ forceRescan: true });
 
 // Generate route modules and entry files
 function generateEntryFiles() {
+  try {
+    generateRouteTypes(projectRoot);
+  } catch (e) {}
   const routeModulesCode = generateRouteModulesCode(projectRoot, "../..");
   fs.writeFileSync(path.join(devDir, "route-modules.mjs"), routeModulesCode, "utf8");
 

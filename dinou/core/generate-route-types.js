@@ -827,6 +827,25 @@ export default dinou;
 `;
 }
 
+const deferredPruneTimers = new Map();
+
+function scheduleDeferredRouteTypesPrune(projectRoot, remainingAttempts = 5) {
+  if (remainingAttempts <= 0) return;
+  const rootKey = normKey(projectRoot);
+  if (deferredPruneTimers.has(rootKey)) return;
+
+  const timer = setTimeout(() => {
+    deferredPruneTimers.delete(rootKey);
+    try {
+      generateRouteTypes(projectRoot, { _retryAttempts: remainingAttempts - 1 });
+    } catch (e) {}
+  }, 150);
+  if (typeof timer.unref === "function") {
+    timer.unref();
+  }
+  deferredPruneTimers.set(rootKey, timer);
+}
+
 function writeFileIfChanged(targetPath, content) {
   const current = fs.existsSync(targetPath)
     ? fs.readFileSync(targetPath, "utf8")
@@ -838,7 +857,8 @@ function writeFileIfChanged(targetPath, content) {
 }
 
 function pruneContextualRoutesDir(routesOutRoot, expectedFiles) {
-  if (!fs.existsSync(routesOutRoot)) return;
+  if (!fs.existsSync(routesOutRoot)) return false;
+  let hadLockedArtifacts = false;
 
   function cleanDirRecursive(dir, isRoot = false) {
     let entries;
@@ -855,8 +875,11 @@ function pruneContextualRoutesDir(routesOutRoot, expectedFiles) {
       } else if (entry.name === "dinou.js" || entry.name === "dinou.d.ts") {
         if (!expectedFiles.has(normKey(fullPath))) {
           try {
-            fs.unlinkSync(fullPath);
+            fs.rmSync(fullPath, { force: true, maxRetries: 5, retryDelay: 25 });
           } catch (e) {}
+          if (fs.existsSync(fullPath)) {
+            hadLockedArtifacts = true;
+          }
         }
       }
     }
@@ -865,18 +888,40 @@ function pruneContextualRoutesDir(routesOutRoot, expectedFiles) {
       try {
         const remaining = fs.readdirSync(dir);
         if (remaining.length === 0) {
-          fs.rmdirSync(dir);
+          fs.rmSync(dir, {
+            recursive: true,
+            force: true,
+            maxRetries: 3,
+            retryDelay: 20,
+          });
+          if (fs.existsSync(dir)) {
+            hadLockedArtifacts = true;
+          }
         }
-      } catch (e) {}
+      } catch (e) {
+        if (fs.existsSync(dir)) {
+          try {
+            if (fs.readdirSync(dir).length === 0) {
+              hadLockedArtifacts = true;
+            }
+          } catch (err) {}
+        }
+      }
     }
   }
 
   cleanDirRecursive(routesOutRoot, true);
+  return hadLockedArtifacts;
 }
 
-function syncContextualRouteModules(projectRoot, contextualDirs) {
+function syncContextualRouteModules(
+  projectRoot,
+  contextualDirs,
+  retryAttempts = 5
+) {
   const routesOutRoot = path.resolve(projectRoot, ".dinou/routes");
   const expectedFiles = new Set();
+  let hadWriteLockError = false;
 
   for (const ctxEntry of contextualDirs) {
     if (ctxEntry.hasShadowDinou && !ctxEntry.isEscaped) {
@@ -895,19 +940,29 @@ function syncContextualRouteModules(projectRoot, contextualDirs) {
     expectedFiles.add(normKey(jsPath));
     expectedFiles.add(normKey(dtsPath));
 
-    writeFileIfChanged(jsPath, buildContextualDinouJs(ctxEntry.fromPath));
-    writeFileIfChanged(dtsPath, buildContextualDinouDts(ctxEntry));
+    try {
+      writeFileIfChanged(jsPath, buildContextualDinouJs(ctxEntry.fromPath));
+      writeFileIfChanged(dtsPath, buildContextualDinouDts(ctxEntry));
+    } catch (e) {
+      hadWriteLockError = true;
+    }
   }
 
-  pruneContextualRoutesDir(routesOutRoot, expectedFiles);
+  const hadLockedArtifacts = pruneContextualRoutesDir(routesOutRoot, expectedFiles);
+  if (hadLockedArtifacts || hadWriteLockError) {
+    scheduleDeferredRouteTypesPrune(projectRoot, retryAttempts);
+  }
 }
 
 /**
  * Generates `.dinou/types/routes.d.ts` ambient definitions and `.dinou/routes/<relDir>/dinou.{js,d.ts}`
  * route-contextual modules.
  * @param {string} projectRoot Root directory of the project (default process.cwd())
+ * @param {{ _retryAttempts?: number }} [options]
  */
-function generateRouteTypes(projectRoot = process.cwd()) {
+function generateRouteTypes(projectRoot = process.cwd(), options = {}) {
+  const retryAttempts =
+    typeof options?._retryAttempts === "number" ? options._retryAttempts : 5;
   const srcDir = path.resolve(projectRoot, "src");
   if (!fs.existsSync(srcDir)) return;
 
@@ -1006,6 +1061,7 @@ ${dynamicUnion};
   try {
     writeFileIfChanged(path.join(typesDir, "routes.d.ts"), content);
   } catch (e) {
+    scheduleDeferredRouteTypesPrune(projectRoot, retryAttempts);
     if (process.env.DINOU_DEBUG) {
       console.warn("[Dinou] Could not write .dinou/types/routes.d.ts:", e.message);
     }
@@ -1013,8 +1069,13 @@ ${dynamicUnion};
 
   // 2. Write & prune .dinou/routes/<relDir>/dinou.{js,d.ts}
   try {
-    syncContextualRouteModules(projectRoot, topology.contextualDirs || []);
+    syncContextualRouteModules(
+      projectRoot,
+      topology.contextualDirs || [],
+      retryAttempts
+    );
   } catch (e) {
+    scheduleDeferredRouteTypesPrune(projectRoot, retryAttempts);
     if (process.env.DINOU_DEBUG) {
       console.warn("[Dinou] Could not sync .dinou/routes modules:", e.message);
     }
