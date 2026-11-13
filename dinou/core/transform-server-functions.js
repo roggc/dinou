@@ -64,28 +64,142 @@ function isInsideScope(childScope, parentScope) {
   return false;
 }
 
+const BABEL_PARSER_PLUGINS = [
+  "jsx",
+  "typescript",
+  "asyncGenerators",
+  "classProperties",
+  "classPrivateProperties",
+  "classPrivateMethods",
+  "dynamicImport",
+  "exportDefaultFrom",
+  "exportNamespaceFrom",
+  "nullishCoalescingOperator",
+  "numericSeparator",
+  "objectRestSpread",
+  "optionalCatchBinding",
+  "optionalChaining",
+  "topLevelAwait",
+];
+
+function getExportedSpecifierName(exported) {
+  if (!exported) return null;
+  if (exported.type === "Identifier") return exported.name;
+  if (exported.type === "StringLiteral") return exported.value;
+  return null;
+}
+
+/**
+ * Resolves (and if anonymous/expression, binds) a local module-scope identifier
+ * for a module's `default` export so `registerServerReference` can reference it.
+ */
+function ensureModuleDefaultIdentifier(code, filename) {
+  let ast;
+  try {
+    ast = parser.parse(code, {
+      sourceType: "module",
+      plugins: BABEL_PARSER_PLUGINS,
+    });
+  } catch (err) {
+    console.warn(`[transformServerFunctions] Babel parse error in ${filename}:`, err.message);
+    return { didMutate: false, code, defaultExportIdentifier: null };
+  }
+
+  let defaultExportIdentifier = null;
+  let didMutate = false;
+  const body = ast.program.body;
+
+  for (let i = 0; i < body.length; i++) {
+    const stmt = body[i];
+    if (stmt.type === "ExportDefaultDeclaration") {
+      const decl = stmt.declaration;
+      if (decl.type === "FunctionDeclaration" || decl.type === "ClassDeclaration") {
+        if (decl.id && decl.id.name) {
+          defaultExportIdentifier = decl.id.name;
+        } else {
+          decl.id = t.identifier("$$dinou_default_action");
+          defaultExportIdentifier = "$$dinou_default_action";
+          didMutate = true;
+        }
+      } else if (decl.type === "Identifier") {
+        defaultExportIdentifier = decl.name;
+      } else {
+        const defaultId = "$$dinou_default_action";
+        defaultExportIdentifier = defaultId;
+        body.splice(
+          i,
+          1,
+          t.variableDeclaration("const", [
+            t.variableDeclarator(t.identifier(defaultId), decl),
+          ]),
+          t.exportDefaultDeclaration(t.identifier(defaultId))
+        );
+        didMutate = true;
+      }
+      break;
+    } else if (stmt.type === "ExportNamedDeclaration" && Array.isArray(stmt.specifiers)) {
+      const defaultSpec = stmt.specifiers.find(
+        (s) => s.type === "ExportSpecifier" && getExportedSpecifierName(s.exported) === "default"
+      );
+      if (defaultSpec) {
+        if (!stmt.source && defaultSpec.local && defaultSpec.local.type === "Identifier") {
+          defaultExportIdentifier = defaultSpec.local.name;
+        } else if (stmt.source && defaultSpec.local) {
+          const defaultId = "$$dinou_default_action";
+          defaultExportIdentifier = defaultId;
+          body.unshift(
+            t.importDeclaration(
+              [t.importSpecifier(t.identifier(defaultId), t.cloneNode(defaultSpec.local))],
+              t.cloneNode(stmt.source)
+            )
+          );
+          didMutate = true;
+        }
+        break;
+      }
+    }
+  }
+
+  if (didMutate) {
+    const output = generate(ast, { retainLines: false });
+    return { didMutate: true, code: output.code, defaultExportIdentifier };
+  }
+  return { didMutate: false, code, defaultExportIdentifier };
+}
+
 /**
  * Transforms function-level "use server" directives:
  * 1. Hoists inline/nested server functions to module top level and binds captured closure variables.
  * 2. Ensures top-level functions with "use server" in their body are exported so they can be referenced and invoked.
- * 3. Returns the transformed code and the list of exported server function names.
+ * 3. Returns the transformed code, the list of exported server function names, and defaultExportIdentifier when "default" is an action.
  *
  * @param {string} code Source code
  * @param {string} [filename="file.tsx"]
- * @returns {{ transformed: boolean, isModuleLevel: boolean, code: string, actions: string[] }}
+ * @returns {{ transformed: boolean, isModuleLevel: boolean, code: string, actions: string[], defaultExportIdentifier: string | null }}
  */
 export function transformServerFunctions(code, filename = "file.tsx") {
   if (!hasServerFunctions(code)) {
-    return { transformed: false, isModuleLevel: false, code, actions: [] };
+    return { transformed: false, isModuleLevel: false, code, actions: [], defaultExportIdentifier: null };
   }
 
   if (isModuleLevelUseServer(code)) {
     const exports = parseExports(code);
+    if (exports.includes("default")) {
+      const resolved = ensureModuleDefaultIdentifier(code, filename);
+      return {
+        transformed: resolved.didMutate,
+        isModuleLevel: true,
+        code: resolved.code,
+        actions: exports,
+        defaultExportIdentifier: resolved.defaultExportIdentifier,
+      };
+    }
     return {
       transformed: false,
       isModuleLevel: true,
       code,
       actions: exports,
+      defaultExportIdentifier: null,
     };
   }
 
@@ -93,31 +207,16 @@ export function transformServerFunctions(code, filename = "file.tsx") {
   try {
     ast = parser.parse(code, {
       sourceType: "module",
-      plugins: [
-        "jsx",
-        "typescript",
-        "asyncGenerators",
-        "classProperties",
-        "classPrivateProperties",
-        "classPrivateMethods",
-        "dynamicImport",
-        "exportDefaultFrom",
-        "exportNamespaceFrom",
-        "nullishCoalescingOperator",
-        "numericSeparator",
-        "objectRestSpread",
-        "optionalCatchBinding",
-        "optionalChaining",
-        "topLevelAwait",
-      ],
+      plugins: BABEL_PARSER_PLUGINS,
     });
   } catch (err) {
     console.warn(`[transformServerFunctions] Babel parse error in ${filename}:`, err.message);
-    return { transformed: false, isModuleLevel: false, code, actions: [] };
+    return { transformed: false, isModuleLevel: false, code, actions: [], defaultExportIdentifier: null };
   }
 
   const actions = [];
   const hoistedNodes = [];
+  let defaultExportIdentifier = null;
   let actionCounter = 0;
 
   traverse(ast, {
@@ -155,7 +254,33 @@ export function transformServerFunctions(code, filename = "file.tsx") {
 
       if (isTopLevel) {
         cleanDirectivesAndStatements();
-        actions.push(fnName);
+
+        if (path.parentPath.isExportDefaultDeclaration()) {
+          if (!actions.includes("default")) {
+            actions.push("default");
+          }
+          if (path.isFunctionDeclaration()) {
+            if (!path.node.id) {
+              path.node.id = t.identifier("$$dinou_default_action");
+            }
+            defaultExportIdentifier = path.node.id.name;
+          } else {
+            const defaultId = "$$dinou_default_action";
+            defaultExportIdentifier = defaultId;
+            path.parentPath.replaceWithMultiple([
+              t.variableDeclaration("const", [
+                t.variableDeclarator(t.identifier(defaultId), path.node),
+              ]),
+              t.exportDefaultDeclaration(t.identifier(defaultId)),
+            ]);
+          }
+          path.skip();
+          return;
+        }
+
+        if (!actions.includes(fnName)) {
+          actions.push(fnName);
+        }
 
         if (path.isFunctionDeclaration()) {
           if (!path.parentPath.isExportNamedDeclaration()) {
@@ -244,11 +369,41 @@ export function transformServerFunctions(code, filename = "file.tsx") {
   });
 
   if (actions.length === 0) {
-    return { transformed: false, isModuleLevel: false, code, actions: [] };
+    return { transformed: false, isModuleLevel: false, code, actions: [], defaultExportIdentifier: null };
   }
 
   // Insert hoisted function declarations right after the last import statement in the program
   const program = ast.program;
+  if (!defaultExportIdentifier) {
+    for (const stmt of program.body) {
+      if (stmt.type === "ExportDefaultDeclaration" && stmt.declaration.type === "Identifier") {
+        if (actions.includes(stmt.declaration.name)) {
+          defaultExportIdentifier = stmt.declaration.name;
+          if (!actions.includes("default")) actions.push("default");
+        }
+        break;
+      } else if (
+        stmt.type === "ExportNamedDeclaration" &&
+        !stmt.source &&
+        Array.isArray(stmt.specifiers)
+      ) {
+        const defaultSpec = stmt.specifiers.find(
+          (s) => s.type === "ExportSpecifier" && getExportedSpecifierName(s.exported) === "default"
+        );
+        if (
+          defaultSpec &&
+          defaultSpec.local &&
+          defaultSpec.local.type === "Identifier" &&
+          actions.includes(defaultSpec.local.name)
+        ) {
+          defaultExportIdentifier = defaultSpec.local.name;
+          if (!actions.includes("default")) actions.push("default");
+          break;
+        }
+      }
+    }
+  }
+
   let lastImportIdx = -1;
   for (let i = 0; i < program.body.length; i++) {
     if (program.body[i].type === "ImportDeclaration") {
@@ -266,6 +421,7 @@ export function transformServerFunctions(code, filename = "file.tsx") {
     isModuleLevel: false,
     code: output.code,
     actions,
+    defaultExportIdentifier,
   };
 }
 

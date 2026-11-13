@@ -1028,8 +1028,9 @@ const serverReferencesPlugin = {
       transformed += `import { registerServerReference } from "react-server-dom-webpack/server.edge";\n`;
 
       for (const name of exports) {
-        if (name !== "default") {
-          transformed += `registerServerReference(${name}, ${JSON.stringify(relativeFileUrl)}, ${JSON.stringify(name)});\n`;
+        const localIdent = name === "default" ? sfResult.defaultExportIdentifier : name;
+        if (localIdent) {
+          transformed += `registerServerReference(${localIdent}, ${JSON.stringify(relativeFileUrl)}, ${JSON.stringify(name)});\n`;
         }
       }
 
@@ -1073,9 +1074,10 @@ const serverReferencesPluginSsr = {
       transformed += `import { registerServerReference } from "react-server-dom-webpack/client.edge";\n`;
 
       for (const name of exports) {
-        if (name !== "default") {
-          transformed += `registerServerReference(${name}, ${JSON.stringify(relativeFileUrl + "#" + name)});\n`;
-          transformed += `registerServerReference(${name}, ${JSON.stringify(pathToFileURL(absPath).href + "#" + name)});\n`;
+        const localIdent = name === "default" ? sfResult.defaultExportIdentifier : name;
+        if (localIdent) {
+          transformed += `registerServerReference(${localIdent}, ${JSON.stringify(relativeFileUrl + "#" + name)});\n`;
+          transformed += `registerServerReference(${localIdent}, ${JSON.stringify(pathToFileURL(absPath).href + "#" + name)});\n`;
         }
       }
 

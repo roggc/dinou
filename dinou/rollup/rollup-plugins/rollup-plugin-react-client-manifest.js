@@ -93,6 +93,13 @@ function normalizeFsPath(p) {
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
+function normalizeServerFilePath(p) {
+  const resolved = path.resolve(p).replace(/\\/g, "/");
+  return process.platform === "win32" && resolved[1] === ":"
+    ? resolved.charAt(0).toLowerCase() + resolved.slice(1)
+    : resolved;
+}
+
 function alignDrive(p) {
   const resolved = path.resolve(p);
   const cwd = process.cwd();
@@ -293,10 +300,10 @@ function setManifestEntry(fileUrl, expName, entry) {
         }
 
         if (useServerRegex.test(importCode.trim())) {
-          serverFiles.add(normalizeFsPath(absImportPathWithExt));
+          serverFiles.add(normalizeServerFilePath(absImportPathWithExt));
           continue;
         } else if (hasServerFunctions(importCode)) {
-          serverFiles.add(normalizeFsPath(absImportPathWithExt));
+          serverFiles.add(normalizeServerFilePath(absImportPathWithExt));
         }
 
         const nested = await getImportsAndAssetsAndCsss(
@@ -479,7 +486,7 @@ function setManifestEntry(fileUrl, expName, entry) {
         } else if (isPageOrLayout(normAbs)) {
           serverModules.add(normKey);
           if (useServerRegex.test(code.trim()) || hasServerFunctions(code)) {
-            serverFiles.add(normKey);
+            serverFiles.add(normalizeServerFilePath(normAbs));
           }
           this.addWatchFile(normAbs);
           const { imports, assets, csss } = await getImportsAndAssetsAndCsss(
@@ -562,6 +569,7 @@ function setManifestEntry(fileUrl, expName, entry) {
         return;
       const normAbs = alignDrive(id);
       const normId = normalizeFsPath(normAbs);
+      const normServerFileId = normalizeServerFilePath(normAbs);
       if (!existsSync(normAbs)) {
         const fileUrl = normalizeFileUrl(normAbs);
         const fileUrlLower = fileUrl.toLowerCase();
@@ -572,7 +580,7 @@ function setManifestEntry(fileUrl, expName, entry) {
         }
         clientModules.delete(normId);
         serverModules.delete(normId);
-        serverFiles.delete(normId);
+        serverFiles.delete(normServerFileId);
         knownClientChunks.delete(normId);
         return;
       }
@@ -580,9 +588,9 @@ function setManifestEntry(fileUrl, expName, entry) {
       const isClientModule = useClientRegex.test(code.trim());
       const isServerModule = useServerRegex.test(code.trim()) || hasServerFunctions(code);
       if (isServerModule) {
-        serverFiles.add(normId);
+        serverFiles.add(normServerFileId);
       } else {
-        serverFiles.delete(normId);
+        serverFiles.delete(normServerFileId);
       }
 
       updateManifestForModule(normAbs, code, isClientModule);

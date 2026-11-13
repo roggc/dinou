@@ -5,6 +5,7 @@ import manifestGeneratorPlugin from "./manifest-generator-plugin.js";
 import parseExports from "../../core/parse-exports.js";
 import { useServerRegex } from "../../constants.js";
 import { extractServerFunctions, hasServerFunctions } from "../../core/transform-server-functions.js";
+import { normalizePathCase } from "../../core/path-utils.js";
 
 function serverFunctionsPlugin(manifestData = {}, options = {}) {
   const opts =
@@ -16,12 +17,15 @@ function serverFunctionsPlugin(manifestData = {}, options = {}) {
   const serverFiles =
     opts.serverFiles || manifestData.serverFiles || options.serverFiles || null;
   const root = process.cwd();
+  const normalizedRoot = normalizePathCase(root);
   const serverFunctions = new Map(); // Collect here: Map<relativePath, Set<exports>>
   const sfMtimeCache = new Map(); // Cache by filePath: { mtimeMs, exportsSet }
 
   function normalizeFsPath(p) {
     const resolved = path.resolve(p).replace(/\\/g, "/");
-    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+    return process.platform === "win32" && resolved[1] === ":"
+      ? resolved.charAt(0).toLowerCase() + resolved.slice(1)
+      : resolved;
   }
 
   return {
@@ -39,7 +43,9 @@ function serverFunctionsPlugin(manifestData = {}, options = {}) {
       const exports = isModuleLevel ? parseExports(code) : extractServerFunctions(code, id);
       if (!exports || exports.length === 0) return null;
 
-      const relativePath = path.relative(root, id).replace(/\\/g, "/");
+      const relativePath = path
+        .relative(normalizedRoot, normalizePathCase(path.resolve(id)))
+        .replace(/\\/g, "/");
       serverFunctions.set(relativePath, new Set(exports)); // Save exports as a Set for uniqueness
 
       const fileUrl = `file:///${relativePath}`;
@@ -72,7 +78,9 @@ function serverFunctionsPlugin(manifestData = {}, options = {}) {
     async generateBundle(options, bundle) {
       if (serverFiles && serverFiles.size > 0) {
         for (const filePath of serverFiles) {
-          const rel = path.relative(root, filePath).replace(/\\/g, "/");
+          const rel = path
+            .relative(normalizedRoot, normalizePathCase(path.resolve(filePath)))
+            .replace(/\\/g, "/");
           try {
             const stat = await fs.stat(filePath);
             const cached = sfMtimeCache.get(filePath);

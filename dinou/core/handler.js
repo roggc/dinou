@@ -1500,14 +1500,23 @@ async function handleRequest(request, platformContext = {}) {
       }
 
       const sfManifest = getServerFunctionsManifest();
+      let resolvedRelativePath = normalizedRelativePath;
       if (sfManifest) {
-        const allowedExports = sfManifest[normalizedRelativePath];
+        let allowedExports = sfManifest[normalizedRelativePath];
+        if (!allowedExports) {
+          const lowerTarget = normalizedRelativePath.toLowerCase();
+          const matchedKey = Object.keys(sfManifest).find((k) => k.toLowerCase() === lowerTarget);
+          if (matchedKey) {
+            allowedExports = sfManifest[matchedKey];
+            resolvedRelativePath = matchedKey;
+          }
+        }
         if (!allowedExports || !allowedExports.has(exportName)) {
           return Response.json({ error: "Invalid export name" }, { status: 400 });
         }
       }
 
-      const absPath = path.resolve(process.cwd(), relativePath);
+      const absPath = path.resolve(process.cwd(), resolvedRelativePath);
       const mod = await importModule(absPath);
       const fn = exportName === "default" ? mod.default : mod[exportName];
 

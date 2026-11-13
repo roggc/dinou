@@ -4,6 +4,7 @@ import manifestGeneratorPlugin from "./manifest-generator-plugin.js";
 import parseExports from "../../core/parse-exports.js";
 import { useServerRegex } from "../../constants.js";
 import { extractServerFunctions, hasServerFunctions } from "../../core/transform-server-functions.js";
+import { normalizePathCase } from "../../core/path-utils.js";
 
 class WebpackServerFunctionsPluginSimple {
   constructor(options = {}) {
@@ -51,15 +52,23 @@ class WebpackServerFunctionsPluginSimple {
             }
 
             if (this.serverFiles && this.serverFiles.size > 0) {
+              const normalizedCwd = normalizePathCase(process.cwd());
+              const existingPathsLower = new Set(
+                Object.keys(serverFunctionsManifest).map((k) => k.toLowerCase())
+              );
               for (const filePath of this.serverFiles) {
-                const rel = path.relative(process.cwd(), filePath).replace(/\\/g, "/");
-                if (!serverFunctionsManifest[rel]) {
+                const rel = path
+                  .relative(normalizedCwd, normalizePathCase(path.resolve(filePath)))
+                  .replace(/\\/g, "/");
+                const relLower = rel.toLowerCase();
+                if (!existingPathsLower.has(relLower)) {
                   try {
                     const fileCode = fs.readFileSync(filePath, "utf8");
                     if (useServerRegex.test(fileCode.trim())) {
                       const exports = parseExports(fileCode);
                       if (exports && exports.length > 0) {
                         serverFunctionsManifest[rel] = exports;
+                        existingPathsLower.add(relLower);
                         serverFunctionPaths.add(
                           path.resolve(process.cwd(), rel).replace(/\\/g, "/").toLowerCase()
                         );
@@ -68,6 +77,7 @@ class WebpackServerFunctionsPluginSimple {
                       const actions = extractServerFunctions(fileCode, filePath);
                       if (actions && actions.length > 0) {
                         serverFunctionsManifest[rel] = actions;
+                        existingPathsLower.add(relLower);
                         serverFunctionPaths.add(
                           path.resolve(process.cwd(), rel).replace(/\\/g, "/").toLowerCase()
                         );

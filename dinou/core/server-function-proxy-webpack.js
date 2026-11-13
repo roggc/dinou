@@ -178,7 +178,12 @@ function createServerFunctionProxy(id) {
           },
         });
 
-        return createFromFetch(Promise.resolve(new Response(readableStream)));
+        return createFromFetch(Promise.resolve(new Response(readableStream)), {
+          callServer: async (nextId, nextArgs) => {
+            const proxy = createServerFunctionProxy(nextId);
+            return proxy(...nextArgs);
+          },
+        });
       }
       return res.json();
     },

@@ -9,10 +9,12 @@ import { regex as assetRegex } from "../../core/asset-extensions.js";
 import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
 import { useClientRegex, useServerRegex } from "../../constants.js";
 import { hasServerFunctions } from "../../core/transform-server-functions.js";
+import { normalizePathCase } from "../../core/path-utils.js";
 
 const traverse = typeof _traverseRaw === "function" ? _traverseRaw : (_traverseRaw.default || _traverseRaw);
 
 const normalizePath = (p) => p.split(path.sep).join(path.posix.sep);
+const normalizeServerFilePath = (p) => normalizePathCase(path.resolve(p)).replace(/\\/g, "/");
 
 function hashFilePath(absPath) {
   return crypto.createHash("sha1").update(absPath).digest("hex").slice(0, 8);
@@ -89,19 +91,19 @@ async function getCSSEntries({
 
         const isImportedFileServer = useServerRegex.test(importedCode.trim());
         if (isImportedFileServer) {
-          serverFiles.add(path.resolve(absImportPathWithExt).replace(/\\/g, "/").toLowerCase());
+          serverFiles.add(normalizeServerFilePath(absImportPathWithExt));
           continue;
         } else if (hasServerFunctions(importedCode)) {
-          serverFiles.add(path.resolve(absImportPathWithExt).replace(/\\/g, "/").toLowerCase());
+          serverFiles.add(normalizeServerFilePath(absImportPathWithExt));
         }
       } else {
         const isImportedFileServer = useServerRegex.test(importedCode.trim());
 
         if (isImportedFileServer) {
-          serverFiles.add(path.resolve(absImportPathWithExt).replace(/\\/g, "/").toLowerCase());
+          serverFiles.add(normalizeServerFilePath(absImportPathWithExt));
           continue;
         } else if (hasServerFunctions(importedCode)) {
-          serverFiles.add(path.resolve(absImportPathWithExt).replace(/\\/g, "/").toLowerCase());
+          serverFiles.add(normalizeServerFilePath(absImportPathWithExt));
         }
       }
 
@@ -190,7 +192,7 @@ async function getCSSEntries({
       } catch (err) {}
     } else if (isPageOrLayout(absPath)) {
       if (hasServerFunctions(code)) {
-        serverFiles.add(path.resolve(absPath).replace(/\\/g, "/").toLowerCase());
+        serverFiles.add(normalizeServerFilePath(absPath));
       }
       try {
         const { csss } = await getImportsAndAssetsAndCsss(code, absPath);
