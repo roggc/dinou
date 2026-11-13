@@ -9,6 +9,7 @@ import { getStorageAdapter } from "./storage-adapter.js";
 import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
 import { DinouCacheSlotBoundary as RawDinouCacheSlotBoundary } from "./slot.js";
 import { getContext } from "./request-context.js";
+import { unwrapBailoutProxy } from "./bailout-proxy.js";
 import { getJSX } from "./get-jsx.js";
 import {
   isPprBuildActive,
@@ -527,6 +528,7 @@ async function DinouCacheSlot(props) {
   const { id, tag, tags, revalidate, children } = props || {};
   const isNoCache = typeof revalidate === "number" && revalidate < 1;
   const reqCtxInitial = getContext();
+  const rawQueryInitial = unwrapBailoutProxy(reqCtxInitial?.req?.query);
   const shouldStreamSlotInSuspense =
     isInsideRuntimeSuspenseOutsideSlot() &&
     !isPprBuildActive() &&
@@ -536,7 +538,7 @@ async function DinouCacheSlot(props) {
     !reqCtxInitial?._isPprRuntimeResume &&
     (Boolean(reqCtxInitial?._dynamicState?.value) ||
       isNoCache ||
-      Object.keys(reqCtxInitial?.req?.query || {}).length > 0 ||
+      Object.keys(rawQueryInitial || {}).length > 0 ||
       process.env.DINOU_DEV === "true" ||
       process.env.NODE_ENV !== "production");
 

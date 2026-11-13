@@ -44,6 +44,7 @@ export declare function revalidateTag(
   options?: { cascade?: boolean } | "layout"
 ): Promise<void>;
 
+import type { ReactNode } from "react";
 import type { RequestContextStore } from "./index";
 
 export type {
@@ -161,7 +162,7 @@ export interface DinouCacheSlotProps {
   tag?: string;
   tags?: string[];
   revalidate?: number;
-  children: any;
+  children: ReactNode | (() => ReactNode | Promise<ReactNode>);
 }
 
 /**
@@ -169,7 +170,7 @@ export interface DinouCacheSlotProps {
  * Caches and invalidates component sub-trees inside a page via revalidate and revalidateTag,
  * without re-evaluating the parent page or re-fetching unneeded database queries.
  */
-export declare function DinouCacheSlot(props: DinouCacheSlotProps): Promise<any>;
+export declare function DinouCacheSlot(props: DinouCacheSlotProps): Promise<ReactNode>;
 
 /**
  * Opts the enclosing `<Suspense>` boundary out of becoming a Dynamic PPR Hole

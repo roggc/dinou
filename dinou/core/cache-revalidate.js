@@ -12,7 +12,7 @@ import { getActiveLayoutChain, resolveLayoutFunctionsConfig, resolveLayoutChainP
 import importModule from "./import-module.js";
 import { resolveModulePpr } from "./resolve-module-ppr.js";
 import { getDinouConfig } from "./load-dinou-config.js";
-import { createBailoutProxy } from "./bailout-proxy.js";
+import { createBailoutProxy, unwrapBailoutProxy } from "./bailout-proxy.js";
 import {
   runWithPprContext,
   resetPprHoles,
@@ -250,10 +250,11 @@ function normalizeRevalidatePath(reqPath) {
     const ctx = getContext();
     let currentPathname = "/";
     if (ctx && ctx.req) {
+      const rawReqHeaders = unwrapBailoutProxy(ctx.req.headers);
       const headerPath =
-        ctx.req.headers?.["x-dinou-current-path"] ||
-        ctx.req.headers?.["X-Dinou-Current-Path"];
-      const referer = ctx.req.headers?.referer;
+        rawReqHeaders?.["x-dinou-current-path"] ||
+        rawReqHeaders?.["X-Dinou-Current-Path"];
+      const referer = rawReqHeaders?.referer;
       if (headerPath) {
         currentPathname = headerPath;
       } else if (referer) {
