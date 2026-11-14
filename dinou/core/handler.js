@@ -929,11 +929,26 @@ function __noopMarker() {
   return discovered;
 }
 
+function applyStreamingResponseHeaders(headers) {
+  if (!headers.has("Content-Encoding")) {
+    headers.set("Content-Encoding", "identity");
+  }
+  if (!headers.has("X-Accel-Buffering")) {
+    headers.set("X-Accel-Buffering", "no");
+  }
+  const cacheControl = headers.get("Cache-Control");
+  if (!cacheControl) {
+    headers.set("Cache-Control", "no-store, no-cache, must-revalidate, no-transform");
+  } else if (!/\bno-transform\b/i.test(cacheControl)) {
+    headers.set("Cache-Control", `${cacheControl}, no-transform`);
+  }
+}
+
 /**
  * Bridges Node.js style response methods to a WHATWG Web Response.
  */
 class WebResponseBridge extends PassThrough {
-  constructor() {
+  constructor(platformContext = null) {
     super();
     this.statusCode = 200;
     this.statusMessage = "";
@@ -941,6 +956,7 @@ class WebResponseBridge extends PassThrough {
     this.cookies = [];
     this.headersSent = false;
     this._resolved = false;
+    this._platformContext = platformContext;
     this._responsePromise = new Promise((resolve) => {
       this._resolveResponse = resolve;
     });
@@ -1021,11 +1037,13 @@ class WebResponseBridge extends PassThrough {
       for (const c of this.cookies) {
         this.headers.append("Set-Cookie", c);
       }
+      applyStreamingResponseHeaders(this.headers);
       const webStream = Readable.toWeb(this);
       const res = new Response(webStream, {
         status: this.statusCode,
         statusText: this.statusMessage || undefined,
         headers: this.headers,
+        encodeBody: "manual",
       });
       this._resolved = true;
       this._resolveResponse(res);
@@ -1075,6 +1093,7 @@ class WebResponseBridge extends PassThrough {
     for (const c of this.cookies) {
       this.headers.append("Set-Cookie", c);
     }
+    applyStreamingResponseHeaders(this.headers);
 
     const textEncoder = new TextEncoder();
     const { readable, writable } = new TransformStream();
@@ -1088,7 +1107,7 @@ class WebResponseBridge extends PassThrough {
     };
     this.on("data", onBridgeData);
 
-    (async () => {
+    const pumpPromise = (async () => {
       let reader;
       try {
         reader = readableStream.getReader();
@@ -1117,10 +1136,19 @@ class WebResponseBridge extends PassThrough {
       } catch (e) {}
     })();
 
+    if (
+      this._platformContext &&
+      this._platformContext.ctx &&
+      typeof this._platformContext.ctx.waitUntil === "function"
+    ) {
+      this._platformContext.ctx.waitUntil(pumpPromise);
+    }
+
     const res = new Response(readable, {
       status: this.statusCode,
       statusText: this.statusMessage || undefined,
       headers: this.headers,
+      encodeBody: "manual",
     });
     this._resolved = true;
     this._resolveResponse(res);
@@ -1360,6 +1388,7 @@ function createServerFunctionContext(simReq, resBridge, platformContext = {}) {
     env: platformContext.env || {},
     ctx: platformContext.ctx || null,
     platformContext,
+    _dynamicState: { value: true },
   };
   setCurrentContext(context);
   return context;
@@ -1440,7 +1469,7 @@ async function handleRequest(request, platformContext = {}) {
     method: request.method,
   };
 
-  const bridge = new WebResponseBridge();
+  const bridge = new WebResponseBridge(platformContext);
   const rootContext = createRequestContext(simReq, bridge, platformContext);
 
   // 4. Plugin onRequest Hook (Universal Middlewares & Webhooks)
@@ -1826,11 +1855,27 @@ async function handleRequest(request, platformContext = {}) {
                 !isLayoutTtlExpired &&
                 entry.slotTags.length > 0 &&
                 (await hasExpiredSlots(entry.slotTags));
+              const ancestors =
+                i < activeChain.length - 1 ? activeChain.slice(i + 1) : [];
               const maxAncestorGen =
-                i < activeChain.length - 1
-                  ? Math.max(0, ...activeChain.slice(i + 1).map((l) => l.generatedAt || 0))
+                ancestors.length > 0
+                  ? Math.max(0, ...ancestors.map((l) => l.generatedAt || 0))
                   : 0;
-              const isAncestorNewer = entry.generatedAt > 0 && maxAncestorGen > entry.generatedAt;
+              const maxAncestorOwnGen =
+                ancestors.length > 0
+                  ? Math.max(
+                      0,
+                      ...ancestors.map((l) => l.layoutGeneratedAt || l.generatedAt || 0)
+                    )
+                  : 0;
+              const entryOwnGen = entry.layoutGeneratedAt || entry.generatedAt || 0;
+              const isAncestorOwnNewer =
+                entryOwnGen > 0 && maxAncestorOwnGen > entryOwnGen;
+              const isAncestorSlotOnlyNewer =
+                !isAncestorOwnNewer &&
+                entry.generatedAt > 0 &&
+                maxAncestorGen > entry.generatedAt;
+              const isAncestorNewer = isAncestorOwnNewer || isAncestorSlotOnlyNewer;
               if (isLayoutSlotTtlExpired && !isLayoutTtlExpired && !(isLayoutReq && isAncestorNewer)) {
                 const layoutSlotRevalKey = `layout-slot:${entry.layoutRoutePath}`;
                 const layoutSlotRevalPromise = (async () => {
@@ -1850,7 +1895,10 @@ async function handleRequest(request, platformContext = {}) {
                 }
               } else if (isLayoutTtlExpired || (isLayoutReq && isAncestorNewer)) {
                 const { revalidateLayout } = await import("./cache-revalidate.js");
-                await revalidateLayout(entry.layoutRoutePath, {});
+                await revalidateLayout(entry.layoutRoutePath, {
+                  onlyRefreshSlots:
+                    !isLayoutTtlExpired && !isAncestorOwnNewer && isAncestorSlotOnlyNewer,
+                });
                 const lMetaKey = entry.cleanLayoutKey
                   ? `${entry.cleanLayoutKey}/layout.metadata.json`
                   : "layout.metadata.json";
@@ -1866,6 +1914,11 @@ async function handleRequest(request, platformContext = {}) {
                 );
                 if (refreshedMeta?.generatedAt) {
                   entry.generatedAt = Number(refreshedMeta.generatedAt);
+                }
+                if (refreshedMeta?.layoutGeneratedAt || refreshedMeta?.generatedAt) {
+                  entry.layoutGeneratedAt = Number(
+                    refreshedMeta.layoutGeneratedAt || refreshedMeta.generatedAt
+                  );
                 }
                 if (refreshedMeta?.suspenseCount !== undefined) {
                   entry.suspenseCount = Number(refreshedMeta.suspenseCount || 0);
@@ -2655,15 +2708,27 @@ async function handleRequest(request, platformContext = {}) {
               !isLayoutTtlExpired &&
               entry.slotTags.length > 0 &&
               (await hasExpiredSlots(entry.slotTags));
+            const ancestors =
+              i < activeLayoutChain.length - 1 ? activeLayoutChain.slice(i + 1) : [];
             const maxAncestorGen =
-              i < activeLayoutChain.length - 1
+              ancestors.length > 0
+                ? Math.max(0, ...ancestors.map((l) => l.generatedAt || 0))
+                : 0;
+            const maxAncestorOwnGen =
+              ancestors.length > 0
                 ? Math.max(
                     0,
-                    ...activeLayoutChain.slice(i + 1).map((l) => l.generatedAt || 0)
+                    ...ancestors.map((l) => l.layoutGeneratedAt || l.generatedAt || 0)
                   )
                 : 0;
-            const isAncestorNewer =
-              entry.generatedAt > 0 && maxAncestorGen > entry.generatedAt;
+            const entryOwnGen = entry.layoutGeneratedAt || entry.generatedAt || 0;
+            const isAncestorOwnNewer =
+              entryOwnGen > 0 && maxAncestorOwnGen > entryOwnGen;
+            const isAncestorSlotOnlyNewer =
+              !isAncestorOwnNewer &&
+              entry.generatedAt > 0 &&
+              maxAncestorGen > entry.generatedAt;
+            const isAncestorNewer = isAncestorOwnNewer || isAncestorSlotOnlyNewer;
             if (isLayoutSlotTtlExpired && !isLayoutTtlExpired && !isAncestorNewer) {
               const layoutSlotRevalKey = `layout-slot:${entry.layoutRoutePath}`;
               const layoutSlotRevalPromise = (async () => {
@@ -2683,7 +2748,10 @@ async function handleRequest(request, platformContext = {}) {
               }
             } else if (isLayoutTtlExpired || isAncestorNewer) {
               const { revalidateLayout } = await import("./cache-revalidate.js");
-              await revalidateLayout(entry.layoutRoutePath, {});
+              await revalidateLayout(entry.layoutRoutePath, {
+                onlyRefreshSlots:
+                  !isLayoutTtlExpired && !isAncestorOwnNewer && isAncestorSlotOnlyNewer,
+              });
               const refreshedMeta = await readMetaFromStorage(
                 storage,
                 entry.cleanLayoutKey
@@ -2697,6 +2765,11 @@ async function handleRequest(request, platformContext = {}) {
               );
               if (refreshedMeta?.generatedAt) {
                 entry.generatedAt = Number(refreshedMeta.generatedAt);
+              }
+              if (refreshedMeta?.layoutGeneratedAt || refreshedMeta?.generatedAt) {
+                entry.layoutGeneratedAt = Number(
+                  refreshedMeta.layoutGeneratedAt || refreshedMeta.generatedAt
+                );
               }
             }
           }

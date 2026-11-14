@@ -234,32 +234,52 @@ async function spliceDynamicHolesIntoShell(
   let holeIndex = Number(startHoleIndex) || 0;
   const liveHolesMap = new Map();
 
-  async function traverseProps(props) {
+  async function traverseProps(props, inClientProps = false) {
     if (!props || typeof props !== "object") return;
     for (const [, value] of Object.entries(props)) {
-      if (value && typeof value === "object") {
-        await traverse(value);
+      if (liveHolesMap.size >= knownHoleIds.size) return;
+      if (value && (typeof value === "object" || typeof value === "function")) {
+        await traverse(value, inClientProps);
       }
     }
   }
 
-  async function traverse(current) {
+  async function traverse(current, inClientProps = false) {
     if (!current || liveHolesMap.size >= knownHoleIds.size) return;
     if (Array.isArray(current)) {
       for (const item of current) {
         if (liveHolesMap.size >= knownHoleIds.size) return;
-        await traverse(item);
+        await traverse(item, inClientProps);
       }
-      return;
-    }
-    if (typeof current !== "object" || current instanceof Promise) {
       return;
     }
     if (
       isClientComponentRef(current?.type) ||
       current?.$$typeof === Symbol.for("react.client.reference")
     ) {
-      await traverseProps(current?.props);
+      await traverseProps(current?.props, true);
+      return;
+    }
+    if (
+      current instanceof Promise ||
+      ((typeof current === "object" || typeof current === "function") &&
+        typeof current?.then === "function")
+    ) {
+      if (inClientProps) {
+        return;
+      }
+      try {
+        const resolved = await current;
+        await traverse(resolved, false);
+      } catch (err) {
+        if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
+          return;
+        }
+        console.error("[Dinou PPR] Error awaiting JSX promise in hole splice:", err);
+      }
+      return;
+    }
+    if (typeof current !== "object") {
       return;
     }
     if (typeof current?.type === "function") {
@@ -267,7 +287,7 @@ async function spliceDynamicHolesIntoShell(
         const evaluated = await invokeWithServerHooksDispatcher(() =>
           current.type(current.props || {})
         );
-        await traverse(evaluated);
+        await traverse(evaluated, false);
       } catch (err) {
         if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
           return;
@@ -282,14 +302,14 @@ async function spliceDynamicHolesIntoShell(
       current.type.$$typeof === Symbol.for("react.forward_ref")
     ) {
       if (isClientComponentRef(current.type)) {
-        await traverseProps(current.props);
+        await traverseProps(current.props, true);
         return;
       }
       try {
         const rendered = await invokeWithServerHooksDispatcher(() =>
           current.type.render(current.props || {}, current.ref)
         );
-        await traverse(rendered);
+        await traverse(rendered, false);
       } catch (err) {
         if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
           return;
@@ -304,7 +324,7 @@ async function spliceDynamicHolesIntoShell(
       current.type.$$typeof === Symbol.for("react.memo")
     ) {
       if (isClientComponentRef(current.type)) {
-        await traverseProps(current.props);
+        await traverseProps(current.props, true);
         return;
       }
       try {
@@ -324,7 +344,7 @@ async function spliceDynamicHolesIntoShell(
             innerComp.render(current.props || {}, current.ref)
           );
         }
-        await traverse(rendered);
+        await traverse(rendered, false);
       } catch (err) {
         if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
           return;
@@ -359,18 +379,18 @@ async function spliceDynamicHolesIntoShell(
         : runInRuntimeStaticSuspense;
       await runStaticScope(async () => {
         if (current.props?.children) {
-          await traverse(current.props.children);
+          await traverse(current.props.children, false);
         }
         if (current.props?.fallback) {
-          await traverse(current.props.fallback);
+          await traverse(current.props.fallback, false);
         }
       });
       return;
     }
     if (current?.$$typeof === Symbol.for("react.transitional.element")) {
-      await traverseProps(current.props);
+      await traverseProps(current.props, false);
     } else {
-      await traverseProps(current);
+      await traverseProps(current, inClientProps);
     }
   }
 
@@ -413,29 +433,25 @@ async function streamDynamicHoles(
 
   const clientManifest = getClientManifest();
 
-  async function traverseProps(props) {
+  async function traverseProps(props, inClientProps = false) {
     if (!props || typeof props !== "object") return;
     for (const [, value] of Object.entries(props)) {
       if (hasExplicitHoles && holePromises.length >= knownHoleIds.size) return;
-      if (value && typeof value === "object") {
-        await traverse(value);
+      if (value && (typeof value === "object" || typeof value === "function")) {
+        await traverse(value, inClientProps);
       }
     }
   }
 
-  async function traverse(current) {
+  async function traverse(current, inClientProps = false) {
     if (!current || (hasExplicitHoles && holePromises.length >= knownHoleIds.size)) return;
 
     // Handle Arrays (children)
     if (Array.isArray(current)) {
       for (const item of current) {
         if (hasExplicitHoles && holePromises.length >= knownHoleIds.size) return;
-        await traverse(item);
+        await traverse(item, inClientProps);
       }
-      return;
-    }
-
-    if (typeof current !== "object" || current instanceof Promise) {
       return;
     }
 
@@ -444,7 +460,31 @@ async function streamDynamicHoles(
       isClientComponentRef(current?.type) ||
       current?.$$typeof === Symbol.for("react.client.reference")
     ) {
-      await traverseProps(current?.props);
+      await traverseProps(current?.props, true);
+      return;
+    }
+
+    if (
+      current instanceof Promise ||
+      ((typeof current === "object" || typeof current === "function") &&
+        typeof current?.then === "function")
+    ) {
+      if (inClientProps) {
+        return;
+      }
+      try {
+        const resolved = await current;
+        await traverse(resolved, false);
+      } catch (err) {
+        if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
+          return;
+        }
+        console.error("[Dinou PPR] Error awaiting JSX promise in hole traversal:", err);
+      }
+      return;
+    }
+
+    if (typeof current !== "object") {
       return;
     }
 
@@ -454,7 +494,7 @@ async function streamDynamicHoles(
         const evaluated = await invokeWithServerHooksDispatcher(() =>
           current.type(current.props || {})
         );
-        await traverse(evaluated);
+        await traverse(evaluated, false);
       } catch (err) {
         if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
           return;
@@ -471,14 +511,14 @@ async function streamDynamicHoles(
       current.type.$$typeof === Symbol.for("react.forward_ref")
     ) {
       if (isClientComponentRef(current.type)) {
-        await traverseProps(current.props);
+        await traverseProps(current.props, true);
         return;
       }
       try {
         const rendered = await invokeWithServerHooksDispatcher(() =>
           current.type.render(current.props || {}, current.ref)
         );
-        await traverse(rendered);
+        await traverse(rendered, false);
       } catch (err) {
         if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
           return;
@@ -495,7 +535,7 @@ async function streamDynamicHoles(
       current.type.$$typeof === Symbol.for("react.memo")
     ) {
       if (isClientComponentRef(current.type)) {
-        await traverseProps(current.props);
+        await traverseProps(current.props, true);
         return;
       }
       try {
@@ -515,7 +555,7 @@ async function streamDynamicHoles(
             innerComp.render(current.props || {}, current.ref)
           );
         }
-        await traverse(rendered);
+        await traverse(rendered, false);
       } catch (err) {
         if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
           return;
@@ -594,10 +634,10 @@ async function streamDynamicHoles(
           : runInRuntimeStaticSuspense;
       await runStaticScope(async () => {
         if (current.props?.children) {
-          await traverse(current.props.children);
+          await traverse(current.props.children, false);
         }
         if (current.props?.fallback) {
-          await traverse(current.props.fallback);
+          await traverse(current.props.fallback, false);
         }
       });
       return;
@@ -605,9 +645,9 @@ async function streamDynamicHoles(
 
     // Traverse host element / Fragment props or plain props object
     if (current?.$$typeof === Symbol.for("react.transitional.element")) {
-      await traverseProps(current.props);
+      await traverseProps(current.props, false);
     } else {
-      await traverseProps(current);
+      await traverseProps(current, inClientProps);
     }
   }
 
@@ -840,11 +880,18 @@ async function handlePprResume({
 
   const headers = new Headers(bridge.headers);
   headers.set("Content-Type", "text/html; charset=utf-8");
-  headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  headers.set("Cache-Control", "no-store, no-cache, must-revalidate, no-transform");
+  if (!headers.has("Content-Encoding")) {
+    headers.set("Content-Encoding", "identity");
+  }
+  if (!headers.has("X-Accel-Buffering")) {
+    headers.set("X-Accel-Buffering", "no");
+  }
 
   return new Response(readable, {
     status: metadata?.status || 200,
     headers,
+    encodeBody: "manual",
   });
 }
 

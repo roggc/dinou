@@ -62,12 +62,21 @@ async function generateStatic() {
       ? rscModule.getStaticLayouts()
       : [];
 
-  // 4b. Pre-render all static layout segments (layout.rsc)
+  // 4b. Pre-render all static layout segments (layout.rsc) ancestor-first with monotonic timestamps
+  let lastSsgLayoutGen = 0;
   if (layouts.length > 0) {
     if (!isTTY) {
       console.log(`⚡ [SSG] Pre-rendering ${layouts.length} static layout(s)...`);
     }
-    for (const layoutInfo of layouts) {
+    const sortedLayouts = [...layouts].sort((a, b) => {
+      const cleanA = String(a?.routePath || "/").replace(/^\/+/, "").replace(/\/+$/, "");
+      const cleanB = String(b?.routePath || "/").replace(/^\/+/, "").replace(/\/+$/, "");
+      const depthA = cleanA ? cleanA.split("/").filter(Boolean).length : 0;
+      const depthB = cleanB ? cleanB.split("/").filter(Boolean).length : 0;
+      if (depthA !== depthB) return depthA - depthB;
+      return cleanA < cleanB ? -1 : cleanA > cleanB ? 1 : 0;
+    });
+    for (const layoutInfo of sortedLayouts) {
       const layoutReqPath = layoutInfo.routePath.startsWith("/")
         ? layoutInfo.routePath
         : "/" + layoutInfo.routePath;
@@ -88,9 +97,12 @@ async function generateStatic() {
             const cleanLayoutPath = layoutReqPath.replace(/^\/+/, "").replace(/\/+$/, "");
             const layoutRscKey = cleanLayoutPath ? `${cleanLayoutPath}/layout.rsc` : "layout.rsc";
 
+            const ssgLayoutGen = Math.max(Date.now(), lastSsgLayoutGen + 1);
+            lastSsgLayoutGen = ssgLayoutGen;
             let layoutMeta = {
               status: 200,
-              generatedAt: Date.now(),
+              generatedAt: ssgLayoutGen,
+              layoutGeneratedAt: ssgLayoutGen,
               revalidate: undefined,
               tags: [],
             };
@@ -161,6 +173,9 @@ async function generateStatic() {
           layoutErr
         );
       }
+    }
+    while (lastSsgLayoutGen > 0 && Date.now() <= lastSsgLayoutGen) {
+      await new Promise((r) => setTimeout(r, 1));
     }
   }
 

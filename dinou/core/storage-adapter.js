@@ -141,7 +141,10 @@ class FileSystemStorage extends StorageAdapter {
 
     // Check companion metadata if available
     let metadata = null;
-    const isLayoutKey = cleanKey.includes("layout.rsc") || cleanKey.includes("layout.metadata.json");
+    const isLayoutKey =
+      cleanKey.includes("layout.rsc") ||
+      cleanKey.includes("layout.metadata.json") ||
+      cleanKey.includes("shell.layout.json");
     const normSlotKey = cleanKey.replace(/^\/+/, "");
     const isSlotKey = normSlotKey.startsWith("slots/") || normSlotKey.endsWith("/slot.json") || normSlotKey.endsWith("/slot.metadata.json");
     const metaFileName = isLayoutKey
@@ -174,7 +177,10 @@ class FileSystemStorage extends StorageAdapter {
     const cleanKey = String(key || "").replace(/\\/g, "/");
     const isMetaJson = cleanKey.endsWith("metadata.json") || path.basename(targetPath).endsWith("metadata.json");
     if (metadata && !isMetaJson) {
-      const isLayoutKey = cleanKey.includes("layout.rsc") || cleanKey.includes("layout.metadata.json");
+      const isLayoutKey =
+        cleanKey.includes("layout.rsc") ||
+        cleanKey.includes("layout.metadata.json") ||
+        cleanKey.includes("shell.layout.json");
       const normSlotKey = cleanKey.replace(/^\/+/, "");
       const isSlotKey = normSlotKey.startsWith("slots/") || normSlotKey.endsWith("/slot.json") || normSlotKey.endsWith("/slot.metadata.json");
       const metaFileName = isLayoutKey
@@ -218,7 +224,9 @@ class FileSystemStorage extends StorageAdapter {
     const effectivePrefix = prefix === "dinou_cache" ? "" : prefix;
     const results = [];
     const walk = (dir, rel = "") => {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      const entries = fs
+        .readdirSync(dir, { withFileTypes: true })
+        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
       for (const entry of entries) {
         const entryRel = rel ? `${rel}/${entry.name}` : entry.name;
         if (entry.isDirectory()) {

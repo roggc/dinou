@@ -227,9 +227,20 @@ async function resolveRouteConfigForRevalidate(pagePath, reqSegments, existingMe
   };
 }
 
+function compareLayoutPathsAncestorFirst(pathA, pathB) {
+  const cleanA = String(pathA || "/").replace(/^\/+/, "").replace(/\/+$/, "");
+  const cleanB = String(pathB || "/").replace(/^\/+/, "").replace(/\/+$/, "");
+  const depthA = cleanA ? cleanA.split("/").filter(Boolean).length : 0;
+  const depthB = cleanB ? cleanB.split("/").filter(Boolean).length : 0;
+  if (depthA !== depthB) return depthA - depthB;
+  return cleanA < cleanB ? -1 : cleanA > cleanB ? 1 : 0;
+}
+
 async function walkMetadataFiles(dir, fileList = []) {
   try {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
+    const entries = (await fs.readdir(dir, { withFileTypes: true })).sort((a, b) =>
+      a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+    );
     for (const entry of entries) {
       const entryPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
@@ -354,9 +365,11 @@ async function revalidatePage(reqPath, internalOptions = {}) {
     let maxActiveLayoutGenTime = 0;
     let leafSuspenseCount = 0;
     let leafHoles = [];
+    let hasActiveLayoutChain = false;
     try {
       const activeChain = getActiveLayoutChain(reqSegments, {}, srcFolder);
       if (activeChain.length > 0) {
+        hasActiveLayoutChain = true;
         for (const entry of activeChain) {
           const lMetaKey = entry.cleanLayoutKey
             ? `${entry.cleanLayoutKey}/layout.metadata.json`
@@ -370,6 +383,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
           }
           const lGen = Number(lMetaObj?.generatedAt || 0);
           entry.generatedAt = lGen;
+          entry.layoutGeneratedAt = Number(lMetaObj?.layoutGeneratedAt || lGen || 0);
           entry.suspenseCount = Number(lMetaObj?.suspenseCount || 0);
           entry.holes = Array.isArray(lMetaObj?.holes) ? lMetaObj.holes : [];
           if (lGen > maxActiveLayoutGenTime) {
@@ -377,8 +391,39 @@ async function revalidatePage(reqPath, internalOptions = {}) {
           }
         }
         const leafLayout = activeChain[0];
-        if (activeChain.length > 1 && maxActiveLayoutGenTime > (leafLayout.generatedAt || 0)) {
-          await revalidateLayout(leafLayout.layoutRoutePath);
+        const leafRscKey = leafLayout.cleanLayoutKey
+          ? `${leafLayout.cleanLayoutKey}/layout.rsc`
+          : "layout.rsc";
+        let leafRscItem = await readEdgeStorageOrAsset(storage, leafRscKey);
+        let hasValidLeafRsc = Boolean(
+          leafRscItem &&
+            leafRscItem.content &&
+            !leafRscItem.content.trimStart().startsWith("<")
+        );
+        const ancestors = activeChain.length > 1 ? activeChain.slice(1) : [];
+        const maxAncestorGen =
+          ancestors.length > 0
+            ? Math.max(0, ...ancestors.map((l) => l.generatedAt || 0))
+            : 0;
+        const maxAncestorOwnGen =
+          ancestors.length > 0
+            ? Math.max(
+                0,
+                ...ancestors.map((l) => l.layoutGeneratedAt || l.generatedAt || 0)
+              )
+            : 0;
+        const leafGen = leafLayout.generatedAt || 0;
+        const leafOwnGen = leafLayout.layoutGeneratedAt || leafGen;
+        const isLeafMissing =
+          !hasValidLeafRsc && (isEdgeRuntime() || maxAncestorGen > 0 || onlyRefreshSlots);
+        const isAncestorOwnNewer = leafOwnGen > 0 && maxAncestorOwnGen > leafOwnGen;
+        const isAncestorSlotOnlyNewer =
+          !isAncestorOwnNewer && leafGen > 0 && maxAncestorGen > leafGen;
+        if (isLeafMissing || isAncestorOwnNewer || isAncestorSlotOnlyNewer) {
+          await revalidateLayout(leafLayout.layoutRoutePath, {
+            onlyRefreshSlots:
+              !isAncestorOwnNewer && (isAncestorSlotOnlyNewer || isLeafMissing),
+          });
           const refreshedMetaKey = leafLayout.cleanLayoutKey
             ? `${leafLayout.cleanLayoutKey}/layout.metadata.json`
             : "layout.metadata.json";
@@ -387,6 +432,9 @@ async function revalidatePage(reqPath, internalOptions = {}) {
             try {
               const parsed = JSON.parse(refreshedItem.content);
               leafLayout.generatedAt = Number(parsed?.generatedAt || leafLayout.generatedAt || 0);
+              leafLayout.layoutGeneratedAt = Number(
+                parsed?.layoutGeneratedAt || leafLayout.generatedAt || 0
+              );
               leafLayout.suspenseCount = Number(parsed?.suspenseCount || 0);
               leafLayout.holes = Array.isArray(parsed?.holes) ? parsed.holes : [];
               if (leafLayout.generatedAt > maxActiveLayoutGenTime) {
@@ -394,14 +442,16 @@ async function revalidatePage(reqPath, internalOptions = {}) {
               }
             } catch (e) {}
           }
+          leafRscItem = await readEdgeStorageOrAsset(storage, leafRscKey);
+          hasValidLeafRsc = Boolean(
+            leafRscItem &&
+              leafRscItem.content &&
+              !leafRscItem.content.trimStart().startsWith("<")
+          );
         }
         leafSuspenseCount = Number(leafLayout.suspenseCount || 0);
         leafHoles = Array.isArray(leafLayout.holes) ? leafLayout.holes : [];
-        const leafRscKey = leafLayout.cleanLayoutKey
-          ? `${leafLayout.cleanLayoutKey}/layout.rsc`
-          : "layout.rsc";
-        const leafRscItem = await readEdgeStorageOrAsset(storage, leafRscKey);
-        if (leafRscItem && leafRscItem.content && !leafRscItem.content.trimStart().startsWith("<")) {
+        if (hasValidLeafRsc) {
           activeLayoutRscText = leafRscItem.content;
         }
       }
@@ -615,6 +665,25 @@ async function revalidatePage(reqPath, internalOptions = {}) {
                 console.warn(`⚠️ [Edge Revalidate] Layout+Page composition fallback for ${cleanPath}:`, composeErr?.message || composeErr);
               }
             }
+          } else if (
+            !hasActiveLayoutChain &&
+            didSpliceOnlyPageSlots &&
+            renderedRsc &&
+            typeof renderHtmlStream === "function"
+          ) {
+            try {
+              const htmlStream = await renderHtmlStream(toStream(renderedRsc), {
+                bootstrapModules: [clientEntry],
+                bootstrapScriptContent,
+                waitForAll: true,
+              });
+              const htmlText = await new Response(htmlStream).text();
+              if (htmlText) {
+                renderedFullRsc = renderedRsc;
+                newHtml = htmlText;
+                composedFromCachedLayout = true;
+              }
+            } catch (composeErr) {}
           }
 
           if (!composedFromCachedLayout) {
@@ -930,17 +999,44 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
           let resolvedLayoutJsx = null;
           if (onlyRefreshSlots) {
             try {
-              const existingShellLayout = await readEdgeStorageOrAsset(storage, shellLayoutKey);
-              if (existingShellLayout && existingShellLayout.content) {
-                const deserialized = deserializeJSX(existingShellLayout.content);
-                resolvedLayoutJsx = await runInLayoutSegment(() =>
-                  refreshNestedSlotsInTree(deserialized, "__layout_shell__", {
-                    currentPath: reqPathWithSlash,
-                  })
-                );
-                if (resolvedLayoutJsx) {
-                  didSpliceOnlyLayoutSlots = true;
-                  await storage.set(shellLayoutKey, serializeJSX(resolvedLayoutJsx));
+              let hasNewerAncestorOwnLayout = false;
+              if (prevLayoutOwnGenTime > 0) {
+                const activeChain = getActiveLayoutChain(reqSegments, {}, srcFolder, {
+                  ignoreNoLayout: true,
+                });
+                for (const anc of activeChain.slice(1)) {
+                  const ancMetaKey = anc.cleanLayoutKey
+                    ? `${anc.cleanLayoutKey}/layout.metadata.json`
+                    : "layout.metadata.json";
+                  const ancItem = await readEdgeStorageOrAsset(storage, ancMetaKey);
+                  let ancMetaObj = ancItem?.metadata || null;
+                  if (!ancMetaObj && ancItem?.content) {
+                    try {
+                      ancMetaObj = JSON.parse(ancItem.content);
+                    } catch (e) {}
+                  }
+                  const ancOwnGen = Number(
+                    ancMetaObj?.layoutGeneratedAt || ancMetaObj?.generatedAt || 0
+                  );
+                  if (ancOwnGen > prevLayoutOwnGenTime) {
+                    hasNewerAncestorOwnLayout = true;
+                    break;
+                  }
+                }
+              }
+              if (!hasNewerAncestorOwnLayout) {
+                const existingShellLayout = await readEdgeStorageOrAsset(storage, shellLayoutKey);
+                if (existingShellLayout && existingShellLayout.content) {
+                  const deserialized = deserializeJSX(existingShellLayout.content);
+                  resolvedLayoutJsx = await runInLayoutSegment(() =>
+                    refreshNestedSlotsInTree(deserialized, "__layout_shell__", {
+                      currentPath: reqPathWithSlash,
+                    })
+                  );
+                  if (resolvedLayoutJsx) {
+                    didSpliceOnlyLayoutSlots = true;
+                    await storage.set(shellLayoutKey, serializeJSX(resolvedLayoutJsx));
+                  }
                 }
               }
             } catch (e) {
@@ -1185,9 +1281,12 @@ async function revalidateTag(tag, options) {
       // 1. Delete invalidated slot artifacts first so subsequent layout/page revalidations re-render the fresh slot
       await Promise.all(Array.from(targetSlotKeys).map((k) => storage.delete(k)));
 
-      // 2. Revalidate affected layouts first so any subsequent revalidatePage uses the updated layout.rsc
+      // 2. Revalidate affected layouts ancestor-first so parent slots/timestamps settle before descendants
+      const sortedTargetLayouts = Array.from(targetLayoutPaths.entries()).sort(([a], [b]) =>
+        compareLayoutPathsAncestorFirst(a, b)
+      );
       await Promise.all(
-        Array.from(targetLayoutPaths.entries()).map(([p, opts]) => revalidateLayout(p, opts))
+        sortedTargetLayouts.map(([p, opts]) => revalidateLayout(p, opts))
       );
 
       // 3. Revalidate affected pages (without deleting metadata.json!)
@@ -1241,6 +1340,7 @@ async function revalidateTag(tag, options) {
   }
 
   await Promise.all(slotPromises);
+  targetLayoutPaths.sort((a, b) => compareLayoutPathsAncestorFirst(a.reqPath, b.reqPath));
   await Promise.all(
     targetLayoutPaths.map(({ reqPath, onlyRefreshSlots }) =>
       revalidateLayout(reqPath, { onlyRefreshSlots })
