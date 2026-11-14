@@ -170,6 +170,14 @@ export interface DinouPlugin {
 
 export interface DinouConfig {
   /**
+   * Enable or disable the React Compiler (`babel-plugin-react-compiler`) during production builds.
+   * Applies across all supported bundlers (Esbuild, Rollup, and Webpack).
+   * Individual components or hooks can also opt out locally with the `"use no memo"` directive.
+   * @default true
+   */
+  reactCompiler?: boolean;
+
+  /**
    * Enable or disable React StrictMode in development mode.
    * When enabled, React double-invokes render and effect functions in development to catch side-effects.
    * @default true

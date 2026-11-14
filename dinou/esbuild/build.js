@@ -7,6 +7,7 @@ import path from "node:path";
 import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-module.js";
 import { generateRouteTypes } from "../core/generate-route-types.js";
 import { esbuildContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
+import { getDinouConfig } from "../core/load-dinou-config.js";
 import ensureVendorMode from "../core/ensure-vendor-mode.js";
 if (!ensureVendorMode()) {
   await new Promise(() => {});
@@ -103,12 +104,16 @@ try {
     ...assetEntryPoints,
   };
 
+  const dinouConfig = await getDinouConfig();
+  const enableReactCompiler = dinouConfig?.reactCompiler !== false;
+
   await esbuild.build(
     getConfigEsbuildProd({
       entryPoints,
       manifest,
       outdir,
       serverFiles,
+      reactCompiler: enableReactCompiler,
     })
   );
 

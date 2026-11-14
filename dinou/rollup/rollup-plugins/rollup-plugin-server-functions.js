@@ -30,49 +30,53 @@ function serverFunctionsPlugin(manifestData = {}, options = {}) {
 
   return {
     name: "server-functions-proxy",
-    transform(code, id) {
-      if (id.includes("node_modules") || id.includes("\0")) return null;
-      if (serverFiles && !serverFiles.has(normalizeFsPath(id))) {
-        if (!useServerRegex.test(code.trim()) && !hasServerFunctions(code)) return null;
-        serverFiles.add(normalizeFsPath(id));
-      } else if (!useServerRegex.test(code.trim()) && !hasServerFunctions(code)) {
-        return null;
-      }
+    transform: {
+      order: "pre",
+      handler(code, id) {
+        if (id.includes("node_modules") || id.includes("\0")) return null;
+        if (!/\.[jt]sx?($|\?)/.test(id)) return null;
+        if (serverFiles && !serverFiles.has(normalizeFsPath(id))) {
+          if (!useServerRegex.test(code.trim()) && !hasServerFunctions(code)) return null;
+          serverFiles.add(normalizeFsPath(id));
+        } else if (!useServerRegex.test(code.trim()) && !hasServerFunctions(code)) {
+          return null;
+        }
 
-      const isModuleLevel = useServerRegex.test(code.trim());
-      const exports = isModuleLevel ? parseExports(code) : extractServerFunctions(code, id);
-      if (!exports || exports.length === 0) return null;
+        const isModuleLevel = useServerRegex.test(code.trim());
+        const exports = isModuleLevel ? parseExports(code) : extractServerFunctions(code, id);
+        if (!exports || exports.length === 0) return null;
 
-      const relativePath = path
-        .relative(normalizedRoot, normalizePathCase(path.resolve(id)))
-        .replace(/\\/g, "/");
-      serverFunctions.set(relativePath, new Set(exports)); // Save exports as a Set for uniqueness
+        const relativePath = path
+          .relative(normalizedRoot, normalizePathCase(path.resolve(id)))
+          .replace(/\\/g, "/");
+        serverFunctions.set(relativePath, new Set(exports)); // Save exports as a Set for uniqueness
 
-      const fileUrl = `file:///${relativePath}`;
+        const fileUrl = `file:///${relativePath}`;
 
-      // Generate a module that exports proxies instead of the real code
-      let proxyCode = `
+        // Generate a module that exports proxies instead of the real code
+        let proxyCode = `
         import { createServerFunctionProxy } from "/__SERVER_FUNCTION_PROXY__";
       `;
 
-      for (const exp of exports) {
-        const key =
-          exp === "default" ? `${fileUrl}#default` : `${fileUrl}#${exp}`;
-        if (exp === "default") {
-          proxyCode += `export default createServerFunctionProxy(${JSON.stringify(
-            key
-          )});\n`;
-        } else {
-          proxyCode += `export const ${exp} = createServerFunctionProxy(${JSON.stringify(
-            key
-          )});\n`;
+        for (const exp of exports) {
+          const key =
+            exp === "default" ? `${fileUrl}#default` : `${fileUrl}#${exp}`;
+          if (exp === "default") {
+            proxyCode += `export default createServerFunctionProxy(${JSON.stringify(
+              key
+            )});\n`;
+          } else {
+            proxyCode += `export const ${exp} = createServerFunctionProxy(${JSON.stringify(
+              key
+            )});\n`;
+          }
         }
-      }
 
-      return {
-        code: proxyCode,
-        map: null,
-      };
+        return {
+          code: proxyCode,
+          map: null,
+        };
+      },
     },
     // 🪄 After manifest exists, replace the placeholder with the final URL
     async generateBundle(options, bundle) {

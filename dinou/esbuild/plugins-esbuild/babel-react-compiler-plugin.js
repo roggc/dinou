@@ -1,54 +1,96 @@
-import babel from "#babel/core";
+import babelModule from "#babel/core";
+import presetReactModule from "#babel/preset-react";
+import presetTypescriptModule from "#babel/preset-typescript";
+import pluginSyntaxImportMetaModule from "#babel/plugin-syntax-import-meta";
+import pluginReactCompilerModule from "#babel-plugin-react-compiler";
 import fs from "node:fs/promises";
 import path from "node:path";
-const norm = (p) => path.resolve(p).replace(/\\/g, "/");
-export default function babelReactCompilerPlugin() {
+import { fileURLToPath } from "node:url";
+import { useClientRegex, useServerRegex } from "../../constants.js";
+import { hasServerFunctions } from "../../core/transform-server-functions.js";
+
+const unwrapBabel = (mod) => mod?.default ?? mod;
+const babel = unwrapBabel(babelModule);
+const presetReact = unwrapBabel(presetReactModule);
+const presetTypescript = unwrapBabel(presetTypescriptModule);
+const pluginSyntaxImportMeta = unwrapBabel(pluginSyntaxImportMetaModule);
+const pluginReactCompiler = unwrapBabel(pluginReactCompilerModule);
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const normalizeNormPath = (p) => {
+  let s = path.resolve(p).replace(/\\/g, "/");
+  if (process.platform === "win32") {
+    s = s.replace(/^([a-zA-Z]):/, (_, d) => d.toLowerCase() + ":");
+  }
+  return s;
+};
+const dinouRootPrefix =
+  normalizeNormPath(path.resolve(__dirname, "../..")) + "/";
+
+export default function babelReactCompilerPlugin({ serverFiles = null } = {}) {
+  const serverFilesSet = serverFiles
+    ? new Set(Array.from(serverFiles).map((f) => normalizeNormPath(f)))
+    : null;
+
   return {
     name: "babel-react-compiler-bridge",
     setup(build) {
-      const entryPoints = build.initialOptions.entryPoints;
-      // Intercept JS/TS/JSX/TSX files
-      // NOTE: Filter node_modules to avoid slowing down by processing external libraries
-      build.onLoad({ filter: /\.[jt]sx?$/ }, async (args) => {
-        // Double check security to avoid node_modules
-        if (args.path.includes("node_modules")) return;
-        const abs = path.resolve(args.path);
-
-        const absNorm = norm(abs);
-        const isAnEntryPoint = Object.values(entryPoints).some(
-          (val) => norm(path.resolve(val)) === absNorm,
-        );
-        if (!isAnEntryPoint) {
-          return;
+      // Intercept user JS/TS/JSX/TSX modules across the entire client graph
+      // (including child components and custom hooks without their own "use client" directive).
+      build.onLoad({ filter: /\.[jt]sx?$/, namespace: "file" }, async (args) => {
+        const normPath = args.path.replace(/\\/g, "/");
+        if (
+          normPath.includes("/node_modules/") ||
+          normPath.includes("/.dinou/")
+        ) {
+          return null;
         }
+
+        const absNorm = normalizeNormPath(args.path);
+        // Skip Dinou's internal framework runtime (both in library and ejected mode)
+        if (absNorm.startsWith(dinouRootPrefix)) {
+          return null;
+        }
+        // Skip known "use server" modules so serverFunctionsPlugin handles them exclusively
+        if (serverFilesSet && serverFilesSet.has(absNorm)) {
+          return null;
+        }
+
         try {
           const source = await fs.readFile(args.path, "utf8");
-          const filename = args.path;
+          const trimmed = source.trim();
 
-          // Transform the code with Babel + React Compiler
+          // Defense-in-depth: never run client React Compiler on "use server" modules
+          if (
+            !useClientRegex.test(trimmed) &&
+            (useServerRegex.test(trimmed) || hasServerFunctions(source))
+          ) {
+            return null;
+          }
+
           const result = await babel.transformAsync(source, {
-            filename,
+            filename: args.path,
             presets: [
-              // We need to tell Babel to understand React and TS before compiling
-              ["@babel/preset-react", { runtime: "automatic" }],
-              "@babel/preset-typescript",
+              [presetReact, { runtime: "automatic" }],
+              presetTypescript,
             ],
             plugins: [
-              "babel-plugin-react-compiler", // 👈 The jewel in the crown
+              pluginReactCompiler,
+              pluginSyntaxImportMeta,
             ],
-            sourceMaps: true, // Vital for esbuild sourcemaps to work
-            configFile: false, // Ignore global babel.config.js to get straight to the point
+            sourceMaps: build.initialOptions.sourcemap ? "inline" : false,
+            configFile: false,
+            babelrc: false,
           });
 
-          // If for some reason Babel does not return code, let esbuild handle it
-          if (!result || !result.code) return;
+          if (!result || !result.code) return null;
 
           return {
             contents: result.code,
-            loader: "js", // Babel returns standard JS
+            loader: "js",
+            resolveDir: path.dirname(args.path),
           };
         } catch (error) {
-          // If Babel fails, show a clean error to not break the build silently
           return {
             errors: [
               {

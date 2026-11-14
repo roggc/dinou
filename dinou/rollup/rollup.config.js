@@ -22,7 +22,17 @@ import rollupMemoryPlugin from "./rollup-plugins/rollup-plugin-memory.js";
 import rollupSwcPlugin from "./rollup-plugins/rollup-plugin-swc.js";
 import { generateRouteTypes } from "../core/generate-route-types.js";
 import { rollupContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
+import { getDinouConfig } from "../core/load-dinou-config.js";
+import presetReactModule from "#babel/preset-react";
+import presetTypescriptModule from "#babel/preset-typescript";
+import pluginSyntaxImportMetaModule from "#babel/plugin-syntax-import-meta";
+import pluginReactCompilerModule from "#babel-plugin-react-compiler";
 
+const unwrapBabel = (mod) => mod?.default ?? mod;
+const presetReact = unwrapBabel(presetReactModule);
+const presetTypescript = unwrapBabel(presetTypescriptModule);
+const pluginSyntaxImportMeta = unwrapBabel(pluginSyntaxImportMetaModule);
+const pluginReactCompiler = unwrapBabel(pluginReactCompilerModule);
 const babel = babelModule?.default || babelModule;
 const resolve = resolveModule?.default || resolveModule;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -44,7 +54,10 @@ export default async function () {
   const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
   const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDevelopment;
   const serverFiles = new Set();
-  const del = (await import("rollup-plugin-delete")).default;
+  const dinouConfig = await getDinouConfig();
+  const enableReactCompiler = dinouConfig?.reactCompiler !== false;
+  const delModule = await import("#rollup-plugin-delete");
+  const del = delModule?.default || delModule;
   const clientConfig = {
     input: isDevelopment
       ? {
@@ -164,14 +177,16 @@ export default async function () {
         ? rollupSwcPlugin()
         : babel({
             babelHelpers: "bundled",
+            configFile: false,
+            babelrc: false,
             extensions: [".js", ".jsx", ".ts", ".tsx"],
             presets: [
-              ["@babel/preset-react", { runtime: "automatic" }],
-              "@babel/preset-typescript",
+              [presetReact, { runtime: "automatic" }],
+              presetTypescript,
             ],
             plugins: [
-              "babel-plugin-react-compiler",
-              "@babel/plugin-syntax-import-meta",
+              enableReactCompiler && pluginReactCompiler,
+              pluginSyntaxImportMeta,
             ].filter(Boolean),
             exclude: /node_modules[\\/](?!dinou|react-refresh)/,
           }),

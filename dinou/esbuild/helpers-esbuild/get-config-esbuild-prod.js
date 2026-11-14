@@ -15,11 +15,11 @@ export default function getConfigEsbuildProd({
   outdir = ".dinou/dist3",
   manifest = {},
   serverFiles,
+  reactCompiler = true,
 }) {
   const manifestData = {};
   let plugins = [
     esbuildContextualDinouPlugin({ projectRoot: process.cwd() }),
-    babelReactCompilerPlugin(),
     TsconfigPathsPlugin({}),
     cssProcessorPlugin({ outdir }),
     reactClientManifestPlugin({
@@ -29,8 +29,9 @@ export default function getConfigEsbuildProd({
     assetsPlugin(),
     manifestGeneratorPlugin(manifestData),
     serverFunctionsPlugin({ manifestData, serverFiles }),
+    reactCompiler && babelReactCompilerPlugin({ serverFiles }),
     writePlugin(),
-  ];
+  ].filter(Boolean);
 
   const staticDir = existsSync("public") ? "public" : (existsSync("favicons") ? "favicons" : null);
   if (staticDir) {

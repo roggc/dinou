@@ -3,11 +3,17 @@ import "dotenv/config";
 import path from "node:path";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import ReactServerWebpackPlugin from "react-server-dom-webpack/plugin";
 import CopyWebpackPlugin from "#copy-webpack-plugin";
 import MiniCssExtractPlugin from "#mini-css-extract-plugin";
+import presetReactModule from "#babel/preset-react";
+import presetTypescriptModule from "#babel/preset-typescript";
+import pluginSyntaxImportMetaModule from "#babel/plugin-syntax-import-meta";
+import pluginReactCompilerModule from "#babel-plugin-react-compiler";
 import createScopedName from "../core/createScopedName.js";
+import { getDinouConfig } from "../core/load-dinou-config.js";
 import TsconfigPathsPlugin from "#tsconfig-paths-webpack-plugin";
 import manifestGeneratorPlugin from "./plugins/manifest-generator-plugin.js";
 import ServerFunctionsPlugin from "./plugins/server-functions-plugin.js";
@@ -91,6 +97,15 @@ export default async () => {
     cleanDir(outputDir);
   }
   const [cssEntries, , serverFiles] = await getCSSEntries();
+  const dinouConfig = await getDinouConfig();
+  const enableReactCompiler = dinouConfig?.reactCompiler !== false;
+  const require = createRequire(import.meta.url);
+  const babelLoaderPath = require.resolve("#babel-loader");
+  const unwrapBabel = (mod) => mod?.default ?? mod;
+  const presetReact = unwrapBabel(presetReactModule);
+  const presetTypescript = unwrapBabel(presetTypescriptModule);
+  const pluginSyntaxImportMeta = unwrapBabel(pluginSyntaxImportMetaModule);
+  const pluginReactCompiler = unwrapBabel(pluginReactCompilerModule);
 
   const dependencyClientFiles = new Set();
   if (typeof scanProjectDependenciesForClientComponentsAsync === "function") {
@@ -191,15 +206,17 @@ export default async () => {
                   },
                 }
               : {
-                  loader: "babel-loader",
+                  loader: babelLoaderPath,
                   options: {
+                    configFile: false,
+                    babelrc: false,
                     presets: [
-                      ["@babel/preset-react", { runtime: "automatic" }],
-                      "@babel/preset-typescript",
+                      [presetReact, { runtime: "automatic" }],
+                      presetTypescript,
                     ],
                     plugins: [
-                      "babel-plugin-react-compiler",
-                      "@babel/plugin-syntax-import-meta",
+                      enableReactCompiler && pluginReactCompiler,
+                      pluginSyntaxImportMeta,
                     ].filter(Boolean),
                   },
                 },
