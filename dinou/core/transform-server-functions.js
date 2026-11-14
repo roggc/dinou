@@ -2,7 +2,7 @@ import parser from "#babel/parser";
 import traverseModule from "#babel/traverse";
 import generateModule from "#babel/generator";
 import * as tModule from "#babel/types";
-import { useServerRegex } from "../constants.js";
+import { useClientRegex, useServerRegex } from "../constants.js";
 import parseExports from "./parse-exports.js";
 
 const traverse = traverseModule?.default || traverseModule;
@@ -440,9 +440,101 @@ export function extractServerFunctions(code, filename = "file.tsx") {
   return result.actions || [];
 }
 
+const SSR_SERVER_STUB_PREAMBLE = `import { registerServerReference as __dinouRegisterServerReference } from "react-server-dom-webpack/client.edge";
+function __dinouCreateSsrServerStub(id) {
+  const stub = () => {
+    const err = new Error(
+      \`[Dinou] Server Function "\${id}" deferred from SSR to client <Suspense> mount.\`
+    );
+    Object.defineProperty(err, Symbol.for("react.recoverable"), { value: true });
+    const rejected = Promise.reject(err);
+    rejected.catch(() => {});
+    return rejected;
+  };
+  __dinouRegisterServerReference(stub, id);
+  return stub;
+}
+`;
+
+/**
+ * Generates a pure SSR Server Reference stub module for Pass B (`ssr-engine`),
+ * stripping all server-side implementation bodies and server-only imports while
+ * preserving exact ESM export signatures (`export const ...` and `export default ...`).
+ *
+ * @param {string} code
+ * @param {string} [filename="file.tsx"]
+ * @param {string} [relativeFileUrl="file:///src/action.ts"]
+ * @returns {string | null}
+ */
+export function buildSsrServerReferenceModule(
+  code,
+  filename = "file.tsx",
+  relativeFileUrl = "file:///src/action.ts"
+) {
+  if (typeof code !== "string" || useClientRegex.test(code.trim())) {
+    return null;
+  }
+  if (!hasServerFunctions(code)) {
+    return null;
+  }
+  const actions = extractServerFunctions(code, filename);
+  if (!actions || actions.length === 0) {
+    return null;
+  }
+
+  const uniqueActions = Array.from(new Set(actions));
+  let out = SSR_SERVER_STUB_PREAMBLE;
+  for (const name of uniqueActions) {
+    const fullId = `${relativeFileUrl}#${name}`;
+    if (name === "default") {
+      out += `const __dinou_default_stub = __dinouCreateSsrServerStub(${JSON.stringify(fullId)});\n`;
+      out += `export default __dinou_default_stub;\n`;
+    } else {
+      out += `export const ${name} = __dinouCreateSsrServerStub(${JSON.stringify(fullId)});\n`;
+    }
+  }
+  return out;
+}
+
+/**
+ * Synthesizes `sf_0`, `sf_1`, ... module namespace stub objects directly inside
+ * `ssr-client-manifest` from `server-functions-manifest.json` without importing
+ * server source files into the browser-conditioned SSR engine (Pass B).
+ *
+ * @param {Record<string, string[] | Set<string>>} parsedServerFunctionsManifest
+ * @returns {string}
+ */
+export function generateSsrServerManifestStubs(parsedServerFunctionsManifest) {
+  const serverFunctionFiles = Object.keys(parsedServerFunctionsManifest || {});
+  if (serverFunctionFiles.length === 0) {
+    return "";
+  }
+
+  let code = `\n${SSR_SERVER_STUB_PREAMBLE}`;
+  serverFunctionFiles.forEach((relPath, index) => {
+    const normRel = relPath.replace(/\\/g, "/");
+    const relFileUrl = "file:///" + normRel;
+    const rawFns = parsedServerFunctionsManifest[relPath] || [];
+    const fns = Array.from(
+      new Set(Array.isArray(rawFns) ? rawFns : Array.from(rawFns))
+    );
+    const entries = fns
+      .map(
+        (fn) =>
+          `    ${JSON.stringify(fn)}: __dinouCreateSsrServerStub(${JSON.stringify(`${relFileUrl}#${fn}`)})`
+      )
+      .join(",\n");
+    const objLiteral = entries ? `{\n${entries}\n  }` : `{}`;
+    code += `const sf_${index} = Object.defineProperty(${objLiteral}, "__esModule", { value: true });\n`;
+  });
+  return code;
+}
+
 export default {
   hasServerFunctions,
   isModuleLevelUseServer,
   transformServerFunctions,
   extractServerFunctions,
+  buildSsrServerReferenceModule,
+  generateSsrServerManifestStubs,
 };

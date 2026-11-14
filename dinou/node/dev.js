@@ -37,7 +37,12 @@ import { discoverLayoutsFromFs } from "../core/discover-layouts.js";
 import { esbuildContextualDinouPlugin, isUnderscoreEscapedSrcPath } from "../core/resolve-contextual-dinou.js";
 import parseExports from "../core/parse-exports.js";
 import { useClientRegex, useServerRegex } from "../constants.js";
-import { transformServerFunctions, hasServerFunctions } from "../core/transform-server-functions.js";
+import {
+  transformServerFunctions,
+  hasServerFunctions,
+  buildSsrServerReferenceModule,
+  generateSsrServerManifestStubs,
+} from "../core/transform-server-functions.js";
 import { nodeToWebRequest, sendWebResponseToNode } from "../core/http-adapter.js";
 import { setStorageAdapter, hasExplicitStorageAdapter, FileSystemStorage, MemoryStorage } from "../core/storage-adapter.js";
 import createScopedName from "../core/createScopedName.js";
@@ -823,10 +828,7 @@ globalThis.__DINOU_LAYOUTS__ = ${JSON.stringify(discoveredLayouts)};
   });
 
   const serverFunctionFiles = Object.keys(parsedServerFunctionsManifest);
-  serverFunctionFiles.forEach((relPath, index) => {
-    const absPath = path.resolve(projectRoot, relPath).replace(/\\/g, "/");
-    ssrManifestCode += `import * as sf_${index} from ${JSON.stringify(absPath)};\n`;
-  });
+  ssrManifestCode += generateSsrServerManifestStubs(parsedServerFunctionsManifest);
 
   ssrManifestCode += `\nexport const clientModules = {\n`;
   const emittedClientModules = new Set();
@@ -1285,26 +1287,13 @@ const serverReferencesPluginSsr = {
         try { code = fs.readFileSync(args.path, "utf8"); } catch (e) { return null; }
         if (!hasServerFunctions(code)) return null;
 
-        const sfResult = transformServerFunctions(code, args.path);
-        if (!sfResult.actions || sfResult.actions.length === 0) return null;
-
-        const transformedCode = sfResult.code;
-        const exports = sfResult.actions;
         const absPath = path.resolve(args.path);
         const relPath = path.relative(projectRoot, absPath).replace(/\\/g, "/");
         const relativeFileUrl = "file:///" + relPath;
+        const stubModule = buildSsrServerReferenceModule(code, args.path, relativeFileUrl);
+        if (!stubModule) return null;
 
-        let transformed = transformedCode + "\n\n";
-        transformed += `import { registerServerReference } from "react-server-dom-webpack/client.edge";\n`;
-        for (const name of exports) {
-          const localIdent = name === "default" ? sfResult.defaultExportIdentifier : name;
-          if (localIdent) {
-            transformed += `registerServerReference(${localIdent}, ${JSON.stringify(relativeFileUrl + "#" + name)});\n`;
-            transformed += `registerServerReference(${localIdent}, ${JSON.stringify(pathToFileURL(absPath).href + "#" + name)});\n`;
-          }
-        }
-        const ext = path.extname(args.path);
-        return { contents: transformed, loader: ext === ".ts" ? "ts" : ext === ".tsx" ? "tsx" : ext === ".jsx" ? "jsx" : "js" };
+        return { contents: stubModule, loader: "js" };
       });
     });
   },

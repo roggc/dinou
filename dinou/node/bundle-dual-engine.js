@@ -11,7 +11,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { generateRouteModulesCode, generateRouteTypes } from "../core/route-generator.js";
 import parseExports from "../core/parse-exports.js";
 import { useClientRegex, useServerRegex } from "../constants.js";
-import { transformServerFunctions, hasServerFunctions } from "../core/transform-server-functions.js";
+import {
+  transformServerFunctions,
+  hasServerFunctions,
+  buildSsrServerReferenceModule,
+  generateSsrServerManifestStubs,
+} from "../core/transform-server-functions.js";
 import createScopedName from "../core/createScopedName.js";
 import { regex as assetRegex } from "../core/asset-extensions.js";
 import {
@@ -479,10 +484,7 @@ globalThis.__DINOU_VFS__ = ${JSON.stringify(vfsSnapshot)};
   });
 
   const serverFunctionFiles = Object.keys(parsedServerFunctionsManifest);
-  serverFunctionFiles.forEach((relPath, index) => {
-    const absPath = path.resolve(projectRoot, relPath).replace(/\\/g, "/");
-    ssrManifestCode += `import * as sf_${index} from ${JSON.stringify(absPath)};\n`;
-  });
+  ssrManifestCode += generateSsrServerManifestStubs(parsedServerFunctionsManifest);
 
   ssrManifestCode += `\nexport const clientModules = {\n`;
   const emittedClientModules = new Set();
@@ -915,43 +917,19 @@ var __webpack_chunk_load__ = function(chunkId) {
     setup(build) {
       build.onLoad({ filter: /\.[jt]sx?$/ }, async (args) => {
         if (args.path.includes("node_modules")) {
-          if (
-            args.path.includes("react-server-dom") ||
-            args.path.includes("@roggc/react-server-dom-esm") ||
-            args.path.includes("node_modules/react/") ||
-            args.path.includes("node_modules\\react\\") ||
-            args.path.includes("node_modules/react-dom/") ||
-            args.path.includes("node_modules\\react-dom\\")
-          ) {
-            return null;
-          }
+          return null;
         }
         let code;
         try { code = fs.readFileSync(args.path, "utf8"); } catch (e) { return null; }
         if (!hasServerFunctions(code)) return null;
 
-        const sfResult = transformServerFunctions(code, args.path);
-        if (!sfResult.actions || sfResult.actions.length === 0) return null;
-
-        const transformedCode = sfResult.code;
-        const exports = sfResult.actions;
         const absPath = path.resolve(args.path);
         const relPath = path.relative(projectRoot, absPath).replace(/\\/g, "/");
         const relativeFileUrl = "file:///" + relPath;
+        const stubModule = buildSsrServerReferenceModule(code, args.path, relativeFileUrl);
+        if (!stubModule) return null;
 
-        let transformed = transformedCode + "\n\n";
-        transformed += `import { registerServerReference } from "react-server-dom-webpack/client.edge";\n`;
-        for (const name of exports) {
-          const localIdent = name === "default" ? sfResult.defaultExportIdentifier : name;
-          if (localIdent) {
-            transformed += `registerServerReference(${localIdent}, ${JSON.stringify(relativeFileUrl + "#" + name)});\n`;
-            transformed += `registerServerReference(${localIdent}, ${JSON.stringify(pathToFileURL(absPath).href + "#" + name)});\n`;
-          }
-        }
-
-        const ext = path.extname(args.path);
-        const loader = ext === ".ts" ? "ts" : ext === ".tsx" ? "tsx" : ext === ".jsx" ? "jsx" : "js";
-        return { contents: transformed, loader };
+        return { contents: stubModule, loader: "js" };
       });
     },
   };

@@ -1634,7 +1634,11 @@ async function handleRequest(request, platformContext = {}) {
       return bridge.toResponse();
     } catch (err) {
       console.error("[Dinou] Error executing server function:", err);
-      return Response.json({ error: err.message || "Internal Server Error" }, { status: 500 });
+      const errorPayload = { error: err?.message || "Internal Server Error" };
+      if (err && typeof err.digest === "string") {
+        errorPayload.digest = err.digest;
+      }
+      return Response.json(errorPayload, { status: 500 });
     }
   }
 
