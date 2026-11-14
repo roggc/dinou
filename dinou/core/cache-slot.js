@@ -5,11 +5,15 @@
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import React from "react";
-import { getStorageAdapter } from "./storage-adapter.js";
+import {
+  getStorageAdapter,
+  FileSystemStorage,
+  readDist2Fallback,
+} from "./storage-adapter.js";
 import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
 import { DinouCacheSlotBoundary as RawDinouCacheSlotBoundary } from "./slot.js";
-import { getContext } from "./request-context.js";
-import { unwrapBailoutProxy } from "./bailout-proxy.js";
+import { getContext, requestStorage } from "./request-context.js";
+import { createBailoutProxy, unwrapBailoutProxy } from "./bailout-proxy.js";
 import { getJSX } from "./get-jsx.js";
 import {
   isPprBuildActive,
@@ -76,6 +80,87 @@ if (!globalThis[PRE_EVAL_ROUTES_KEY] || !(globalThis[PRE_EVAL_ROUTES_KEY] instan
   globalThis[PRE_EVAL_ROUTES_KEY] = new Map();
 }
 const preEvaluatingRoutes = globalThis[PRE_EVAL_ROUTES_KEY];
+
+function normalizeSlotRouteKey(rawPath) {
+  if (typeof rawPath !== "string" || rawPath.trim() === "") return null;
+  const clean = rawPath.split("?")[0].split("#")[0].replace(/\\/g, "/");
+  if (
+    clean.includes("____rsc_") ||
+    clean.includes("____server_function____")
+  ) {
+    return null;
+  }
+  return clean.replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
+function doesSlotEntryMatchRoute(entry, targetRouteKey) {
+  if (targetRouteKey === null || targetRouteKey === undefined) return true;
+  const keys = entry?.routeKeys;
+  if (!(keys instanceof Set) || keys.size === 0) return true;
+  if (targetRouteKey === "") return true;
+  for (const k of keys) {
+    if (
+      k === "" ||
+      k === targetRouteKey ||
+      targetRouteKey.startsWith(k + "/") ||
+      k.startsWith(targetRouteKey + "/")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function createDiscoveryContext(currentPath) {
+  const outerCtx = getContext();
+  const rawQuery = unwrapBailoutProxy(outerCtx?.req?.query);
+  const rawCookies = unwrapBailoutProxy(outerCtx?.req?.cookies);
+  const rawHeaders = unwrapBailoutProxy(outerCtx?.req?.headers);
+  const activeEnv =
+    outerCtx?.env ||
+    outerCtx?.platformContext?.env ||
+    outerCtx?.req?.env ||
+    (typeof globalThis !== "undefined" ? globalThis.__DINOU_ENV__ : undefined) ||
+    {};
+  let reqPath =
+    typeof currentPath === "string" && currentPath
+      ? currentPath.split("?")[0]
+      : outerCtx?.req?.path || "/";
+  if (!reqPath.startsWith("/")) reqPath = "/" + reqPath;
+  return {
+    req: {
+      query: createBailoutProxy(
+        rawQuery && typeof rawQuery === "object" ? { ...rawQuery } : {},
+        "req.query"
+      ),
+      cookies: createBailoutProxy(
+        rawCookies && typeof rawCookies === "object" ? { ...rawCookies } : {},
+        "req.cookies"
+      ),
+      headers: createBailoutProxy(
+        rawHeaders && typeof rawHeaders === "object" ? { ...rawHeaders } : {},
+        "req.headers"
+      ),
+      path: reqPath,
+      url: reqPath,
+      method: "GET",
+      env: activeEnv,
+    },
+    res: {
+      status() {},
+      setHeader() {},
+      cookie() {},
+      clearCookie() {},
+      redirect() {},
+    },
+    env: activeEnv,
+    platformContext: outerCtx?.platformContext
+      ? { ...outerCtx.platformContext, isSSG: false }
+      : { env: activeEnv },
+    _isStaticHtmlRender: Boolean(outerCtx?._isStaticHtmlRender),
+    _isSlotDiscovery: true,
+  };
+}
 
 let _registerServerRefFn = null;
 function getRegisterServerReference() {
@@ -342,7 +427,9 @@ async function getSlotFromStorage(storage, storageKey, knownTags = []) {
   }
 
   const isDeleted =
-    typeof storage.isDeleted === "function" && storage.isDeleted(storageKey);
+    typeof storage.isKeyDeleted === "function"
+      ? await storage.isKeyDeleted(storageKey)
+      : typeof storage.isDeleted === "function" && storage.isDeleted(storageKey);
   if (isDeleted) {
     return null;
   }
@@ -378,12 +465,15 @@ async function getSlotFromStorage(storage, storageKey, knownTags = []) {
             ...(Array.isArray(metadata?.tags) ? metadata.tags : []),
             ...(Array.isArray(knownTags) ? knownTags : []),
           ]);
-          if (typeof storage.getTagInvalidatedAt === "function") {
-            for (const t of combinedTags) {
-              const invAt = storage.getTagInvalidatedAt(t);
-              if (invAt > 0 && invAt >= generatedAt) {
-                return null;
-              }
+          for (const t of combinedTags) {
+            const invAt =
+              typeof storage.getTagInvalidatedAtAsync === "function"
+                ? await storage.getTagInvalidatedAtAsync(t)
+                : typeof storage.getTagInvalidatedAt === "function"
+                ? storage.getTagInvalidatedAt(t)
+                : 0;
+            if (invAt > 0 && invAt >= generatedAt) {
+              return null;
             }
           }
           cached = { content, metadata };
@@ -393,6 +483,11 @@ async function getSlotFromStorage(storage, storageKey, knownTags = []) {
       }
     }
   } catch (e) {}
+
+  const dist2Item = await readDist2Fallback(storage, storageKey, knownTags);
+  if (dist2Item && dist2Item.content) {
+    return dist2Item;
+  }
 
   return cached;
 }
@@ -404,7 +499,11 @@ async function readMetaFromStorageOrAssets(storage, key) {
     if (item?.metadata && typeof item.metadata === "object") return item.metadata;
     if (item?.content) return JSON.parse(item.content);
   } catch (e) {}
-  if (typeof storage.isDeleted === "function" && storage.isDeleted(key)) return null;
+  const isDeleted =
+    typeof storage.isKeyDeleted === "function"
+      ? await storage.isKeyDeleted(key)
+      : typeof storage.isDeleted === "function" && storage.isDeleted(key);
+  if (isDeleted) return null;
   try {
     const reqContext = getContext();
     const assets =
@@ -425,6 +524,17 @@ async function readMetaFromStorageOrAssets(storage, key) {
       }
     }
   } catch (e) {}
+  const dist2Item = await readDist2Fallback(storage, key);
+  if (dist2Item) {
+    if (dist2Item.metadata && typeof dist2Item.metadata === "object") {
+      return dist2Item.metadata;
+    }
+    if (dist2Item.content && dist2Item.content.trimStart().startsWith("{")) {
+      try {
+        return JSON.parse(dist2Item.content);
+      } catch (e) {}
+    }
+  }
   return null;
 }
 
@@ -604,6 +714,15 @@ async function DinouCacheSlot(props) {
   }
 
   // Register in slotRegistry for on-demand endpoint re-rendering and nested slot discovery
+  const prevSlotEntry = slotRegistry.get(slotId);
+  const slotRouteKeys =
+    prevSlotEntry?.routeKeys instanceof Set
+      ? prevSlotEntry.routeKeys
+      : new Set();
+  const currentSlotRouteKey = normalizeSlotRouteKey(reqCtxInitial?.req?.path);
+  if (currentSlotRouteKey !== null) {
+    slotRouteKeys.add(currentSlotRouteKey);
+  }
   slotRegistry.set(slotId, {
     render: async () => {
       return await runSlotScope(async () => {
@@ -611,16 +730,31 @@ async function DinouCacheSlot(props) {
         return await asyncRenderJSXToClientJSX(childElement);
       });
     },
-    discover: async () => {
+    discover: async (discoverPath) => {
       if (discoveringSlots.has(slotId)) return;
       discoveringSlots.add(slotId);
       try {
-        await runInSlotDiscovery(async () => {
-          await runSlotScope(async () => {
-            const childElement = typeof children === "function" ? await children() : children;
-            await asyncRenderJSXToClientJSX(childElement);
-          });
-        });
+        const fallbackRoute =
+          discoverPath ||
+          (slotRouteKeys.size > 0
+            ? "/" + Array.from(slotRouteKeys)[0]
+            : undefined);
+        await requestStorage.run(
+          createDiscoveryContext(fallbackRoute),
+          async () => {
+            await runWithPprContext({ isPpr: true }, async () => {
+              await runInSlotDiscovery(async () => {
+                await runSlotScope(async () => {
+                  const childElement =
+                    typeof children === "function"
+                      ? await children()
+                      : children;
+                  await asyncRenderJSXToClientJSX(childElement);
+                });
+              });
+            });
+          }
+        );
       } catch (e) {
       } finally {
         discoveringSlots.delete(slotId);
@@ -628,6 +762,7 @@ async function DinouCacheSlot(props) {
     },
     tags: allTags,
     revalidate: typeof revalidate === "number" ? revalidate : undefined,
+    routeKeys: slotRouteKeys,
   });
 
   // When running inside a nested slot discovery pass, recursively discover any child slots
@@ -892,23 +1027,34 @@ async function resolveCanonicalSlotId(slotIdOrTag, storage) {
       if (direct && direct.content) {
         return slotIdOrTag;
       }
+      const candidateKeySet = new Set();
       if (typeof storage.keys === "function") {
         const keys = await storage.keys("slots/");
-        for (const rawKey of keys) {
-          const key = String(rawKey || "").replace(/\\/g, "/");
-          if (key.endsWith("/slot.json") || key.endsWith("/slot.metadata.json")) {
-            const item = await storage.get(key);
-            let meta = item?.metadata;
-            if (!meta && key.endsWith("/slot.metadata.json") && item?.content) {
-              try {
-                meta = JSON.parse(item.content);
-              } catch (e) {}
-            }
-            if (meta && Array.isArray(meta.tags) && meta.tags.includes(slotIdOrTag)) {
-              if (meta.slotId) return meta.slotId;
-              const match = key.match(/^slots\/([^/]+)\//);
-              if (match) return match[1];
-            }
+        for (const k of keys) candidateKeySet.add(String(k || "").replace(/\\/g, "/"));
+      }
+      if (!storage.baseDir && storage.hydrateFromDisk !== false) {
+        try {
+          const dist2SlotsFs = new FileSystemStorage();
+          const diskSlotKeys = await dist2SlotsFs.keys("slots/");
+          for (const k of diskSlotKeys) {
+            candidateKeySet.add(String(k || "").replace(/\\/g, "/"));
+          }
+        } catch (e) {}
+      }
+      for (const key of candidateKeySet) {
+        if (key.endsWith("/slot.json") || key.endsWith("/slot.metadata.json")) {
+          const item =
+            (await storage.get(key)) || (await readDist2Fallback(storage, key));
+          let meta = item?.metadata;
+          if (!meta && key.endsWith("/slot.metadata.json") && item?.content) {
+            try {
+              meta = JSON.parse(item.content);
+            } catch (e) {}
+          }
+          if (meta && Array.isArray(meta.tags) && meta.tags.includes(slotIdOrTag)) {
+            if (meta.slotId) return meta.slotId;
+            const match = key.match(/^slots\/([^/]+)\//);
+            if (match) return match[1];
           }
         }
       }
@@ -988,17 +1134,24 @@ async function getSlotJSX(slotId, options = {}) {
     }
   }
 
-  async function discoverFromRegisteredSlots() {
-    const attempted = new Set();
+  const attemptedDiscoveryKeys = new Set();
+  async function discoverFromRegisteredSlots(filterRouteKey = undefined) {
     let progressed = true;
     while (!slotRegistry.has(targetId) && progressed) {
       progressed = false;
       for (const [regKey, entry] of Array.from(slotRegistry.entries())) {
-        if (attempted.has(regKey)) continue;
-        attempted.add(regKey);
+        if (attemptedDiscoveryKeys.has(regKey)) continue;
+        if (
+          filterRouteKey !== undefined &&
+          filterRouteKey !== null &&
+          !doesSlotEntryMatchRoute(entry, filterRouteKey)
+        ) {
+          continue;
+        }
+        attemptedDiscoveryKeys.add(regKey);
         progressed = true;
         if (typeof entry.discover === "function") {
-          await entry.discover();
+          await entry.discover(options.currentPath);
           targetId = await resolveCanonicalSlotId(slotId, storage);
           if (slotRegistry.has(targetId)) return;
         }
@@ -1006,9 +1159,13 @@ async function getSlotJSX(slotId, options = {}) {
     }
   }
 
-  // 2. First try discovering nested slots from already-registered outer slots
+  const cleanCurrentRouteKey = options.currentPath
+    ? normalizeSlotRouteKey(options.currentPath)
+    : null;
+
+  // 2. First try discovering nested slots from already-registered outer slots matching this route
   if (!slotRegistry.has(targetId)) {
-    await discoverFromRegisteredSlots();
+    await discoverFromRegisteredSlots(cleanCurrentRouteKey);
   }
 
   // 3. If still not in slotRegistry (e.g., cold server start), pre-evaluate the route once
@@ -1022,24 +1179,45 @@ async function getSlotJSX(slotId, options = {}) {
       const preEvalPromise = (async () => {
         try {
           const isNotFound = { value: false };
-          await runWithPprContext({ isPpr: true }, async () => {
-            await runInSlotDiscovery(async () => {
-              const pageJsx = await getJSX(options.currentPath, {}, isNotFound, false, false, {
-                segment: "page",
-              });
-              if (pageJsx) {
-                await asyncRenderJSXToClientJSX(pageJsx);
-              }
-              const resolvedId = await resolveCanonicalSlotId(slotId, storage);
+          await requestStorage.run(
+            createDiscoveryContext(options.currentPath),
+            async () => {
+              await runWithPprContext({ isPpr: true }, async () => {
+                await runInSlotDiscovery(async () => {
+                  const pageJsx = await getJSX(
+                    options.currentPath,
+                    {},
+                    isNotFound,
+                    false,
+                    false,
+                    {
+                      segment: "page",
+                    }
+                  );
+                  if (pageJsx) {
+                    await asyncRenderJSXToClientJSX(pageJsx);
+                  }
+                  const resolvedId = await resolveCanonicalSlotId(
+                    slotId,
+                    storage
+                  );
 
-              if (!slotRegistry.has(resolvedId)) {
-                const fullJsx = await getJSX(options.currentPath, {}, isNotFound, false, false);
-                if (fullJsx) {
-                  await asyncRenderJSXToClientJSX(fullJsx);
-                }
-              }
-            });
-          });
+                  if (!slotRegistry.has(resolvedId)) {
+                    const fullJsx = await getJSX(
+                      options.currentPath,
+                      {},
+                      isNotFound,
+                      false,
+                      false
+                    );
+                    if (fullJsx) {
+                      await asyncRenderJSXToClientJSX(fullJsx);
+                    }
+                  }
+                });
+              });
+            }
+          );
         } catch (e) {
           console.warn(
             `[getSlotJSX] Could not pre-evaluate route "${options.currentPath}" to register slot "${slotId}":`,
@@ -1055,8 +1233,13 @@ async function getSlotJSX(slotId, options = {}) {
     }
 
     if (!slotRegistry.has(targetId)) {
-      await discoverFromRegisteredSlots();
+      await discoverFromRegisteredSlots(cleanCurrentRouteKey);
     }
+  }
+
+  // 4. Final global fallback across any remaining registered slots if route-scoped lookup missed
+  if (!slotRegistry.has(targetId)) {
+    await discoverFromRegisteredSlots(null);
   }
 
   storageKey = `slots/${targetId}/slot.json`;

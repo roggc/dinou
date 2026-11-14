@@ -1,9 +1,14 @@
-import { isPprBuildActive, isInsideOuterSuspenseOutsideSlot, markDynamicAccess } from "./ppr-context.js";
+import {
+  isPprBuildActive,
+  isInsideOuterSuspenseOutsideSlot,
+  markDynamicAccess,
+  isSlotDiscoveryActive,
+} from "./ppr-context.js";
 
 function triggerBailout(label, onBailout) {
   if (isPprBuildActive() && isInsideOuterSuspenseOutsideSlot()) {
     markDynamicAccess(label);
-  } else if (typeof onBailout === "function") {
+  } else if (!isSlotDiscoveryActive() && typeof onBailout === "function") {
     onBailout();
   }
 }

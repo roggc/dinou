@@ -33,12 +33,16 @@ async function generateStatic() {
   });
 
   // 2. Initialize FileSystemStorage for writing .dinou/dist2
+  // Guard against dinou.config.* `storage` (e.g. RedisStorage) overriding FileSystemStorage during SSG build
+  globalThis.__DINOU_IS_SSG_BUILD__ = true;
   const storage = new FileSystemStorage(distFolder2);
   setStorageAdapter(storage);
 
+  try {
   // 3. Load compiled engines
   const rscModule = await import(pathToFileURL(rscEnginePath).href);
   const ssrModule = await import(pathToFileURL(ssrEnginePath).href);
+  setStorageAdapter(storage);
 
   // 4. Discover static routes and layouts
   updateBuildProgress("[SSG] Discovering static routes and layouts...");
@@ -292,6 +296,9 @@ async function generateStatic() {
   console.log(
     `✓ [SSG] Pre-rendered ${renderedCount} page(s) and ${layouts.length} layout(s) to .dinou/dist2`
   );
+  } finally {
+    delete globalThis.__DINOU_IS_SSG_BUILD__;
+  }
 }
 
 export { generateStatic };

@@ -4,7 +4,7 @@ import { existsSync, copyFileSync } from "node:fs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getContext, requestStorage } from "./request-context.js";
 import { resolveRelativeUrl } from "./url-resolver.js";
-import { getStorageAdapter } from "./storage-adapter.js";
+import { getStorageAdapter, readDist2Fallback } from "./storage-adapter.js";
 import { isEdgeRuntime, renderRSCStream } from "./rsc-renderer.js";
 import getJSX from "./get-jsx.js";
 import { getFilePathAndDynamicParams } from "./get-file-path-and-dynamic-params.js";
@@ -20,6 +20,7 @@ import {
   getPprHoleCounter,
   runInPageSegment,
   runInLayoutSegment,
+  isSlotDiscoveryActive,
 } from "./ppr-context.js";
 import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
 import {
@@ -85,7 +86,11 @@ async function readEdgeStorageOrAsset(storage, key) {
     const item = await storage.get(key);
     if (item && item.content) return item;
   } catch (e) {}
-  if (typeof storage.isDeleted === "function" && storage.isDeleted(key)) {
+  const isDeleted =
+    typeof storage.isKeyDeleted === "function"
+      ? await storage.isKeyDeleted(key)
+      : typeof storage.isDeleted === "function" && storage.isDeleted(key);
+  if (isDeleted) {
     return null;
   }
   try {
@@ -113,7 +118,7 @@ async function readEdgeStorageOrAsset(storage, key) {
       }
     }
   } catch (e) {}
-  return null;
+  return await readDist2Fallback(storage, key);
 }
 
 async function resolveRouteConfigForRevalidate(pagePath, reqSegments, existingMeta = {}) {
@@ -256,19 +261,22 @@ function normalizeRevalidatePath(reqPath) {
         rawReqHeaders?.["X-Dinou-Current-Path"];
       const referer = rawReqHeaders?.referer;
       if (headerPath) {
-        currentPathname = headerPath;
+        currentPathname = String(headerPath).split("?")[0].split("#")[0] || "/";
       } else if (referer) {
         try {
           currentPathname = new URL(referer).pathname;
         } catch (e) {}
       } else {
-        currentPathname = ctx.req.path || "/";
+        const reqPathCandidate = ctx.req.path || "/";
+        currentPathname = reqPathCandidate.includes("____server_function____")
+          ? "/"
+          : reqPathCandidate;
       }
     }
     targetPath = resolveRelativeUrl(targetPath, currentPathname);
   }
 
-  let cleanPath = targetPath;
+  let cleanPath = String(targetPath || "/").split("?")[0].split("#")[0] || "/";
   if (!cleanPath.startsWith("/")) {
     cleanPath = "/" + cleanPath;
   }
@@ -282,7 +290,6 @@ async function revalidatePage(reqPath, internalOptions = {}) {
   const cleanPath = normalizeRevalidatePath(reqPath);
   const onlyRefreshSlots = Boolean(internalOptions?.onlyRefreshSlots);
   return enqueueRevalidation(async () => {
-  if (isEdgeRuntime()) {
     const storage = getStorageAdapter();
     const cleanPathKey = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
     const htmlKey = cleanPathKey ? `${cleanPathKey}/index.html` : "index.html";
@@ -401,10 +408,12 @@ async function revalidatePage(reqPath, internalOptions = {}) {
     } catch (e) {}
 
     const prevGenTime = Math.max((currentMeta && currentMeta.generatedAt) || 0, maxActiveLayoutGenTime);
+    const prevPageOwnGenTime =
+      (currentMeta && (currentMeta.pageGeneratedAt || currentMeta.generatedAt)) || 0;
     const now = Date.now();
     const newGenTime = nextMonotonicGenTime(prevGenTime);
     currentMeta.generatedAt = newGenTime;
-    currentMeta.pageGeneratedAt = newGenTime;
+    let didSpliceOnlyPageSlots = false;
 
     let newHtml = cached ? cached.content : "";
     let renderedRsc = "";
@@ -420,6 +429,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
         "x-forwarded-proto": "http",
       };
       const markRevalDynamic = () => {
+        if (isSlotDiscoveryActive()) return;
         revalDynamicState.value = true;
       };
       const outerCtx = getContext();
@@ -476,6 +486,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
                   })
                 );
                 if (resolvedPageJsx) {
+                  didSpliceOnlyPageSlots = true;
                   pendingShellPageJson = serializeJSX(resolvedPageJsx);
                 }
               }
@@ -654,7 +665,9 @@ async function revalidatePage(reqPath, internalOptions = {}) {
           }
         });
       } catch (e) {
-        console.warn(`⚠️ [Edge Revalidate] Render fallback for ${cleanPath}:`, e?.message || e);
+        if (isEdgeRuntime() || process.env.DINOU_DEBUG) {
+          console.warn(`⚠️ [Edge Revalidate] Render fallback for ${cleanPath}:`, e?.message || e);
+        }
       }
       if (revalDynamicState.value && !isRoutePpr) {
         markRouteDynamicInMap(reqPathWithSlash, cleanPath, true);
@@ -662,6 +675,35 @@ async function revalidatePage(reqPath, internalOptions = {}) {
         return;
       }
       markRouteDynamicInMap(reqPathWithSlash, cleanPath, false);
+    }
+
+    const didRenderFreshPage = Boolean(
+      renderedRsc || renderedFullRsc || composedFromCachedLayout
+    );
+
+    if (!didRenderFreshPage && !isEdgeRuntime()) {
+      const keysToEvict = [
+        htmlKey,
+        shellHtmlKey,
+        oldHtmlKey,
+        rscKey,
+        shellRscKey,
+        shellPageKey,
+        oldRscKey,
+        legacyRscKey,
+        metaKey,
+      ];
+      if (cleanPathKey) {
+        keysToEvict.push(cleanPathKey);
+      }
+      await Promise.all(
+        keysToEvict.map((k) => Promise.resolve(storage.delete(k)).catch(() => {}))
+      );
+      return;
+    }
+
+    if (!pagePath && !cached && !existingPageRsc) {
+      return;
     }
 
     try {
@@ -679,6 +721,10 @@ async function revalidatePage(reqPath, internalOptions = {}) {
         new Date(newGenTime).toISOString()
       );
     }
+    currentMeta.pageGeneratedAt =
+      didSpliceOnlyPageSlots && prevPageOwnGenTime > 0
+        ? prevPageOwnGenTime
+        : newGenTime;
     await storage.set(htmlKey, newHtml, currentMeta);
     if (isRoutePpr) {
       await storage.set(shellHtmlKey, newHtml, currentMeta);
@@ -732,70 +778,6 @@ async function revalidatePage(reqPath, internalOptions = {}) {
     } catch (e) {}
 
     console.log(`✅ [Edge Revalidate] Successfully revalidated page ${cleanPath} (generatedAt: ${newGenTime})`);
-    return;
-  }
-
-  const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
-  const reqPathWithSlash = cleanPath.endsWith("/") ? cleanPath : cleanPath + "/";
-
-  // Check if there is an existing page to copy to _old
-  try {
-    if (existsSync(path.join(dist2Folder, reqPathWithSlash, "index.html"))) {
-      copyFileSync(
-        path.join(dist2Folder, reqPathWithSlash, "index.html"),
-        path.join(dist2Folder, reqPathWithSlash, "index._old.html")
-      );
-    }
-    if (existsSync(path.join(dist2Folder, reqPathWithSlash, "page.rsc"))) {
-      copyFileSync(
-        path.join(dist2Folder, reqPathWithSlash, "page.rsc"),
-        path.join(dist2Folder, reqPathWithSlash, "page._old.rsc")
-      );
-    }
-    if (existsSync(path.join(dist2Folder, reqPathWithSlash, "rsc.rsc"))) {
-      copyFileSync(
-        path.join(dist2Folder, reqPathWithSlash, "rsc.rsc"),
-        path.join(dist2Folder, reqPathWithSlash, "rsc._old.rsc")
-      );
-    }
-  } catch (e) {
-    // Ignore copy errors
-  }
-
-  console.log(`[Revalidate] Starting on-demand page revalidation for ${cleanPath}...`);
-  try {
-    const isDynamic = {};
-    await getBuildStaticPage()(cleanPath, isDynamic);
-    if (isDynamic.value) {
-      console.log(`[Revalidate] Bailout detected for ${cleanPath}. Switching to dynamic (skipping static write).`);
-      return;
-    }
-
-    const rscResult = await getGenerateStaticRSC()(cleanPath);
-    if (!rscResult.success) {
-      console.warn(`⚠️ [Revalidate] RSC generation failed for ${cleanPath}.`);
-      if (rscResult.tempPath && existsSync(rscResult.tempPath)) {
-        await fs.unlink(rscResult.tempPath).catch(() => {});
-      }
-      return;
-    }
-
-    await getSafeRename()(rscResult.tempPath, rscResult.finalPath);
-
-    const pageResult = await getGenerateStaticPage()(cleanPath);
-    if (pageResult.success) {
-      await getSafeRename()(pageResult.tempPath, pageResult.finalPath);
-      getUpdateStatus()(cleanPath, pageResult.status);
-      console.log(`✅ [Revalidate] Successfully revalidated page ${cleanPath} (Status: ${pageResult.status})`);
-    } else {
-      console.warn(`⚠️ [Revalidate] HTML generation failed for ${cleanPath}.`);
-      if (pageResult.tempPath && existsSync(pageResult.tempPath)) {
-        await fs.unlink(pageResult.tempPath).catch(() => {});
-      }
-    }
-  } catch (e) {
-    console.warn(`⚠️ [Revalidate] Failed to revalidate page ${cleanPath}:`, e.message || e);
-  }
   });
 }
 
@@ -806,48 +788,24 @@ async function revalidatePath(reqPath, options) {
     );
   }
   const cleanPath = normalizeRevalidatePath(reqPath);
+  const storage = getStorageAdapter();
+  const cleanPathKey = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
+  const layoutRscKey = cleanPathKey ? `${cleanPathKey}/layout.rsc` : "layout.rsc";
+  const layoutMetaKey = cleanPathKey ? `${cleanPathKey}/layout.metadata.json` : "layout.metadata.json";
 
-  if (isEdgeRuntime()) {
-    const storage = getStorageAdapter();
-    const cleanPathKey = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
-    const layoutRscKey = cleanPathKey ? `${cleanPathKey}/layout.rsc` : "layout.rsc";
-    const layoutMetaKey = cleanPathKey ? `${cleanPathKey}/layout.metadata.json` : "layout.metadata.json";
-
-    // 1. Revalidar primero el layout si existe para este segmento (para que revalidatePage componga con el layout fresco)
-    const cachedLayout = await storage.get(layoutRscKey);
-    const cachedLayoutMeta = await storage.get(layoutMetaKey);
-    if (cachedLayout || cachedLayoutMeta) {
-      await revalidateLayout(cleanPath);
-    }
-
-    // 2. Revalidar la página
-    await revalidatePage(cleanPath);
-    return;
-  }
-
-  const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
-  const reqPathWithSlash = cleanPath.endsWith("/") ? cleanPath : cleanPath + "/";
-  const targetDir = path.join(dist2Folder, reqPathWithSlash);
-
-  // 1. Revalidar el layout si existe en este segmento
-  const layoutFinalPath = path.join(targetDir, "layout.rsc");
-  const layoutOldPath = path.join(targetDir, "layout._old.rsc");
-  if (existsSync(layoutFinalPath) || existsSync(layoutOldPath)) {
+  // 1. Revalidate layout first if present for this segment (so revalidatePage composes with the fresh layout)
+  const cachedLayout = await readEdgeStorageOrAsset(storage, layoutRscKey);
+  const cachedLayoutMeta = await readEdgeStorageOrAsset(storage, layoutMetaKey);
+  if (cachedLayout || cachedLayoutMeta) {
     await revalidateLayout(cleanPath);
   }
 
-  // 2. Revalidar la página
+  // 2. Revalidate page
   await revalidatePage(cleanPath);
 }
 
-async function revalidateLayout(cleanPath, internalOptions = {}) {
-  let targetPath = cleanPath;
-  if (!targetPath.startsWith("/")) {
-    targetPath = "/" + targetPath;
-  }
-  if (targetPath !== "/" && targetPath.endsWith("/")) {
-    targetPath = targetPath.slice(0, -1);
-  }
+async function revalidateLayout(reqPath, internalOptions = {}) {
+  const targetPath = normalizeRevalidatePath(reqPath);
   const onlyRefreshSlots = Boolean(internalOptions?.onlyRefreshSlots);
   const inFlightKey = `${targetPath}:${onlyRefreshSlots ? "slots" : "full"}`;
 
@@ -856,7 +814,6 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
   }
 
   const revalPromise = enqueueRevalidation(async () => {
-    if (isEdgeRuntime()) {
       const storage = getStorageAdapter();
       const cleanPathKey = targetPath.replace(/^\/+/, "").replace(/\/+$/, "");
       const layoutRscKey = cleanPathKey ? `${cleanPathKey}/layout.rsc` : "layout.rsc";
@@ -866,21 +823,18 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
 
       let cached = await readEdgeStorageOrAsset(storage, layoutRscKey);
       let currentMeta = (cached && cached.metadata) || {};
+      let hasCachedMeta = Boolean(cached && cached.metadata);
       try {
         const metaItem = await readEdgeStorageOrAsset(storage, layoutMetaKey);
         if (metaItem && metaItem.content) {
           currentMeta = JSON.parse(metaItem.content);
-        }
-      } catch (e) {}
-
-      try {
-        if (cached && cached.content) {
-          await storage.set(layoutOldRscKey, cached.content);
+          hasCachedMeta = true;
         }
       } catch (e) {}
 
       const reqSegments = targetPath.split("/").filter(Boolean);
       const srcFolder = path.resolve(process.cwd(), "src");
+      let resolvedLayoutFilePath = null;
       try {
         const [layoutPath, layoutParams] = getFilePathAndDynamicParams(
           reqSegments,
@@ -892,6 +846,7 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
           undefined,
           0
         );
+        resolvedLayoutFilePath = layoutPath || null;
         if (layoutPath) {
           const layoutCfg = await resolveLayoutFunctionsConfig(layoutPath, layoutParams || {});
           if (Array.isArray(layoutCfg.tags) && layoutCfg.tags.length > 0) {
@@ -910,6 +865,8 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
       } catch (e) {}
 
       const prevGenTime = (currentMeta && currentMeta.generatedAt) || 0;
+      const prevLayoutOwnGenTime =
+        (currentMeta && (currentMeta.layoutGeneratedAt || currentMeta.generatedAt)) || 0;
       const now = Date.now();
       const newGenTime = nextMonotonicGenTime(prevGenTime);
       currentMeta.generatedAt = newGenTime;
@@ -919,6 +876,8 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
 
       const reqPathWithSlash = targetPath.endsWith("/") ? targetPath : targetPath + "/";
       let newLayoutRsc = cached && cached.content ? cached.content : "";
+      let didRenderFreshLayout = false;
+      let didSpliceOnlyLayoutSlots = false;
       try {
         const revalDynamicState = { value: false };
         const rawHeaders = {
@@ -927,6 +886,7 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
           "x-forwarded-proto": "http",
         };
         const markRevalDynamic = () => {
+          if (isSlotDiscoveryActive()) return;
           revalDynamicState.value = true;
         };
         const outerCtx = getContext();
@@ -979,6 +939,7 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
                   })
                 );
                 if (resolvedLayoutJsx) {
+                  didSpliceOnlyLayoutSlots = true;
                   await storage.set(shellLayoutKey, serializeJSX(resolvedLayoutJsx));
                 }
               }
@@ -1017,6 +978,7 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
             const rendered = await new Response(stream).text();
             if (rendered) {
               newLayoutRsc = rendered;
+              didRenderFreshLayout = true;
             }
           }
           const layoutSlotTags = revalContext._layoutSlotTags || revalContext._slotTags;
@@ -1025,45 +987,46 @@ async function revalidateLayout(cleanPath, internalOptions = {}) {
           }
         });
       } catch (e) {
-        console.warn(`⚠️ [Edge Revalidate] Layout render fallback for ${targetPath}:`, e?.message || e);
+        if (isEdgeRuntime() || process.env.DINOU_DEBUG) {
+          console.warn(`⚠️ [Edge Revalidate] Layout render fallback for ${targetPath}:`, e?.message || e);
+        }
       }
+
+      if (!didRenderFreshLayout && !isEdgeRuntime()) {
+        await Promise.all(
+          [layoutRscKey, layoutOldRscKey, layoutMetaKey, shellLayoutKey].map((k) =>
+            Promise.resolve(storage.delete(k)).catch(() => {})
+          )
+        );
+        return Boolean(cached || hasCachedMeta || resolvedLayoutFilePath);
+      }
+
+      if (!resolvedLayoutFilePath && !cached && !hasCachedMeta) {
+        return false;
+      }
+
+      try {
+        if (cached && cached.content) {
+          await storage.set(layoutOldRscKey, cached.content);
+        }
+      } catch (e) {}
+
       if (newLayoutRsc && now <= prevGenTime) {
         newLayoutRsc = newLayoutRsc.replace(
           /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g,
           new Date(newGenTime).toISOString()
         );
       }
+      currentMeta.layoutGeneratedAt =
+        didSpliceOnlyLayoutSlots && prevLayoutOwnGenTime > 0
+          ? prevLayoutOwnGenTime
+          : newGenTime;
       if (newLayoutRsc) {
         await storage.set(layoutRscKey, newLayoutRsc, currentMeta);
       }
       await storage.set(layoutMetaKey, JSON.stringify(currentMeta));
       console.log(`✅ [Edge Revalidate] Successfully revalidated layout ${targetPath} (generatedAt: ${newGenTime})`);
       return true;
-    }
-
-    const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
-    const reqPathWithSlash = targetPath.endsWith("/") ? targetPath : targetPath + "/";
-    const layoutFinalPath = path.join(dist2Folder, reqPathWithSlash, "layout.rsc");
-    const layoutOldPath = path.join(dist2Folder, reqPathWithSlash, "layout._old.rsc");
-
-    if (existsSync(layoutFinalPath)) {
-      try {
-        copyFileSync(layoutFinalPath, layoutOldPath);
-      } catch (e) {}
-    }
-
-    console.log(`[Revalidate] Starting on-demand layout revalidation for ${targetPath}...`);
-    try {
-      const layoutRscResult = await getGenerateStaticRSC()(targetPath, { segment: "layout" });
-      if (layoutRscResult && layoutRscResult.success) {
-        await getSafeRename()(layoutRscResult.tempPath, layoutRscResult.finalPath);
-        console.log(`✅ [Revalidate] Successfully revalidated layout ${targetPath}`);
-        return true;
-      }
-    } catch (err) {
-      console.warn(`⚠️ [Revalidate] Failed to revalidate layout ${targetPath}:`, err.message || err);
-    }
-    return false;
   });
 
   inflightLayoutRevalidations.set(inFlightKey, revalPromise);
@@ -1085,11 +1048,36 @@ async function revalidateTag(tag, options) {
   const storage = getStorageAdapter();
   if (isEdgeRuntime() || (storage && typeof storage.keys === "function")) {
     if (storage && typeof storage.keys === "function") {
-      const allKeys = await storage.keys();
+      const allKeysSet = new Set(await storage.keys());
+      const isFsStorage = Boolean(storage && storage.baseDir);
+      if (!isFsStorage && storage.hydrateFromDisk !== false) {
+        try {
+          const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
+          if (existsSync(dist2Folder)) {
+            const diskMetaFiles = await walkMetadataFiles(dist2Folder);
+            for (const diskMeta of diskMetaFiles) {
+              const relKey = path
+                .relative(dist2Folder, diskMeta)
+                .replace(/\\/g, "/");
+              const deleted =
+                typeof storage.isKeyDeleted === "function"
+                  ? await storage.isKeyDeleted(relKey)
+                  : typeof storage.isDeleted === "function" &&
+                    storage.isDeleted(relKey);
+              if (!deleted) {
+                allKeysSet.add(relKey);
+              }
+            }
+          }
+        } catch (e) {}
+      }
+      const allKeys = Array.from(allKeysSet);
       const targetPaths = new Map();
       const targetLayoutPaths = new Map();
       const targetSlotKeys = new Set();
-      if (typeof storage.markTagInvalidated === "function") {
+      if (typeof storage.markTagInvalidatedAsync === "function") {
+        await storage.markTagInvalidatedAsync(tag);
+      } else if (typeof storage.markTagInvalidated === "function") {
         storage.markTagInvalidated(tag);
       }
       globalThis[Symbol.for("dinou.slot.recent.fresh")]?.clear?.();
@@ -1102,12 +1090,13 @@ async function revalidateTag(tag, options) {
           }
         }
       }
-      const isFsStorage = Boolean(storage && storage.baseDir);
+      const readKeyOrFallback = async (k) =>
+        (await storage.get(k)) || (await readEdgeStorageOrAsset(storage, k));
       for (const rawKey of allKeys) {
         const key = String(rawKey || "").replace(/\\/g, "/");
         if (key.endsWith("/slot.metadata.json") || (!isFsStorage && (key.startsWith("slots/") || key.endsWith("/slot.json")))) {
           try {
-            const item = await storage.get(key);
+            const item = await readKeyOrFallback(key);
             let meta = item?.metadata;
             if (!meta && item?.content) {
               try {
@@ -1125,7 +1114,7 @@ async function revalidateTag(tag, options) {
           } catch (e) {}
         } else if (key.endsWith("layout.metadata.json") || (!isFsStorage && key.endsWith("layout.rsc"))) {
           try {
-            const item = await storage.get(key);
+            const item = await readKeyOrFallback(key);
             let meta = item?.metadata;
             if (!meta && item?.content) {
               try {
@@ -1147,7 +1136,7 @@ async function revalidateTag(tag, options) {
           } catch (e) {}
         } else if (key.endsWith("metadata.json")) {
           try {
-            const item = await storage.get(key);
+            const item = await readKeyOrFallback(key);
             let meta = item?.metadata;
             if (!meta && item?.content) {
               try {

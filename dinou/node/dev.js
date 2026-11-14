@@ -39,7 +39,7 @@ import parseExports from "../core/parse-exports.js";
 import { useClientRegex, useServerRegex } from "../constants.js";
 import { transformServerFunctions, hasServerFunctions } from "../core/transform-server-functions.js";
 import { nodeToWebRequest, sendWebResponseToNode } from "../core/http-adapter.js";
-import { setStorageAdapter, FileSystemStorage, MemoryStorage } from "../core/storage-adapter.js";
+import { setStorageAdapter, hasExplicitStorageAdapter, FileSystemStorage, MemoryStorage } from "../core/storage-adapter.js";
 import createScopedName from "../core/createScopedName.js";
 import { regex as assetRegex } from "../core/asset-extensions.js";
 import {
@@ -136,9 +136,13 @@ const yieldToEventLoop = () => new Promise((resolve) => setImmediate(resolve));
 try {
   const dist2Dir = path.resolve(projectRoot, ".dinou/dist2");
   try { fs.rmSync(path.join(dist2Dir, "slots"), { recursive: true, force: true }); } catch (e) {}
-  setStorageAdapter(new FileSystemStorage(dist2Dir));
+  if (!hasExplicitStorageAdapter()) {
+    setStorageAdapter(new FileSystemStorage(dist2Dir));
+  }
 } catch (e) {
-  setStorageAdapter(new MemoryStorage());
+  if (!hasExplicitStorageAdapter()) {
+    setStorageAdapter(new MemoryStorage());
+  }
 }
 
 // Candidate Link and Redirect paths

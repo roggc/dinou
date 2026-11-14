@@ -40,6 +40,7 @@ import { handleRequest } from "./rsc-engine.mjs";
 import { renderHtml } from "./ssr-engine.mjs";
 import {
   setStorageAdapter,
+  hasExplicitStorageAdapter,
   FileSystemStorage,
   MemoryStorage,
 } from "${dinouDirSlash}/core/storage-adapter.js";
@@ -56,12 +57,14 @@ let storageInitialized = false;
 
 function initStorage() {
   if (!storageInitialized) {
-    try {
-      const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
-      const dist2Dir = path.resolve(cwd, ".dinou/dist2");
-      setStorageAdapter(new FileSystemStorage(dist2Dir));
-    } catch (e) {
-      setStorageAdapter(new MemoryStorage());
+    if (!hasExplicitStorageAdapter()) {
+      try {
+        const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
+        const dist2Dir = path.resolve(cwd, ".dinou/dist2");
+        setStorageAdapter(new FileSystemStorage(dist2Dir));
+      } catch (e) {
+        setStorageAdapter(new MemoryStorage());
+      }
     }
     storageInitialized = true;
   }

@@ -1,5 +1,6 @@
 // dinou/index.d.ts
 import { IncomingHttpHeaders } from "http";
+import type { StorageAdapter } from "./server";
 
 // ====================================================================
 // REQUEST PROPERTIES TYPES (REQ)
@@ -193,7 +194,7 @@ export interface DinouConfig {
   /**
    * Custom storage adapter for ISR / ISG page caching.
    */
-  storage?: any;
+  storage?: StorageAdapter;
 
   /**
    * Array of setup/polyfill file paths to be executed at the earliest stage

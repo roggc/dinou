@@ -773,6 +773,7 @@ import { renderHtml } from "./ssr-engine.js";
 import {
   getStorageAdapter,
   setStorageAdapter,
+  hasExplicitStorageAdapter,
   DenoKVStorage,
   MemoryStorage,
 } from "${dinouDirSlash}/core/storage-adapter.js";
@@ -787,25 +788,27 @@ let storageInitialized = false;
 
 export async function fetch(req) {
   if (!storageInitialized) {
-    if (typeof Deno !== "undefined" && typeof Deno.openKv === "function") {
-      try {
-        const kvUrl = Deno.env.get("DENO_KV_URL");
-        let kvInstance;
-        if (kvUrl) {
-          kvInstance = await Deno.openKv(kvUrl);
-        } else if (Deno.env.get("DENO_DEPLOYMENT_ID")) {
-          kvInstance = await Deno.openKv();
-        } else {
-          const cwd = typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
-          const kvPath = Deno.env.get("DENO_KV_PATH") || path.resolve(cwd, ".dinou/kv.db");
-          kvInstance = await Deno.openKv(kvPath);
+    if (!hasExplicitStorageAdapter()) {
+      if (typeof Deno !== "undefined" && typeof Deno.openKv === "function") {
+        try {
+          const kvUrl = Deno.env.get("DENO_KV_URL");
+          let kvInstance;
+          if (kvUrl) {
+            kvInstance = await Deno.openKv(kvUrl);
+          } else if (Deno.env.get("DENO_DEPLOYMENT_ID")) {
+            kvInstance = await Deno.openKv();
+          } else {
+            const cwd = typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
+            const kvPath = Deno.env.get("DENO_KV_PATH") || path.resolve(cwd, ".dinou/kv.db");
+            kvInstance = await Deno.openKv(kvPath);
+          }
+          setStorageAdapter(new DenoKVStorage(kvInstance));
+        } catch (e) {
+          setStorageAdapter(new MemoryStorage());
         }
-        setStorageAdapter(new DenoKVStorage(kvInstance));
-      } catch (e) {
+      } else {
         setStorageAdapter(new MemoryStorage());
       }
-    } else {
-      setStorageAdapter(new MemoryStorage());
     }
     storageInitialized = true;
   }

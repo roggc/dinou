@@ -5,7 +5,7 @@ export function resolveRelativeUrl(href, currentPathname) {
   if (href.startsWith("/") || href.includes("://")) {
     return href;
   }
-  let base = currentPathname || "/";
+  let base = String(currentPathname || "/").split("?")[0].split("#")[0] || "/";
   if (!base.endsWith("/")) {
     base += "/";
   }

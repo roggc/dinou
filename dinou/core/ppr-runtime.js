@@ -11,7 +11,7 @@ import { renderRSCStream } from "./rsc-renderer.js";
 import { getClientManifest } from "./manifest-provider.js";
 import { requestStorage, setCurrentContext } from "./request-context.js";
 import getJSX from "./get-jsx.js";
-import { getStorageAdapter } from "./storage-adapter.js";
+import { getStorageAdapter, readDist2Fallback } from "./storage-adapter.js";
 import { deserializeJSX } from "./cache-slot.js";
 import { getActiveLayoutChain } from "./layout-functions.js";
 import {
@@ -55,15 +55,14 @@ async function readShellJsonFromStorage(storage, key, platformContext, reqUrl) {
       }
     } catch (e) {}
   }
-  try {
-    const diskPath = path.resolve(process.cwd(), ".dinou/dist2", key);
-    if (existsSync(diskPath)) {
-      const txt = readFileSync(diskPath, "utf8");
-      if (txt && txt.trim().startsWith("{")) {
-        return txt;
-      }
-    }
-  } catch (e) {}
+  const isDeleted =
+    storage &&
+    (typeof storage.isKeyDeleted === "function"
+      ? await storage.isKeyDeleted(key)
+      : typeof storage.isDeleted === "function" && storage.isDeleted(key));
+  if (isDeleted) {
+    return null;
+  }
   if (platformContext?.env?.ASSETS && reqUrl) {
     try {
       const assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${key}`, reqUrl)));
@@ -75,6 +74,26 @@ async function readShellJsonFromStorage(storage, key, platformContext, reqUrl) {
               await storage.set(key, txt);
             } catch (e) {}
           }
+          return txt;
+        }
+      }
+    } catch (e) {}
+  }
+  if (storage) {
+    const dist2Item = await readDist2Fallback(storage, key);
+    if (
+      dist2Item &&
+      typeof dist2Item.content === "string" &&
+      dist2Item.content.trim().startsWith("{")
+    ) {
+      return dist2Item.content;
+    }
+  } else {
+    try {
+      const diskPath = path.resolve(process.cwd(), ".dinou/dist2", key);
+      if (existsSync(diskPath)) {
+        const txt = readFileSync(diskPath, "utf8");
+        if (txt && txt.trim().startsWith("{")) {
           return txt;
         }
       }

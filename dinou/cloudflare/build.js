@@ -774,6 +774,7 @@ import { renderHtml } from "./ssr-engine.js";
 import {
   getStorageAdapter,
   setStorageAdapter,
+  hasExplicitStorageAdapter,
   CloudflareKVStorage,
   MemoryStorage,
 } from "${dinouDirSlash}/core/storage-adapter.js";
@@ -792,10 +793,12 @@ export default {
     }
 
     if (!storageInitialized) {
-      if (env && env.DINOU_CACHE) {
-        setStorageAdapter(new CloudflareKVStorage(env.DINOU_CACHE));
-      } else {
-        setStorageAdapter(new MemoryStorage());
+      if (!hasExplicitStorageAdapter()) {
+        if (env && env.DINOU_CACHE) {
+          setStorageAdapter(new CloudflareKVStorage(env.DINOU_CACHE));
+        } else {
+          setStorageAdapter(new MemoryStorage());
+        }
       }
       storageInitialized = true;
     }

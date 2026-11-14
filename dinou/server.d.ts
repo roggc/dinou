@@ -1,7 +1,8 @@
 /**
  * Revalidates the cache for a specific route path (both its layout segment, if present, and its page).
+ * Supports both absolute paths (`"/blog"`) and relative paths (`"./"`, `"../dashboard"`) inside Server Functions.
  * Child routes sharing the layout have their `index.html` lazily re-composed on demand (preserving their cached `page.rsc` payloads) to ensure 0 hydration mismatch.
- * @param path The path of the route to revalidate (e.g. "/blog" or "/dashboard").
+ * @param path The path of the route to revalidate (e.g. `"/blog"`, `"./"`, or `"../dashboard"`).
  */
 export declare function revalidatePath(path: string): Promise<void>;
 /**
@@ -17,14 +18,16 @@ export declare function revalidatePath(
 /**
  * Revalidates only the page component (`page.rsc`) and its HTML (`index.html`) for a specific route path,
  * composing with the cached layout without re-executing `layout.tsx`.
- * @param path The path of the page to revalidate (e.g. "/dashboard/analytics").
+ * Supports both absolute paths (`"/dashboard/analytics"`) and relative paths (`"./"`, `"../overview"`) inside Server Functions.
+ * @param path The path of the page to revalidate (e.g. `"/dashboard/analytics"` or `"./"`).
  */
 export declare function revalidatePage(path: string): Promise<void>;
 
 /**
  * Revalidates only the layout shell (`layout.rsc` and `layout.metadata.json`) for a specific route path,
  * without re-rendering child pages. Affected `index.html` files are lazily re-composed on demand.
- * @param path The path of the layout segment to revalidate (e.g. "/dashboard").
+ * Supports both absolute paths (`"/dashboard"`) and relative paths (`"./"`, `".."`) inside Server Functions.
+ * @param path The path of the layout segment to revalidate (e.g. `"/dashboard"` or `"./"`).
  */
 export declare function revalidateLayout(path: string): Promise<boolean>;
 
@@ -195,22 +198,41 @@ export declare function getContext(): RequestContextStore | undefined;
 
 export interface StorageItem {
   content: string;
-  metadata?: any;
+  metadata?: Record<string, any> | null;
+}
+
+export interface MemoryStorageOptions {
+  hydrateFromDisk?: boolean;
+}
+
+export interface RedisStorageOptions {
+  prefix?: string;
+  hydrateFromDisk?: boolean;
 }
 
 export abstract class StorageAdapter {
+  hydrateFromDisk: boolean;
   abstract get(key: string): Promise<StorageItem | null>;
   abstract set(key: string, content: string, metadata?: any): Promise<void>;
   abstract has(key: string): Promise<boolean>;
   abstract delete(key: string): Promise<void>;
+  keys?(prefix?: string): Promise<string[]> | string[];
+  isDeleted(key: string): boolean;
+  isKeyDeleted(key: string): Promise<boolean>;
+  markTagInvalidated(tag: string): void;
+  markTagInvalidatedAsync(tag: string): Promise<void>;
+  getTagInvalidatedAt(tag: string): number;
+  getTagInvalidatedAtAsync(tag: string): Promise<number>;
 }
 
 export class FileSystemStorage extends StorageAdapter {
+  baseDir: string;
   constructor(baseDir?: string);
   get(key: string): Promise<StorageItem | null>;
   set(key: string, content: string, metadata?: any): Promise<void>;
   has(key: string): Promise<boolean>;
   delete(key: string): Promise<void>;
+  keys(prefix?: string): Promise<string[]>;
 }
 
 export class CloudflareKVStorage extends StorageAdapter {
@@ -219,6 +241,7 @@ export class CloudflareKVStorage extends StorageAdapter {
   set(key: string, content: string, metadata?: any): Promise<void>;
   has(key: string): Promise<boolean>;
   delete(key: string): Promise<void>;
+  keys(prefix?: string): Promise<string[]>;
 }
 
 export class DenoKVStorage extends StorageAdapter {
@@ -227,22 +250,26 @@ export class DenoKVStorage extends StorageAdapter {
   set(key: string, content: string, metadata?: any): Promise<void>;
   has(key: string): Promise<boolean>;
   delete(key: string): Promise<void>;
+  keys(prefix?: string): Promise<string[]>;
 }
 
 export class MemoryStorage extends StorageAdapter {
-  constructor();
+  constructor(options?: MemoryStorageOptions);
   get(key: string): Promise<StorageItem | null>;
   set(key: string, content: string, metadata?: any): Promise<void>;
   has(key: string): Promise<boolean>;
   delete(key: string): Promise<void>;
+  keys(prefix?: string): string[];
 }
 
 export class RedisStorage extends StorageAdapter {
-  constructor(redisClient: any, prefix?: string);
+  prefix: string;
+  constructor(redisClient: any, prefixOrOptions?: string | RedisStorageOptions);
   get(key: string): Promise<StorageItem | null>;
   set(key: string, content: string, metadata?: any): Promise<void>;
   has(key: string): Promise<boolean>;
   delete(key: string): Promise<void>;
+  keys(prefix?: string): Promise<string[]>;
 }
 
 export function getStorageAdapter(): StorageAdapter;
