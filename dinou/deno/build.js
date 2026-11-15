@@ -74,60 +74,22 @@ for (const r of candidateDinouRoots) {
   candidateSlotPaths.add(path.resolve(r, "core/slot.js"));
 }
 
-function copyRecursive(src, dest) {
-  if (!fs.existsSync(src)) return 0;
-  let count = 0;
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-  for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    if (entry.isDirectory()) {
-      fs.mkdirSync(destPath, { recursive: true });
-      count += copyRecursive(srcPath, destPath);
-    } else {
-      fs.mkdirSync(path.dirname(destPath), { recursive: true });
-      fs.copyFileSync(srcPath, destPath);
-      count++;
-    }
-  }
-  return count;
-}
-
 const isWebpackBuild = process.env.DINOU_BUILD_TOOL === "webpack";
 const bundlerName = isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild");
 
-const dist2Dir = path.resolve(projectRoot, ".dinou/dist2");
-const dist3Dir = path.resolve(projectRoot, ".dinou/dist3");
 console.log(`\n🦖 Dinou (Deno • ${bundlerName})`);
-if (fs.existsSync(dist2Dir)) {
-  const copiedCount = copyRecursive(dist2Dir, dist3Dir);
-  console.log(`  📄 Synchronized ${copiedCount} pre-rendered static route(s) to .dinou/dist3`);
-}
 console.log("  ⚡ Generating route modules & manifests...");
 const routeModulesCode = generateRouteModulesCode(projectRoot, "../..");
 const routeModulesPath = path.join(denoDir, "route-modules.js");
 fs.writeFileSync(routeModulesPath, routeModulesCode, "utf8");
 
-function findManifest(filename, fallbackFolder) {
-  const candidates = isWebpackBuild
-    ? [
-        path.resolve(projectRoot, ".dinou/dist3", filename),
-        path.resolve(projectRoot, ".dinou/public", filename),
-        path.resolve(projectRoot, ".dinou", fallbackFolder, filename),
-      ]
-    : [
-        path.resolve(projectRoot, ".dinou", fallbackFolder, filename),
-        path.resolve(projectRoot, ".dinou/dist3", filename),
-        path.resolve(projectRoot, ".dinou/public", filename),
-      ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c;
-  }
-  return null;
+function findManifest(filename, folder) {
+  const candidate = path.resolve(projectRoot, ".dinou", folder, filename);
+  return fs.existsSync(candidate) ? candidate : null;
 }
 
-const clientManifestPath = findManifest("react-client-manifest.json", "react_client_manifest");
-const sfManifestPath = findManifest("server-functions-manifest.json", "server_functions_manifest");
+const clientManifestPath = findManifest("react-client-manifest.json", "dist1");
+const sfManifestPath = findManifest("server-functions-manifest.json", "dist1");
 
 let parsedClientManifest = {};
 if (clientManifestPath && fs.existsSync(clientManifestPath)) {
@@ -384,7 +346,7 @@ if (sfManifestPath && fs.existsSync(sfManifestPath)) {
   manifestInlines += `\nglobalThis.__DINOU_SERVER_FUNCTIONS_MANIFEST__ = {};\n`;
 }
 
-const assetManifestPath = findManifest("manifest.json", "dist3");
+const assetManifestPath = findManifest("manifest.json", "dist1");
 if (assetManifestPath && fs.existsSync(assetManifestPath)) {
   const content = fs.readFileSync(assetManifestPath, "utf8");
   manifestInlines += `\nglobalThis.__DINOU_ASSET_MANIFEST__ = ${content};\n`;
@@ -779,6 +741,12 @@ import {
   DenoKVStorage,
   MemoryStorage,
 } from "${dinouDirSlash}/core/storage-adapter.js";
+import {
+  getStaticContentType,
+  getStaticCacheControl,
+  normalizePublicRequestPath,
+  resolveConfinedStaticFile,
+} from "${dinouDirSlash}/core/static-assets.js";
 import * as path from "node:path";
 import * as fs from "node:fs";
 
@@ -819,25 +787,34 @@ export async function fetch(req) {
   const pathname = url.pathname;
 
   // Static assets delivery (if running with local disk access)
-  if (pathname !== "/" && typeof Deno !== "undefined" && typeof Deno.readFile === "function") {
-    try {
-      const cwd = typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
-      const dist3Dir = path.resolve(cwd, ".dinou/dist3");
-      const filePath = path.join(dist3Dir, pathname);
-      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-        const content = await Deno.readFile(filePath);
-        const ext = path.extname(filePath).toLowerCase();
-        const headers = {};
-        if (ext === ".js" || ext === ".mjs") headers["content-type"] = "application/javascript; charset=utf-8";
-        else if (ext === ".css") headers["content-type"] = "text/css; charset=utf-8";
-        else if (ext === ".json") headers["content-type"] = "application/json";
-        else if (ext === ".svg") headers["content-type"] = "image/svg+xml";
-        else if (ext === ".png") headers["content-type"] = "image/png";
-        else if (ext === ".ico") headers["content-type"] = "image/x-icon";
-        return new Response(content, { headers });
+  if (
+    (req.method === "GET" || req.method === "HEAD") &&
+    typeof Deno !== "undefined" &&
+    typeof Deno.readFile === "function"
+  ) {
+    const cleanPath = normalizePublicRequestPath(pathname);
+    if (cleanPath) {
+      try {
+        const cwd = typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
+        const dist3Dir = path.resolve(cwd, ".dinou/dist3");
+        const filePath = resolveConfinedStaticFile(dist3Dir, cleanPath);
+        if (filePath && fs.existsSync(filePath)) {
+          const stat = fs.statSync(filePath);
+          if (stat.isFile()) {
+            const content =
+              req.method === "HEAD" ? null : await Deno.readFile(filePath);
+            return new Response(content, {
+              headers: {
+                "content-type": getStaticContentType(cleanPath),
+                "content-length": String(stat.size),
+                "cache-control": getStaticCacheControl(cleanPath),
+              },
+            });
+          }
+        }
+      } catch (e) {
+        // Fallback to Dinou handler
       }
-    } catch (e) {
-      // Fallback to Dinou handler
     }
   }
 

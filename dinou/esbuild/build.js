@@ -18,8 +18,7 @@ const __dirname = path.dirname(__filename);
 
 const outdir = ".dinou/dist3";
 await fs.rm(outdir, { recursive: true, force: true });
-await fs.rm(".dinou/react_client_manifest", { recursive: true, force: true });
-await fs.rm(".dinou/server_functions_manifest", { recursive: true, force: true });
+await fs.rm(".dinou/dist1", { recursive: true, force: true });
 
 const absPathToClientRedirect = path.resolve(
   __dirname,
@@ -129,7 +128,7 @@ try {
     target: "node20",
     format: "esm",
     conditions: ["react-server", "node", "import"],
-    outdir: ".dinou/dist3/server",
+    outdir: ".dinou/dist1/server",
     external: [
       "express",
       "chokidar",
@@ -146,7 +145,7 @@ try {
     sourcemap: true,
   });
   await fs.writeFile(
-    path.resolve(process.cwd(), ".dinou/dist3/server/package.json"),
+    path.resolve(process.cwd(), ".dinou/dist1/server/package.json"),
     JSON.stringify({ type: "module" }, null, 2)
   );
 

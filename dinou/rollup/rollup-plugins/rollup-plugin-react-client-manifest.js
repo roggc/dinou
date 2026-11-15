@@ -76,7 +76,7 @@ function getDefaultExportName(code) {
 
 function reactClientManifestPlugin({
   srcDir = path.resolve("src"),
-  manifestPath = ".dinou/react_client_manifest/react-client-manifest.json",
+  manifestPath = null,
   assetInclude = regex,
   serverFiles = new Set(),
 } = {}) {
@@ -741,11 +741,17 @@ function setManifestEntry(fileUrl, expName, entry) {
 
       const isDev = process.env.NODE_ENV !== "production" || process.env.DINOU_DEV === "true";
       const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDev;
+      const resolvedManifestPath =
+        manifestPath ||
+        path.join(
+          isDev ? ".dinou/node-dev" : ".dinou/dist1",
+          "react-client-manifest.json"
+        );
 
       let existingManifest = null;
-      if (shouldWriteToDisk && existsSync(manifestPath)) {
+      if (shouldWriteToDisk && existsSync(resolvedManifestPath)) {
         try {
-          existingManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+          existingManifest = JSON.parse(readFileSync(resolvedManifestPath, "utf8"));
         } catch (e) {}
       }
 
@@ -756,8 +762,8 @@ function setManifestEntry(fileUrl, expName, entry) {
           for (const k of Object.keys(manifest).sort()) {
             sortedManifest[k] = manifest[k];
           }
-          mkdirSync(dirname(manifestPath), { recursive: true });
-          writeFileSync(manifestPath, JSON.stringify(sortedManifest, null, 2));
+          mkdirSync(dirname(resolvedManifestPath), { recursive: true });
+          writeFileSync(resolvedManifestPath, JSON.stringify(sortedManifest, null, 2));
         }
         manifestUpdatedCallback?.();
       }

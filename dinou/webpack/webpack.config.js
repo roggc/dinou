@@ -62,6 +62,8 @@ const projectRoot = process.cwd();
 
 const outputDirs = [
   path.resolve(projectRoot, ".dinou/public"),
+  path.resolve(projectRoot, ".dinou/node-dev"),
+  path.resolve(projectRoot, ".dinou/dist1"),
   path.resolve(projectRoot, ".dinou/dist3"),
   path.resolve(projectRoot, "out"),
   path.resolve(projectRoot, "dist"),
@@ -95,6 +97,21 @@ export default async () => {
   // 🔥 CLEAN HARD
   if (shouldWriteToDisk) {
     cleanDir(outputDir);
+    if (!isDevelopment) {
+      cleanDir(path.resolve(process.cwd(), ".dinou/dist1"));
+    } else {
+      const nodeDevDir = path.resolve(process.cwd(), ".dinou/node-dev");
+      for (const stale of [
+        "react-client-manifest.json",
+        "react-ssr-manifest.json",
+        "server-functions-manifest.json",
+        "manifest.json",
+      ]) {
+        try {
+          fs.rmSync(path.join(nodeDevDir, stale), { force: true });
+        } catch (e) {}
+      }
+    }
   }
   const [cssEntries, , serverFiles] = await getCSSEntries();
   const dinouConfig = await getDinouConfig();
@@ -129,7 +146,7 @@ export default async () => {
   function runPostBuild() {
     if (clientDone && serverDone && !ssgExecuted) {
       ssgExecuted = true;
-      const serverDir = path.resolve(process.cwd(), ".dinou/dist3/server");
+      const serverDir = path.resolve(process.cwd(), ".dinou/dist1/server");
       fs.mkdirSync(serverDir, { recursive: true });
       fs.writeFileSync(
         path.join(serverDir, "package.json"),
@@ -311,6 +328,68 @@ export default async () => {
           ...Array.from(dependencyClientFiles),
         ],
       }),
+      {
+        apply(compiler) {
+          const pluginName = "DinouRelocateRscManifestsPlugin";
+          compiler.hooks.thisCompilation.tap(pluginName, (compilation) => {
+            const { Compilation } = compiler.webpack || webpack;
+            compilation.hooks.processAssets.tap(
+              {
+                name: pluginName,
+                stage: Compilation.PROCESS_ASSETS_STAGE_REPORT + 100,
+              },
+              () => {
+                const clientAsset = compilation.getAsset("react-client-manifest.json");
+                if (clientAsset) {
+                  const rawSource = clientAsset.source.source();
+                  const jsonText = Buffer.isBuffer(rawSource)
+                    ? rawSource.toString("utf8")
+                    : String(rawSource);
+                  if (typeof globalThis !== "undefined") {
+                    try {
+                      globalThis.__DINOU_RAW_CLIENT_MANIFEST__ = JSON.parse(jsonText);
+                    } catch (e) {}
+                  }
+                  if (shouldWriteToDisk) {
+                    const manifestDir = path.resolve(
+                      process.cwd(),
+                      isDevelopment ? ".dinou/node-dev" : ".dinou/dist1"
+                    );
+                    fs.mkdirSync(manifestDir, { recursive: true });
+                    fs.writeFileSync(
+                      path.join(manifestDir, "react-client-manifest.json"),
+                      jsonText,
+                      "utf8"
+                    );
+                  }
+                  compilation.deleteAsset("react-client-manifest.json");
+                }
+
+                const ssrAsset = compilation.getAsset("react-ssr-manifest.json");
+                if (ssrAsset) {
+                  if (shouldWriteToDisk) {
+                    const rawSsr = ssrAsset.source.source();
+                    const ssrText = Buffer.isBuffer(rawSsr)
+                      ? rawSsr.toString("utf8")
+                      : String(rawSsr);
+                    const manifestDir = path.resolve(
+                      process.cwd(),
+                      isDevelopment ? ".dinou/node-dev" : ".dinou/dist1"
+                    );
+                    fs.mkdirSync(manifestDir, { recursive: true });
+                    fs.writeFileSync(
+                      path.join(manifestDir, "react-ssr-manifest.json"),
+                      ssrText,
+                      "utf8"
+                    );
+                  }
+                  compilation.deleteAsset("react-ssr-manifest.json");
+                }
+              }
+            );
+          });
+        },
+      },
       isDevelopment && {
         apply(compiler) {
           compiler.hooks.thisCompilation.tap(
@@ -349,11 +428,10 @@ export default async () => {
             from: "public",
             to: ".",
             noErrorOnMissing: true,
-          },
-          {
-            from: "favicons",
-            to: ".",
-            noErrorOnMissing: true,
+            globOptions: {
+              dot: true,
+              ignore: ["**/.DS_Store", "**/Thumbs.db"],
+            },
           },
         ],
       }),
@@ -498,7 +576,7 @@ export default async () => {
       netlify: path.resolve(__dirname, "../adapters/netlify.js"),
     },
     output: {
-      path: path.resolve(process.cwd(), outputDirectory, "server"),
+      path: path.resolve(process.cwd(), ".dinou/dist1/server"),
       filename: "[name].js",
       library: {
         type: "module",

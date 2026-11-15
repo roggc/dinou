@@ -35,6 +35,11 @@ import { resolveSetupFiles } from "../core/resolve-setup-files.js";
 import { generateRouteModulesCode, generateRouteTypes } from "../core/route-generator.js";
 import { discoverLayoutsFromFs } from "../core/discover-layouts.js";
 import { esbuildContextualDinouPlugin, isUnderscoreEscapedSrcPath } from "../core/resolve-contextual-dinou.js";
+import {
+  getStaticContentType,
+  normalizePublicRequestPath,
+  resolveConfinedStaticFile,
+} from "../core/static-assets.js";
 import parseExports from "../core/parse-exports.js";
 import { useClientRegex, useServerRegex } from "../constants.js";
 import {
@@ -96,6 +101,18 @@ if (typeof globalThis !== "undefined") {
 const isWebpackBuild = process.env.DINOU_BUILD_TOOL === "webpack";
 const devDir = path.resolve(projectRoot, ".dinou/node-dev");
 fs.mkdirSync(devDir, { recursive: true });
+if (process.env.DINOU_STANDALONE_SERVER !== "true") {
+  for (const stale of [
+    "react-client-manifest.json",
+    "react-ssr-manifest.json",
+    "server-functions-manifest.json",
+    "manifest.json",
+  ]) {
+    try {
+      fs.rmSync(path.join(devDir, stale), { force: true });
+    } catch (e) {}
+  }
+}
 
 // Locate Dinou core directory
 const dinouDir = fs.existsSync(path.resolve(projectRoot, "dinou"))
@@ -248,20 +265,9 @@ async function findClientComponents(parsedClientManifest = {}) {
 }
 
 // Manifest paths and helpers
-function findManifest(filename, fallbackFolder) {
-  const candidates = isWebpackBuild
-    ? [
-        path.resolve(projectRoot, ".dinou/public", filename),
-        path.resolve(projectRoot, ".dinou", fallbackFolder, filename),
-      ]
-    : [
-        path.resolve(projectRoot, ".dinou", fallbackFolder, filename),
-        path.resolve(projectRoot, ".dinou/public", filename),
-      ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c;
-  }
-  return null;
+function findManifest(filename, folder) {
+  const candidate = path.resolve(projectRoot, ".dinou", folder, filename);
+  return fs.existsSync(candidate) ? candidate : null;
 }
 
 function readJsonSafe(filePath) {
@@ -310,9 +316,9 @@ function getCachedFileExports(filePath) {
 
 async function updateManifestsState(options = {}) {
   const forceRescan = options.forceRescan || false;
-  const cPath = findManifest("react-client-manifest.json", "react_client_manifest");
-  const sfPath = findManifest("server-functions-manifest.json", "server_functions_manifest");
-  const aPath = findManifest("manifest.json", "public");
+  const cPath = findManifest("react-client-manifest.json", "node-dev");
+  const sfPath = findManifest("server-functions-manifest.json", "node-dev");
+  const aPath = isWebpackBuild ? findManifest("manifest.json", "node-dev") : null;
 
   const rawClient = globalThis.__DINOU_RAW_CLIENT_MANIFEST__ || readJsonSafe(cPath);
   if (rawClient) {
@@ -350,10 +356,10 @@ async function updateManifestsState(options = {}) {
     globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__ = parsedServerFunctionsManifest;
   }
 
-  const rawAsset = globalThis.__DINOU_RAW_ASSET_MANIFEST__ || readJsonSafe(aPath);
-  if (rawAsset) {
-    parsedAssetManifest = rawAsset;
-  }
+  const rawAsset = isWebpackBuild
+    ? globalThis.__DINOU_RAW_ASSET_MANIFEST__ || readJsonSafe(aPath)
+    : null;
+  parsedAssetManifest = rawAsset || {};
 
   // Normalize client manifest
   const normalized = { ...parsedClientManifest };
@@ -2090,22 +2096,17 @@ srcWatcher.on("all", (event, fullPath) => {
   }, 50);
 });
 
-// Watch manifest folder for client bundler output
-const manifestFolder = isWebpackBuild
-  ? path.resolve(projectRoot, ".dinou/public")
-  : path.resolve(projectRoot, ".dinou/react_client_manifest");
-
 let clientManifestReady = false;
 
 function checkClientFilesPresent() {
   if (globalThis.__DINOU_MEM_FILES__ && globalThis.__DINOU_MEM_FILES__.has("main.js")) {
     return true;
   }
-  const cPath = findManifest("react-client-manifest.json", "react_client_manifest");
+  const cPath = findManifest("react-client-manifest.json", "node-dev");
   if (!globalThis.__DINOU_RAW_CLIENT_MANIFEST__ && !readJsonSafe(cPath)) return false;
   if (isWebpackBuild) {
     if (globalThis.__DINOU_RAW_ASSET_MANIFEST__) return true;
-    const mPath = path.resolve(projectRoot, ".dinou/public/manifest.json");
+    const mPath = path.resolve(projectRoot, ".dinou/node-dev/manifest.json");
     return fs.existsSync(mPath);
   }
   const mainPath = path.resolve(projectRoot, ".dinou/public/main.js");
@@ -2188,25 +2189,9 @@ if (!fs.existsSync(dotDinouDir)) {
   fs.mkdirSync(dotDinouDir, { recursive: true });
 }
 
-const MIME_TYPES = {
-  ".js": "application/javascript; charset=utf-8",
-  ".mjs": "application/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".json": "application/json",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".ico": "image/x-icon",
-  ".txt": "text/plain; charset=utf-8",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-};
-
 const candidateStaticDirs = [
-  path.resolve(projectRoot, ".dinou/public"),
   path.resolve(projectRoot, "public"),
+  path.resolve(projectRoot, ".dinou/public"),
 ];
 
 function isManifestReady() {
@@ -2632,11 +2617,17 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    // 2. Static files delivery from memory, .dinou/public, or public/
-    if (pathname !== "/") {
-      const cleanPath = pathname.startsWith("/") ? pathname.slice(1) : pathname;
-      const mappedPath = (parsedAssetManifest && parsedAssetManifest[cleanPath]) || cleanPath;
-      const ext = path.extname(cleanPath).toLowerCase();
+    // 2. Static files delivery from memory, public/, or .dinou/public
+    const cleanPath =
+      req.method === "GET" || req.method === "HEAD"
+        ? normalizePublicRequestPath(pathname)
+        : null;
+    if (cleanPath) {
+      const rawMapped = (parsedAssetManifest && parsedAssetManifest[cleanPath]) || cleanPath;
+      const mappedPath =
+        rawMapped === cleanPath
+          ? cleanPath
+          : normalizePublicRequestPath("/" + String(rawMapped).replace(/^\/+/, "")) || cleanPath;
 
       // 2.a In-memory fast path for client bundles and assets generated in dev
       if (globalThis.__DINOU_MEM_FILES__) {
@@ -2658,13 +2649,12 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (memBuf) {
-          const fileExt = path.extname(cleanPath).toLowerCase();
-          const contentType = MIME_TYPES[fileExt] || "application/octet-stream";
+          const contentType = getStaticContentType(cleanPath);
           res.statusCode = 200;
           res.setHeader("content-type", contentType);
           res.setHeader("content-length", String(memBuf.length));
           res.setHeader("cache-control", "no-store, no-cache, must-revalidate");
-          res.end(memBuf);
+          res.end(req.method === "HEAD" ? undefined : memBuf);
           return;
         }
       }
@@ -2672,8 +2662,8 @@ const server = http.createServer(async (req, res) => {
       let foundFilePath = null;
       for (const baseDir of candidateStaticDirs) {
         for (const targetName of [mappedPath, cleanPath]) {
-          const filePath = path.join(baseDir, targetName);
-          if (fs.existsSync(filePath)) {
+          const filePath = resolveConfinedStaticFile(baseDir, targetName);
+          if (filePath && fs.existsSync(filePath)) {
             try {
               if (fs.statSync(filePath).isFile()) {
                 foundFilePath = filePath;
@@ -2697,8 +2687,8 @@ const server = http.createServer(async (req, res) => {
           await new Promise((r) => setTimeout(r, 25));
           for (const baseDir of candidateStaticDirs) {
             for (const targetName of [mappedPath, cleanPath]) {
-              const filePath = path.join(baseDir, targetName);
-              if (fs.existsSync(filePath)) {
+              const filePath = resolveConfinedStaticFile(baseDir, targetName);
+              if (filePath && fs.existsSync(filePath)) {
                 try {
                   if (fs.statSync(filePath).isFile()) {
                     foundFilePath = filePath;
@@ -2723,7 +2713,7 @@ const server = http.createServer(async (req, res) => {
       if (foundFilePath) {
         try {
           const fileExt = path.extname(foundFilePath).toLowerCase();
-          const contentType = MIME_TYPES[fileExt] || "application/octet-stream";
+          const contentType = getStaticContentType(foundFilePath);
 
           // Safely read buffer into memory, retrying briefly if the bundler currently has it truncated or locked
           let buf = null;
@@ -2744,7 +2734,7 @@ const server = http.createServer(async (req, res) => {
             res.setHeader("content-type", contentType);
             res.setHeader("content-length", String(buf.length));
             res.setHeader("cache-control", "no-store, no-cache, must-revalidate");
-            res.end(buf);
+            res.end(req.method === "HEAD" ? undefined : buf);
             return;
           }
         } catch (e) {}

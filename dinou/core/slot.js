@@ -157,13 +157,16 @@ export function DefaultDevError({ error }) {
 
 function SlotErrorRenderer({ error, reset }) {
   const getErrorRSC = typeof globalThis !== "undefined" ? globalThis.__DINOU_GET_ERROR_RSC_PAYLOAD__ : null;
+  const isStaticExport =
+    typeof window !== "undefined" &&
+    Boolean(window.__DINOU_STATIC_EXPORT__ || window.__DINOU_STATIC_EXPORT_UNLOADING__);
   const errorPromise = useMemo(() => {
-    if (typeof getErrorRSC === "function") {
+    if (!isStaticExport && typeof getErrorRSC === "function") {
       const route = typeof window !== "undefined" ? window.location.pathname + window.location.search : "";
       return getErrorRSC(route, error);
     }
     return null;
-  }, [error]);
+  }, [error, isStaticExport]);
 
   if (!errorPromise) {
     return createElement(DefaultDevError, { error });
@@ -217,6 +220,7 @@ class SlotErrorBoundary extends Component {
   }
 
   componentDidCatch(error, errorInfo) {
+    if (typeof window !== "undefined" && window.__DINOU_STATIC_EXPORT_UNLOADING__) return;
     console.error("[Dinou] Page Error caught in Slot:", error, errorInfo);
   }
 
@@ -231,6 +235,9 @@ class SlotErrorBoundary extends Component {
 
   render() {
     if (this.state.hasError) {
+      if (typeof window !== "undefined" && window.__DINOU_STATIC_EXPORT_UNLOADING__) {
+        return null;
+      }
       const reset = () => this.setState({ hasError: false, error: null });
       return createElement(
         InnerErrorBoundary,

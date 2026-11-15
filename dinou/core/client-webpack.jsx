@@ -288,14 +288,44 @@ const consumeInlineRscResponse = (kind) => {
   });
 };
 
+const isStaticExportMode = () =>
+  typeof window !== "undefined" && Boolean(window.__DINOU_STATIC_EXPORT__);
+
+const isStaticExportUnloading = () =>
+  typeof window !== "undefined" && Boolean(window.__DINOU_STATIC_EXPORT_UNLOADING__);
+
+const buildStaticExportRscUrl = (rawRouteOrKey, fileName) => {
+  const withoutHash = String(rawRouteOrKey || "/").split("#")[0];
+  const qIdx = withoutHash.indexOf("?");
+  const rawPathname = qIdx === -1 ? withoutHash : withoutHash.slice(0, qIdx);
+  const existingQuery = qIdx === -1 ? "" : withoutHash.slice(qIdx + 1);
+  const cleanPathname = rawPathname.replace(/\/+$/, "");
+  const baseRscPath = cleanPathname ? `${cleanPathname}/${fileName}` : `/${fileName}`;
+  return existingQuery ? `${baseRscPath}?${existingQuery}` : baseRscPath;
+};
+
 const getPagePayload = (route, isPrefetch = false, version = 0) => {
   const url = route.split("::")[0];
   if (pageCache.has(url)) {
     return pageCache.get(url);
   }
 
+  const staticExport = isStaticExportMode();
+  if (staticExport && isStaticExportUnloading()) {
+    const pendingPromise = createFromFetch(new Promise(() => {}), {
+      callServer: async (id, args) => {
+        const proxy = createServerFunctionProxy(id);
+        return proxy(...args);
+      },
+    });
+    pendingPromise.catch(() => {});
+    pageCache.set(url, pendingPromise);
+    return pendingPromise;
+  }
   let payloadUrl;
-  if (window.__DINOU_USE_OLD_RSC__ || window.__DINOU_USE_STATIC__) {
+  if (staticExport) {
+    payloadUrl = buildStaticExportRscUrl(url, "page.rsc");
+  } else if (window.__DINOU_USE_OLD_RSC__ || window.__DINOU_USE_STATIC__) {
     payloadUrl = window.__DINOU_USE_OLD_RSC__
       ? window.__DINOU_USE_STATIC__
         ? "/____rsc_page_old_static____" + url
@@ -311,7 +341,8 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
     !isPrefetch &&
     typeof document !== "undefined" &&
     (!document.body || document.body.getAttribute("data-hydrated") !== "true");
-  const buildId = isInitialHydration ? window.__DINOU_BUILD_ID__ : undefined;
+  const buildId =
+    staticExport || isInitialHydration ? window.__DINOU_BUILD_ID__ : undefined;
   if (buildId && !version) {
     payloadUrl += (payloadUrl.includes("?") ? "&" : "?") + "____build_id____=" + buildId;
   }
@@ -322,7 +353,9 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
   const inlineRes = isInitialHydration && !version ? consumeInlineRscResponse("P") : null;
   const fetchPromise = inlineRes
     ? Promise.resolve(inlineRes)
-    : fetch(payloadUrl, { cache: "no-store" }).then((res) => {
+    : fetch(payloadUrl, {
+        cache: staticExport && !version ? "default" : "no-store",
+      }).then((res) => {
         if (res.headers.has("x-rsc-redirect")) {
           const redirectUrl = res.headers.get("x-rsc-redirect");
           pageCache.delete(url);
@@ -335,7 +368,25 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
           }
           return new Promise(() => {});
         }
+        if (
+          staticExport &&
+          (!res.ok ||
+            (res.headers.get("content-type") || "").toLowerCase().includes("text/html"))
+        ) {
+          if (!isPrefetch && !isInitialHydration) {
+            window.__DINOU_STATIC_EXPORT_UNLOADING__ = true;
+            window.location.replace(url);
+          } else {
+            pageCache.delete(url);
+          }
+          return new Promise(() => {});
+        }
         return res;
+      }, (err) => {
+        if (isStaticExportUnloading()) {
+          return new Promise(() => {});
+        }
+        throw err;
       });
 
   const promise = createFromFetch(
@@ -355,20 +406,34 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
 
 const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
   if (!layoutKey) return null;
-  const cacheKey = `${layoutKey}${searchPart}`;
+  const staticExport = isStaticExportMode();
+  const cacheKey = staticExport ? layoutKey : `${layoutKey}${searchPart}`;
   if (layoutCache.has(cacheKey)) {
     return layoutCache.get(cacheKey);
+  }
+  if (staticExport && isStaticExportUnloading()) {
+    const pendingPromise = createFromFetch(new Promise(() => {}), {
+      callServer: async (id, args) => {
+        const proxy = createServerFunctionProxy(id);
+        return proxy(...args);
+      },
+    });
+    pendingPromise.catch(() => {});
+    layoutCache.set(cacheKey, pendingPromise);
+    return pendingPromise;
   }
 
   const isInitialHydration =
     typeof document !== "undefined" &&
     (!document.body || document.body.getAttribute("data-hydrated") !== "true");
-  const buildId = isInitialHydration ? window.__DINOU_BUILD_ID__ : undefined;
+  const buildId =
+    staticExport || isInitialHydration ? window.__DINOU_BUILD_ID__ : undefined;
   const cleanKey = layoutKey === "/" ? "" : layoutKey;
-  let layoutUrl =
-    (window.__DINOU_USE_STATIC__
-      ? "/____rsc_layout_static____"
-      : "/____rsc_layout____") + cleanKey + searchPart;
+  let layoutUrl = staticExport
+    ? buildStaticExportRscUrl((cleanKey || "/") + searchPart, "layout.rsc")
+    : (window.__DINOU_USE_STATIC__
+        ? "/____rsc_layout_static____"
+        : "/____rsc_layout____") + cleanKey + searchPart;
 
   if (buildId && !version) {
     layoutUrl += (layoutUrl.includes("?") ? "&" : "?") + "____build_id____=" + buildId;
@@ -381,14 +446,34 @@ const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
   const inlineRes = isInitialHydration && !version ? consumeInlineRscResponse("L") : null;
   const fetchPromise = inlineRes
     ? Promise.resolve(inlineRes)
-    : fetch(layoutUrl, { cache: "no-store" }).then((res) => {
-        if (!res.ok) {
-          console.warn(
-            `[Dinou Router] Layout ${layoutKey} fetch returned status ${res.status}`
-          );
+    : fetch(layoutUrl, {
+        cache: staticExport && !version ? "default" : "no-store",
+      }).then(
+        (res) => {
+          if (isStaticExportUnloading()) {
+            return new Promise(() => {});
+          }
+          if (
+            staticExport &&
+            (!res.ok ||
+              (res.headers.get("content-type") || "").toLowerCase().includes("text/html"))
+          ) {
+            return new Promise(() => {});
+          }
+          if (!res.ok) {
+            console.warn(
+              `[Dinou Router] Layout ${layoutKey} fetch returned status ${res.status}`
+            );
+          }
+          return res;
+        },
+        (err) => {
+          if (isStaticExportUnloading()) {
+            return new Promise(() => {});
+          }
+          throw err;
         }
-        return res;
-      });
+      );
 
   const promise = createFromFetch(
     fetchPromise,
@@ -406,6 +491,9 @@ const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
 };
 
 const getErrorRSCPayload = (route, error) => {
+  if (isStaticExportMode() || isStaticExportUnloading()) {
+    return null;
+  }
   const url = route.split("::")[0];
   const cacheKey = `error::${url}::${error.message || String(error)}`;
   if (pageCache.has(cacheKey)) {
@@ -446,6 +534,7 @@ const getErrorRSCPayload = (route, error) => {
       },
     }
   );
+  promise.catch(() => {});
   pageCache.set(cacheKey, promise);
   return promise;
 };
@@ -503,6 +592,7 @@ class ErrorBoundary extends Component {
   }
 
   componentDidCatch(error, errorInfo) {
+    if (isStaticExportUnloading()) return;
     console.error("[Dinou] ErrorBoundary caught error:", error, errorInfo);
     if (this.props.onError) {
       this.props.onError(error);
@@ -517,6 +607,9 @@ class ErrorBoundary extends Component {
 
   render() {
     if (this.state.hasError) {
+      if (isStaticExportUnloading()) {
+        return null;
+      }
       if (this.props.fallback) {
         return this.props.fallback(this.state.error);
       }
@@ -938,7 +1031,7 @@ function Router() {
     <RouterContext.Provider value={contextValue}>
       <ErrorBoundary
         resetKey={`${route}::${navCount}`}
-        onError={setNavError}
+        onError={isStaticExportMode() ? undefined : setNavError}
       >
         <DinouPageContext.Provider value={slotContextValue}>
           {navError
@@ -961,6 +1054,9 @@ const app = useStrictMode
   : routerElement;
 
 const onRecoverableError = (error) => {
+  if (isStaticExportUnloading()) {
+    return;
+  }
   if (
     error?.name === "InvalidStateError" &&
     (error?.message?.includes("Document hidden") || (typeof document !== "undefined" && document.hidden))

@@ -48,6 +48,12 @@ import {
   nodeToWebRequest,
   sendWebResponseToNode,
 } from "${dinouDirSlash}/core/http-adapter.js";
+import {
+  getStaticContentType,
+  getStaticCacheControl,
+  normalizePublicRequestPath,
+  resolveConfinedStaticFile,
+} from "${dinouDirSlash}/core/static-assets.js";
 
 if (typeof globalThis !== "undefined") {
   globalThis.__DINOU_RUNTIME__ = "node-bundle";
@@ -70,22 +76,6 @@ function initStorage() {
   }
 }
 
-const MIME_TYPES = {
-  ".js": "application/javascript; charset=utf-8",
-  ".mjs": "application/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".json": "application/json",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".ico": "image/x-icon",
-  ".txt": "text/plain; charset=utf-8",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-};
-
 const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
 const dist3Dir = path.resolve(cwd, ".dinou/dist3");
 
@@ -96,25 +86,28 @@ export async function fetch(req) {
   const pathname = url.pathname;
 
   // Static assets delivery (Zero-copy with Node streams)
-  if (pathname !== "/") {
-    const filePath = path.join(dist3Dir, pathname);
-    if (fs.existsSync(filePath)) {
-      try {
-        const stat = fs.statSync(filePath);
-        if (stat.isFile()) {
-          const nodeStream = fs.createReadStream(filePath);
-          const webStream = Readable.toWeb(nodeStream);
-          const ext = path.extname(filePath).toLowerCase();
-          const contentType = MIME_TYPES[ext] || "application/octet-stream";
-          return new Response(webStream, {
-            headers: {
-              "content-type": contentType,
-              "content-length": String(stat.size),
-              "cache-control": "public, max-age=31536000, immutable",
-            },
-          });
-        }
-      } catch (e) {}
+  if (req.method === "GET" || req.method === "HEAD") {
+    const cleanPath = normalizePublicRequestPath(pathname);
+    if (cleanPath) {
+      const filePath = resolveConfinedStaticFile(dist3Dir, cleanPath);
+      if (filePath && fs.existsSync(filePath)) {
+        try {
+          const stat = fs.statSync(filePath);
+          if (stat.isFile()) {
+            const body =
+              req.method === "HEAD"
+                ? null
+                : Readable.toWeb(fs.createReadStream(filePath));
+            return new Response(body, {
+              headers: {
+                "content-type": getStaticContentType(cleanPath),
+                "content-length": String(stat.size),
+                "cache-control": getStaticCacheControl(cleanPath),
+              },
+            });
+          }
+        } catch (e) {}
+      }
     }
   }
 

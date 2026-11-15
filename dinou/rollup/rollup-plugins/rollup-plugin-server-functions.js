@@ -174,9 +174,9 @@ function serverFunctionsPlugin(manifestData = {}, options = {}) {
           : process.env.DINOU_WRITE_TO_DISK === "true" || !isDev;
 
       if (shouldWriteToDisk) {
-        // Write the manifest to the specified folder (e.g. same place as other assets)
+        // Write the manifest outside public static webroot
         const manifestPath = path.join(
-          ".dinou/server_functions_manifest",
+          isDev ? ".dinou/node-dev" : ".dinou/dist1",
           "server-functions-manifest.json"
         );
         try {

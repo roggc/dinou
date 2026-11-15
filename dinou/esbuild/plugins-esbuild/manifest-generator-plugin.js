@@ -7,8 +7,6 @@ export default function manifestGeneratorPlugin(manifestData) {
   return {
     name: "manifest-generator",
     setup(build) {
-      const outdir = build.initialOptions.outdir || ".";
-
       build.onEnd(async (result) => {
         const meta = result.metafile;
         if (!meta) {
@@ -41,12 +39,12 @@ export default function manifestGeneratorPlugin(manifestData) {
         }
 
         try {
-          const outDir = path.resolve(process.cwd(), outdir);
+          const dist1Dir = path.resolve(process.cwd(), ".dinou/dist1");
 
-          await fs.mkdir(outDir, { recursive: true });
+          await fs.mkdir(dist1Dir, { recursive: true });
 
           await fs.writeFile(
-            path.join(outDir, "manifest.json"),
+            path.join(dist1Dir, "manifest.json"),
             JSON.stringify(manifestData, null, 2),
             "utf8"
           );

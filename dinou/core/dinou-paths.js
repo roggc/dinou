@@ -33,7 +33,7 @@ export function getDinouCoreDir() {
     if (fs.existsSync && fs.existsSync(resolvedCore)) return resolvedCore;
   } catch (e) { }
 
-  // 4. Modo bundle de Webpack (ej. corriendo desde .dinou/dist3/server/handler.js)
+  // 4. Modo bundle de servidor (ej. corriendo desde .dinou/dist1/server/handler.js)
   // La estructura del paquete instalado es node_modules/dinou/dinou/core
   try {
     const cwd = typeof process !== "undefined" && process.cwd ? process.cwd() : "";

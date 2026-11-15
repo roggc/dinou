@@ -236,9 +236,9 @@ export default function serverFunctionsPlugin({
           const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "false" ? false : (process.env.DINOU_WRITE_TO_DISK === "true" || !isDev);
 
           if (shouldWriteToDisk) {
-            // Write the server functions manifest JSON file to the output directory
+            // Write the server functions manifest JSON file outside public static webroot
             const manifestPath = path.join(
-              ".dinou/server_functions_manifest",
+              isDev ? ".dinou/node-dev" : ".dinou/dist1",
               "server-functions-manifest.json"
             );
             await fs.mkdir(path.dirname(manifestPath), { recursive: true });

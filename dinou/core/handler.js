@@ -43,6 +43,10 @@ import {
 } from "./storage-adapter.js";
 import { createBailoutProxy } from "./bailout-proxy.js";
 import getAssetFromManifest from "./get-asset-from-manifest.js";
+import {
+  fetchCloudflareDist2Asset,
+  isReservedCloudflareDist2RequestPath,
+} from "./static-assets.js";
 import { handlePprResume, spliceDynamicHolesIntoShell } from "./ppr-runtime.js";
 import { resolveModulePpr } from "./resolve-module-ppr.js";
 import { getDinouConfig as loadDinouConfig } from "./load-dinou-config.js";
@@ -848,7 +852,11 @@ async function readMetaFromStorage(storage, metaKey, fallbackKey = null, platfor
     !isDeleted
   ) {
     try {
-      const metaRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${metaKey}`, requestUrl)));
+      const metaRes = await fetchCloudflareDist2Asset(
+        platformContext.env.ASSETS,
+        metaKey,
+        requestUrl
+      );
       if (metaRes && metaRes.status === 200) {
         const text = await metaRes.text();
         if (text && text.trim().startsWith("{")) {
@@ -899,7 +907,11 @@ async function readRscFromStorage(storage, rscKey, platformContext = null, reque
     !isDeleted
   ) {
     try {
-      const assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${rscKey}`, requestUrl)));
+      const assetRes = await fetchCloudflareDist2Asset(
+        platformContext.env.ASSETS,
+        rscKey,
+        requestUrl
+      );
       if (assetRes && assetRes.status === 200) {
         const text = await assetRes.text();
         if (text && !text.trimStart().startsWith("<")) {
@@ -1412,8 +1424,11 @@ async function handleRequest(request, platformContext = {}) {
   const url = new URL(request.url);
   const pathname = url.pathname;
 
-  // 1. Anti-Bot Shield
-  if (botGarbagePatterns.some((pattern) => pattern.test(pathname))) {
+  // 1. Anti-Bot Shield & Reserved Internal Namespace Guard
+  if (
+    botGarbagePatterns.some((pattern) => pattern.test(pathname)) ||
+    isReservedCloudflareDist2RequestPath(pathname)
+  ) {
     return new Response("Not Found", { status: 404 });
   }
 
@@ -2163,7 +2178,11 @@ async function handleRequest(request, platformContext = {}) {
           !isRscDeleted
         ) {
           try {
-            const assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${rscKey}`, request.url)));
+            const assetRes = await fetchCloudflareDist2Asset(
+              platformContext.env.ASSETS,
+              rscKey,
+              request.url
+            );
             if (assetRes && assetRes.status === 200) {
               const contentType = assetRes.headers.get("content-type") || "";
               const rscContent = await assetRes.text();
@@ -2588,7 +2607,11 @@ async function handleRequest(request, platformContext = {}) {
       (cleanPath ? await checkDeleted(cleanPath) : false);
     if (!isDevelopment && !cachedItem && !isRouteDeletedInStorage && platformContext && platformContext.env && platformContext.env.ASSETS) {
       try {
-        const metaRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${metaKey}`, request.url)));
+        const metaRes = await fetchCloudflareDist2Asset(
+          platformContext.env.ASSETS,
+          metaKey,
+          request.url
+        );
         if (metaRes && metaRes.status === 200) {
           const ct = metaRes.headers.get("content-type") || "";
           if (ct.includes("json") || !ct.includes("html")) {
@@ -2598,15 +2621,11 @@ async function handleRequest(request, platformContext = {}) {
             } catch (e) {}
 
             if (metadata && typeof metadata === "object" && metadata.generatedAt) {
-              const fetchPath = cleanPath ? `/${cleanPath}/` : "/";
-              let assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(fetchPath, request.url)));
-              if (!assetRes || assetRes.status !== 200) {
-                assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${htmlKey}`, request.url)));
-              }
-              if (!assetRes || assetRes.status !== 200) {
-                const altPath = cleanPath ? `/${cleanPath}` : "/index.html";
-                assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(altPath, request.url)));
-              }
+              const assetRes = await fetchCloudflareDist2Asset(
+                platformContext.env.ASSETS,
+                htmlKey,
+                request.url
+              );
               if (assetRes && assetRes.status === 200) {
                 const html = await assetRes.text();
                 cachedItem = {
@@ -2617,7 +2636,11 @@ async function handleRequest(request, platformContext = {}) {
                 await storage.set(metaKey, JSON.stringify(cachedItem.metadata));
                 const layoutMetaKey = cleanPath ? `${cleanPath}/layout.metadata.json` : "layout.metadata.json";
                 try {
-                  const layoutMetaRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${layoutMetaKey}`, request.url)));
+                  const layoutMetaRes = await fetchCloudflareDist2Asset(
+                    platformContext.env.ASSETS,
+                    layoutMetaKey,
+                    request.url
+                  );
                   if (layoutMetaRes && layoutMetaRes.status === 200) {
                     const layoutMetaText = await layoutMetaRes.text();
                     await storage.set(layoutMetaKey, layoutMetaText);

@@ -33,6 +33,10 @@ import {
   filterEscapedClientManifest,
 } from "../core/resolve-contextual-dinou.js";
 import { discoverLayoutsFromFs, sortEntriesByName } from "../core/discover-layouts.js";
+import {
+  CLOUDFLARE_DIST2_NAMESPACE,
+  shouldExportDist3Entry,
+} from "../core/static-assets.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -74,17 +78,20 @@ for (const r of candidateDinouRoots) {
   candidateSlotPaths.add(path.resolve(r, "core/slot.js"));
 }
 
-function copyRecursive(src, dest) {
+function copyRecursive(src, dest, filterFile = null, relPrefix = "") {
   if (!fs.existsSync(src)) return 0;
   let count = 0;
   const entries = fs.readdirSync(src, { withFileTypes: true });
   for (const entry of entries) {
+    const relPosix = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
     if (entry.isDirectory()) {
-      fs.mkdirSync(destPath, { recursive: true });
-      count += copyRecursive(srcPath, destPath);
+      count += copyRecursive(srcPath, destPath, filterFile, relPosix);
     } else {
+      if (filterFile && !filterFile(relPosix)) {
+        continue;
+      }
       fs.mkdirSync(path.dirname(destPath), { recursive: true });
       fs.copyFileSync(srcPath, destPath);
       count++;
@@ -98,36 +105,44 @@ const bundlerName = isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL |
 
 const dist2Dir = path.resolve(projectRoot, ".dinou/dist2");
 const dist3Dir = path.resolve(projectRoot, ".dinou/dist3");
+const cloudflareAssetsDir = path.join(cloudflareDir, "assets");
+const cloudflareDist2AssetsDir = path.join(
+  cloudflareAssetsDir,
+  CLOUDFLARE_DIST2_NAMESPACE
+);
+
 console.log(`\n🦖 Dinou (Cloudflare Workers • ${bundlerName})`);
+fs.rmSync(cloudflareAssetsDir, { recursive: true, force: true });
+fs.mkdirSync(cloudflareAssetsDir, { recursive: true });
+
+if (fs.existsSync(dist3Dir)) {
+  const staticCount = copyRecursive(
+    dist3Dir,
+    cloudflareAssetsDir,
+    shouldExportDist3Entry
+  );
+  console.log(
+    `  📦 Synchronized ${staticCount} public static asset(s) to .dinou/cloudflare/assets`
+  );
+}
 if (fs.existsSync(dist2Dir)) {
-  const copiedCount = copyRecursive(dist2Dir, dist3Dir);
-  console.log(`  📄 Synchronized ${copiedCount} pre-rendered static route(s) to .dinou/dist3`);
+  const copiedCount = copyRecursive(dist2Dir, cloudflareDist2AssetsDir);
+  console.log(
+    `  📄 Synchronized ${copiedCount} internal SSG cache file(s) to .dinou/cloudflare/assets/${CLOUDFLARE_DIST2_NAMESPACE}`
+  );
 }
 console.log("  ⚡ Generating route modules & manifests...");
 const routeModulesCode = generateRouteModulesCode(projectRoot, "../..");
 const routeModulesPath = path.join(cloudflareDir, "route-modules.js");
 fs.writeFileSync(routeModulesPath, routeModulesCode, "utf8");
 
-function findManifest(filename, fallbackFolder) {
-  const candidates = isWebpackBuild
-    ? [
-        path.resolve(projectRoot, ".dinou/dist3", filename),
-        path.resolve(projectRoot, ".dinou/public", filename),
-        path.resolve(projectRoot, ".dinou", fallbackFolder, filename),
-      ]
-    : [
-        path.resolve(projectRoot, ".dinou", fallbackFolder, filename),
-        path.resolve(projectRoot, ".dinou/dist3", filename),
-        path.resolve(projectRoot, ".dinou/public", filename),
-      ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c;
-  }
-  return null;
+function findManifest(filename, folder) {
+  const candidate = path.resolve(projectRoot, ".dinou", folder, filename);
+  return fs.existsSync(candidate) ? candidate : null;
 }
 
-const clientManifestPath = findManifest("react-client-manifest.json", "react_client_manifest");
-const sfManifestPath = findManifest("server-functions-manifest.json", "server_functions_manifest");
+const clientManifestPath = findManifest("react-client-manifest.json", "dist1");
+const sfManifestPath = findManifest("server-functions-manifest.json", "dist1");
 
 let parsedClientManifest = {};
 if (clientManifestPath && fs.existsSync(clientManifestPath)) {
@@ -385,7 +400,7 @@ if (sfManifestPath && fs.existsSync(sfManifestPath)) {
   manifestInlines += `\nglobalThis.__DINOU_SERVER_FUNCTIONS_MANIFEST__ = {};\n`;
 }
 
-const assetManifestPath = findManifest("manifest.json", "dist3");
+const assetManifestPath = findManifest("manifest.json", "dist1");
 if (assetManifestPath && fs.existsSync(assetManifestPath)) {
   const content = fs.readFileSync(assetManifestPath, "utf8");
   manifestInlines += `\nglobalThis.__DINOU_ASSET_MANIFEST__ = ${content};\n`;
@@ -780,6 +795,11 @@ import {
   CloudflareKVStorage,
   MemoryStorage,
 } from "${dinouDirSlash}/core/storage-adapter.js";
+import {
+  getStaticContentType,
+  isPublicStaticAssetRequest,
+  isReservedCloudflareDist2RequestPath,
+} from "${dinouDirSlash}/core/static-assets.js";
 
 if (typeof globalThis !== "undefined") {
   globalThis.__DINOU_RUNTIME__ = "edge";
@@ -790,7 +810,10 @@ let storageInitialized = false;
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/cdn-cgi/")) {
+    if (
+      url.pathname.startsWith("/cdn-cgi/") ||
+      isReservedCloudflareDist2RequestPath(url.pathname)
+    ) {
       return new Response(null, { status: 404 });
     }
 
@@ -810,16 +833,24 @@ export default {
       url.pathname.includes("____server_function____") ||
       request.headers.get("x-server-function-call") === "1";
 
-    const staticExtRegex = /\\.(js|mjs|cjs|css|png|jpg|jpeg|gif|svg|ico|webp|avif|woff|woff2|ttf|eot|otf|wasm|map|txt|webmanifest)$/i;
-    const isStaticAsset =
-      staticExtRegex.test(url.pathname) ||
-      url.pathname.startsWith("/assets/") ||
-      url.pathname.startsWith("/_dinou/");
+    const isStaticAsset = isPublicStaticAssetRequest(url.pathname);
 
     if (!isRSCPayload && !isServerFunction && isStaticAsset && env && env.ASSETS && (request.method === "GET" || request.method === "HEAD")) {
       try {
         const assetRes = await env.ASSETS.fetch(request.clone ? request.clone() : request);
         if (assetRes && assetRes.status < 400) {
+          if (
+            url.pathname.toLowerCase().endsWith("/apple-app-site-association") &&
+            !(assetRes.headers.get("content-type") || "").toLowerCase().includes("json")
+          ) {
+            const headers = new Headers(assetRes.headers);
+            headers.set("content-type", getStaticContentType(url.pathname));
+            return new Response(assetRes.body, {
+              status: assetRes.status,
+              statusText: assetRes.statusText,
+              headers,
+            });
+          }
           return assetRes;
         }
       } catch (e) {}

@@ -23,6 +23,7 @@ import {
   runInRuntimeStaticSuspense,
   runInRuntimeDynamicHole,
 } from "./ppr-context.js";
+import { fetchCloudflareDist2Asset } from "./static-assets.js";
 
 function safeJsonForInlineScript(str) {
   return JSON.stringify(str)
@@ -65,7 +66,11 @@ async function readShellJsonFromStorage(storage, key, platformContext, reqUrl) {
   }
   if (platformContext?.env?.ASSETS && reqUrl) {
     try {
-      const assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${key}`, reqUrl)));
+      const assetRes = await fetchCloudflareDist2Asset(
+        platformContext.env.ASSETS,
+        key,
+        reqUrl
+      );
       if (assetRes && assetRes.status === 200) {
         const txt = await assetRes.text();
         if (txt && txt.trim().startsWith("{")) {

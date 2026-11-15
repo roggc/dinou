@@ -30,6 +30,7 @@ import {
   isSlotDiscoveryActive,
 } from "./ppr-context.js";
 import { createRequire } from "node:module";
+import { fetchCloudflareDist2Asset } from "./static-assets.js";
 
 const require = createRequire(import.meta.url);
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -447,8 +448,8 @@ async function getSlotFromStorage(storage, storageKey, knownTags = []) {
         ? cleanKey.slice(0, -"/slot.json".length) + "/slot.metadata.json"
         : `${cleanKey}.metadata.json`;
       const [slotRes, metaRes] = await Promise.all([
-        assets.fetch(new Request(`http://localhost/${cleanKey}`)),
-        assets.fetch(new Request(`http://localhost/${metaKey}`)),
+        fetchCloudflareDist2Asset(assets, cleanKey),
+        fetchCloudflareDist2Asset(assets, metaKey),
       ]);
       if (slotRes && slotRes.status === 200) {
         const ct = slotRes.headers?.get?.("content-type") || "";
@@ -513,7 +514,7 @@ async function readMetaFromStorageOrAssets(storage, key) {
       (typeof globalThis !== "undefined" ? globalThis.__DINOU_ENV__?.ASSETS : null);
     if (assets && typeof assets.fetch === "function") {
       const cleanKey = String(key).replace(/^\/+/, "");
-      const res = await assets.fetch(new Request(`http://localhost/${cleanKey}`));
+      const res = await fetchCloudflareDist2Asset(assets, cleanKey);
       if (res && res.status === 200) {
         const text = await res.text();
         if (text && text.trimStart().startsWith("{")) {

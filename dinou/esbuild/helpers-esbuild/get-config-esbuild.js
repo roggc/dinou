@@ -7,6 +7,7 @@ import assetsPlugin from "../plugins-esbuild/assets-plugin.js";
 import skipMissingEntryPointsPlugin from "../plugins-esbuild/skip-missing-entry-points-plugin.js";
 import { swcRedirectPlugin } from "./swc-disk-cache.js";
 import { esbuildContextualDinouPlugin } from "../../core/resolve-contextual-dinou.js";
+import { copyStaticDirectoriesToOutdir } from "../../core/copy-static-dirs.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -45,7 +46,11 @@ export default function getConfigEsbuild({
     skipMissingEntryPointsPlugin(),
     cssProcessorPlugin({ outdir, hmrEngine }),
     serverFunctionsPlugin({ serverFiles }),
-    reactClientManifestPlugin({ manifest, onManifestUpdated }),
+    reactClientManifestPlugin({
+      manifest,
+      manifestPath: ".dinou/node-dev/react-client-manifest.json",
+      onManifestUpdated,
+    }),
     assetsPlugin({ changedIds }),
     stableChunkNamesAndMapsPlugin({ changedIds }),
     esmHmrPlugin({ entryNames: ["main", "error"], changedIds, hmrEngine, hmrPort }),
@@ -67,8 +72,7 @@ export default function getConfigEsbuild({
   ];
 
   const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true";
-  const staticDir = fs.existsSync("public") ? "public" : (fs.existsSync("favicons") ? "favicons" : null);
-  if (staticDir && shouldWriteToDisk) {
+  if (fs.existsSync("public") && shouldWriteToDisk) {
     let staticCopied = false;
     plugins = [
       {
@@ -77,9 +81,7 @@ export default function getConfigEsbuild({
           build.onEnd(() => {
             if (staticCopied) return;
             staticCopied = true;
-            try {
-              fs.cpSync(staticDir, outdir, { recursive: true, force: true });
-            } catch (e) {}
+            copyStaticDirectoriesToOutdir(process.cwd(), outdir);
           });
         },
       },

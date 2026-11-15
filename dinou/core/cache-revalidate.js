@@ -28,6 +28,7 @@ import {
   deserializeJSX,
   refreshNestedSlotsInTree,
 } from "./cache-slot.js";
+import { fetchCloudflareDist2Asset } from "./static-assets.js";
 
 const INFLIGHT_LAYOUT_REVAL_KEY = Symbol.for("dinou.layout.inflight.revalidations");
 if (!globalThis[INFLIGHT_LAYOUT_REVAL_KEY]) {
@@ -102,7 +103,7 @@ async function readEdgeStorageOrAsset(storage, key) {
       (typeof globalThis !== "undefined" ? globalThis.__DINOU_ENV__?.ASSETS : null);
     if (assets && typeof assets.fetch === "function") {
       const cleanKey = String(key).replace(/^\/+/, "");
-      const res = await assets.fetch(new Request(`http://localhost/${cleanKey}`));
+      const res = await fetchCloudflareDist2Asset(assets, cleanKey);
       if (res && res.status === 200) {
         const ct = res.headers?.get?.("content-type") || "";
         const content = await res.text();

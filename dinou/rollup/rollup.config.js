@@ -6,7 +6,7 @@ import postcss from "#rollup-plugin-postcss";
 import babelModule from "#rollup/plugin-babel";
 import resolveModule from "#rollup/plugin-node-resolve";
 import commonjs from "#rollup/plugin-commonjs";
-import copy from "#rollup-plugin-copy";
+import { copyStaticDirectoriesToOutdir } from "../core/copy-static-dirs.js";
 import reactClientManifest from "./rollup-plugins/rollup-plugin-react-client-manifest.js";
 import createScopedName from "../core/createScopedName.js";
 import replace from "#rollup/plugin-replace";
@@ -147,8 +147,13 @@ export default async function () {
         del({
           targets: [
             `${outputDirectory}/*`,
-            ".dinou/react_client_manifest/*",
-            ".dinou/server_functions_manifest/*",
+            ...(isDevelopment
+              ? [
+                  ".dinou/node-dev/react-client-manifest.json",
+                  ".dinou/node-dev/server-functions-manifest.json",
+                  ".dinou/node-dev/manifest.json",
+                ]
+              : [".dinou/dist1/*"]),
           ],
           runOnce: true,
           hook: "buildStart",
@@ -201,23 +206,15 @@ export default async function () {
           path: path.resolve(__dirname, "postcss.config.js"),
         },
       }),
-      shouldWriteToDisk &&
-        copy({
-          targets: [
-            fs.existsSync("public") && {
-              src: "public/*",
-              dest: outputDirectory,
-            },
-            fs.existsSync("favicons") && {
-              src: "favicons/*",
-              dest: outputDirectory,
-            },
-          ].filter(Boolean),
-          flatten: true,
-        }),
+      shouldWriteToDisk && {
+        name: "dinou-copy-static",
+        writeBundle() {
+          copyStaticDirectoriesToOutdir(process.cwd(), outputDirectory);
+        },
+      },
       reactClientManifest({
         manifestPath: path.join(
-          ".dinou/react_client_manifest",
+          isDevelopment ? ".dinou/node-dev" : ".dinou/dist1",
           "react-client-manifest.json",
         ),
         serverFiles,
@@ -278,7 +275,7 @@ export default async function () {
       netlify: path.resolve(__dirname, "../adapters/netlify.js"),
     },
     output: {
-      dir: path.resolve(outputDirectory, "server"),
+      dir: path.resolve(process.cwd(), ".dinou/dist1/server"),
       format: "esm",
       entryFileNames: "[name].js",
       chunkFileNames: "[name]-[hash].js",
@@ -312,8 +309,10 @@ export default async function () {
       {
         name: "post-build-server",
         closeBundle() {
+          const serverDir = path.resolve(process.cwd(), ".dinou/dist1/server");
+          fs.mkdirSync(serverDir, { recursive: true });
           fs.writeFileSync(
-            path.resolve(process.cwd(), ".dinou/dist3/server/package.json"),
+            path.join(serverDir, "package.json"),
             JSON.stringify({ type: "module" }, null, 2)
           );
           execSync(`"${process.execPath}" --conditions=react-server "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {

@@ -37,25 +37,27 @@ class WebpackMemoryPlugin {
           const raw = typeof asset.source === "function" ? asset.source() : asset;
           const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw || "");
 
+          if (cleanKey === "react-client-manifest.json") {
+            try {
+              globalThis.__DINOU_RAW_CLIENT_MANIFEST__ = JSON.parse(buf.toString("utf8"));
+            } catch (e) {}
+            continue;
+          }
+          if (cleanKey === "server-functions-manifest.json") {
+            try {
+              globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__ = JSON.parse(buf.toString("utf8"));
+            } catch (e) {}
+            continue;
+          }
+          if (cleanKey === "react-ssr-manifest.json") {
+            continue;
+          }
+
           if (typeof globalThis !== "undefined" && globalThis.__DINOU_MEM_FILES__) {
             globalThis.__DINOU_MEM_FILES__.set(cleanKey, buf);
             globalThis.__DINOU_MEM_FILES__.set("/" + cleanKey, buf);
             const base = path.basename(cleanKey);
             globalThis.__DINOU_MEM_FILES__.set(base, buf);
-          }
-
-          if (cleanKey === "react-client-manifest.json") {
-            try {
-              globalThis.__DINOU_RAW_CLIENT_MANIFEST__ = JSON.parse(buf.toString("utf8"));
-            } catch (e) {}
-          } else if (cleanKey === "server-functions-manifest.json") {
-            try {
-              globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__ = JSON.parse(buf.toString("utf8"));
-            } catch (e) {}
-          } else if (cleanKey === "manifest.json") {
-            try {
-              globalThis.__DINOU_RAW_ASSET_MANIFEST__ = JSON.parse(buf.toString("utf8"));
-            } catch (e) {}
           }
         }
       });

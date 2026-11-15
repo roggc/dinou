@@ -270,7 +270,7 @@ program
   .command("build:cloudflare:rollup")
   .description("Build the app for Cloudflare Workers with Rollup")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && node ${p("cloudflare/build.js")}`);
+    runCommand(`cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && cross-env DINOU_BUILD_TOOL=rollup node ${p("cloudflare/build.js")}`);
   });
 
 program
@@ -498,14 +498,14 @@ program
   .command("export-static:rollup")
   .description("Export standalone static website with Rollup")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && node ${p("core/export-static.js")}`);
+    runCommand(`cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && cross-env DINOU_BUILD_TOOL=rollup node ${p("core/export-static.js")}`);
   });
 
 program
   .command("export-static:webpack")
   .description("Export standalone static website with Webpack")
   .action(() => {
-    runCommand(`cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && node ${p("core/export-static.js")}`);
+    runCommand(`cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && cross-env DINOU_BUILD_TOOL=webpack node ${p("core/export-static.js")}`);
   });
 
 

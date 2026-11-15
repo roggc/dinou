@@ -34,8 +34,13 @@ export async function startEsbuildDev(options = {}) {
     delete globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__;
   }
   await fs.rm(outdir, { recursive: true, force: true });
-  await fs.rm(".dinou/react_client_manifest", { recursive: true, force: true });
-  await fs.rm(".dinou/server_functions_manifest", { recursive: true, force: true });
+  for (const stale of [
+    "react-client-manifest.json",
+    "server-functions-manifest.json",
+    "manifest.json",
+  ]) {
+    await fs.rm(path.join(".dinou/node-dev", stale), { force: true });
+  }
 
   let currentCtx = null; // Track the active esbuild context
   let activeBuildResolve = null;

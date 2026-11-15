@@ -80,26 +80,14 @@ export async function bundleDualEngine(options = {}) {
   // 2. Discover manifests
   const isWebpackBuild = process.env.DINOU_BUILD_TOOL === "webpack";
 
-  function findManifest(filename, fallbackFolder) {
-    const candidates = isWebpackBuild
-      ? [
-          path.resolve(projectRoot, ".dinou/dist3", filename),
-          path.resolve(projectRoot, ".dinou/public", filename),
-          path.resolve(projectRoot, ".dinou", fallbackFolder, filename),
-        ]
-      : [
-          path.resolve(projectRoot, ".dinou", fallbackFolder, filename),
-          path.resolve(projectRoot, ".dinou/dist3", filename),
-          path.resolve(projectRoot, ".dinou/public", filename),
-        ];
-    for (const c of candidates) {
-      if (fs.existsSync(c)) return c;
-    }
-    return null;
+  function findManifest(filename, folder) {
+    const candidate = path.resolve(projectRoot, ".dinou", folder, filename);
+    return fs.existsSync(candidate) ? candidate : null;
   }
 
-  const clientManifestPath = findManifest("react-client-manifest.json", "react_client_manifest");
-  const sfManifestPath = findManifest("server-functions-manifest.json", "server_functions_manifest");
+  const manifestFolder = isDev ? "node-dev" : "dist1";
+  const clientManifestPath = findManifest("react-client-manifest.json", manifestFolder);
+  const sfManifestPath = findManifest("server-functions-manifest.json", manifestFolder);
 
   let parsedClientManifest = {};
   if (clientManifestPath && fs.existsSync(clientManifestPath)) {
@@ -336,7 +324,7 @@ export async function bundleDualEngine(options = {}) {
     manifestInlines += `\nglobalThis.__DINOU_SERVER_FUNCTIONS_MANIFEST__ = {};\n`;
   }
 
-  const assetManifestPath = findManifest("manifest.json", "dist3");
+  const assetManifestPath = findManifest("manifest.json", manifestFolder);
   if (assetManifestPath && fs.existsSync(assetManifestPath)) {
     const content = fs.readFileSync(assetManifestPath, "utf8");
     manifestInlines += `\nglobalThis.__DINOU_ASSET_MANIFEST__ = ${content};\n`;

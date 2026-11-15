@@ -3,11 +3,11 @@ import reactClientManifestPlugin from "../plugins-esbuild/react-client-manifest-
 import serverFunctionsPlugin from "../plugins-esbuild/server-functions-plugin.js";
 import cssProcessorPlugin from "../plugins-esbuild/css-processor-plugin.js";
 import assetsPlugin from "../plugins-esbuild/assets-plugin.js";
-import copyStaticFiles from "#esbuild-copy-static-files";
 import manifestGeneratorPlugin from "../plugins-esbuild/manifest-generator-plugin.js";
 import writePlugin from "../plugins-esbuild/write-plugin.js";
 import babelReactCompilerPlugin from "../plugins-esbuild/babel-react-compiler-plugin.js";
 import { esbuildContextualDinouPlugin } from "../../core/resolve-contextual-dinou.js";
+import { copyStaticDirectoriesToOutdir } from "../../core/copy-static-dirs.js";
 import { existsSync } from "node:fs";
 
 export default function getConfigEsbuildProd({
@@ -24,7 +24,7 @@ export default function getConfigEsbuildProd({
     cssProcessorPlugin({ outdir }),
     reactClientManifestPlugin({
       manifest,
-      manifestPath: `.dinou/react_client_manifest/react-client-manifest.json`,
+      manifestPath: `.dinou/dist1/react-client-manifest.json`,
     }),
     assetsPlugin(),
     manifestGeneratorPlugin(manifestData),
@@ -33,14 +33,17 @@ export default function getConfigEsbuildProd({
     writePlugin(),
   ].filter(Boolean);
 
-  const staticDir = existsSync("public") ? "public" : (existsSync("favicons") ? "favicons" : null);
-  if (staticDir) {
+  if (existsSync("public")) {
     plugins = [
-      copyStaticFiles({
-        src: staticDir,
-        dest: outdir,
-      }),
       ...plugins,
+      {
+        name: "copy-static-files",
+        setup(build) {
+          build.onEnd(() => {
+            copyStaticDirectoriesToOutdir(process.cwd(), outdir);
+          });
+        },
+      },
     ];
   }
 

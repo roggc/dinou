@@ -9,6 +9,11 @@ import {
   CloudflareKVStorage,
   MemoryStorage,
 } from "../core/storage-adapter.js";
+import {
+  getStaticContentType,
+  isPublicStaticAssetRequest,
+  isReservedCloudflareDist2RequestPath,
+} from "../core/static-assets.js";
 
 // Ensure Edge runtime flag is set globally
 if (typeof globalThis !== "undefined") {
@@ -27,7 +32,10 @@ export default {
    */
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/cdn-cgi/")) {
+    if (
+      url.pathname.startsWith("/cdn-cgi/") ||
+      isReservedCloudflareDist2RequestPath(url.pathname)
+    ) {
       return new Response(null, { status: 404 });
     }
 
@@ -43,14 +51,25 @@ export default {
     const isRSCPayload = url.pathname.includes("____rsc_");
     const isServerFunction = url.pathname.includes("____server_function____") || request.headers.get("x-server-function-call") === "1";
 
-    // Static assets: files with extensions like .js, .css, .png, etc. (excluding document .html and RSC/server-functions)
-    const staticExtRegex = /\.(js|mjs|cjs|css|png|jpg|jpeg|gif|svg|ico|webp|avif|woff|woff2|ttf|eot|otf|wasm|map|txt|webmanifest)$/i;
-    const isStaticAsset = staticExtRegex.test(url.pathname) || url.pathname.startsWith("/assets/") || url.pathname.startsWith("/_dinou/");
+    // Static assets: public/ files, /assets/*, /.well-known/*, and client bundles
+    const isStaticAsset = isPublicStaticAssetRequest(url.pathname);
 
     if (!isRSCPayload && !isServerFunction && isStaticAsset && env && env.ASSETS && (request.method === "GET" || request.method === "HEAD")) {
       try {
         const assetRes = await env.ASSETS.fetch(request.clone ? request.clone() : request);
         if (assetRes && assetRes.status < 400) {
+          if (
+            url.pathname.toLowerCase().endsWith("/apple-app-site-association") &&
+            !(assetRes.headers.get("content-type") || "").toLowerCase().includes("json")
+          ) {
+            const headers = new Headers(assetRes.headers);
+            headers.set("content-type", getStaticContentType(url.pathname));
+            return new Response(assetRes.body, {
+              status: assetRes.status,
+              statusText: assetRes.statusText,
+              headers,
+            });
+          }
           return assetRes;
         }
       } catch (e) {}

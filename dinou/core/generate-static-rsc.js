@@ -95,11 +95,7 @@ async function generateStaticRSC(reqPath, options = {}) {
   try {
     const manifest = JSON.parse(
       fs.readFileSync(
-        path.resolve(
-          isWebpack
-            ? ".dinou/dist3/react-client-manifest.json"
-            : ".dinou/react_client_manifest/react-client-manifest.json"
-        ),
+        path.resolve(".dinou/dist1/react-client-manifest.json"),
         "utf8"
       )
     );
