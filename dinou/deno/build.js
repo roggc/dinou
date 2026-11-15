@@ -33,6 +33,7 @@ import {
   filterEscapedClientManifest,
 } from "../core/resolve-contextual-dinou.js";
 import { discoverLayoutsFromFs, sortEntriesByName } from "../core/discover-layouts.js";
+import { createServerCssModulesPlugin } from "../core/server-css-modules-plugin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -874,6 +875,11 @@ const commonLoader = {
   ".jpeg": "dataurl",
   ".webp": "dataurl",
   ".ico": "dataurl",
+  ".woff": "dataurl",
+  ".woff2": "dataurl",
+  ".ttf": "dataurl",
+  ".otf": "dataurl",
+  ".eot": "dataurl",
 };
 
 const banner = {
@@ -1050,6 +1056,8 @@ const rscOutfile = path.join(denoDir, "rsc-engine.js");
 const ssrOutfile = path.join(denoDir, "ssr-engine.js");
 const finalOutfile = path.join(denoDir, "main.js");
 
+const serverCssModulesPlugin = createServerCssModulesPlugin({ projectRoot });
+
 try {
   // Pass A: RSC Engine
   console.log("  ⚡ Bundling Pass A (RSC deno) & Pass B (SSR deno)...");
@@ -1061,9 +1069,9 @@ try {
     target: "es2022",
     platform: "neutral",
     mainFields: ["module", "main"],
-    conditions: ["deno", "worker", "react-server"],
+    conditions: ["deno", "worker", "react-server", "style"],
     external: externalList,
-    plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin, serverCssModulesPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
@@ -1085,9 +1093,9 @@ try {
     target: "es2022",
     platform: "neutral",
     mainFields: ["module", "main"],
-    conditions: ["deno", "worker", "browser"],
+    conditions: ["deno", "worker", "browser", "style"],
     external: externalList,
-    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr, serverCssModulesPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",

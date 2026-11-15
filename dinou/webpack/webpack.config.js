@@ -12,7 +12,12 @@ import presetReactModule from "#babel/preset-react";
 import presetTypescriptModule from "#babel/preset-typescript";
 import pluginSyntaxImportMetaModule from "#babel/plugin-syntax-import-meta";
 import pluginReactCompilerModule from "#babel-plugin-react-compiler";
+import esbuild from "esbuild";
 import createScopedName from "../core/createScopedName.js";
+import {
+  createBasePostCssPlugins,
+  getRegisteredCssUrlAssets,
+} from "../core/postcss-pipeline.js";
 import { getDinouConfig } from "../core/load-dinou-config.js";
 import TsconfigPathsPlugin from "#tsconfig-paths-webpack-plugin";
 import manifestGeneratorPlugin from "./plugins/manifest-generator-plugin.js";
@@ -260,6 +265,10 @@ export default async () => {
             {
               loader: "css-loader",
               options: {
+                url: {
+                  filter: (url) => !url.startsWith("/"),
+                },
+                import: false,
                 modules: {
                   getLocalIdent: (context, localIdentName, localName) => {
                     return createScopedName(localName, context.resourcePath);
@@ -268,7 +277,15 @@ export default async () => {
                 importLoaders: 1,
               },
             },
-            "postcss-loader",
+            {
+              loader: "postcss-loader",
+              options: {
+                postcssOptions: {
+                  config: false,
+                  plugins: createBasePostCssPlugins(),
+                },
+              },
+            },
           ],
         },
         {
@@ -276,12 +293,22 @@ export default async () => {
           exclude: /\.module\.css$/,
           use: [
             MiniCssExtractPlugin.loader,
-            "css-loader",
+            {
+              loader: "css-loader",
+              options: {
+                url: {
+                  filter: (url) => !url.startsWith("/"),
+                },
+                import: false,
+                importLoaders: 1,
+              },
+            },
             {
               loader: "postcss-loader",
               options: {
                 postcssOptions: {
-                  config: path.resolve(__dirname, "postcss.config.js"),
+                  config: false,
+                  plugins: createBasePostCssPlugins(),
                 },
               },
             },
@@ -450,6 +477,82 @@ export default async () => {
         manifest: manifestGeneratorPlugin.manifestData,
         serverFiles,
       }),
+      isDevelopment &&
+        new webpack.DefinePlugin({
+          "process.env.DINOU_HMR_PORT": JSON.stringify(
+            String(
+              process.env.HMR_PORT || Number(process.env.PORT || 3000) + 1
+            )
+          ),
+        }),
+      {
+        apply(compiler) {
+          const pluginName = "DinouCssAssetsAndMinifyPlugin";
+          const clearRegistry = () => {
+            getRegisteredCssUrlAssets().clear();
+          };
+          compiler.hooks.run.tap(pluginName, clearRegistry);
+          compiler.hooks.watchRun.tap(pluginName, clearRegistry);
+
+          compiler.hooks.thisCompilation.tap(pluginName, (compilation) => {
+            compilation.hooks.processAssets.tap(
+              {
+                name: pluginName,
+                stage: webpack.Compilation.PROCESS_ASSETS_STAGE_ADDITIONS,
+              },
+              () => {
+                for (const [
+                  assetFileName,
+                  absAssetPath,
+                ] of getRegisteredCssUrlAssets().entries()) {
+                  if (
+                    !compilation.getAsset(assetFileName) &&
+                    !compilation.getAsset("/" + assetFileName) &&
+                    fs.existsSync(absAssetPath)
+                  ) {
+                    try {
+                      const buf = fs.readFileSync(absAssetPath);
+                      compilation.emitAsset(
+                        assetFileName,
+                        new webpack.sources.RawSource(buf)
+                      );
+                    } catch (e) {}
+                  }
+                }
+              }
+            );
+
+            if (!isDevelopment) {
+              compilation.hooks.processAssets.tap(
+                {
+                  name: `${pluginName}:minify`,
+                  stage: webpack.Compilation.PROCESS_ASSETS_STAGE_OPTIMIZE_SIZE,
+                },
+                () => {
+                  const cssAsset = compilation.getAsset("styles.css");
+                  if (!cssAsset) return;
+                  try {
+                    const raw = cssAsset.source.source();
+                    const rawCss = Buffer.isBuffer(raw)
+                      ? raw.toString("utf8")
+                      : String(raw || "");
+                    if (rawCss) {
+                      const minified = esbuild.transformSync(rawCss, {
+                        loader: "css",
+                        minify: true,
+                      }).code;
+                      compilation.updateAsset(
+                        "styles.css",
+                        new webpack.sources.RawSource(minified)
+                      );
+                    }
+                  } catch (e) {}
+                }
+              );
+            }
+          });
+        },
+      },
       isDevelopment && new WebpackMemoryPlugin(),
       !isDevelopment && {
         apply(compiler) {
@@ -461,7 +564,8 @@ export default async () => {
       },
     ].filter(Boolean),
     resolve: {
-      extensions: [".js", ".jsx", ".ts", ".tsx"],
+      conditionNames: ["style", "import", "module", "browser", "default"],
+      extensions: [".js", ".jsx", ".ts", ".tsx", ".css"],
       modules: ["src", "node_modules"],
       extensionAlias: {
         ".js": [".js", ".ts", ".tsx"],
@@ -479,7 +583,7 @@ export default async () => {
         ? [
           new TsconfigPathsPlugin({
             configFile,
-            extensions: [".js", ".jsx", ".ts", ".tsx"],
+            extensions: [".js", ".jsx", ".ts", ".tsx", ".css"],
           }),
         ]
         : [],

@@ -19,6 +19,7 @@ import {
 } from "../core/transform-server-functions.js";
 import createScopedName from "../core/createScopedName.js";
 import { regex as assetRegex } from "../core/asset-extensions.js";
+import { createServerCssModulesPlugin } from "../core/server-css-modules-plugin.js";
 import {
   isSupportedClientModule,
   scanProjectDependenciesForClientComponents,
@@ -925,6 +926,7 @@ var __webpack_chunk_load__ = function(chunkId) {
   const rscOutfile = path.join(nodeDir, "rsc-engine.mjs");
   const ssrOutfile = path.join(nodeDir, "ssr-engine.mjs");
 
+  const serverCssModulesPlugin = createServerCssModulesPlugin({ projectRoot });
   const buildEnv = isDev ? "development" : "production";
 
   // Pass A: RSC Engine
@@ -936,11 +938,11 @@ var __webpack_chunk_load__ = function(chunkId) {
     target: "node20",
     platform: "node",
     mainFields: ["module", "main"],
-    conditions: ["node", "worker", "react-server"],
+    conditions: ["node", "worker", "react-server", "style"],
     external: externalList,
     banner,
     inject: setupFiles,
-    plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin, serverAssetPlugin],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin, serverCssModulesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
@@ -961,11 +963,11 @@ var __webpack_chunk_load__ = function(chunkId) {
     target: "node20",
     platform: "node",
     mainFields: ["module", "main"],
-    conditions: ["node", "worker", "browser"],
+    conditions: ["node", "worker", "browser", "style"],
     external: externalList,
     banner,
     inject: setupFiles,
-    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr, serverAssetPlugin],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr, serverCssModulesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",

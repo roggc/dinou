@@ -8,7 +8,28 @@ import writePlugin from "../plugins-esbuild/write-plugin.js";
 import babelReactCompilerPlugin from "../plugins-esbuild/babel-react-compiler-plugin.js";
 import { esbuildContextualDinouPlugin } from "../../core/resolve-contextual-dinou.js";
 import { copyStaticDirectoriesToOutdir } from "../../core/copy-static-dirs.js";
-import { existsSync } from "node:fs";
+import { stripJsonCommentsAndTrailingCommas } from "../../core/get-abs-path-with-ext.js";
+import { existsSync, readFileSync } from "node:fs";
+
+function loadParsedTsconfig() {
+  const candidates = ["tsconfig.json", "jsconfig.json"];
+  for (const filename of candidates) {
+    if (!existsSync(filename)) continue;
+    try {
+      const raw = readFileSync(filename, "utf8");
+      const parsed = JSON.parse(stripJsonCommentsAndTrailingCommas(raw));
+      const compilerOptions = parsed?.compilerOptions || {};
+      return {
+        ...parsed,
+        compilerOptions: {
+          ...compilerOptions,
+          baseUrl: compilerOptions.baseUrl || ".",
+        },
+      };
+    } catch (e) {}
+  }
+  return { compilerOptions: { baseUrl: "." } };
+}
 
 export default function getConfigEsbuildProd({
   entryPoints,
@@ -18,9 +39,10 @@ export default function getConfigEsbuildProd({
   reactCompiler = true,
 }) {
   const manifestData = {};
+  const parsedTsconfig = loadParsedTsconfig();
   let plugins = [
     esbuildContextualDinouPlugin({ projectRoot: process.cwd() }),
-    TsconfigPathsPlugin({}),
+    TsconfigPathsPlugin({ tsconfig: parsedTsconfig }),
     cssProcessorPlugin({ outdir }),
     reactClientManifestPlugin({
       manifest,
@@ -56,6 +78,7 @@ export default function getConfigEsbuildProd({
     sourcemap: false,
     chunkNames: "[name]-[hash]",
     entryNames: "[name]-[hash]",
+    tsconfigRaw: parsedTsconfig,
     jsx: "automatic",
     target: "es2022",
     write: false,

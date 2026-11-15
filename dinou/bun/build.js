@@ -33,6 +33,7 @@ import {
   filterEscapedClientManifest,
 } from "../core/resolve-contextual-dinou.js";
 import { discoverLayoutsFromFs, sortEntriesByName } from "../core/discover-layouts.js";
+import { createServerCssModulesPlugin } from "../core/server-css-modules-plugin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -870,6 +871,11 @@ const commonLoader = {
   ".jpeg": "dataurl",
   ".webp": "dataurl",
   ".ico": "dataurl",
+  ".woff": "dataurl",
+  ".woff2": "dataurl",
+  ".ttf": "dataurl",
+  ".otf": "dataurl",
+  ".eot": "dataurl",
 };
 
 const banner = {
@@ -1046,6 +1052,8 @@ const rscOutfile = path.join(bunDir, "rsc-engine.js");
 const ssrOutfile = path.join(bunDir, "ssr-engine.js");
 const finalOutfile = path.join(bunDir, "server.js");
 
+const serverCssModulesPlugin = createServerCssModulesPlugin({ projectRoot });
+
 try {
   // Pass A: RSC Engine
   console.log("  ⚡ Bundling Pass A (RSC bun) & Pass B (SSR bun)...");
@@ -1057,9 +1065,9 @@ try {
     target: "es2022",
     platform: "neutral",
     mainFields: ["module", "main"],
-    conditions: ["bun", "worker", "react-server"],
+    conditions: ["bun", "worker", "react-server", "style"],
     external: externalList,
-    plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin, serverCssModulesPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
@@ -1081,9 +1089,9 @@ try {
     target: "es2022",
     platform: "neutral",
     mainFields: ["module", "main"],
-    conditions: ["bun", "worker", "browser"],
+    conditions: ["bun", "worker", "browser", "style"],
     external: externalList,
-    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr, serverCssModulesPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",

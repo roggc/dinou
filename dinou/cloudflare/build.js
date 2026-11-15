@@ -37,6 +37,7 @@ import {
   CLOUDFLARE_DIST2_NAMESPACE,
   shouldExportDist3Entry,
 } from "../core/static-assets.js";
+import { createServerCssModulesPlugin } from "../core/server-css-modules-plugin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -939,6 +940,11 @@ const commonLoader = {
   ".jpeg": "dataurl",
   ".webp": "dataurl",
   ".ico": "dataurl",
+  ".woff": "dataurl",
+  ".woff2": "dataurl",
+  ".ttf": "dataurl",
+  ".otf": "dataurl",
+  ".eot": "dataurl",
 };
 
 const banner = {
@@ -1115,6 +1121,8 @@ const rscOutfile = path.join(cloudflareDir, "rsc-engine.js");
 const ssrOutfile = path.join(cloudflareDir, "ssr-engine.js");
 const finalOutfile = path.join(cloudflareDir, "worker.js");
 
+const serverCssModulesPlugin = createServerCssModulesPlugin({ projectRoot });
+
 try {
   // Pass A: RSC Engine
   console.log("  ⚡ Bundling Pass A (RSC workerd) & Pass B (SSR workerd)...");
@@ -1126,9 +1134,9 @@ try {
     target: "es2022",
     platform: "neutral",
     mainFields: ["module", "main"],
-    conditions: ["workerd", "worker", "react-server"],
+    conditions: ["workerd", "worker", "react-server", "style"],
     external: externalList,
-    plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin, serverCssModulesPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
@@ -1151,9 +1159,9 @@ try {
     target: "es2022",
     platform: "neutral",
     mainFields: ["module", "main"],
-    conditions: ["workerd", "worker", "browser"],
+    conditions: ["workerd", "worker", "browser", "style"],
     external: externalList,
-    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr, serverCssModulesPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",

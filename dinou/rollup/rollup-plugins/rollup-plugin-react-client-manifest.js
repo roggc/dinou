@@ -7,7 +7,11 @@ import parser from "#babel/parser";
 import _traverseRaw from "#babel/traverse";
 import { regex } from "../../core/asset-extensions.js";
 import createScopedName from "../../core/createScopedName.js";
-import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
+import {
+  getAbsPathWithExt,
+  resolveStyleImportFromCode,
+} from "../../core/get-abs-path-with-ext.js";
+import { isTailwindStylesheetSource } from "../../core/postcss-pipeline.js";
 import { useClientRegex, useServerRegex } from "../../constants.js";
 import { hasServerFunctions } from "../../core/transform-server-functions.js";
 import parseExports from "../../core/parse-exports.js";
@@ -264,10 +268,11 @@ function setManifestEntry(fileUrl, expName, entry) {
     for (const source of importSources) {
       // console.log("source", source);
 
-      // Resolve the import
-      const absImportPathWithExt = getAbsPathWithExt(source, {
-        parentURL: pathToFileURL(baseFilePath).href,
-      });
+      // Resolve the import (including bare stylesheet imports from node_modules)
+      const absImportPathWithExt =
+        getAbsPathWithExt(source, {
+          parentURL: pathToFileURL(baseFilePath).href,
+        }) || resolveStyleImportFromCode(source, baseFilePath);
       if (!absImportPathWithExt) {
         // console.warn(`[resolve failed] ${source} from ${baseFilePath}`);
         continue;
@@ -364,6 +369,8 @@ function setManifestEntry(fileUrl, expName, entry) {
     return (
       fileName.startsWith("page.") ||
       fileName.startsWith("layout.") ||
+      fileName.startsWith("error.") ||
+      fileName.startsWith("not_found.") ||
       fileName.startsWith("page_functions.") ||
       fileName.startsWith("layout_functions.")
     );
@@ -373,6 +380,7 @@ function setManifestEntry(fileUrl, expName, entry) {
   const knownClientChunks = new Map();
   const knownCssChunks = new Map();
   let hasPendingCssChange = false;
+  let hasPendingSourceChange = false;
 
   return {
     name: "react-client-manifest",
@@ -389,16 +397,14 @@ function setManifestEntry(fileUrl, expName, entry) {
             name: entry.name,
           });
         }
-        if (hasPendingCssChange) {
-          for (const entry of knownCssChunks.values()) {
-            this.emitFile({
-              type: "chunk",
-              id: entry.id,
-              name: entry.name,
-            });
-          }
-          hasPendingCssChange = false;
+        for (const entry of knownCssChunks.values()) {
+          this.emitFile({
+            type: "chunk",
+            id: entry.id,
+            name: entry.name,
+          });
         }
+        hasPendingCssChange = false;
 
         // Quick scan for newly added client files in incremental builds
         try {
@@ -574,6 +580,7 @@ function setManifestEntry(fileUrl, expName, entry) {
         !lower.endsWith(".ts")
       )
         return;
+      hasPendingSourceChange = true;
       const normAbs = alignDrive(id);
       const normId = normalizeFsPath(normAbs);
       const normServerFileId = normalizeServerFilePath(normAbs);
@@ -641,7 +648,22 @@ function setManifestEntry(fileUrl, expName, entry) {
         }
       }
     },
+    shouldTransformCachedModule({ id }) {
+      if (!hasPendingSourceChange || !id) return false;
+      const cleanId = id.split("?")[0];
+      if (!cleanId.toLowerCase().endsWith(".css")) return false;
+      try {
+        if (existsSync(cleanId)) {
+          const cssCode = readFileSync(cleanId, "utf8");
+          if (isTailwindStylesheetSource(cssCode)) {
+            return true;
+          }
+        }
+      } catch (e) {}
+      return false;
+    },
     generateBundle(outputOptions, bundle) {
+      hasPendingSourceChange = false;
       const normFsPathCache = new Map();
       function getNormFsPath(p) {
         let n = normFsPathCache.get(p);

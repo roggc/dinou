@@ -1,6 +1,5 @@
+import { createBasePostCssPlugins } from "../core/postcss-pipeline.js";
+
 export default {
-  plugins: {
-    "@tailwindcss/postcss": {},
-    autoprefixer: {},
-  },
+  plugins: createBasePostCssPlugins(),
 };

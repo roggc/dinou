@@ -6,7 +6,10 @@ import parser from "#babel/parser";
 import _traverseRaw from "#babel/traverse";
 import crypto from "node:crypto";
 import { regex as assetRegex } from "../../core/asset-extensions.js";
-import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
+import {
+  getAbsPathWithExt,
+  resolveStyleImportFromCode,
+} from "../../core/get-abs-path-with-ext.js";
 import { useClientRegex, useServerRegex } from "../../constants.js";
 import { hasServerFunctions } from "../../core/transform-server-functions.js";
 import { normalizePathCase } from "../../core/path-utils.js";
@@ -25,8 +28,8 @@ async function getCSSEntries({
   assetInclude = assetRegex,
   manifest = {},
 } = {}) {
-  const detectedClientEntries = new Set();
-  const detectedCSSEntries = new Set();
+  const clientEntryMap = new Map();
+  const cssEntryMap = new Map();
 
   async function getImportsAndAssetsAndCsss(
     code,
@@ -58,13 +61,33 @@ async function getCSSEntries({
     for (const nodePath of importNodes) {
       const source = nodePath.node.source.value;
 
-      // Resolve the import to absolute path (with extension) using your helper
-      const absImportPathWithExt = getAbsPathWithExt(source, {
-        parentURL: pathToFileURL(baseFilePath).href,
-      });
+      // Resolve local/aliased imports or bare stylesheet imports from node_modules
+      const absImportPathWithExt =
+        getAbsPathWithExt(source, {
+          parentURL: pathToFileURL(baseFilePath).href,
+        }) || resolveStyleImportFromCode(source, baseFilePath);
 
       if (!absImportPathWithExt) {
         // unresolved - skip
+        continue;
+      }
+
+      if (
+        absImportPathWithExt.endsWith(".css") ||
+        absImportPathWithExt.endsWith(".scss") ||
+        absImportPathWithExt.endsWith(".less")
+      ) {
+        csss.add(absImportPathWithExt);
+        continue;
+      }
+
+      if (assetInclude.test(absImportPathWithExt)) {
+        assets.add(absImportPathWithExt);
+        continue;
+      }
+
+      if (absImportPathWithExt.endsWith(".json")) {
+        imports.add(absImportPathWithExt);
         continue;
       }
 
@@ -107,21 +130,6 @@ async function getCSSEntries({
         }
       }
 
-      // For non-client modules, process normally
-      if (
-        absImportPathWithExt.endsWith(".css") ||
-        absImportPathWithExt.endsWith(".scss") ||
-        absImportPathWithExt.endsWith(".less")
-      ) {
-        csss.add(absImportPathWithExt);
-        continue;
-      }
-
-      if (assetInclude.test(absImportPathWithExt)) {
-        assets.add(absImportPathWithExt);
-        continue;
-      }
-
       imports.add(absImportPathWithExt);
 
       // Process imports recursively for non-client modules
@@ -155,6 +163,8 @@ async function getCSSEntries({
     return (
       fileName.startsWith("page.") ||
       fileName.startsWith("layout.") ||
+      fileName.startsWith("error.") ||
+      fileName.startsWith("not_found.") ||
       fileName.startsWith("page_functions.") ||
       fileName.startsWith("layout_functions.")
     );
@@ -183,7 +193,7 @@ async function getCSSEntries({
     if (isClientModule) {
       const name = path.basename(absPath, path.extname(absPath));
 
-      detectedClientEntries.add({
+      clientEntryMap.set(normalizedPath.toLowerCase(), {
         absPath: normalizedPath,
         name,
       });
@@ -197,19 +207,21 @@ async function getCSSEntries({
       try {
         const { csss } = await getImportsAndAssetsAndCsss(code, absPath);
 
-        if (csss.length > 0) {
-          detectedCSSEntries.add(
-            ...csss.map((cssPath) => ({
-              absPath: normalizePath(cssPath),
-              name: path.basename(cssPath, path.extname(cssPath)),
-            })),
-          );
+        for (const cssPath of csss) {
+          const normCss = normalizePath(cssPath);
+          cssEntryMap.set(normCss.toLowerCase(), {
+            absPath: normCss,
+            name: path.basename(cssPath, path.extname(cssPath)),
+          });
         }
       } catch (err) {
         /* ignore */
       }
     }
   } // end for files
+
+  const detectedClientEntries = new Set(clientEntryMap.values());
+  const detectedCSSEntries = new Set(cssEntryMap.values());
 
   for (const dCE of detectedClientEntries) {
     const hash = hashFilePath(dCE.absPath);

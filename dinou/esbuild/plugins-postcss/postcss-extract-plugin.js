@@ -1,14 +1,35 @@
 // postcss-extract-plugin.js
 import fs from "node:fs";
 import path from "node:path";
+import esbuild from "esbuild";
+import { normalizePathCase } from "../../core/path-utils.js";
 
-let cachedExtractedCSS = "";
-let cachedCSSBuffer = null;
+function normalizeFileKey(filePath) {
+  if (!filePath || typeof filePath !== "string") return "";
+  return normalizePathCase(path.resolve(filePath)).replace(/\\/g, "/");
+}
 
 const createPostCSSExtractPlugin = (options = {}) => {
   const { outputFile = "styles.css", shouldExtract = () => true } = options;
 
-  let currentExtractedCSS = "";
+  // Per-file CSS map so incremental rebuilds never wipe unchanged stylesheets
+  const extractedByFile = new Map();
+  let lastFinalizedCSS = null;
+  let cachedCSSBuffer = null;
+
+  const setExtractedCss = (filePath, cssText) => {
+    const key = normalizeFileKey(filePath);
+    if (!key) return;
+    extractedByFile.set(key, {
+      filePath: path.resolve(filePath),
+      css: cssText || "",
+    });
+  };
+
+  const getExtractedCss = (filePath) => {
+    const key = normalizeFileKey(filePath);
+    return key ? extractedByFile.get(key)?.css : undefined;
+  };
 
   // Define the PostCSS plugin to intercept and extract CSS rules
   const postcssPlugin = {
@@ -18,8 +39,10 @@ const createPostCSSExtractPlugin = (options = {}) => {
       const filePath = result.opts.from;
 
       if (shouldExtract(filePath, root)) {
-        currentExtractedCSS += root.toString();
-        currentExtractedCSS += "\n";
+        const cssText = root.toString();
+        if (filePath) {
+          setExtractedCss(filePath, cssText);
+        }
 
         // Remove all CSS rules from the original file to prevent duplicate injection
         root.removeAll();
@@ -29,13 +52,33 @@ const createPostCSSExtractPlugin = (options = {}) => {
 
   // Write the collected CSS contents to the final output file on disk or memory
   const finalize = () => {
-    if (currentExtractedCSS) {
-      cachedExtractedCSS = currentExtractedCSS;
-      cachedCSSBuffer = Buffer.from(cachedExtractedCSS);
-      currentExtractedCSS = "";
+    const isProduction = process.env.NODE_ENV === "production";
+    const parts = [];
+
+    for (const [key, entry] of extractedByFile.entries()) {
+      if (entry.filePath && !fs.existsSync(entry.filePath)) {
+        extractedByFile.delete(key);
+        continue;
+      }
+      if (entry.css) {
+        parts.push(entry.css);
+      }
     }
 
-    if (!cachedCSSBuffer) return;
+    let combinedCSS = parts.length > 0 ? parts.join("\n") + "\n" : "";
+
+    if (isProduction && combinedCSS) {
+      try {
+        combinedCSS = esbuild.transformSync(combinedCSS, {
+          loader: "css",
+          minify: true,
+        }).code;
+      } catch (e) {}
+    }
+
+    const changed = lastFinalizedCSS !== null && combinedCSS !== lastFinalizedCSS;
+    lastFinalizedCSS = combinedCSS;
+    cachedCSSBuffer = Buffer.from(combinedCSS, "utf8");
 
     // 1. Ensure it's ALWAYS stored in globalThis.__DINOU_MEM_FILES__
     if (typeof globalThis !== "undefined") {
@@ -47,20 +90,22 @@ const createPostCSSExtractPlugin = (options = {}) => {
     }
 
     // 2. Write to disk if in production OR if DINOU_WRITE_TO_DISK is requested in dev
-    const isProduction = process.env.NODE_ENV === "production";
-    const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || isProduction;
-    if (shouldWriteToDisk && cachedExtractedCSS) {
+    const shouldWriteToDisk =
+      process.env.DINOU_WRITE_TO_DISK === "true" || isProduction;
+    if (shouldWriteToDisk && (combinedCSS || fs.existsSync(outputFile))) {
       const outputDir = path.dirname(outputFile);
       if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });
       }
-      fs.writeFileSync(outputFile, cachedExtractedCSS);
+      fs.writeFileSync(outputFile, combinedCSS, "utf8");
     }
+
+    return changed;
   };
 
-  const addExtractedCss = (cssText) => {
-    if (cssText) {
-      currentExtractedCSS += cssText + "\n";
+  const addExtractedCss = (cssText, filePath) => {
+    if (filePath) {
+      setExtractedCss(filePath, cssText);
     }
   };
 
@@ -68,6 +113,8 @@ const createPostCSSExtractPlugin = (options = {}) => {
     plugin: postcssPlugin,
     finalize,
     addExtractedCss,
+    setExtractedCss,
+    getExtractedCss,
   };
 };
 

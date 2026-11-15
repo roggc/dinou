@@ -53,6 +53,11 @@ import { setStorageAdapter, hasExplicitStorageAdapter, FileSystemStorage, Memory
 import createScopedName from "../core/createScopedName.js";
 import { regex as assetRegex } from "../core/asset-extensions.js";
 import {
+  createServerCssModulesPlugin,
+  didCssModuleExportsChange,
+} from "../core/server-css-modules-plugin.js";
+import { resolveStyleImportFromCode } from "../core/get-abs-path-with-ext.js";
+import {
   isSupportedClientModule,
   scanProjectDependenciesForClientComponents,
   scanProjectDependenciesForClientComponentsAsync,
@@ -1420,8 +1425,16 @@ function createDevExternalPackagesPlugin(isRsc = true) {
             return null;
           }
         }
-        // 6. CSS / Stylesheets (handled by esbuild empty loader)
+        // 6. CSS / Stylesheets (handled by server CSS modules plugin / esbuild empty loader)
         if (/\.(css|scss|sass|less)$/i.test(args.path)) {
+          return null;
+        }
+        if (
+          resolveStyleImportFromCode(
+            args.path,
+            args.importer || path.join(args.resolveDir || projectRoot, "__dinou_dev__.js")
+          )
+        ) {
           return null;
         }
         // 7. Client components from node_modules:
@@ -1495,6 +1508,8 @@ updateSpinner("Initializing Incremental Dual-Bundle Engine (No fork)...");
 const rscOutfile = path.join(devDir, "rsc-engine.mjs");
 const ssrOutfile = path.join(devDir, "ssr-engine.mjs");
 
+const serverCssModulesPlugin = createServerCssModulesPlugin({ projectRoot });
+
 const ctxA = await esbuild.context({
   entryPoints: { "rsc-engine": path.join(devDir, "rsc-entry.mjs") },
   outdir: devDir,
@@ -1506,11 +1521,11 @@ const ctxA = await esbuild.context({
   target: "node20",
   platform: "node",
   mainFields: ["module", "main"],
-  conditions: ["node", "worker", "react-server"],
+  conditions: ["node", "worker", "react-server", "style"],
   external: externalList,
   banner,
   inject: setupFiles,
-  plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin, serverAssetPlugin, createDevExternalPackagesPlugin(true)],
+  plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin, serverCssModulesPlugin, serverAssetPlugin, createDevExternalPackagesPlugin(true)],
   alias: commonAlias,
   loader: commonLoader,
   jsx: "automatic",
@@ -1534,11 +1549,11 @@ const ctxB = await esbuild.context({
   target: "node20",
   platform: "node",
   mainFields: ["module", "main"],
-  conditions: ["node", "worker", "browser"],
+  conditions: ["node", "worker", "browser", "style"],
   external: externalList,
   banner,
   inject: setupFiles,
-  plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr, serverAssetPlugin, createDevExternalPackagesPlugin(false)],
+  plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr, serverCssModulesPlugin, serverAssetPlugin, createDevExternalPackagesPlugin(false)],
   alias: commonAlias,
   loader: commonLoader,
   jsx: "automatic",
@@ -1798,8 +1813,17 @@ async function doRebuildBatch(changesMap) {
 
       const normLower = absFilePath.toLowerCase();
       const isCssFile = normLower.endsWith(".css") || normLower.endsWith(".scss") || normLower.endsWith(".less");
+      const isCssModuleFile = normLower.endsWith(".module.css");
+      let cssModuleClassesChanged = false;
       if (isCssFile) {
         hasCssChanges = true;
+        if (isCssModuleFile) {
+          try {
+            cssModuleClassesChanged = await didCssModuleExportsChange(absFilePath);
+          } catch (e) {
+            cssModuleClassesChanged = true;
+          }
+        }
       }
 
       let isClientFile = false;
@@ -1916,12 +1940,18 @@ async function doRebuildBatch(changesMap) {
 
       if (clientBundlerHandle?.notifyFileChanged && isClientRelevant) {
         clientRebuildPromises.push(clientBundlerHandle.notifyFileChanged(absFilePath));
+      } else if (isJsTsSource && isPageRoute) {
+        if (clientBundlerHandle?.refreshStyles) {
+          clientRebuildPromises.push(clientBundlerHandle.refreshStyles());
+        } else if (clientBundlerHandle?.notifyFileChanged) {
+          clientRebuildPromises.push(clientBundlerHandle.notifyFileChanged(absFilePath));
+        }
       }
 
-      if (isClientFile) {
+      if (isClientFile || cssModuleClassesChanged) {
         hasClientChanges = true;
       }
-      if (isServerFile || (!isClientFile && !isCssFile)) {
+      if (isServerFile || cssModuleClassesChanged || (!isClientFile && !isCssFile)) {
         hasServerChanges = true;
       }
     }
@@ -1991,12 +2021,29 @@ async function doRebuildBatch(changesMap) {
 
       if (queuedChanges.size === 0 && pendingSrcChanges.size === 0) {
         if (isWebpackBuild) {
-          if (hasServerChanges || hasClientChanges || hasCssChanges) {
+          if (hasClientChanges) {
             await broadcastToClients({ type: "reload" });
+          } else {
+            if (hasCssChanges) {
+              await broadcastToClients({ type: "style-update", url: "/styles.css" });
+            }
+            if (hasServerChanges) {
+              for (const [absFilePath] of changesMap) {
+                await broadcastToClients({ type: "rsc-update", path: absFilePath });
+              }
+            }
           }
-        } else if (hasServerChanges && !hasCssChanges) {
+        } else if (hasServerChanges) {
           for (const [absFilePath] of changesMap) {
-            broadcastToClients({ type: "rsc-update", path: absFilePath });
+            const lowerPath = absFilePath.toLowerCase();
+            const isPureNonModuleCss =
+              (lowerPath.endsWith(".css") ||
+                lowerPath.endsWith(".scss") ||
+                lowerPath.endsWith(".less")) &&
+              !lowerPath.endsWith(".module.css");
+            if (!isPureNonModuleCss) {
+              broadcastToClients({ type: "rsc-update", path: absFilePath });
+            }
           }
         }
       }
@@ -2484,7 +2531,10 @@ async function startClientBundler(tool) {
             broadcast: (msg) => {
               const clients = devServer?.webSocketServer?.clients || devServer?.sockets;
               if (devServer?.sendMessage && clients) {
-                devServer.sendMessage(clients, "static-changed");
+                devServer.sendMessage(clients, "dinou-hmr", msg || { type: "reload" });
+                if (process.env.DINOU_STANDALONE_SERVER === "true" && (!msg || msg.type === "reload")) {
+                  devServer.sendMessage(clients, "static-changed");
+                }
               }
             },
             restart: async () => {

@@ -2,7 +2,12 @@ import path from "node:path";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import esbuild from "esbuild";
 import postcss from "#rollup-plugin-postcss";
+import {
+  createBasePostCssPlugins,
+  getRegisteredCssUrlAssets,
+} from "../core/postcss-pipeline.js";
 import babelModule from "#rollup/plugin-babel";
 import resolveModule from "#rollup/plugin-node-resolve";
 import commonjs from "#rollup/plugin-commonjs";
@@ -168,7 +173,8 @@ export default async function () {
       }),
       json(),
       resolve({
-        extensions: [".js", ".jsx", ".ts", ".tsx"],
+        extensions: [".mjs", ".js", ".jsx", ".ts", ".tsx", ".json", ".css"],
+        exportConditions: ["style"],
         browser: true,
         preferBuiltins: false,
       }),
@@ -202,10 +208,41 @@ export default async function () {
         },
         extract: "styles.css",
         minimize: !isDevelopment,
-        config: {
-          path: path.resolve(__dirname, "postcss.config.js"),
-        },
+        plugins: createBasePostCssPlugins(),
+        config: false,
       }),
+      {
+        name: "dinou-rollup-css-assets-and-minify",
+        buildStart() {
+          getRegisteredCssUrlAssets().clear();
+        },
+        generateBundle(_options, bundle) {
+          for (const [assetFileName, absAssetPath] of getRegisteredCssUrlAssets().entries()) {
+            if (!bundle[assetFileName] && fs.existsSync(absAssetPath)) {
+              try {
+                this.emitFile({
+                  type: "asset",
+                  fileName: assetFileName,
+                  source: fs.readFileSync(absAssetPath),
+                });
+              } catch (e) {}
+            }
+          }
+          if (!isDevelopment && bundle["styles.css"]?.type === "asset") {
+            try {
+              const rawCss = Buffer.isBuffer(bundle["styles.css"].source)
+                ? bundle["styles.css"].source.toString("utf8")
+                : String(bundle["styles.css"].source || "");
+              if (rawCss) {
+                bundle["styles.css"].source = esbuild.transformSync(rawCss, {
+                  loader: "css",
+                  minify: true,
+                }).code;
+              }
+            } catch (e) {}
+          }
+        },
+      },
       shouldWriteToDisk && {
         name: "dinou-copy-static",
         writeBundle() {

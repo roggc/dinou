@@ -161,7 +161,13 @@ socket.addEventListener("message", ({ data: _data }) => {
 
   if (data.type === "rsc-update") {
     if (typeof window !== "undefined" && typeof window.__DINOU_ROUTER_REFRESH__ === "function") {
-      window.__DINOU_ROUTER_REFRESH__();
+      const refreshLayout = Boolean(
+        data.layout ||
+          (data.path &&
+            (/(?:^|[\\/])layout\.[jt]sx?$/i.test(data.path) ||
+              /\.module\.css$/i.test(data.path)))
+      );
+      window.__DINOU_ROUTER_REFRESH__({ layout: refreshLayout });
       return;
     }
     reload();

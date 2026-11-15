@@ -1094,6 +1094,74 @@ if (!isLayoutError) {
   }
 }
 
+if (
+  process.env.NODE_ENV !== "production" &&
+  typeof window !== "undefined" &&
+  typeof WebSocket !== "undefined"
+) {
+  try {
+    const hmrPort = process.env.DINOU_HMR_PORT || "3001";
+    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${wsProtocol}//${window.location.hostname}:${hmrPort}/ws`;
+    const ws = new WebSocket(wsUrl);
+
+    const applyStyleUpdate = (targetUrl) => {
+      const cleanTarget = targetUrl ? targetUrl.split("?")[0] : "";
+      const links = document.querySelectorAll('link[rel="stylesheet"]');
+      for (const link of links) {
+        const rawHref = link.getAttribute("href");
+        if (!rawHref) continue;
+        const cleanHref = rawHref.split("?")[0];
+        if (
+          !cleanTarget ||
+          cleanHref.endsWith(cleanTarget) ||
+          cleanTarget.endsWith(cleanHref) ||
+          cleanHref.includes("styles.css")
+        ) {
+          const nextUrl = new URL(link.href, window.location.origin);
+          nextUrl.searchParams.set("t", String(Date.now()));
+          link.href = nextUrl.href;
+        }
+      }
+    };
+
+    ws.addEventListener("message", (event) => {
+      if (!event?.data || typeof event.data !== "string") return;
+      try {
+        const parsed = JSON.parse(event.data);
+        if (parsed.type === "static-changed") {
+          window.location.reload();
+          return;
+        }
+        if (parsed.type === "dinou-hmr" && parsed.data) {
+          const msg = parsed.data;
+          if (msg.type === "reload") {
+            window.location.reload();
+            return;
+          }
+          if (msg.type === "style-update") {
+            applyStyleUpdate(msg.url || "/styles.css");
+            return;
+          }
+          if (msg.type === "rsc-update") {
+            if (typeof window.__DINOU_ROUTER_REFRESH__ === "function") {
+              const refreshLayout = Boolean(
+                msg.layout ||
+                  (msg.path &&
+                    (/(?:^|[\\/])layout\.[jt]sx?$/i.test(msg.path) ||
+                      /\.module\.css$/i.test(msg.path)))
+              );
+              window.__DINOU_ROUTER_REFRESH__({ layout: refreshLayout });
+            } else {
+              window.location.reload();
+            }
+          }
+        }
+      } catch (e) {}
+    });
+  } catch (e) {}
+}
+
 if (import.meta.hot) {
   import.meta.hot.accept();
 }

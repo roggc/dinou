@@ -8,6 +8,7 @@ import skipMissingEntryPointsPlugin from "../plugins-esbuild/skip-missing-entry-
 import { swcRedirectPlugin } from "./swc-disk-cache.js";
 import { esbuildContextualDinouPlugin } from "../../core/resolve-contextual-dinou.js";
 import { copyStaticDirectoriesToOutdir } from "../../core/copy-static-dirs.js";
+import { stripJsonCommentsAndTrailingCommas } from "../../core/get-abs-path-with-ext.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -16,13 +17,16 @@ export default function getConfigEsbuild({
   outdir = ".dinou/public",
   manifest = {},
   changedIds,
+  cssModuleClassChanges,
   hmrEngine,
+  cssRefreshRef,
   serverFiles,
   onManifestUpdated,
   onBuildStart,
   onBuildEnd,
   hmrPort,
 }) {
+  const sharedCssModuleClassChanges = cssModuleClassChanges || new Set();
   let esbuildRebuildStart = 0;
   let plugins = [
     esbuildContextualDinouPlugin({ projectRoot: process.cwd() }),
@@ -44,7 +48,13 @@ export default function getConfigEsbuild({
         ]
       : []),
     skipMissingEntryPointsPlugin(),
-    cssProcessorPlugin({ outdir, hmrEngine }),
+    cssProcessorPlugin({
+      outdir,
+      hmrEngine,
+      changedIds,
+      cssRefreshRef,
+      cssModuleClassChanges: sharedCssModuleClassChanges,
+    }),
     serverFunctionsPlugin({ serverFiles }),
     reactClientManifestPlugin({
       manifest,
@@ -53,7 +63,13 @@ export default function getConfigEsbuild({
     }),
     assetsPlugin({ changedIds }),
     stableChunkNamesAndMapsPlugin({ changedIds }),
-    esmHmrPlugin({ entryNames: ["main", "error"], changedIds, hmrEngine, hmrPort }),
+    esmHmrPlugin({
+      entryNames: ["main", "error"],
+      changedIds,
+      cssModuleClassChanges: sharedCssModuleClassChanges,
+      hmrEngine,
+      hmrPort,
+    }),
     ...(onBuildEnd
       ? [
           {
@@ -93,7 +109,7 @@ export default function getConfigEsbuild({
   if (fs.existsSync("tsconfig.json")) {
     try {
       const raw = fs.readFileSync("tsconfig.json", "utf8");
-      const clean = raw.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, "").replace(/,(\s*[}\]])/g, "$1");
+      const clean = stripJsonCommentsAndTrailingCommas(raw);
       userTsconfig = JSON.parse(clean);
     } catch (e) {}
   }

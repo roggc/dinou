@@ -20,6 +20,11 @@ export const extensions = [
   "aac",
   "mjpeg",
   "mjpg",
+  "woff",
+  "woff2",
+  "ttf",
+  "otf",
+  "eot",
 ];
 
 export const globPattern = `**/*.{${extensions.join(",")}}`;

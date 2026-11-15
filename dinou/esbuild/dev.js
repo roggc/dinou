@@ -77,6 +77,7 @@ export async function startEsbuildDev(options = {}) {
 
   const changedIds = new Set();
   const hmrEngine = { value: null };
+  const cssRefreshRef = { refresh: null };
 
   let manifest = {};
   let entryPoints = {};
@@ -178,6 +179,7 @@ export async function startEsbuildDev(options = {}) {
           manifest,
           changedIds,
           hmrEngine,
+          cssRefreshRef,
           serverFiles: currentServerFiles,
           hmrPort: options.hmrPort,
           onManifestUpdated: async () => {
@@ -297,6 +299,16 @@ export async function startEsbuildDev(options = {}) {
         }
       }
       return Promise.resolve();
+    },
+    refreshStyles: async () => {
+      if (typeof cssRefreshRef.refresh === "function") {
+        try {
+          return await cssRefreshRef.refresh();
+        } catch (err) {
+          console.error("❌ [Esbuild Dev] CSS refresh error:", err);
+        }
+      }
+      return false;
     },
     restart: async () => {
       console.log("⚡ [Esbuild Dev] Recreating client bundle due to directive change...");

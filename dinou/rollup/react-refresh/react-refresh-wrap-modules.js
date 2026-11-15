@@ -25,20 +25,23 @@ function reactRefreshWrapModules() {
         return null;
       }
 
-      // Only wrap user component chunks that contain actual app code (not third-party libraries)
+      // Only wrap user component chunks that contain actual JS/TS app code (not pure CSS chunks or third-party libraries)
       const modulePaths = Object.keys(chunk.modules || {});
-      const hasUserCode = modulePaths.some(
-        (p) =>
-          !p.includes("node_modules") &&
-          !p.includes("dinou[\\/]core") &&
-          !p.includes("dinou[\\/]rollup") &&
-          !p.includes("dinou[\\/]esbuild") &&
-          !p.includes("dinou[\\/]webpack") &&
-          !p.includes("dinou/core") &&
-          !p.includes("dinou/rollup") &&
-          !p.includes("dinou/esbuild") &&
-          !p.includes("dinou/webpack")
-      );
+      const hasUserCode = modulePaths.some((p) => {
+        const cleanPath = p.replace(/\?.*$/, "");
+        return (
+          /\.(jsx?|tsx?)$/i.test(cleanPath) &&
+          !cleanPath.includes("node_modules") &&
+          !cleanPath.includes("dinou/core") &&
+          !cleanPath.includes("dinou\\core") &&
+          !cleanPath.includes("dinou/rollup") &&
+          !cleanPath.includes("dinou\\rollup") &&
+          !cleanPath.includes("dinou/esbuild") &&
+          !cleanPath.includes("dinou\\esbuild") &&
+          !cleanPath.includes("dinou/webpack") &&
+          !cleanPath.includes("dinou\\webpack")
+        );
+      });
 
       if (!hasUserCode) {
         return null;
