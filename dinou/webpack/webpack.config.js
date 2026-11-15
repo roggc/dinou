@@ -18,6 +18,10 @@ import {
   createBasePostCssPlugins,
   getRegisteredCssUrlAssets,
 } from "../core/postcss-pipeline.js";
+import {
+  hasPublicStylesCss,
+  warnPublicStylesCssCollision,
+} from "../core/copy-static-dirs.js";
 import { getDinouConfig } from "../core/load-dinou-config.js";
 import TsconfigPathsPlugin from "#tsconfig-paths-webpack-plugin";
 import manifestGeneratorPlugin from "./plugins/manifest-generator-plugin.js";
@@ -490,6 +494,9 @@ export default async () => {
           const pluginName = "DinouCssAssetsAndMinifyPlugin";
           const clearRegistry = () => {
             getRegisteredCssUrlAssets().clear();
+            if (typeof globalThis !== "undefined") {
+              globalThis.__DINOU_HAS_COMPILED_STYLES__ = false;
+            }
           };
           compiler.hooks.run.tap(pluginName, clearRegistry);
           compiler.hooks.watchRun.tap(pluginName, clearRegistry);
@@ -501,6 +508,27 @@ export default async () => {
                 stage: webpack.Compilation.PROCESS_ASSETS_STAGE_ADDITIONS,
               },
               () => {
+                const stylesAsset = compilation.getAsset("styles.css");
+                const hasCompiledStyles = Boolean(
+                  stylesAsset && !stylesAsset.info?.copied
+                );
+                if (typeof globalThis !== "undefined") {
+                  globalThis.__DINOU_HAS_COMPILED_STYLES__ = hasCompiledStyles;
+                }
+                if (hasCompiledStyles) {
+                  if (hasPublicStylesCss(process.cwd())) {
+                    warnPublicStylesCssCollision(process.cwd());
+                  }
+                  for (const assetObj of compilation.getAssets()) {
+                    if (
+                      assetObj.info?.copied &&
+                      assetObj.name.toLowerCase() === "styles.css"
+                    ) {
+                      compilation.deleteAsset(assetObj.name);
+                    }
+                  }
+                }
+
                 for (const [
                   assetFileName,
                   absAssetPath,
@@ -530,7 +558,7 @@ export default async () => {
                 },
                 () => {
                   const cssAsset = compilation.getAsset("styles.css");
-                  if (!cssAsset) return;
+                  if (!cssAsset || cssAsset.info?.copied) return;
                   try {
                     const raw = cssAsset.source.source();
                     const rawCss = Buffer.isBuffer(raw)

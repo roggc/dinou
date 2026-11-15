@@ -72,7 +72,7 @@ function esmHmrPlugin() {
       // Inject client HMR runtime if it's the entry
       if (isClientEntry && !code.includes("/__hmr_client__.js")) {
         return {
-          code: `import { createHotContext } from "/__hmr_client__.js";window.__hotContext = createHotContext;\n` + code,
+          code: `import "/runtime.js";import { createHotContext } from "/__hmr_client__.js";window.__hotContext = createHotContext;\n` + code,
           map: null,
         };
       }

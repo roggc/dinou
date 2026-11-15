@@ -29,8 +29,19 @@ class WebpackMemoryPlugin {
           }
         }
 
+        if (typeof globalThis !== "undefined" && globalThis.__DINOU_MEM_FILES__) {
+          const stylesInfo = compilation.getAsset("styles.css")?.info;
+          if (!assets["styles.css"] || stylesInfo?.copied) {
+            globalThis.__DINOU_MEM_FILES__.delete("styles.css");
+            globalThis.__DINOU_MEM_FILES__.delete("/styles.css");
+          }
+        }
+
         for (const [filename, asset] of Object.entries(assets)) {
           if (!asset) continue;
+          if (compilation.getAsset(filename)?.info?.copied) {
+            continue;
+          }
 
           const normKey = filename.replace(/\\/g, "/");
           const cleanKey = normKey.replace(/^\/+/, "");

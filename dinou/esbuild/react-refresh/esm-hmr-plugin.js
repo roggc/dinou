@@ -217,6 +217,15 @@ export default function esmHmrPlugin({
           const outfile_basename = path.basename(outfile);
           const urlId = "/" + outfile_basename;
           const safeId = JSON.stringify(urlId);
+          if (outfile_basename === "main.js") {
+            const mainSource = new TextDecoder().decode(outputFile.contents);
+            if (!/^\s*import\s+["']\/runtime\.js["'];/.test(mainSource)) {
+              outputFile.contents = new TextEncoder().encode(
+                `import "/runtime.js";\n${mainSource}`
+              );
+            }
+            continue;
+          }
           const frameworkEntries = new Set([
             "main.js",
             "serverFunctionProxy.js",
@@ -253,13 +262,16 @@ export default function esmHmrPlugin({
           }
           const wrappedCode = `
           const RefreshRuntime = window.__reactRefreshRuntime;
+          const actualRuntime = RefreshRuntime?.default || RefreshRuntime;
           let prevRefreshReg = window.$RefreshReg$;
           let prevRefreshSig = window.$RefreshSig$;
           window.$RefreshReg$ = (type, id) => {
             const fullId = (id && id.includes('#')) ? id : (${safeId} + '#' + id);
-            RefreshRuntime.register(type, fullId);
+            actualRuntime?.register(type, fullId);
           };
-          window.$RefreshSig$ = RefreshRuntime?.createSignatureFunctionForTransform;
+          window.$RefreshSig$ = actualRuntime?.createSignatureFunctionForTransform
+            ? actualRuntime.createSignatureFunctionForTransform.bind(actualRuntime)
+            : (prevRefreshSig || (() => (type) => type));
           if (!import.meta.hot) import.meta.hot = window.__hotContext?.(${safeId});
           // --- original code ---
           ${source}
@@ -267,7 +279,7 @@ export default function esmHmrPlugin({
           if (import.meta.hot) {
             import.meta.hot.accept(({module}) => {
               if (window.__isReactRefreshBoundary && window.__isReactRefreshBoundary(module)) {
-                window.__debouncePerformReactRefresh();
+                window.__debouncePerformReactRefresh?.();
               } else {
                 // Fallback: full reload if it is not a boundary
                 import.meta.hot.invalidate();

@@ -2034,13 +2034,14 @@ async function handleRequest(request, platformContext = {}) {
         !isRoutePpr;
 
     if (canServeCachedRsc) {
+      const hasTimestampComparison = Boolean(
+        !internalRefreshVersion && internalBuildId && currentGeneratedAt
+      );
       const useOld =
         isOld ||
-        regenerating.has(cleanPath) ||
-        (!internalRefreshVersion &&
-          internalBuildId &&
-          currentGeneratedAt &&
-          Number(internalBuildId) < Number(currentGeneratedAt));
+        (hasTimestampComparison
+          ? Number(internalBuildId) < Number(currentGeneratedAt)
+          : !isEdgeRuntime(platformContext) && regenerating.has(cleanPath));
 
       const resolvedTargetFileName = targetFileName;
 
@@ -2867,6 +2868,7 @@ async function handleRequest(request, platformContext = {}) {
                   content: recomposedHtml,
                   metadata: updatedMeta,
                 };
+                await storage.set(metaKey, JSON.stringify(updatedMeta));
                 await storage.set(htmlKey, recomposedHtml, updatedMeta);
                 if (isPprRoute) {
                   const shellHtmlKey = cleanPath ? `${cleanPath}/shell.html` : "shell.html";
@@ -2875,7 +2877,6 @@ async function handleRequest(request, platformContext = {}) {
                 if (cleanPath) {
                   await storage.set(cleanPath, recomposedHtml, updatedMeta);
                 }
-                await storage.set(metaKey, JSON.stringify(updatedMeta));
               }
             }
           }
@@ -2964,12 +2965,23 @@ async function handleRequest(request, platformContext = {}) {
                   pageRscText = rscText;
                 }
 
-                await storage.set(pageRscKey, pageRscText);
-                await storage.set(rscKey, rscText);
+                const oldRscKey = cleanPath ? `${cleanPath}/page._old.rsc` : "page._old.rsc";
+                const oldHtmlKey = cleanPath ? `${cleanPath}/index._old.html` : "index._old.html";
+                try {
+                  const prevPageRsc = await storage.get(pageRscKey);
+                  if (prevPageRsc && prevPageRsc.content) {
+                    await storage.set(oldRscKey, prevPageRsc.content);
+                  }
+                  if (cachedItem && cachedItem.content) {
+                    await storage.set(oldHtmlKey, cachedItem.content);
+                  }
+                } catch (e) {}
+
+                const nextGenAt = Math.max(Date.now(), Number(metadata.generatedAt || 0) + 1);
                 const updatedMeta = {
                   status: 200,
                   revalidate: metadata.revalidate || 3,
-                  generatedAt: Date.now(),
+                  generatedAt: nextGenAt,
                   ...(Array.isArray(metadata.tags) ? { tags: metadata.tags } : {}),
                   ...(context._slotTags && context._slotTags.size > 0
                     ? { slotTags: Array.from(context._slotTags) }
@@ -2977,13 +2989,17 @@ async function handleRequest(request, platformContext = {}) {
                     ? { slotTags: metadata.slotTags }
                     : {}),
                 };
-                await storage.set(htmlKey, htmlText, updatedMeta);
                 await storage.set(metaKey, JSON.stringify(updatedMeta));
+                await storage.set(pageRscKey, pageRscText);
+                await storage.set(rscKey, rscText);
+                await storage.set(htmlKey, htmlText, updatedMeta);
                 console.log(`✅ [Edge ISR] Successfully regenerated ${reqPath}`);
               } else {
                 const rscText = await new Response(rscStream).text();
                 const pageRscKey = cleanPath ? `${cleanPath}/page.rsc` : "page.rsc";
                 const rscKey = cleanPath ? `${cleanPath}/rsc.rsc` : "rsc.rsc";
+                const oldRscKey = cleanPath ? `${cleanPath}/page._old.rsc` : "page._old.rsc";
+                const oldHtmlKey = cleanPath ? `${cleanPath}/index._old.html` : "index._old.html";
 
                 let pageRscText = "";
                 try {
@@ -2994,25 +3010,33 @@ async function handleRequest(request, platformContext = {}) {
                   pageRscText = rscText;
                 }
 
-                await storage.set(pageRscKey, pageRscText);
-                await storage.set(rscKey, rscText);
+                try {
+                  const prevPageRsc = await storage.get(pageRscKey);
+                  if (prevPageRsc && prevPageRsc.content) {
+                    await storage.set(oldRscKey, prevPageRsc.content);
+                  }
+                  if (cachedItem && cachedItem.content) {
+                    await storage.set(oldHtmlKey, cachedItem.content);
+                  }
+                } catch (e) {}
 
+                const nextGenAt = Math.max(Date.now(), Number(metadata.generatedAt || 0) + 1);
                 // Update HTML with new timestamp
                 let html = cachedItem.content || "";
-                const newTimestamp = new Date().toISOString();
+                const newTimestamp = new Date(nextGenAt).toISOString();
                 html = html.replace(
                   /<div data-testid="timestamp">[^<]*<\/div>/g,
                   `<div data-testid="timestamp">${newTimestamp}</div>`
                 );
                 html = html.replace(
-                  /window\.__DINOU_BUILD_ID__="[^"]*"/g,
-                  `window.__DINOU_BUILD_ID__="${Date.now()}"`
+                  /window\.__DINOU_BUILD_ID__\s*=\s*"[^"]*"/g,
+                  `window.__DINOU_BUILD_ID__ = "${nextGenAt}"`
                 );
 
                 const updatedMeta = {
                   status: 200,
                   revalidate: metadata.revalidate || 3,
-                  generatedAt: Date.now(),
+                  generatedAt: nextGenAt,
                   ...(Array.isArray(metadata.tags) ? { tags: metadata.tags } : {}),
                   ...(context._slotTags && context._slotTags.size > 0
                     ? { slotTags: Array.from(context._slotTags) }
@@ -3020,8 +3044,10 @@ async function handleRequest(request, platformContext = {}) {
                     ? { slotTags: metadata.slotTags }
                     : {}),
                 };
-                await storage.set(htmlKey, html, updatedMeta);
                 await storage.set(metaKey, JSON.stringify(updatedMeta));
+                await storage.set(pageRscKey, pageRscText);
+                await storage.set(rscKey, rscText);
+                await storage.set(htmlKey, html, updatedMeta);
                 console.log(`✅ [Edge ISR] Successfully regenerated ${reqPath} with timestamp ${newTimestamp}`);
               }
             });

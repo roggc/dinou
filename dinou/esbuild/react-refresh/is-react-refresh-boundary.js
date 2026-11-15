@@ -1,4 +1,7 @@
 export function isReactRefreshBoundary(RefreshRuntime, moduleExports) {
+  if (!RefreshRuntime?.isLikelyComponentType) {
+    return false;
+  }
   if (RefreshRuntime.isLikelyComponentType(moduleExports)) {
     return true;
   }
@@ -29,7 +32,12 @@ export function isReactRefreshBoundary(RefreshRuntime, moduleExports) {
     }
 
     hasExports = true;
-    const exportValue = moduleExports[key];
+    let exportValue;
+    try {
+      exportValue = moduleExports[key];
+    } catch (e) {
+      return false;
+    }
     if (!RefreshRuntime.isLikelyComponentType(exportValue)) {
       areAllExportsComponents = false;
     }

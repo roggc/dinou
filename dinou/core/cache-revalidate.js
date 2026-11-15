@@ -795,57 +795,76 @@ async function revalidatePage(reqPath, internalOptions = {}) {
       didSpliceOnlyPageSlots && prevPageOwnGenTime > 0
         ? prevPageOwnGenTime
         : newGenTime;
-    await storage.set(htmlKey, newHtml, currentMeta);
-    if (isRoutePpr) {
-      await storage.set(shellHtmlKey, newHtml, currentMeta);
+
+    let finalPageRscToWrite = "";
+    let finalFullRscToWrite = "";
+    if (renderedRsc) {
+      finalPageRscToWrite =
+        now <= prevGenTime
+          ? renderedRsc.replace(
+              /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g,
+              new Date(newGenTime).toISOString()
+            )
+          : renderedRsc;
+      if (renderedFullRsc) {
+        finalFullRscToWrite =
+          now <= prevGenTime
+            ? renderedFullRsc.replace(
+                /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g,
+                new Date(newGenTime).toISOString()
+              )
+            : renderedFullRsc;
+      }
+    } else {
+      try {
+        let cachedRsc =
+          existingPageRsc && existingPageRsc.content
+            ? existingPageRsc
+            : await storage.get(rscKey);
+        if (!cachedRsc) {
+          cachedRsc = await storage.get(legacyRscKey);
+        }
+        if (cachedRsc && cachedRsc.content) {
+          finalPageRscToWrite = cachedRsc.content.replace(
+            /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g,
+            new Date(newGenTime).toISOString()
+          );
+        }
+      } catch (e) {}
     }
+
+    // Causal commit order to guarantee zero hydration mismatch (#418) under concurrent ISR reads:
+    // 1. _old snapshot already committed above (so buildId < currentGeneratedAt resolves T_prev)
+    // 2. metadata.json advances currentGeneratedAt to newGenTime (routing T_prev clients to _old)
+    // 3. page.rsc / shell.rsc / shell.page.json commit T_new before any HTML exposes buildId=newGenTime
+    // 4. index.html / shell.html / cleanPathKey commit last
+    await storage.set(metaKey, JSON.stringify(currentMeta));
+
     if (pendingShellPageJson) {
       try {
         await storage.set(shellPageKey, pendingShellPageJson);
       } catch (e) {}
     }
+
+    try {
+      if (finalPageRscToWrite) {
+        await storage.set(rscKey, finalPageRscToWrite);
+        if (isRoutePpr && renderedRsc) {
+          await storage.set(shellRscKey, finalPageRscToWrite);
+        }
+      }
+      if (finalFullRscToWrite) {
+        await storage.set(legacyRscKey, finalFullRscToWrite);
+      }
+    } catch (e) {}
+
+    await storage.set(htmlKey, newHtml, currentMeta);
+    if (isRoutePpr) {
+      await storage.set(shellHtmlKey, newHtml, currentMeta);
+    }
     if (cleanPathKey) {
       await storage.set(cleanPathKey, newHtml, currentMeta);
     }
-    await storage.set(metaKey, JSON.stringify(currentMeta));
-
-    try {
-      if (renderedRsc) {
-        const finalRsc =
-          now <= prevGenTime
-            ? renderedRsc.replace(
-                /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g,
-                new Date(newGenTime).toISOString()
-              )
-            : renderedRsc;
-        await storage.set(rscKey, finalRsc);
-        if (isRoutePpr) {
-          await storage.set(shellRscKey, finalRsc);
-        }
-        if (renderedFullRsc) {
-          const finalFullRsc =
-            now <= prevGenTime
-              ? renderedFullRsc.replace(
-                  /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g,
-                  new Date(newGenTime).toISOString()
-                )
-              : renderedFullRsc;
-          await storage.set(legacyRscKey, finalFullRsc);
-        }
-      } else {
-        let cachedRsc = await storage.get(rscKey);
-        if (!cachedRsc) {
-          cachedRsc = await storage.get(legacyRscKey);
-        }
-        if (cachedRsc && cachedRsc.content) {
-          const newRsc = cachedRsc.content.replace(
-            /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g,
-            new Date(newGenTime).toISOString()
-          );
-          await storage.set(rscKey, newRsc);
-        }
-      }
-    } catch (e) {}
 
     console.log(`✅ [Edge Revalidate] Successfully revalidated page ${cleanPath} (generatedAt: ${newGenTime})`);
   });
@@ -1118,10 +1137,10 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
         didSpliceOnlyLayoutSlots && prevLayoutOwnGenTime > 0
           ? prevLayoutOwnGenTime
           : newGenTime;
+      await storage.set(layoutMetaKey, JSON.stringify(currentMeta));
       if (newLayoutRsc) {
         await storage.set(layoutRscKey, newLayoutRsc, currentMeta);
       }
-      await storage.set(layoutMetaKey, JSON.stringify(currentMeta));
       console.log(`✅ [Edge Revalidate] Successfully revalidated layout ${targetPath} (generatedAt: ${newGenTime})`);
       return true;
   });

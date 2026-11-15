@@ -3,6 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import esbuild from "esbuild";
 import { normalizePathCase } from "../../core/path-utils.js";
+import {
+  hasPublicStylesCss,
+  warnPublicStylesCssCollision,
+} from "../../core/copy-static-dirs.js";
 
 function normalizeFileKey(filePath) {
   if (!filePath || typeof filePath !== "string") return "";
@@ -65,6 +69,7 @@ const createPostCSSExtractPlugin = (options = {}) => {
       }
     }
 
+    const hasCompiledStyles = extractedByFile.size > 0;
     let combinedCSS = parts.length > 0 ? parts.join("\n") + "\n" : "";
 
     if (isProduction && combinedCSS) {
@@ -76,23 +81,34 @@ const createPostCSSExtractPlugin = (options = {}) => {
       } catch (e) {}
     }
 
-    const changed = lastFinalizedCSS !== null && combinedCSS !== lastFinalizedCSS;
-    lastFinalizedCSS = combinedCSS;
-    cachedCSSBuffer = Buffer.from(combinedCSS, "utf8");
+    const nextState = hasCompiledStyles ? combinedCSS : null;
+    const changed = lastFinalizedCSS !== null && nextState !== lastFinalizedCSS;
+    lastFinalizedCSS = nextState;
 
-    // 1. Ensure it's ALWAYS stored in globalThis.__DINOU_MEM_FILES__
     if (typeof globalThis !== "undefined") {
+      globalThis.__DINOU_HAS_COMPILED_STYLES__ = hasCompiledStyles;
       if (!globalThis.__DINOU_MEM_FILES__) {
         globalThis.__DINOU_MEM_FILES__ = new Map();
       }
-      globalThis.__DINOU_MEM_FILES__.set("styles.css", cachedCSSBuffer);
-      globalThis.__DINOU_MEM_FILES__.set("/styles.css", cachedCSSBuffer);
+      if (hasCompiledStyles) {
+        cachedCSSBuffer = Buffer.from(combinedCSS, "utf8");
+        globalThis.__DINOU_MEM_FILES__.set("styles.css", cachedCSSBuffer);
+        globalThis.__DINOU_MEM_FILES__.set("/styles.css", cachedCSSBuffer);
+      } else {
+        cachedCSSBuffer = null;
+        globalThis.__DINOU_MEM_FILES__.delete("styles.css");
+        globalThis.__DINOU_MEM_FILES__.delete("/styles.css");
+      }
     }
 
-    // 2. Write to disk if in production OR if DINOU_WRITE_TO_DISK is requested in dev
+    if (hasCompiledStyles && hasPublicStylesCss(process.cwd())) {
+      warnPublicStylesCssCollision(process.cwd());
+    }
+
+    // Write to disk if in production OR if DINOU_WRITE_TO_DISK is requested in dev
     const shouldWriteToDisk =
       process.env.DINOU_WRITE_TO_DISK === "true" || isProduction;
-    if (shouldWriteToDisk && (combinedCSS || fs.existsSync(outputFile))) {
+    if (shouldWriteToDisk && hasCompiledStyles) {
       const outputDir = path.dirname(outputFile);
       if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });

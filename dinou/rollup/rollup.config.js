@@ -11,7 +11,11 @@ import {
 import babelModule from "#rollup/plugin-babel";
 import resolveModule from "#rollup/plugin-node-resolve";
 import commonjs from "#rollup/plugin-commonjs";
-import { copyStaticDirectoriesToOutdir } from "../core/copy-static-dirs.js";
+import {
+  copyStaticDirectoriesToOutdir,
+  hasPublicStylesCss,
+  warnPublicStylesCssCollision,
+} from "../core/copy-static-dirs.js";
 import reactClientManifest from "./rollup-plugins/rollup-plugin-react-client-manifest.js";
 import createScopedName from "../core/createScopedName.js";
 import replace from "#rollup/plugin-replace";
@@ -143,6 +147,7 @@ export default async function () {
     perf: isDevelopment,
     treeshake: isDevelopment ? false : true,
     external: [
+      "/runtime.js",
       "/refresh.js",
       "/__hmr_client__.js",
       "/__SERVER_FUNCTION_PROXY__",
@@ -215,8 +220,22 @@ export default async function () {
         name: "dinou-rollup-css-assets-and-minify",
         buildStart() {
           getRegisteredCssUrlAssets().clear();
+          if (typeof globalThis !== "undefined") {
+            globalThis.__DINOU_HAS_COMPILED_STYLES__ = false;
+          }
         },
         generateBundle(_options, bundle) {
+          const hasCompiledStyles = Boolean(bundle["styles.css"]);
+          if (typeof globalThis !== "undefined") {
+            globalThis.__DINOU_HAS_COMPILED_STYLES__ = hasCompiledStyles;
+            if (!hasCompiledStyles && globalThis.__DINOU_MEM_FILES__) {
+              globalThis.__DINOU_MEM_FILES__.delete("styles.css");
+              globalThis.__DINOU_MEM_FILES__.delete("/styles.css");
+            }
+          }
+          if (hasCompiledStyles && hasPublicStylesCss(process.cwd())) {
+            warnPublicStylesCssCollision(process.cwd());
+          }
           for (const [assetFileName, absAssetPath] of getRegisteredCssUrlAssets().entries()) {
             if (!bundle[assetFileName] && fs.existsSync(absAssetPath)) {
               try {

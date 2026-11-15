@@ -91,6 +91,7 @@ export default function getConfigEsbuild({
   if (fs.existsSync("public") && shouldWriteToDisk) {
     let staticCopied = false;
     plugins = [
+      ...plugins,
       {
         name: "copy-static-files-once",
         setup(build) {
@@ -101,7 +102,6 @@ export default function getConfigEsbuild({
           });
         },
       },
-      ...plugins,
     ];
   }
 
@@ -165,6 +165,7 @@ export default function getConfigEsbuild({
       "/__SERVER_FUNCTION_PROXY__",
       "/serverFunctionProxy.js",
       "/__hmr_client__.js",
+      "/runtime.js",
       "/react-refresh-entry.js",
     ],
     plugins,
