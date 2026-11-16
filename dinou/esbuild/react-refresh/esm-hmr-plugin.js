@@ -68,7 +68,10 @@ export default function esmHmrPlugin({
   hmrEngine,
   hmrPort,
 } = {}) {
-  const port = hmrPort || Number(process.env.HMR_PORT || (Number(process.env.PORT || 3000) + 1));
+  const port =
+    hmrPort !== undefined
+      ? hmrPort
+      : Number(process.env.HMR_PORT || Number(process.env.PORT || 3000) + 1);
 
   const isPureCssStyleUpdate = (lowerPath) => {
     if (

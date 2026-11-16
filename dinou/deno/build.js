@@ -34,6 +34,7 @@ import {
 } from "../core/resolve-contextual-dinou.js";
 import { discoverLayoutsFromFs, sortEntriesByName } from "../core/discover-layouts.js";
 import { createServerCssModulesPlugin } from "../core/server-css-modules-plugin.js";
+import { createServerAssetPlugin } from "../core/asset-extensions.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -746,6 +747,7 @@ import {
   getStaticContentType,
   getStaticCacheControl,
   normalizePublicRequestPath,
+  parseHttpByteRange,
   resolveConfinedStaticFile,
 } from "${dinouDirSlash}/core/static-assets.js";
 import * as path from "node:path";
@@ -802,13 +804,44 @@ export async function fetch(req) {
         if (filePath && fs.existsSync(filePath)) {
           const stat = fs.statSync(filePath);
           if (stat.isFile()) {
+            const contentType = getStaticContentType(cleanPath);
+            const cacheControl = getStaticCacheControl(cleanPath);
+            const rangeHeader = req.method === "GET" ? req.headers.get("range") : null;
+            const range = rangeHeader ? parseHttpByteRange(rangeHeader, stat.size) : null;
+
+            if (range && range.unsatisfiable) {
+              return new Response(null, {
+                status: 416,
+                headers: {
+                  "content-range": range.contentRange,
+                  "accept-ranges": "bytes",
+                },
+              });
+            }
+
+            if (range) {
+              const full = await Deno.readFile(filePath);
+              const slice = full.subarray(range.start, range.end + 1);
+              return new Response(slice, {
+                status: 206,
+                headers: {
+                  "content-type": contentType,
+                  "content-length": String(range.length),
+                  "content-range": range.contentRange,
+                  "accept-ranges": "bytes",
+                  "cache-control": cacheControl,
+                },
+              });
+            }
+
             const content =
               req.method === "HEAD" ? null : await Deno.readFile(filePath);
             return new Response(content, {
               headers: {
-                "content-type": getStaticContentType(cleanPath),
+                "content-type": contentType,
                 "content-length": String(stat.size),
-                "cache-control": getStaticCacheControl(cleanPath),
+                "accept-ranges": "bytes",
+                "cache-control": cacheControl,
               },
             });
           }
@@ -869,17 +902,6 @@ const commonLoader = {
   ".tsx": "tsx",
   ".json": "json",
   ".css": "empty",
-  ".svg": "dataurl",
-  ".png": "dataurl",
-  ".jpg": "dataurl",
-  ".jpeg": "dataurl",
-  ".webp": "dataurl",
-  ".ico": "dataurl",
-  ".woff": "dataurl",
-  ".woff2": "dataurl",
-  ".ttf": "dataurl",
-  ".otf": "dataurl",
-  ".eot": "dataurl",
 };
 
 const banner = {
@@ -1057,6 +1079,7 @@ const ssrOutfile = path.join(denoDir, "ssr-engine.js");
 const finalOutfile = path.join(denoDir, "main.js");
 
 const serverCssModulesPlugin = createServerCssModulesPlugin({ projectRoot });
+const serverAssetPlugin = createServerAssetPlugin({ projectRoot, dinouConfig });
 
 try {
   // Pass A: RSC Engine
@@ -1071,7 +1094,7 @@ try {
     mainFields: ["module", "main"],
     conditions: ["deno", "worker", "react-server", "style"],
     external: externalList,
-    plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin, serverCssModulesPlugin],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin, serverCssModulesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
@@ -1095,7 +1118,7 @@ try {
     mainFields: ["module", "main"],
     conditions: ["deno", "worker", "browser", "style"],
     external: externalList,
-    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr, serverCssModulesPlugin],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr, serverCssModulesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
@@ -1121,6 +1144,7 @@ try {
     conditions: ["deno", "worker", "browser"],
     external: externalList,
     banner,
+    plugins: [serverAssetPlugin],
     inject: setupFiles.length > 0 ? setupFiles : undefined,
     alias: commonAlias,
     loader: commonLoader,

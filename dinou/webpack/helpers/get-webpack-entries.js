@@ -5,7 +5,10 @@ import { pathToFileURL } from "node:url";
 import parser from "#babel/parser";
 import _traverseRaw from "#babel/traverse";
 import crypto from "node:crypto";
-import { regex as assetRegex } from "../../core/asset-extensions.js";
+import {
+  getAssetExtensionsInfo,
+  resolveAssetImport,
+} from "../../core/asset-extensions.js";
 import {
   getAbsPathWithExt,
   resolveStyleImportFromCode,
@@ -25,11 +28,16 @@ function hashFilePath(absPath) {
 
 async function getCSSEntries({
   srcDir = path.resolve("src"),
-  assetInclude = assetRegex,
+  assetInclude = null,
+  dinouConfig = null,
   manifest = {},
 } = {}) {
+  const projectRoot = path.dirname(path.resolve(srcDir));
+  const activeAssetInclude =
+    assetInclude || getAssetExtensionsInfo(dinouConfig, projectRoot).regex;
   const clientEntryMap = new Map();
   const cssEntryMap = new Map();
+  const assetEntryMap = new Map();
 
   async function getImportsAndAssetsAndCsss(
     code,
@@ -61,11 +69,17 @@ async function getCSSEntries({
     for (const nodePath of importNodes) {
       const source = nodePath.node.source.value;
 
-      // Resolve local/aliased imports or bare stylesheet imports from node_modules
+      // Resolve local/aliased imports, bare stylesheet imports, or bare asset imports from node_modules
       const absImportPathWithExt =
         getAbsPathWithExt(source, {
           parentURL: pathToFileURL(baseFilePath).href,
-        }) || resolveStyleImportFromCode(source, baseFilePath);
+        }) ||
+        resolveStyleImportFromCode(source, baseFilePath) ||
+        resolveAssetImport(source, {
+          importer: baseFilePath,
+          projectRoot,
+          assetRegex: activeAssetInclude,
+        });
 
       if (!absImportPathWithExt) {
         // unresolved - skip
@@ -81,7 +95,7 @@ async function getCSSEntries({
         continue;
       }
 
-      if (assetInclude.test(absImportPathWithExt)) {
+      if (activeAssetInclude.test(absImportPathWithExt)) {
         assets.add(absImportPathWithExt);
         continue;
       }
@@ -205,13 +219,21 @@ async function getCSSEntries({
         serverFiles.add(normalizeServerFilePath(absPath));
       }
       try {
-        const { csss } = await getImportsAndAssetsAndCsss(code, absPath);
+        const { assets, csss } = await getImportsAndAssetsAndCsss(code, absPath);
 
         for (const cssPath of csss) {
           const normCss = normalizePath(cssPath);
           cssEntryMap.set(normCss.toLowerCase(), {
             absPath: normCss,
             name: path.basename(cssPath, path.extname(cssPath)),
+          });
+        }
+
+        for (const assetPath of assets) {
+          const normAsset = normalizePath(assetPath);
+          assetEntryMap.set(normAsset.toLowerCase(), {
+            absPath: normAsset,
+            name: path.basename(assetPath, path.extname(assetPath)),
           });
         }
       } catch (err) {
@@ -222,6 +244,7 @@ async function getCSSEntries({
 
   const detectedClientEntries = new Set(clientEntryMap.values());
   const detectedCSSEntries = new Set(cssEntryMap.values());
+  const detectedAssetEntries = new Set(assetEntryMap.values());
 
   for (const dCE of detectedClientEntries) {
     const hash = hashFilePath(dCE.absPath);
@@ -237,7 +260,12 @@ async function getCSSEntries({
     dCSSE.outfileName = outfileName;
   }
 
-  return [detectedCSSEntries, detectedClientEntries, serverFiles];
+  return [
+    detectedCSSEntries,
+    detectedClientEntries,
+    serverFiles,
+    detectedAssetEntries,
+  ];
 }
 
 export { getCSSEntries };

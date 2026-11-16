@@ -17,8 +17,7 @@ import {
   buildSsrServerReferenceModule,
   generateSsrServerManifestStubs,
 } from "../core/transform-server-functions.js";
-import createScopedName from "../core/createScopedName.js";
-import { regex as assetRegex } from "../core/asset-extensions.js";
+import { createServerAssetPlugin } from "../core/asset-extensions.js";
 import { createServerCssModulesPlugin } from "../core/server-css-modules-plugin.js";
 import {
   isSupportedClientModule,
@@ -40,7 +39,7 @@ export async function bundleDualEngine(options = {}) {
   const nodeDir = path.resolve(projectRoot, options.outDir || ".dinou/node");
   fs.mkdirSync(nodeDir, { recursive: true });
 
-  const dinouConfig = await getDinouConfig();
+  const dinouConfig = await getDinouConfig(projectRoot);
   const setupFiles = resolveSetupFiles(projectRoot, dinouConfig);
   if (setupFiles.length > 0) {
     console.log(`  🔌 [Dinou Setup] Active setup files (${setupFiles.length}):`, setupFiles.map((f) => path.relative(projectRoot, f)).join(", "));
@@ -741,34 +740,10 @@ export async function renderHtml(rscStream, options = {}) {
     ".json": "json", ".css": "empty",
   };
 
-  const serverAssetPlugin = {
-    name: "dinou-server-asset-plugin",
-    setup(build) {
-      build.onResolve({ filter: assetRegex }, (args) => {
-        let resolvedPath;
-        if (args.path.startsWith("@/")) {
-          resolvedPath = path.resolve(projectRoot, "src", args.path.slice(2));
-        } else if (path.isAbsolute(args.path)) {
-          resolvedPath = args.path;
-        } else {
-          resolvedPath = path.resolve(args.resolveDir, args.path);
-        }
-        return { path: resolvedPath, namespace: "dinou-server-asset" };
-      });
-
-      build.onLoad({ filter: /.*/, namespace: "dinou-server-asset" }, (args) => {
-        const ext = path.extname(args.path);
-        const base = path.basename(args.path, ext);
-        const scoped = createScopedName(base, args.path);
-        const assetUrl = `/assets/${scoped}${ext}`;
-
-        return {
-          contents: `export default ${JSON.stringify(assetUrl)};`,
-          loader: "js",
-        };
-      });
-    },
-  };
+  const serverAssetPlugin = createServerAssetPlugin({
+    projectRoot,
+    dinouConfig,
+  });
 
   const banner = {
     js: `import { createRequire as ___createRequire } from 'node:module';
@@ -992,6 +967,7 @@ var __webpack_chunk_load__ = function(chunkId) {
     banner,
     commonAlias,
     commonLoader,
+    serverAssetPlugin,
     isWebpackBuild,
     setupFiles,
   };

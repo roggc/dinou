@@ -36,6 +36,8 @@ export default function getConfigEsbuildProd({
   outdir = ".dinou/dist3",
   manifest = {},
   serverFiles,
+  serverAssetPaths = [],
+  dinouConfig = null,
   reactCompiler = true,
 }) {
   const manifestData = {};
@@ -48,7 +50,11 @@ export default function getConfigEsbuildProd({
       manifest,
       manifestPath: `.dinou/dist1/react-client-manifest.json`,
     }),
-    assetsPlugin(),
+    assetsPlugin({
+      dinouConfig,
+      serverAssetPaths,
+      projectRoot: process.cwd(),
+    }),
     manifestGeneratorPlugin(manifestData),
     serverFunctionsPlugin({ manifestData, serverFiles }),
     reactCompiler && babelReactCompilerPlugin({ serverFiles }),

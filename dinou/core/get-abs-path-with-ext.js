@@ -21,8 +21,8 @@ let cachedAliasState = {
 };
 
 // Reads tsconfig/jsconfig (tolerating JSONC comments & trailing commas) and builds a map of alias -> targetBase
-function getTsconfigAliases() {
-  const cwd = process.cwd();
+function getTsconfigAliases(customCwd) {
+  const cwd = path.resolve(customCwd || process.cwd());
   const tsconfigPath = path.resolve(cwd, "tsconfig.json");
   const jsconfigPath = path.resolve(cwd, "jsconfig.json");
   const configFile = fs.existsSync(tsconfigPath)
@@ -138,7 +138,7 @@ export function getAbsPathWithExt(specifier, context) {
   const cleanSpecifier = specifier ? specifier.split("?")[0].split("#")[0] : specifier;
   if (!cleanSpecifier) return null;
 
-  const aliasMap = getTsconfigAliases();
+  const aliasMap = getTsconfigAliases(context?.cwd);
   if (aliasMap.size > 0) {
     for (const [alias, info] of aliasMap.entries()) {
       if (info.keyIsWildcard ? cleanSpecifier.startsWith(alias) : cleanSpecifier === alias) {

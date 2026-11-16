@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { regex } from "../../core/asset-extensions.js";
+import { getAssetExtensionsInfo } from "../../core/asset-extensions.js";
 
 function areBuffersEqual(a, b) {
   if (a === b) return true;
@@ -22,16 +22,19 @@ export default async function write(result) {
   const skipSet = new Set();
   const normalizeRel = (p) => p.replace(/\\/g, "/");
   const cssRegex = /\.(css|scss|less)$/i;
+  const activeAssetRegex = getAssetExtensionsInfo(null, process.cwd()).regex;
   for (const [relPath, info] of Object.entries(result.metafile.outputs)) {
     if (!info.entryPoint) continue;
     let entryPointNormalized = info.entryPoint;
-    if (entryPointNormalized.startsWith("dinou-asset:")) {
+    if (entryPointNormalized.startsWith("dinou-asset-entry:")) {
+      entryPointNormalized = entryPointNormalized.replace("dinou-asset-entry:", "");
+    } else if (entryPointNormalized.startsWith("dinou-asset:")) {
       entryPointNormalized = entryPointNormalized.replace("dinou-asset:", "");
     }
     const inputKeys = Object.keys(info.inputs);
     // Logic for assets
     if (
-      regex.test(entryPointNormalized) &&
+      activeAssetRegex.test(entryPointNormalized) &&
       inputKeys.length === 1 &&
       inputKeys[0] === info.entryPoint
     ) {
@@ -117,7 +120,14 @@ export default async function write(result) {
   }
 
   const filesToWrite = [];
+  const seenWritePaths = new Set();
   for (const file of result.outputFiles) {
+    const resolvedOutPath = path.resolve(file.path);
+    const outKey = process.platform === "win32" ? resolvedOutPath.toLowerCase() : resolvedOutPath;
+    if (seenWritePaths.has(outKey)) {
+      continue;
+    }
+    seenWritePaths.add(outKey);
     const fileRelPath = normalizeRel(path.relative(process.cwd(), file.path));
     if (skipSet.has(fileRelPath)) {
       continue;

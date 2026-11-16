@@ -25,7 +25,7 @@ import { esmHmrPlugin } from "./react-refresh/rollup-plugin-esm-hmr.js";
 import dinouAssetPlugin from "./rollup-plugins/dinou-asset-plugin.js";
 import tsconfigPaths from "#rollup-plugin-tsconfig-paths";
 import serverFunctionsPlugin from "./rollup-plugins/rollup-plugin-server-functions.js";
-import { regex } from "../core/asset-extensions.js";
+import { getAssetExtensionsInfo } from "../core/asset-extensions.js";
 import manifestGeneratorPlugin from "./rollup-plugins/manifest-generator-plugin.js";
 import rollupMemoryPlugin from "./rollup-plugins/rollup-plugin-memory.js";
 import rollupSwcPlugin from "./rollup-plugins/rollup-plugin-swc.js";
@@ -56,15 +56,19 @@ console.log(
 );
 
 export default async function () {
-  try {
-    generateRouteTypes(process.cwd());
-  } catch (e) {}
   const isDevelopment = process.env.NODE_ENV !== "production";
   const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
   const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDevelopment;
   const serverFiles = new Set();
   const dinouConfig = await getDinouConfig();
   const enableReactCompiler = dinouConfig?.reactCompiler !== false;
+  const { regex: activeAssetRegex } = getAssetExtensionsInfo(
+    dinouConfig,
+    process.cwd()
+  );
+  try {
+    generateRouteTypes(process.cwd());
+  } catch (e) {}
   const delModule = await import("#rollup-plugin-delete");
   const del = delModule?.default || delModule;
   const clientConfig = {
@@ -169,6 +173,11 @@ export default async function () {
           hook: "buildStart",
         }),
       rollupContextualDinouPlugin({ projectRoot: process.cwd() }),
+      dinouAssetPlugin({
+        include: activeAssetRegex,
+        dinouConfig,
+        projectRoot: process.cwd(),
+      }),
       tsconfigPaths(),
       replace({
         preventAssignment: true,
@@ -185,9 +194,6 @@ export default async function () {
       }),
       commonjs({
         include: isEjected ? [/node_modules/, /dinou/] : /node_modules/,
-      }),
-      dinouAssetPlugin({
-        include: regex,
       }),
       isDevelopment
         ? rollupSwcPlugin()
@@ -273,6 +279,8 @@ export default async function () {
           isDevelopment ? ".dinou/node-dev" : ".dinou/dist1",
           "react-client-manifest.json",
         ),
+        assetInclude: activeAssetRegex,
+        dinouConfig,
         serverFiles,
       }),
       isDevelopment && reactRefreshWrapModules(),
@@ -354,6 +362,12 @@ export default async function () {
       }),
       json(),
       rollupContextualDinouPlugin({ projectRoot: process.cwd() }),
+      dinouAssetPlugin({
+        include: activeAssetRegex,
+        dinouConfig,
+        projectRoot: process.cwd(),
+        emitFiles: false,
+      }),
       resolve({
         exportConditions: ["react-server", "node", "import"],
         preferBuiltins: true,

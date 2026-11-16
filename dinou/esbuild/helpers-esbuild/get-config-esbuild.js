@@ -21,6 +21,8 @@ export default function getConfigEsbuild({
   hmrEngine,
   cssRefreshRef,
   serverFiles,
+  serverAssetPaths = [],
+  dinouConfig = null,
   onManifestUpdated,
   onBuildStart,
   onBuildEnd,
@@ -61,7 +63,12 @@ export default function getConfigEsbuild({
       manifestPath: ".dinou/node-dev/react-client-manifest.json",
       onManifestUpdated,
     }),
-    assetsPlugin({ changedIds }),
+    assetsPlugin({
+      changedIds,
+      serverAssetPaths,
+      dinouConfig,
+      projectRoot: process.cwd(),
+    }),
     stableChunkNamesAndMapsPlugin({ changedIds }),
     esmHmrPlugin({
       entryNames: ["main", "error"],

@@ -58,12 +58,18 @@ export default {
       try {
         const assetRes = await env.ASSETS.fetch(request.clone ? request.clone() : request);
         if (assetRes && assetRes.status < 400) {
-          if (
-            url.pathname.toLowerCase().endsWith("/apple-app-site-association") &&
-            !(assetRes.headers.get("content-type") || "").toLowerCase().includes("json")
-          ) {
+          const rawCt = (assetRes.headers.get("content-type") || "").trim();
+          const lowerCt = rawCt.toLowerCase();
+          const expectedCt = getStaticContentType(url.pathname);
+          const needsContentTypeFix =
+            !rawCt ||
+            (lowerCt === "application/octet-stream" &&
+              expectedCt !== "application/octet-stream") ||
+            (url.pathname.toLowerCase().endsWith("/apple-app-site-association") &&
+              !lowerCt.includes("json"));
+          if (needsContentTypeFix) {
             const headers = new Headers(assetRes.headers);
-            headers.set("content-type", getStaticContentType(url.pathname));
+            headers.set("content-type", expectedCt);
             return new Response(assetRes.body, {
               status: assetRes.status,
               statusText: assetRes.statusText,

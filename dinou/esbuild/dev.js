@@ -17,6 +17,7 @@ import {
   getMirrorPath,
 } from "./helpers-esbuild/swc-disk-cache.js";
 import { generateRouteTypes } from "../core/generate-route-types.js";
+import { getDinouConfig } from "../core/load-dinou-config.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -82,12 +83,15 @@ export async function startEsbuildDev(options = {}) {
   let manifest = {};
   let entryPoints = {};
   let cssEntryPoints = {};
+  let serverAssetPaths = [];
+  let activeDinouConfig = null;
   let allComponentEntries = {};
   let activeComponentEntries = new Map();
   let pathToOutfile = new Map();
   let outfileNameToPath = new Map();
 
   async function updateEntriesAndComponents() {
+    activeDinouConfig = await getDinouConfig();
     try {
       generateRouteTypes(process.cwd());
     } catch (e) {}
@@ -97,7 +101,7 @@ export async function startEsbuildDev(options = {}) {
       detectedCSSEntries,
       detectedAssetEntries,
       serverFiles,
-    ] = await getEsbuildEntries({ manifest });
+    ] = await getEsbuildEntries({ manifest, dinouConfig: activeDinouConfig });
 
     updateManifestForModule(
       absPathToClientRedirect,
@@ -136,10 +140,7 @@ export async function startEsbuildDev(options = {}) {
       {}
     );
 
-    const assetEntryPoints = [...detectedAssetEntries].reduce(
-      (acc, dAE) => ({ ...acc, [dAE.outfileName]: dAE.absPath }),
-      {}
-    );
+    serverAssetPaths = [...detectedAssetEntries].map((dAE) => dAE.absPath);
 
     allComponentEntries = componentEntryPoints;
     for (const [outName, absP] of Object.entries(componentEntryPoints)) {
@@ -181,6 +182,8 @@ export async function startEsbuildDev(options = {}) {
           hmrEngine,
           cssRefreshRef,
           serverFiles: currentServerFiles,
+          serverAssetPaths,
+          dinouConfig: activeDinouConfig,
           hmrPort: options.hmrPort,
           onManifestUpdated: async () => {
             await onRebuilt();

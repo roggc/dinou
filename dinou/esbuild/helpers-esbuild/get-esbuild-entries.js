@@ -6,8 +6,8 @@ import parser from "#babel/parser";
 import traverse from "#babel/traverse";
 import crypto from "node:crypto";
 import {
-  regex as assetRegex,
-  globPattern as assetGlobPattern,
+  getAssetExtensionsInfo,
+  resolveAssetImport,
 } from "../../core/asset-extensions.js";
 import {
   getAbsPathWithExt,
@@ -24,9 +24,15 @@ function hashFilePath(absPath) {
 
 export default async function getEsbuildEntries({
   srcDir = path.resolve("src"),
-  assetInclude = assetRegex,
+  assetInclude = null,
+  dinouConfig = null,
   manifest = {},
 } = {}) {
+  const projectRoot = path.dirname(path.resolve(srcDir));
+  const extInfo = getAssetExtensionsInfo(dinouConfig, projectRoot);
+  const activeAssetInclude = assetInclude || extInfo.regex;
+  const activeAssetGlobPattern = extInfo.globPattern;
+
   const clientEntryMap = new Map();
   const cssEntryMap = new Map();
   const assetEntryMap = new Map();
@@ -64,11 +70,17 @@ export default async function getEsbuildEntries({
     for (const nodePath of importNodes) {
       const source = nodePath.node.source.value;
 
-      // Resolve local/aliased imports or bare stylesheet imports from node_modules
+      // Resolve local/aliased imports, bare stylesheet imports, or bare asset imports from node_modules
       const absImportPathWithExt =
         getAbsPathWithExt(source, {
           parentURL: pathToFileURL(baseFilePath).href,
-        }) || resolveStyleImportFromCode(source, baseFilePath);
+        }) ||
+        resolveStyleImportFromCode(source, baseFilePath) ||
+        resolveAssetImport(source, {
+          importer: baseFilePath,
+          projectRoot,
+          assetRegex: activeAssetInclude,
+        });
 
       if (!absImportPathWithExt) {
         // unresolved - skip
@@ -84,7 +96,7 @@ export default async function getEsbuildEntries({
         continue;
       }
 
-      if (assetInclude.test(absImportPathWithExt)) {
+      if (activeAssetInclude.test(absImportPathWithExt)) {
         assets.add(absImportPathWithExt);
         continue;
       }
@@ -241,7 +253,7 @@ export default async function getEsbuildEntries({
     }
   } // end for files
 
-  const assets = await glob([assetGlobPattern], {
+  const assets = await glob([activeAssetGlobPattern], {
     cwd: srcDir,
     absolute: true,
     ignore: ["_*/**", "**/_*/**"],

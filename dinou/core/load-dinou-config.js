@@ -3,24 +3,48 @@ import { existsSync, mkdirSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 
-const require = createRequire(import.meta.url);
+let require = null;
+try {
+  if (typeof import.meta !== "undefined" && import.meta.url) {
+    require = createRequire(import.meta.url);
+  }
+} catch (e) {}
 
 let dinouConfig = { plugins: [] };
-let dinouConfigPromise = null;
+const dinouConfigPromisesByCwd = new Map();
 
-async function getDinouConfig() {
-  if (typeof globalThis !== "undefined" && globalThis.__DINOU_CONFIG__) {
+async function getDinouConfig(customCwd) {
+  const cwd = path.resolve(
+    customCwd ||
+      (typeof process !== "undefined" && typeof process.cwd === "function"
+        ? process.cwd()
+        : ".")
+  );
+
+  if (
+    typeof globalThis !== "undefined" &&
+    globalThis.__DINOU_CONFIG__ &&
+    (!globalThis.__DINOU_CONFIG_CWD__ || globalThis.__DINOU_CONFIG_CWD__ === cwd)
+  ) {
     return globalThis.__DINOU_CONFIG__;
   }
-  if (dinouConfigPromise) return dinouConfigPromise;
-  dinouConfigPromise = (async () => {
-    const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
-    for (const filename of ["dinou.config.ts", "dinou.config.mjs", "dinou.config.js", "dinou.config.cjs"]) {
+
+  const isDev = process.env.NODE_ENV !== "production";
+  if (!isDev && dinouConfigPromisesByCwd.has(cwd)) {
+    return dinouConfigPromisesByCwd.get(cwd);
+  }
+
+  const loadPromise = (async () => {
+    for (const filename of [
+      "dinou.config.ts",
+      "dinou.config.mjs",
+      "dinou.config.js",
+      "dinou.config.cjs",
+    ]) {
       const p = path.resolve(cwd, filename);
       if (existsSync(p)) {
         try {
           let loaded;
-          const isDev = process.env.NODE_ENV !== "production";
           let esbuild;
           if (
             typeof process !== "undefined" &&
@@ -62,47 +86,64 @@ async function getDinouConfig() {
                 },
               ],
             });
-            loaded = await import(pathToFileURL(bundledPath).href + (isDev ? `?t=${Date.now()}` : ""));
+            loaded = await import(
+              pathToFileURL(bundledPath).href + (isDev ? `?t=${Date.now()}` : "")
+            );
           } else if (p.endsWith(".mjs")) {
-            loaded = await import(pathToFileURL(p).href + (isDev ? `?t=${Date.now()}` : ""));
+            loaded = await import(
+              pathToFileURL(p).href + (isDev ? `?t=${Date.now()}` : "")
+            );
           } else {
             const nodeReq =
-              typeof globalThis !== "undefined" && typeof globalThis.__dinou_require__ === "function"
+              typeof globalThis !== "undefined" &&
+              typeof globalThis.__dinou_require__ === "function"
                 ? globalThis.__dinou_require__
                 : typeof require === "function"
-                ? require
-                : null;
+                  ? require
+                  : null;
             if (nodeReq) {
               try {
                 loaded = nodeReq(p);
               } catch (e) {
-                loaded = await import(pathToFileURL(p).href + (isDev ? `?t=${Date.now()}` : ""));
+                loaded = await import(
+                  pathToFileURL(p).href + (isDev ? `?t=${Date.now()}` : "")
+                );
               }
             } else {
-              loaded = await import(pathToFileURL(p).href + (isDev ? `?t=${Date.now()}` : ""));
+              loaded = await import(
+                pathToFileURL(p).href + (isDev ? `?t=${Date.now()}` : "")
+              );
             }
           }
-          const cfg = loaded && loaded.default ? loaded.default : loaded || { plugins: [] };
+          const cfg =
+            loaded && loaded.default ? loaded.default : loaded || { plugins: [] };
           dinouConfig = cfg;
+          if (typeof globalThis !== "undefined") {
+            globalThis.__DINOU_CONFIG__ = cfg;
+            globalThis.__DINOU_CONFIG_CWD__ = cwd;
+          }
           return cfg;
         } catch (err) {
           console.error(`[Dinou] Error loading ${filename}:`, err);
         }
       }
     }
-    return dinouConfig;
+    const fallback = { plugins: [] };
+    dinouConfig = fallback;
+    return fallback;
   })();
-  return dinouConfigPromise;
+
+  if (!isDev) {
+    dinouConfigPromisesByCwd.set(cwd, loadPromise);
+  }
+  return loadPromise;
 }
 
-// Initial sync attempt if already set on globalThis
 if (typeof globalThis !== "undefined" && globalThis.__DINOU_CONFIG__) {
   dinouConfig = globalThis.__DINOU_CONFIG__;
 }
 
-export {
-  getDinouConfig,
-};
+export { getDinouConfig };
 export default {
   getDinouConfig,
 };

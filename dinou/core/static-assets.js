@@ -34,6 +34,7 @@ export const STATIC_MIME_TYPES = Object.freeze({
   ".ico": "image/x-icon",
   ".bmp": "image/bmp",
   ".apng": "image/apng",
+  ".hdr": "image/vnd.radiance",
 
   // Fonts
   ".woff": "font/woff",
@@ -42,8 +43,10 @@ export const STATIC_MIME_TYPES = Object.freeze({
   ".otf": "font/otf",
   ".eot": "application/vnd.ms-fontobject",
 
-  // Documents & Archives
+  // Documents, 3D Models & Archives
   ".pdf": "application/pdf",
+  ".glb": "model/gltf-binary",
+  ".gltf": "model/gltf+json",
   ".zip": "application/zip",
   ".gz": "application/gzip",
 
@@ -52,16 +55,21 @@ export const STATIC_MIME_TYPES = Object.freeze({
   ".webm": "video/webm",
   ".ogv": "video/ogg",
   ".mov": "video/quicktime",
+  ".avi": "video/x-msvideo",
+  ".mkv": "video/x-matroska",
+  ".mjpeg": "video/x-motion-jpeg",
+  ".mjpg": "video/x-motion-jpeg",
   ".mp3": "audio/mpeg",
   ".wav": "audio/wav",
   ".ogg": "audio/ogg",
+  ".opus": "audio/opus",
   ".m4a": "audio/mp4",
   ".aac": "audio/aac",
   ".flac": "audio/flac",
 });
 
 export const PUBLIC_STATIC_EXT_REGEX =
-  /\.(?:js|mjs|cjs|css|map|wasm|png|jpg|jpeg|gif|svg|ico|webp|avif|bmp|apng|woff|woff2|ttf|eot|otf|txt|xml|rss|atom|json|webmanifest|html|htm|pdf|csv|md|ics|vtt|mp4|webm|ogv|mov|mp3|wav|ogg|m4a|aac|flac|zip|gz)$/i;
+  /\.(?:js|mjs|cjs|css|map|wasm|png|jpg|jpeg|gif|svg|ico|webp|avif|bmp|apng|hdr|woff|woff2|ttf|eot|otf|txt|xml|rss|atom|json|webmanifest|html|htm|pdf|glb|gltf|csv|md|ics|vtt|mp4|webm|ogv|mov|avi|mkv|mjpeg|mjpg|mp3|wav|ogg|opus|m4a|aac|flac|zip|gz)$/i;
 
 const IMMUTABLE_CHUNK_REGEX =
   /^[^/]+-(?:[A-Z0-9]{8}|[a-f0-9]{16,32}|(?=[A-Za-z0-9_-]{8}\.)(?=[A-Za-z0-9_-]*[A-Z0-9])[A-Za-z0-9_-]{8})\.(?:js|mjs|cjs|css)(?:\.map)?$/;
@@ -364,6 +372,98 @@ export async function fetchCloudflareDist2Asset(
     }
   }
   return null;
+}
+
+/**
+ * Parses an incoming RFC 9110 `Range: bytes=<start>-<end>` HTTP header against `totalSize`.
+ * Supports standard `bytes=start-end`, open-ended `bytes=start-`, and suffix `bytes=-length`
+ * ranges required by HTML5 `<video>` and `<audio>` scrubbing and Safari media playback.
+ *
+ * @returns {null | { unsatisfiable: true, contentRange: string } | { unsatisfiable: false, start: number, end: number, length: number, contentRange: string }}
+ */
+export function parseHttpByteRange(rangeHeader, totalSize) {
+  if (
+    !rangeHeader ||
+    typeof rangeHeader !== "string" ||
+    typeof totalSize !== "number" ||
+    !Number.isFinite(totalSize) ||
+    totalSize < 0
+  ) {
+    return null;
+  }
+
+  const trimmed = rangeHeader.trim();
+  if (!trimmed.toLowerCase().startsWith("bytes=")) {
+    return null;
+  }
+
+  const spec = trimmed.slice(6).trim();
+  // Ignore multipart multi-range requests (`bytes=0-50, 100-150`) and serve full 200 per RFC 9110
+  if (!spec || spec.includes(",")) {
+    return null;
+  }
+
+  const dashIdx = spec.indexOf("-");
+  if (dashIdx === -1) {
+    return null;
+  }
+
+  const startStr = spec.slice(0, dashIdx).trim();
+  const endStr = spec.slice(dashIdx + 1).trim();
+
+  if (totalSize === 0) {
+    return {
+      unsatisfiable: true,
+      contentRange: "bytes */0",
+    };
+  }
+
+  let start;
+  let end;
+
+  if (startStr === "") {
+    // Suffix byte-range-spec: `bytes=-500` (last 500 bytes)
+    if (!/^\d+$/.test(endStr)) return null;
+    const suffixLength = Number(endStr);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) {
+      return {
+        unsatisfiable: true,
+        contentRange: `bytes */${totalSize}`,
+      };
+    }
+    start = Math.max(0, totalSize - suffixLength);
+    end = totalSize - 1;
+  } else {
+    if (!/^\d+$/.test(startStr)) return null;
+    start = Number(startStr);
+    if (!Number.isSafeInteger(start) || start >= totalSize) {
+      return {
+        unsatisfiable: true,
+        contentRange: `bytes */${totalSize}`,
+      };
+    }
+    if (endStr === "") {
+      end = totalSize - 1;
+    } else {
+      if (!/^\d+$/.test(endStr)) return null;
+      const parsedEnd = Number(endStr);
+      if (!Number.isSafeInteger(parsedEnd) || parsedEnd < start) {
+        return {
+          unsatisfiable: true,
+          contentRange: `bytes */${totalSize}`,
+        };
+      }
+      end = Math.min(parsedEnd, totalSize - 1);
+    }
+  }
+
+  return {
+    unsatisfiable: false,
+    start,
+    end,
+    length: end - start + 1,
+    contentRange: `bytes ${start}-${end}/${totalSize}`,
+  };
 }
 
 /**

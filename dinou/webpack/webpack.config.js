@@ -28,7 +28,11 @@ import manifestGeneratorPlugin from "./plugins/manifest-generator-plugin.js";
 import ServerFunctionsPlugin from "./plugins/server-functions-plugin.js";
 import WebpackMemoryPlugin from "./plugins/webpack-memory-plugin.js";
 import webpack from "webpack";
-import { regex } from "../core/asset-extensions.js";
+import {
+  getAssetExtensionsInfo,
+  getAssetFileName,
+  resolveAssetImport,
+} from "../core/asset-extensions.js";
 import getCSSEntries from "./helpers/get-webpack-entries.js";
 import {
   scanProjectDependenciesForClientComponents,
@@ -95,6 +99,12 @@ function cleanDir(dir) {
 }
 
 export default async () => {
+  const dinouConfig = await getDinouConfig();
+  const enableReactCompiler = dinouConfig?.reactCompiler !== false;
+  const { regex: activeAssetRegex } = getAssetExtensionsInfo(
+    dinouConfig,
+    process.cwd()
+  );
   try {
     generateRouteTypes(process.cwd());
   } catch (e) {}
@@ -122,9 +132,10 @@ export default async () => {
       }
     }
   }
-  const [cssEntries, , serverFiles] = await getCSSEntries();
-  const dinouConfig = await getDinouConfig();
-  const enableReactCompiler = dinouConfig?.reactCompiler !== false;
+  const [cssEntries, , serverFiles, serverAssetEntries] = await getCSSEntries({
+    assetInclude: activeAssetRegex,
+    dinouConfig,
+  });
   const require = createRequire(import.meta.url);
   const babelLoaderPath = require.resolve("#babel-loader");
   const unwrapBabel = (mod) => mod?.default ?? mod;
@@ -319,29 +330,52 @@ export default async () => {
           ],
         },
         {
-          test: regex,
+          test: activeAssetRegex,
           type: "asset/resource",
           generator: {
             filename: (pathData) => {
               const resourcePath =
-                pathData.module.resourceResolveData?.path ||
-                pathData.module.resource;
-
-              const base = path.basename(
-                resourcePath,
-                path.extname(resourcePath),
-              );
-              const scoped = createScopedName(base, resourcePath);
-
-              return `/assets/${scoped}[ext]`;
+                pathData.module?.resourceResolveData?.path ||
+                pathData.module?.resource ||
+                pathData.filename;
+              return getAssetFileName(resourcePath, process.cwd());
             },
-            publicPath: "",
+            publicPath: "/",
           },
         },
       ],
     },
     plugins: [
       webpackContextualDinouPlugin({ projectRoot: process.cwd() }),
+      {
+        apply(compiler) {
+          compiler.hooks.normalModuleFactory.tap(
+            "DinouWebpackAssetAliasPlugin",
+            (nmf) => {
+              nmf.hooks.beforeResolve.tap(
+                "DinouWebpackAssetAliasPlugin",
+                (resolveData) => {
+                  if (!resolveData || !resolveData.request) return;
+                  const cleanReq = resolveData.request
+                    .split("?")[0]
+                    .split("#")[0];
+                  if (!activeAssetRegex.test(cleanReq)) return;
+                  const importer = resolveData.contextInfo?.issuer || "";
+                  const resolved = resolveAssetImport(resolveData.request, {
+                    importer,
+                    resolveDir: resolveData.context || process.cwd(),
+                    projectRoot: process.cwd(),
+                    assetRegex: activeAssetRegex,
+                  });
+                  if (resolved) {
+                    resolveData.request = resolved;
+                  }
+                }
+              );
+            }
+          );
+        },
+      },
       new ReactServerWebpackPlugin({
         isServer: false,
         clientReferences: [
@@ -533,18 +567,44 @@ export default async () => {
                   assetFileName,
                   absAssetPath,
                 ] of getRegisteredCssUrlAssets().entries()) {
-                  if (
-                    !compilation.getAsset(assetFileName) &&
-                    !compilation.getAsset("/" + assetFileName) &&
-                    fs.existsSync(absAssetPath)
-                  ) {
-                    try {
-                      const buf = fs.readFileSync(absAssetPath);
-                      compilation.emitAsset(
-                        assetFileName,
-                        new webpack.sources.RawSource(buf)
-                      );
-                    } catch (e) {}
+                  if (fs.existsSync(absAssetPath)) {
+                    compilation.fileDependencies.add(absAssetPath);
+                    if (
+                      !compilation.getAsset(assetFileName) &&
+                      !compilation.getAsset("/" + assetFileName)
+                    ) {
+                      try {
+                        const buf = fs.readFileSync(absAssetPath);
+                        compilation.emitAsset(
+                          assetFileName,
+                          new webpack.sources.RawSource(buf)
+                        );
+                      } catch (e) {}
+                    }
+                  }
+                }
+
+                if (serverAssetEntries && serverAssetEntries.size > 0) {
+                  for (const assetEntry of serverAssetEntries) {
+                    const absAssetPath = assetEntry.absPath;
+                    if (!absAssetPath || !fs.existsSync(absAssetPath)) continue;
+                    compilation.fileDependencies.add(absAssetPath);
+                    const assetFileName = getAssetFileName(
+                      absAssetPath,
+                      process.cwd()
+                    );
+                    if (
+                      !compilation.getAsset(assetFileName) &&
+                      !compilation.getAsset("/" + assetFileName)
+                    ) {
+                      try {
+                        const buf = fs.readFileSync(absAssetPath);
+                        compilation.emitAsset(
+                          assetFileName,
+                          new webpack.sources.RawSource(buf)
+                        );
+                      } catch (e) {}
+                    }
                   }
                 }
               }
@@ -721,6 +781,14 @@ export default async () => {
       alias: {
         ...(isEjected ? { dinou: localDinouPath } : {}),
       },
+      plugins: configFile
+        ? [
+            new TsconfigPathsPlugin({
+              configFile,
+              extensions: [".js", ".jsx", ".ts", ".tsx", ".css"],
+            }),
+          ]
+        : [],
     },
     externals: [
       "express",
@@ -733,6 +801,23 @@ export default async () => {
     ],
     module: {
       exprContextCritical: false,
+      rules: [
+        {
+          test: activeAssetRegex,
+          type: "asset/resource",
+          generator: {
+            emit: false,
+            filename: (pathData) => {
+              const resourcePath =
+                pathData.module?.resourceResolveData?.path ||
+                pathData.module?.resource ||
+                pathData.filename;
+              return getAssetFileName(resourcePath, process.cwd());
+            },
+            publicPath: "/",
+          },
+        },
+      ],
     },
     ignoreWarnings: [
       /Critical dependency/,

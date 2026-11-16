@@ -6,6 +6,7 @@ import rawTailwindcss from "#tailwindcss/postcss";
 import rawAutoprefixer from "#autoprefixer";
 import rawPostCssModules from "#postcss-modules";
 import createScopedName from "./createScopedName.js";
+import { getAssetFileName } from "./asset-extensions.js";
 import { getAbsPathWithExt, resolveCssImportSpecifier } from "./get-abs-path-with-ext.js";
 
 const unwrap = (mod) => (typeof mod === "function" ? mod : mod?.default || mod);
@@ -141,10 +142,8 @@ function rewriteCssUrlAssets(root, result, { onAsset } = {}) {
           return fullMatch;
         }
 
-        const ext = path.extname(resolvedPath);
-        const base = path.basename(resolvedPath, ext);
-        const scoped = createScopedName(base, resolvedPath);
-        const assetFileName = `assets/${scoped}${ext}`;
+        const assetFileName = getAssetFileName(resolvedPath, process.cwd());
+        const assetBaseName = path.basename(assetFileName);
 
         const registry = getRegisteredCssUrlAssets();
         registry.set(assetFileName, resolvedPath);
@@ -164,7 +163,7 @@ function rewriteCssUrlAssets(root, result, { onAsset } = {}) {
             }
             globalThis.__DINOU_MEM_FILES__.set(assetFileName, buf);
             globalThis.__DINOU_MEM_FILES__.set("/" + assetFileName, buf);
-            globalThis.__DINOU_MEM_FILES__.set(`${scoped}${ext}`, buf);
+            globalThis.__DINOU_MEM_FILES__.set(assetBaseName, buf);
           } catch (e) {}
         }
 

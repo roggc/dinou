@@ -38,6 +38,7 @@ import { esbuildContextualDinouPlugin, isUnderscoreEscapedSrcPath } from "../cor
 import {
   getStaticContentType,
   normalizePublicRequestPath,
+  parseHttpByteRange,
   resolveConfinedStaticFile,
 } from "../core/static-assets.js";
 import parseExports from "../core/parse-exports.js";
@@ -50,8 +51,10 @@ import {
 } from "../core/transform-server-functions.js";
 import { nodeToWebRequest, sendWebResponseToNode } from "../core/http-adapter.js";
 import { setStorageAdapter, hasExplicitStorageAdapter, FileSystemStorage, MemoryStorage } from "../core/storage-adapter.js";
-import createScopedName from "../core/createScopedName.js";
-import { regex as assetRegex } from "../core/asset-extensions.js";
+import {
+  createServerAssetPlugin,
+  getAssetExtensionsInfo,
+} from "../core/asset-extensions.js";
 import {
   createServerCssModulesPlugin,
   didCssModuleExportsChange,
@@ -1332,56 +1335,11 @@ const commonLoader = {
   ".json": "json", ".css": "empty",
 };
 
-const serverAssetPlugin = {
-  name: "dinou-server-asset-plugin",
-  setup(build) {
-    build.onResolve({ filter: assetRegex }, (args) => {
-      let resolvedPath;
-      if (args.path.startsWith("@/")) {
-        resolvedPath = path.resolve(projectRoot, "src", args.path.slice(2));
-      } else if (path.isAbsolute(args.path)) {
-        resolvedPath = args.path;
-      } else {
-        resolvedPath = path.resolve(args.resolveDir, args.path);
-      }
-      return { path: resolvedPath, namespace: "dinou-server-asset" };
-    });
-
-    build.onLoad({ filter: /.*/, namespace: "dinou-server-asset" }, (args) => {
-      const ext = path.extname(args.path);
-      const base = path.basename(args.path, ext);
-      const scoped = createScopedName(base, args.path);
-      const assetUrl = `/assets/${scoped}${ext}`;
-      const assetKey = `assets/${scoped}${ext}`;
-
-      try {
-        const fileBuf = fs.readFileSync(args.path);
-        if (typeof globalThis !== "undefined") {
-          if (!globalThis.__DINOU_MEM_FILES__) {
-            globalThis.__DINOU_MEM_FILES__ = new Map();
-          }
-          globalThis.__DINOU_MEM_FILES__.set(assetKey, fileBuf);
-          globalThis.__DINOU_MEM_FILES__.set("/" + assetKey, fileBuf);
-          globalThis.__DINOU_MEM_FILES__.set(`${scoped}${ext}`, fileBuf);
-        }
-
-        if (process.env.DINOU_WRITE_TO_DISK === "true") {
-          const outAssetDir = path.resolve(projectRoot, ".dinou/public/assets");
-          const outAssetPath = path.join(outAssetDir, `${scoped}${ext}`);
-          if (!fs.existsSync(outAssetPath)) {
-            fs.mkdirSync(outAssetDir, { recursive: true });
-            fs.writeFileSync(outAssetPath, fileBuf);
-          }
-        }
-      } catch (e) {}
-
-      return {
-        contents: `export default ${JSON.stringify(assetUrl)};`,
-        loader: "js",
-      };
-    });
-  },
-};
+const serverAssetPlugin = createServerAssetPlugin({
+  projectRoot,
+  dinouConfig,
+  emitToDevMemory: true,
+});
 
 const resolvePkgCache = new Map();
 
@@ -1768,6 +1726,32 @@ async function broadcastToClients(msg) {
 // Trigger an incremental rebuild with batching and queueing
 let isRebuilding = false;
 const queuedChanges = new Map();
+let pendingBroadcastReload = false;
+let pendingBroadcastStyleUpdate = false;
+const pendingBroadcastRscPaths = new Set();
+
+async function flushPendingBroadcasts() {
+  if (queuedChanges.size > 0 || pendingSrcChanges.size > 0) {
+    return;
+  }
+  const shouldReload = pendingBroadcastReload;
+  const shouldStyleUpdate = pendingBroadcastStyleUpdate;
+  const rscPaths = Array.from(pendingBroadcastRscPaths);
+  pendingBroadcastReload = false;
+  pendingBroadcastStyleUpdate = false;
+  pendingBroadcastRscPaths.clear();
+
+  if (shouldReload) {
+    await broadcastToClients({ type: "reload" });
+    return;
+  }
+  if (shouldStyleUpdate) {
+    await broadcastToClients({ type: "style-update", url: "/styles.css" });
+  }
+  for (const absFilePath of rscPaths) {
+    await broadcastToClients({ type: "rsc-update", path: absFilePath });
+  }
+}
 
 async function doRebuildBatch(changesMap) {
   const t0 = Date.now();
@@ -1783,6 +1767,7 @@ async function doRebuildBatch(changesMap) {
     let hasClientChanges = false;
     let hasServerChanges = false;
     let hasCssChanges = false;
+    let hasNonCssChanges = false;
     const clientRebuildPromises = [];
 
     for (const [absFilePath, eventType] of changesMap) {
@@ -1791,6 +1776,7 @@ async function doRebuildBatch(changesMap) {
       }
       if (eventType === "unlinkDir") {
         needsStructureRebuild = true;
+        hasNonCssChanges = true;
         const dirPrefix = (absFilePath.endsWith(path.sep) ? absFilePath : absFilePath + path.sep).toLowerCase();
         for (const cf of Array.from(knownClientFiles)) {
           if (cf.toLowerCase().startsWith(dirPrefix)) {
@@ -1812,6 +1798,8 @@ async function doRebuildBatch(changesMap) {
       }
 
       const normLower = absFilePath.toLowerCase();
+      const activeAssetRegex = getAssetExtensionsInfo(dinouConfig, projectRoot).regex;
+      const isAssetFile = activeAssetRegex.test(absFilePath);
       const isCssFile = normLower.endsWith(".css") || normLower.endsWith(".scss") || normLower.endsWith(".less");
       const isCssModuleFile = normLower.endsWith(".module.css");
       let cssModuleClassesChanged = false;
@@ -1825,12 +1813,15 @@ async function doRebuildBatch(changesMap) {
           }
         }
       }
+      if (!isCssFile || cssModuleClassesChanged) {
+        hasNonCssChanges = true;
+      }
 
       let isClientFile = false;
       let isServerFile = false;
       let currentServerActions = [];
 
-      if (fs.existsSync(absFilePath)) {
+      if (!isAssetFile && !isCssFile && fs.existsSync(absFilePath)) {
         try {
           const content = fs.readFileSync(absFilePath, "utf8");
           const trimmed = content.trim();
@@ -1916,6 +1907,7 @@ async function doRebuildBatch(changesMap) {
         wasClientFile ||
         clientDirectiveChanged ||
         isCssFile ||
+        isAssetFile ||
         (isJsTsSource && !isPageRoute);
 
       if (isClientFile) {
@@ -1947,11 +1939,14 @@ async function doRebuildBatch(changesMap) {
           clientRebuildPromises.push(clientBundlerHandle.notifyFileChanged(absFilePath));
         }
       }
+      if (isAssetFile && clientBundlerHandle?.refreshStyles) {
+        clientRebuildPromises.push(clientBundlerHandle.refreshStyles());
+      }
 
-      if (isClientFile || cssModuleClassesChanged) {
+      if (isClientFile || cssModuleClassesChanged || isAssetFile) {
         hasClientChanges = true;
       }
-      if (isServerFile || cssModuleClassesChanged || (!isClientFile && !isCssFile)) {
+      if (isServerFile || cssModuleClassesChanged || isAssetFile || (!isClientFile && !isCssFile)) {
         hasServerChanges = true;
       }
     }
@@ -1959,8 +1954,9 @@ async function doRebuildBatch(changesMap) {
     if (needsClientBundlerRestart && clientBundlerHandle?.restart) {
       updateSpinner(`Directive or structure change detected. Recreating client bundle...`);
       await clientBundlerHandle.restart();
-      if (!needsStructureRebuild && queuedChanges.size === 0 && pendingSrcChanges.size === 0) {
-        await broadcastToClients({ type: "reload" });
+      pendingBroadcastReload = true;
+      if (!needsStructureRebuild) {
+        await flushPendingBroadcasts();
         logSuccess(`Recreated bundle for ${baseName} in ${Date.now() - t0}ms`);
         return;
       }
@@ -1988,9 +1984,10 @@ async function doRebuildBatch(changesMap) {
       if (activeClientBuildPromise) {
         await activeClientBuildPromise;
       }
-      if ((!hasCssChanges || isWebpackBuild) && queuedChanges.size === 0 && pendingSrcChanges.size === 0) {
-        await broadcastToClients({ type: "reload" });
+      if (hasNonCssChanges || !hasCssChanges || isWebpackBuild) {
+        pendingBroadcastReload = true;
       }
+      await flushPendingBroadcasts();
     } else {
       if (clientRebuildPromises.length > 0) {
         await Promise.all(clientRebuildPromises);
@@ -2019,34 +2016,33 @@ async function doRebuildBatch(changesMap) {
       lastClientBuildDetails = "";
       logSuccess(`Rebuilt in ${Date.now() - t0}ms (${baseName})${buildDetails}`);
 
-      if (queuedChanges.size === 0 && pendingSrcChanges.size === 0) {
-        if (isWebpackBuild) {
-          if (hasClientChanges) {
-            await broadcastToClients({ type: "reload" });
-          } else {
-            if (hasCssChanges) {
-              await broadcastToClients({ type: "style-update", url: "/styles.css" });
-            }
-            if (hasServerChanges) {
-              for (const [absFilePath] of changesMap) {
-                await broadcastToClients({ type: "rsc-update", path: absFilePath });
-              }
-            }
+      if (isWebpackBuild) {
+        if (hasClientChanges) {
+          pendingBroadcastReload = true;
+        } else {
+          if (hasCssChanges) {
+            pendingBroadcastStyleUpdate = true;
           }
-        } else if (hasServerChanges) {
-          for (const [absFilePath] of changesMap) {
-            const lowerPath = absFilePath.toLowerCase();
-            const isPureNonModuleCss =
-              (lowerPath.endsWith(".css") ||
-                lowerPath.endsWith(".scss") ||
-                lowerPath.endsWith(".less")) &&
-              !lowerPath.endsWith(".module.css");
-            if (!isPureNonModuleCss) {
-              broadcastToClients({ type: "rsc-update", path: absFilePath });
+          if (hasServerChanges) {
+            for (const [absFilePath] of changesMap) {
+              pendingBroadcastRscPaths.add(absFilePath);
             }
           }
         }
+      } else if (hasServerChanges) {
+        for (const [absFilePath] of changesMap) {
+          const lowerPath = absFilePath.toLowerCase();
+          const isPureNonModuleCss =
+            (lowerPath.endsWith(".css") ||
+              lowerPath.endsWith(".scss") ||
+              lowerPath.endsWith(".less")) &&
+            !lowerPath.endsWith(".module.css");
+          if (!isPureNonModuleCss) {
+            pendingBroadcastRscPaths.add(absFilePath);
+          }
+        }
       }
+      await flushPendingBroadcasts();
     }
   } catch (err) {
     stopSpinner();
@@ -2082,6 +2078,7 @@ async function triggerRebuildBatch(changesMap) {
         queuedChanges.clear();
         await doRebuildBatch(currentBatch);
       }
+      await flushPendingBroadcasts();
     } finally {
       isRebuilding = false;
       activeRebuildPromise = null;
@@ -2700,9 +2697,33 @@ const server = http.createServer(async (req, res) => {
 
         if (memBuf) {
           const contentType = getStaticContentType(cleanPath);
+          const rangeHeader =
+            req.method === "GET" ? req.headers["range"] : undefined;
+          const range = rangeHeader
+            ? parseHttpByteRange(String(rangeHeader), memBuf.length)
+            : null;
+          if (range && range.unsatisfiable) {
+            res.statusCode = 416;
+            res.setHeader("content-range", range.contentRange);
+            res.setHeader("accept-ranges", "bytes");
+            res.end();
+            return;
+          }
+          if (range) {
+            const slice = memBuf.subarray(range.start, range.end + 1);
+            res.statusCode = 206;
+            res.setHeader("content-type", contentType);
+            res.setHeader("content-length", String(slice.length));
+            res.setHeader("content-range", range.contentRange);
+            res.setHeader("accept-ranges", "bytes");
+            res.setHeader("cache-control", "no-store, no-cache, must-revalidate");
+            res.end(slice);
+            return;
+          }
           res.statusCode = 200;
           res.setHeader("content-type", contentType);
           res.setHeader("content-length", String(memBuf.length));
+          res.setHeader("accept-ranges", "bytes");
           res.setHeader("cache-control", "no-store, no-cache, must-revalidate");
           res.end(req.method === "HEAD" ? undefined : memBuf);
           return;
@@ -2764,13 +2785,65 @@ const server = http.createServer(async (req, res) => {
         try {
           const fileExt = path.extname(foundFilePath).toLowerCase();
           const contentType = getStaticContentType(foundFilePath);
+          const isCodeAsset = fileExt === ".js" || fileExt === ".mjs" || fileExt === ".css";
 
-          // Safely read buffer into memory, retrying briefly if the bundler currently has it truncated or locked
+          if (!isCodeAsset) {
+            const stat = fs.statSync(foundFilePath);
+            const rangeHeader =
+              req.method === "GET" ? req.headers["range"] : undefined;
+            const range = rangeHeader
+              ? parseHttpByteRange(String(rangeHeader), stat.size)
+              : null;
+
+            if (range && range.unsatisfiable) {
+              res.statusCode = 416;
+              res.setHeader("content-range", range.contentRange);
+              res.setHeader("accept-ranges", "bytes");
+              res.end();
+              return;
+            }
+
+            if (range) {
+              res.statusCode = 206;
+              res.setHeader("content-type", contentType);
+              res.setHeader("content-length", String(range.length));
+              res.setHeader("content-range", range.contentRange);
+              res.setHeader("accept-ranges", "bytes");
+              res.setHeader("cache-control", "no-store, no-cache, must-revalidate");
+              const stream = fs.createReadStream(foundFilePath, {
+                start: range.start,
+                end: range.end,
+              });
+              stream.on("error", () => {
+                if (!res.writableEnded) res.end();
+              });
+              stream.pipe(res);
+              return;
+            }
+
+            res.statusCode = 200;
+            res.setHeader("content-type", contentType);
+            res.setHeader("content-length", String(stat.size));
+            res.setHeader("accept-ranges", "bytes");
+            res.setHeader("cache-control", "no-store, no-cache, must-revalidate");
+            if (req.method === "HEAD") {
+              res.end();
+              return;
+            }
+            const stream = fs.createReadStream(foundFilePath);
+            stream.on("error", () => {
+              if (!res.writableEnded) res.end();
+            });
+            stream.pipe(res);
+            return;
+          }
+
+          // Safely read JS/CSS buffer into memory, retrying briefly if the bundler currently has it truncated or locked
           let buf = null;
           for (let attempt = 0; attempt < 10; attempt++) {
             try {
               buf = fs.readFileSync(foundFilePath);
-              if (buf.length > 0 || (!fileExt.endsWith(".js") && !fileExt.endsWith(".css"))) {
+              if (buf.length > 0) {
                 break;
               }
             } catch (readErr) {
@@ -2783,6 +2856,7 @@ const server = http.createServer(async (req, res) => {
             res.statusCode = 200;
             res.setHeader("content-type", contentType);
             res.setHeader("content-length", String(buf.length));
+            res.setHeader("accept-ranges", "bytes");
             res.setHeader("cache-control", "no-store, no-cache, must-revalidate");
             res.end(req.method === "HEAD" ? undefined : buf);
             return;

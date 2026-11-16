@@ -5,8 +5,11 @@ import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import parser from "#babel/parser";
 import _traverseRaw from "#babel/traverse";
-import { regex } from "../../core/asset-extensions.js";
-import createScopedName from "../../core/createScopedName.js";
+import {
+  getAssetExtensionsInfo,
+  getAssetInfo,
+  resolveAssetImport,
+} from "../../core/asset-extensions.js";
 import {
   getAbsPathWithExt,
   resolveStyleImportFromCode,
@@ -81,12 +84,17 @@ function getDefaultExportName(code) {
 function reactClientManifestPlugin({
   srcDir = path.resolve("src"),
   manifestPath = null,
-  assetInclude = regex,
+  assetInclude = null,
+  dinouConfig = null,
   serverFiles = new Set(),
 } = {}) {
+  const projectRoot = path.dirname(path.resolve(srcDir));
+  const activeAssetInclude =
+    assetInclude || getAssetExtensionsInfo(dinouConfig, projectRoot).regex;
   const manifest = {};
   const clientModules = new Set();
   const serverModules = new Set();
+  const knownServerAssets = new Set();
   let lastManifest = null;
 
 const urlToManifestKeys = new Map();
@@ -268,11 +276,17 @@ function setManifestEntry(fileUrl, expName, entry) {
     for (const source of importSources) {
       // console.log("source", source);
 
-      // Resolve the import (including bare stylesheet imports from node_modules)
+      // Resolve the import (including bare stylesheet or asset imports from node_modules)
       const absImportPathWithExt =
         getAbsPathWithExt(source, {
           parentURL: pathToFileURL(baseFilePath).href,
-        }) || resolveStyleImportFromCode(source, baseFilePath);
+        }) ||
+        resolveStyleImportFromCode(source, baseFilePath) ||
+        resolveAssetImport(source, {
+          importer: baseFilePath,
+          projectRoot,
+          assetRegex: activeAssetInclude,
+        });
       if (!absImportPathWithExt) {
         // console.warn(`[resolve failed] ${source} from ${baseFilePath}`);
         continue;
@@ -289,7 +303,7 @@ function setManifestEntry(fileUrl, expName, entry) {
       }
 
       // Check if it's an asset
-      if (assetInclude.test(absImportPathWithExt)) {
+      if (activeAssetInclude.test(absImportPathWithExt)) {
         assets.add(absImportPathWithExt);
         continue; // Don't recurse for assets
       }
@@ -347,20 +361,20 @@ function setManifestEntry(fileUrl, expName, entry) {
     return result;
   }
 
-  // New helper to emit a single asset (used in buildStart and watchChange)
+  // Helper to emit a single asset (used in buildStart and incremental watch rebuilds)
   function emitAsset(absAssetPath, pluginContext) {
-    const base = path.basename(absAssetPath, path.extname(absAssetPath));
-    const scoped = createScopedName(base, absAssetPath);
-    const ext = path.extname(absAssetPath);
-    const fileName = `assets/${scoped}${ext}`;
-    const emitted = globalThis.__DINOU_EMITTED_ASSETS__ || (globalThis.__DINOU_EMITTED_ASSETS__ = new Set());
-    if (emitted.has(fileName)) return;
-    emitted.add(fileName);
-    const source = readFileSync(absAssetPath);
+    if (!existsSync(absAssetPath)) return;
+    const info = getAssetInfo(absAssetPath, projectRoot, { includeBuffer: true });
+    if (!info.buffer) return;
+    const emitted =
+      globalThis.__DINOU_EMITTED_ASSETS__ ||
+      (globalThis.__DINOU_EMITTED_ASSETS__ = new Set());
+    if (emitted.has(info.fileName)) return;
+    emitted.add(info.fileName);
     pluginContext.emitFile({
       type: "asset",
-      fileName,
-      source,
+      fileName: info.fileName,
+      source: info.buffer,
     });
   }
 
@@ -403,6 +417,14 @@ function setManifestEntry(fileUrl, expName, entry) {
             id: entry.id,
             name: entry.name,
           });
+        }
+        for (const assetPath of Array.from(knownServerAssets)) {
+          if (!existsSync(assetPath)) {
+            knownServerAssets.delete(assetPath);
+            continue;
+          }
+          this.addWatchFile(assetPath);
+          emitAsset(assetPath, this);
         }
         hasPendingCssChange = false;
 
@@ -515,6 +537,7 @@ function setManifestEntry(fileUrl, expName, entry) {
           // Emit assets for server components (replicate dinouAssetPlugin logic)
           for (const assetPath of assets) {
             this.addWatchFile(assetPath);
+            knownServerAssets.add(assetPath);
             if (!emittedAssets.has(assetPath)) {
               emittedAssets.add(assetPath);
               emitAsset(assetPath, this);
@@ -635,6 +658,7 @@ function setManifestEntry(fileUrl, expName, entry) {
           }
           for (const assetPath of assets) {
             this.addWatchFile(assetPath);
+            knownServerAssets.add(assetPath);
           }
           for (const cssPath of csss) {
             this.addWatchFile(cssPath);

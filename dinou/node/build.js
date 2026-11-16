@@ -27,7 +27,16 @@ try {
     outDir: ".dinou/node",
   });
 
-  const { dinouDirSlash, externalList, banner, commonAlias, commonLoader, isWebpackBuild, setupFiles } = engineResult;
+  const {
+    dinouDirSlash,
+    externalList,
+    banner,
+    commonAlias,
+    commonLoader,
+    serverAssetPlugin,
+    isWebpackBuild,
+    setupFiles,
+  } = engineResult;
 
   // Pass C: Node Orchestrator Entry
   const nodeEntryContent = `// Auto-generated main entry for Node.js (Dual-Bundle)
@@ -52,6 +61,7 @@ import {
   getStaticContentType,
   getStaticCacheControl,
   normalizePublicRequestPath,
+  parseHttpByteRange,
   resolveConfinedStaticFile,
 } from "${dinouDirSlash}/core/static-assets.js";
 
@@ -94,15 +104,48 @@ export async function fetch(req) {
         try {
           const stat = fs.statSync(filePath);
           if (stat.isFile()) {
+            const contentType = getStaticContentType(cleanPath);
+            const cacheControl = getStaticCacheControl(cleanPath);
+            const rangeHeader = req.method === "GET" ? req.headers.get("range") : null;
+            const range = rangeHeader ? parseHttpByteRange(rangeHeader, stat.size) : null;
+
+            if (range && range.unsatisfiable) {
+              return new Response(null, {
+                status: 416,
+                headers: {
+                  "content-range": range.contentRange,
+                  "accept-ranges": "bytes",
+                },
+              });
+            }
+
+            if (range) {
+              const stream = fs.createReadStream(filePath, {
+                start: range.start,
+                end: range.end,
+              });
+              return new Response(Readable.toWeb(stream), {
+                status: 206,
+                headers: {
+                  "content-type": contentType,
+                  "content-length": String(range.length),
+                  "content-range": range.contentRange,
+                  "accept-ranges": "bytes",
+                  "cache-control": cacheControl,
+                },
+              });
+            }
+
             const body =
               req.method === "HEAD"
                 ? null
                 : Readable.toWeb(fs.createReadStream(filePath));
             return new Response(body, {
               headers: {
-                "content-type": getStaticContentType(cleanPath),
+                "content-type": contentType,
                 "content-length": String(stat.size),
-                "cache-control": getStaticCacheControl(cleanPath),
+                "accept-ranges": "bytes",
+                "cache-control": cacheControl,
               },
             });
           }
@@ -222,6 +265,7 @@ if (isMain) {
     external: [...externalList, "./rsc-engine.mjs", "./ssr-engine.mjs"],
     banner,
     inject: setupFiles,
+    plugins: [serverAssetPlugin].filter(Boolean),
     alias: commonAlias,
     loader: commonLoader,
     define: {

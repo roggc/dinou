@@ -1,3 +1,6 @@
+delete process.env.DINOU_DEV;
+process.env.NODE_ENV = "production";
+
 import esbuild from "esbuild";
 import fs from "node:fs/promises";
 import getConfigEsbuildProd from "./helpers-esbuild/get-config-esbuild-prod.js";
@@ -8,6 +11,8 @@ import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-m
 import { generateRouteTypes } from "../core/generate-route-types.js";
 import { esbuildContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
 import { getDinouConfig } from "../core/load-dinou-config.js";
+import { createServerAssetPlugin } from "../core/asset-extensions.js";
+import { createServerCssModulesPlugin } from "../core/server-css-modules-plugin.js";
 import ensureVendorMode from "../core/ensure-vendor-mode.js";
 if (!ensureVendorMode()) {
   await new Promise(() => {});
@@ -50,6 +55,8 @@ const frameworkEntryPoints = {
 };
 
 try {
+  const dinouConfig = await getDinouConfig();
+  const enableReactCompiler = dinouConfig?.reactCompiler !== false;
   try {
     generateRouteTypes(process.cwd());
   } catch (e) {}
@@ -60,7 +67,7 @@ try {
     detectedCSSEntries,
     detectedAssetEntries,
     serverFiles,
-  ] = await getEsbuildEntries({ manifest });
+  ] = await getEsbuildEntries({ manifest, dinouConfig });
 
   updateManifestForModule(
     absPathToClientRedirect,
@@ -91,20 +98,13 @@ try {
     {}
   );
 
-  const assetEntryPoints = [...detectedAssetEntries].reduce(
-    (acc, dAE) => ({ ...acc, [dAE.outfileName]: dAE.absPath }),
-    {}
-  );
+  const serverAssetPaths = [...detectedAssetEntries].map((dAE) => dAE.absPath);
 
   const entryPoints = {
     ...frameworkEntryPoints,
     ...componentEntryPoints,
     ...cssEntryPoints,
-    ...assetEntryPoints,
   };
-
-  const dinouConfig = await getDinouConfig();
-  const enableReactCompiler = dinouConfig?.reactCompiler !== false;
 
   await esbuild.build(
     getConfigEsbuildProd({
@@ -112,6 +112,8 @@ try {
       manifest,
       outdir,
       serverFiles,
+      serverAssetPaths,
+      dinouConfig,
       reactCompiler: enableReactCompiler,
     })
   );
@@ -127,8 +129,9 @@ try {
     platform: "node",
     target: "node20",
     format: "esm",
-    conditions: ["react-server", "node", "import"],
+    conditions: ["react-server", "node", "import", "style"],
     outdir: ".dinou/dist1/server",
+    loader: { ".css": "empty" },
     external: [
       "express",
       "chokidar",
@@ -141,7 +144,11 @@ try {
     banner: {
       js: "import { createRequire as ___createRequire } from 'node:module'; import { fileURLToPath as ___fileURLToPath } from 'node:url'; import ___path from 'node:path'; const require = ___createRequire(import.meta.url || ___path.resolve(process.cwd(), 'package.json')); const __filename = import.meta.url ? ___fileURLToPath(import.meta.url) : ___path.resolve(process.cwd(), 'index.js'); const __dirname = ___path.dirname(__filename); process.env.NODE_ENV = process.env.NODE_ENV || 'production';",
     },
-    plugins: [esbuildContextualDinouPlugin({ projectRoot: process.cwd() })],
+    plugins: [
+      esbuildContextualDinouPlugin({ projectRoot: process.cwd() }),
+      createServerCssModulesPlugin({ projectRoot: process.cwd() }),
+      createServerAssetPlugin({ projectRoot: process.cwd(), dinouConfig }),
+    ],
     sourcemap: true,
   });
   await fs.writeFile(

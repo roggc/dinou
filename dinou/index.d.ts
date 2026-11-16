@@ -212,6 +212,14 @@ export interface DinouConfig {
   setupFiles?: string[];
 
   /**
+   * Additional file extensions (with or without leading dot, e.g. `["glb", "gltf", "hdr", "wasm"]`)
+   * recognized as static media/binary assets when imported in Server Components, Client Components, or CSS `url(...)`.
+   * Automatically fingerprinted into `/assets/[name]-[hash].[ext]` across Esbuild, Rollup, Webpack, and all runtimes,
+   * with ambient TypeScript declarations emitted into `.dinou/types/routes.d.ts`.
+   */
+  assetExtensions?: string[];
+
+  /**
    * Array of Dinou plugins.
    */
   plugins?: DinouPlugin[];
