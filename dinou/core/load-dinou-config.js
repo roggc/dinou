@@ -67,6 +67,9 @@ async function getDinouConfig(customCwd) {
               mkdirSync(outDir, { recursive: true });
             }
             const bundledPath = path.resolve(outDir, "dinou.config.bundled.mjs");
+            const { esbuildTsconfigAliasesPlugin } = await import(
+              "./tsconfig-aliases.js"
+            );
             await esbuild.build({
               entryPoints: [p],
               outfile: bundledPath,
@@ -84,6 +87,10 @@ async function getDinouConfig(customCwd) {
                     });
                   },
                 },
+                esbuildTsconfigAliasesPlugin({
+                  projectRoot: cwd,
+                  skipAssets: false,
+                }),
               ],
             });
             loaded = await import(

@@ -2065,7 +2065,8 @@ async function handleRequest(request, platformContext = {}) {
         isOld ||
         (hasTimestampComparison
           ? Number(internalBuildId) < Number(currentGeneratedAt)
-          : !isEdgeRuntime(platformContext) && regenerating.has(cleanPath));
+          : !isEdgeRuntime(platformContext) &&
+            (regenerating.has(reqPath) || regenerating.has(cleanPath)));
 
       const resolvedTargetFileName = targetFileName;
 
@@ -2149,9 +2150,15 @@ async function handleRequest(request, platformContext = {}) {
                 }
               }
               if (isSlotOnlyExpired && !isExpired) {
-                const slotRevalKey = `slot:${cleanPath}`;
+                const slotRevalKey = `slot:${reqPath}`;
                 const slotRevalPromise = (async () => {
-                  if (regenerating.has(slotRevalKey) || regenerating.has(cleanPath)) return;
+                  if (
+                    regenerating.has(slotRevalKey) ||
+                    regenerating.has(reqPath) ||
+                    regenerating.has(cleanPath)
+                  ) {
+                    return;
+                  }
                   regenerating.add(slotRevalKey);
                   try {
                     const { revalidatePage } = await import("./cache-revalidate.js");
@@ -2166,16 +2173,25 @@ async function handleRequest(request, platformContext = {}) {
                   platformContext.ctx.waitUntil(slotRevalPromise);
                 }
               } else if (isExpired) {
-                const { revalidatePage } = await import("./cache-revalidate.js");
-                await revalidatePage(cleanPath, {});
-                if (!dynamicState.value) {
-                  const refreshedCached = await storage.get(rscKey);
-                  if (refreshedCached && refreshedCached.content) {
-                    cached = refreshedCached;
-                    isExpired = false;
-                  }
+                if (regenerating.has(reqPath) || regenerating.has(cleanPath)) {
+                  isExpired = false;
                 } else {
-                  isExpired = true;
+                  regenerating.add(reqPath);
+                  try {
+                    const { revalidatePage } = await import("./cache-revalidate.js");
+                    await revalidatePage(cleanPath, {});
+                  } finally {
+                    regenerating.delete(reqPath);
+                  }
+                  if (!dynamicState.value) {
+                    const refreshedCached = await storage.get(rscKey);
+                    if (refreshedCached && refreshedCached.content) {
+                      cached = refreshedCached;
+                      isExpired = false;
+                    }
+                  } else {
+                    isExpired = true;
+                  }
                 }
               }
             }

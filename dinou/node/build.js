@@ -36,6 +36,7 @@ try {
     commonAlias,
     commonLoader,
     serverAssetPlugin,
+    serverTsconfigAliasesPlugin,
     isWebpackBuild,
     setupFiles,
   } = engineResult;
@@ -271,7 +272,7 @@ if (isMain) {
     external: [...externalList, "./rsc-engine.mjs", "./ssr-engine.mjs"],
     banner,
     inject: setupFiles,
-    plugins: [serverAssetPlugin].filter(Boolean),
+    plugins: [serverTsconfigAliasesPlugin, serverAssetPlugin].filter(Boolean),
     alias: commonAlias,
     loader: commonLoader,
     define: {

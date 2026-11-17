@@ -7,47 +7,17 @@ import {
   getAbsPathWithExt,
   stripJsonCommentsAndTrailingCommas,
 } from "./get-abs-path-with-ext.js";
+import {
+  extensions,
+  DEFAULT_EXTENSIONS_SET,
+  globPattern,
+  regex,
+  extensionsWithDot,
+} from "./builtin-asset-extensions.js";
 
-export const extensions = [
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "svg",
-  "webp",
-  "avif",
-  "ico",
-  "mp4",
-  "webm",
-  "ogg",
-  "mov",
-  "avi",
-  "mkv",
-  "mp3",
-  "wav",
-  "flac",
-  "m4a",
-  "aac",
-  "mjpeg",
-  "mjpg",
-  "woff",
-  "woff2",
-  "ttf",
-  "otf",
-  "eot",
-];
-
-const DEFAULT_EXTENSIONS_SET = new Set(extensions);
+export { extensions, globPattern, regex, extensionsWithDot };
 
 const escapeRegExp = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-export const globPattern = `**/*.{${extensions.join(",")}}`;
-
-// Regex useful for Rollup/Webpack/PostCSS/Esbuild asset matching
-export const regex = new RegExp(`\\.(${extensions.map(escapeRegExp).join("|")})$`, "i");
-
-// Version with leading dot for direct comparisons
-export const extensionsWithDot = extensions.map((ext) => `.${ext}`);
 
 const syncConfigExtCache = new Map();
 const assetHashCache = new Map();

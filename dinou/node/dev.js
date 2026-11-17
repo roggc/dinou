@@ -64,10 +64,17 @@ import {
   getAssetExtensionsInfo,
 } from "../core/asset-extensions.js";
 import {
+  clearServerCssModulesCache,
   createServerCssModulesPlugin,
   didCssModuleExportsChange,
 } from "../core/server-css-modules-plugin.js";
 import { resolveStyleImportFromCode } from "../core/get-abs-path-with-ext.js";
+import {
+  clearTsconfigAliasCache,
+  esbuildTsconfigAliasesPlugin,
+  getWatchedTsconfigFiles,
+  matchesExplicitUserAlias,
+} from "../core/tsconfig-aliases.js";
 import {
   isSupportedClientModule,
   scanProjectDependenciesForClientComponents,
@@ -1362,7 +1369,6 @@ const nodeBuiltins = [
 const externalList = [...nodeBuiltins, ...nodeBuiltins.map((b) => "node:" + b)];
 
 const commonAlias = {
-  "@": path.resolve(projectRoot, "src"),
   "dinou/config": path.resolve(dinouDir, "core/config.js"),
   dinou: dinouDir,
 };
@@ -1375,6 +1381,11 @@ const serverAssetPlugin = createServerAssetPlugin({
   projectRoot,
   dinouConfig,
   emitToDevMemory: true,
+});
+
+const serverTsconfigAliasesPlugin = esbuildTsconfigAliasesPlugin({
+  projectRoot,
+  getAssetRegex: () => getAssetExtensionsInfo(dinouConfig, projectRoot).regex,
 });
 
 const resolvePkgCache = new Map();
@@ -1396,12 +1407,30 @@ function createDevExternalPackagesPlugin(isRsc = true) {
         if (args.path.startsWith("\0") || args.path.startsWith("virtual:")) {
           return null;
         }
-        // 4. Aliases
-        if (args.path.startsWith("@/") || args.path === "@") {
-          return null;
-        }
+        // 4. Framework & tsconfig/jsconfig path aliases
         if (args.path === "dinou" || args.path.startsWith("dinou/")) {
           return null;
+        }
+        if (matchesExplicitUserAlias(args.path, projectRoot)) {
+          let pkgExists = false;
+          try {
+            const cacheKey = `${args.path}::${args.resolveDir || projectRoot}`;
+            let resolved = resolvePkgCache.get(cacheKey);
+            if (resolved === undefined) {
+              try {
+                resolved = require.resolve(args.path, {
+                  paths: [args.resolveDir || projectRoot],
+                });
+              } catch (e) {
+                resolved = null;
+              }
+              resolvePkgCache.set(cacheKey, resolved);
+            }
+            pkgExists = Boolean(resolved);
+          } catch (e) {}
+          if (!pkgExists) {
+            return null;
+          }
         }
         // 5. In RSC (ctxA), React packages must remain bundled to preserve react-server condition.
         // In SSR (ctxB), React packages MUST be external so client components and the renderer share the same React singleton!
@@ -1504,33 +1533,47 @@ const ssrOutfile = path.join(devDir, "ssr-engine.mjs");
 
 const serverCssModulesPlugin = createServerCssModulesPlugin({ projectRoot });
 
-const ctxA = await esbuild.context({
-  entryPoints: { "rsc-engine": path.join(devDir, "rsc-entry.mjs") },
-  outdir: devDir,
-  splitting: true,
-  outExtension: { ".js": ".mjs" },
-  chunkNames: "chunks/rsc/[name]-[hash]",
-  bundle: true,
-  format: "esm",
-  target: "node20",
-  platform: "node",
-  mainFields: ["module", "main"],
-  conditions: ["node", "worker", "react-server", "style"],
-  external: externalList,
-  banner,
-  inject: setupFiles,
-  plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin, serverCssModulesPlugin, serverAssetPlugin, createDevExternalPackagesPlugin(true)],
-  alias: commonAlias,
-  loader: commonLoader,
-  jsx: "automatic",
-  define: {
-    "process.env.NODE_ENV": '"development"',
-    "process.env.DINOU_DEV": '"true"',
-    "process.env.DINOU_RUNTIME": '"node-bundle"',
-    "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
-  },
-  logLevel: "warning",
-});
+async function createRscContext() {
+  return esbuild.context({
+    entryPoints: { "rsc-engine": path.join(devDir, "rsc-entry.mjs") },
+    outdir: devDir,
+    splitting: true,
+    outExtension: { ".js": ".mjs" },
+    chunkNames: "chunks/rsc/[name]-[hash]",
+    bundle: true,
+    format: "esm",
+    target: "node20",
+    platform: "node",
+    mainFields: ["module", "main"],
+    conditions: ["node", "worker", "react-server", "style"],
+    external: externalList,
+    banner,
+    inject: setupFiles,
+    plugins: [
+      esbuildContextualDinouPlugin({ projectRoot }),
+      serverTsconfigAliasesPlugin,
+      clientReferencesPlugin,
+      serverReferencesPlugin,
+      serverCssModulesPlugin,
+      serverAssetPlugin,
+      createDevExternalPackagesPlugin(true),
+    ],
+    alias: commonAlias,
+    loader: commonLoader,
+    jsx: "automatic",
+    define: {
+      "process.env.NODE_ENV": '"development"',
+      "process.env.DINOU_DEV": '"true"',
+      "process.env.DINOU_RUNTIME": '"node-bundle"',
+      "process.env.DINOU_BUILD_TOOL": JSON.stringify(
+        isWebpackBuild ? "webpack" : process.env.DINOU_BUILD_TOOL || "esbuild"
+      ),
+    },
+    logLevel: "warning",
+  });
+}
+
+let ctxA = await createRscContext();
 
 async function createSsrContext() {
   return esbuild.context({
@@ -1550,6 +1593,7 @@ async function createSsrContext() {
     inject: setupFiles,
     plugins: [
       esbuildContextualDinouPlugin({ projectRoot }),
+      serverTsconfigAliasesPlugin,
       serverReferencesPluginSsr,
       serverCssModulesPlugin,
       serverAssetPlugin,
@@ -2259,6 +2303,140 @@ async function triggerEnvReload(fullPath) {
   return runPromise;
 }
 
+let tsconfigDebounce = null;
+let pendingTsconfigChangedPath = null;
+let activeTsconfigReloadPromise = null;
+const watchedExternalTsconfigs = new Set();
+
+function isRootTsconfigOrJsconfig(filePath) {
+  if (!filePath) return false;
+  const resolved = path.resolve(filePath);
+  if (path.dirname(resolved).toLowerCase() !== path.resolve(projectRoot).toLowerCase()) {
+    return false;
+  }
+  const base = path.basename(resolved).toLowerCase();
+  return base === "tsconfig.json" || base === "jsconfig.json";
+}
+
+const tsconfigExtendsWatcher = chokidar.watch([], {
+  ignoreInitial: true,
+  awaitWriteFinish: {
+    stabilityThreshold: 20,
+    pollInterval: 10,
+  },
+});
+
+function syncWatchedExternalTsconfigs() {
+  try {
+    const nextExternal = new Set();
+    for (const cfgPath of getWatchedTsconfigFiles(projectRoot)) {
+      const absCfg = path.resolve(cfgPath);
+      if (absCfg.includes("node_modules")) continue;
+      if (isRootTsconfigOrJsconfig(absCfg)) continue;
+      nextExternal.add(absCfg);
+    }
+    for (const oldPath of Array.from(watchedExternalTsconfigs)) {
+      if (!nextExternal.has(oldPath)) {
+        watchedExternalTsconfigs.delete(oldPath);
+        try {
+          tsconfigExtendsWatcher.unwatch(oldPath);
+        } catch (e) {}
+      }
+    }
+    for (const newPath of nextExternal) {
+      if (!watchedExternalTsconfigs.has(newPath)) {
+        watchedExternalTsconfigs.add(newPath);
+        try {
+          tsconfigExtendsWatcher.add(newPath);
+        } catch (e) {}
+      }
+    }
+  } catch (e) {}
+}
+
+syncWatchedExternalTsconfigs();
+
+async function triggerTsconfigReload(fullPath) {
+  const prev = activeTsconfigReloadPromise;
+  const runPromise = (async () => {
+    if (prev) {
+      try {
+        await prev;
+      } catch (e) {}
+    }
+    try {
+      const cfgName = fullPath ? path.basename(fullPath) : "tsconfig.json";
+      clearTsconfigAliasCache(projectRoot);
+      clearServerCssModulesCache();
+      resolvePkgCache.clear();
+      fileTransformCache.clear();
+      syncWatchedExternalTsconfigs();
+
+      try {
+        generateRouteTypes(projectRoot);
+      } catch (e) {}
+
+      try {
+        const dist2Dir = path.resolve(projectRoot, ".dinou/dist2");
+        if (fs.existsSync(dist2Dir)) {
+          fs.rmSync(dist2Dir, { recursive: true, force: true });
+        }
+      } catch (e) {}
+
+      logInfo(`Reloading path aliases from ${cfgName}...`);
+      globalThis.__DINOU_DEV_BUNDLE_EPOCH__ =
+        Number(globalThis.__DINOU_DEV_BUNDLE_EPOCH__ || 0) + 1;
+
+      if (clientBundlerHandle?.refreshAliases) {
+        await clientBundlerHandle.refreshAliases();
+      } else if (clientBundlerHandle?.restart) {
+        await clientBundlerHandle.restart();
+      }
+
+      await updateManifestsState({ forceRescan: true });
+
+      await ctxA.dispose();
+      ctxA = await createRscContext();
+      await ctxA.rebuild();
+      engineVersion++;
+      rscModule = await dynamicImportWithRetry(
+        pathToFileURL(rscOutfile).href + "?v=" + engineVersion
+      );
+
+      await ctxB.dispose();
+      ctxB = await createSsrContext();
+      await syncSsrEngine();
+
+      logSuccess(`Reloaded path aliases from ${cfgName}`);
+      clientBundlerHandle?.broadcast?.({ type: "reload" });
+    } catch (err) {
+      console.error("❌ [Dinou Dev] Failed to hot-reload path aliases:", err);
+    } finally {
+      if (activeTsconfigReloadPromise === runPromise) {
+        activeTsconfigReloadPromise = null;
+      }
+    }
+  })();
+  activeTsconfigReloadPromise = runPromise;
+  return runPromise;
+}
+
+function scheduleTsconfigReload(fullPath) {
+  pendingTsconfigChangedPath = fullPath;
+  if (tsconfigDebounce) clearTimeout(tsconfigDebounce);
+  tsconfigDebounce = setTimeout(() => {
+    tsconfigDebounce = null;
+    const changedPath = pendingTsconfigChangedPath;
+    pendingTsconfigChangedPath = null;
+    triggerTsconfigReload(changedPath);
+  }, 50);
+}
+
+tsconfigExtendsWatcher.on("all", (event, fullPath) => {
+  if (event === "addDir" || event === "unlinkDir") return;
+  scheduleTsconfigReload(fullPath);
+});
+
 const envWatcher = chokidar.watch(projectRoot, {
   ignoreInitial: true,
   depth: 0,
@@ -2270,6 +2448,10 @@ const envWatcher = chokidar.watch(projectRoot, {
 
 envWatcher.on("all", (event, fullPath) => {
   if (event === "addDir" || event === "unlinkDir") return;
+  if (isRootTsconfigOrJsconfig(fullPath)) {
+    scheduleTsconfigReload(fullPath);
+    return;
+  }
   if (!isWatchedDotEnvFile(fullPath, projectRoot)) return;
   pendingEnvChangedPath = fullPath;
   if (envDebounce) clearTimeout(envDebounce);
@@ -2703,6 +2885,30 @@ async function startClientBundler(tool) {
                   },
                 });
               }
+              if (!globalThis.__DINOU_WEBPACK_MODIFIED_FILES__) {
+                globalThis.__DINOU_WEBPACK_MODIFIED_FILES__ = new Set();
+              }
+              for (const cf of knownClientFiles) {
+                globalThis.__DINOU_WEBPACK_MODIFIED_FILES__.add(
+                  path.resolve(cf).replace(/\\/g, "/").toLowerCase()
+                );
+              }
+              const waitP = startBuildWait();
+              try {
+                if (devServer?.middleware?.invalidate) {
+                  devServer.middleware.invalidate();
+                } else if (compiler.watching?.invalidate) {
+                  compiler.watching.invalidate();
+                }
+              } catch (e) {}
+              await waitP;
+              await onManifestUpdated();
+            },
+            refreshAliases: async () => {
+              clearTsconfigAliasCache(projectRoot);
+              try {
+                compiler.inputFileSystem?.purge?.();
+              } catch (e) {}
               if (!globalThis.__DINOU_WEBPACK_MODIFIED_FILES__) {
                 globalThis.__DINOU_WEBPACK_MODIFIED_FILES__ = new Set();
               }
@@ -3179,6 +3385,7 @@ async function cleanup() {
   try {
     srcWatcher.close();
     envWatcher.close();
+    tsconfigExtendsWatcher.close();
     if (clientBundlerHandle?.close) {
       await clientBundlerHandle.close();
     }

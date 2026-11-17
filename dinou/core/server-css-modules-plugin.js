@@ -16,6 +16,11 @@ import {
 const serverCssModuleCache = new Map();
 const lastKnownExportJsonByFile = new Map();
 
+export function clearServerCssModulesCache() {
+  serverCssModuleCache.clear();
+  lastKnownExportJsonByFile.clear();
+}
+
 function normalizeCacheKey(filePath) {
   return normalizePathCase(path.resolve(filePath)).replace(/\\/g, "/");
 }

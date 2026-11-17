@@ -17,8 +17,12 @@ import {
   buildSsrServerReferenceModule,
   generateSsrServerManifestStubs,
 } from "../core/transform-server-functions.js";
-import { createServerAssetPlugin } from "../core/asset-extensions.js";
+import {
+  createServerAssetPlugin,
+  getAssetExtensionsInfo,
+} from "../core/asset-extensions.js";
 import { createServerCssModulesPlugin } from "../core/server-css-modules-plugin.js";
+import { esbuildTsconfigAliasesPlugin } from "../core/tsconfig-aliases.js";
 import {
   isSupportedClientModule,
   scanProjectDependenciesForClientComponents,
@@ -736,7 +740,6 @@ export async function renderHtml(rscStream, options = {}) {
   const externalList = [...nodeBuiltins, ...nodeBuiltins.map((b) => "node:" + b)];
 
   const commonAlias = {
-    "@": path.resolve(projectRoot, "src"),
     "dinou/config": path.resolve(dinouDir, "core/config.js"),
     dinou: dinouDir,
   };
@@ -907,6 +910,10 @@ var __webpack_chunk_load__ = function(chunkId) {
   const ssrOutfile = path.join(nodeDir, "ssr-engine.mjs");
 
   const serverCssModulesPlugin = createServerCssModulesPlugin({ projectRoot });
+  const serverTsconfigAliasesPlugin = esbuildTsconfigAliasesPlugin({
+    projectRoot,
+    assetRegex: getAssetExtensionsInfo(dinouConfig, projectRoot).regex,
+  });
   const buildEnv = isDev ? "development" : "production";
   const resolvedBuildTool = isWebpackBuild
     ? "webpack"
@@ -925,7 +932,7 @@ var __webpack_chunk_load__ = function(chunkId) {
     external: externalList,
     banner,
     inject: setupFiles,
-    plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin, serverCssModulesPlugin, serverAssetPlugin],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverTsconfigAliasesPlugin, clientReferencesPlugin, serverReferencesPlugin, serverCssModulesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
@@ -953,7 +960,7 @@ var __webpack_chunk_load__ = function(chunkId) {
     external: externalList,
     banner,
     inject: setupFiles,
-    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr, serverCssModulesPlugin, serverAssetPlugin],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverTsconfigAliasesPlugin, serverReferencesPluginSsr, serverCssModulesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
@@ -985,6 +992,7 @@ var __webpack_chunk_load__ = function(chunkId) {
     commonAlias,
     commonLoader,
     serverAssetPlugin,
+    serverTsconfigAliasesPlugin,
     isWebpackBuild,
     setupFiles,
   };

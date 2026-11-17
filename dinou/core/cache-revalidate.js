@@ -785,16 +785,25 @@ async function revalidatePage(reqPath, internalOptions = {}) {
       }
     } catch (e) {}
 
+    const commitGenTime = nextMonotonicGenTime(newGenTime);
+    if (commitGenTime !== newGenTime && newHtml) {
+      newHtml = newHtml.replace(
+        `window.__DINOU_BUILD_ID__ = "${newGenTime}"`,
+        `window.__DINOU_BUILD_ID__ = "${commitGenTime}"`
+      );
+    }
+    currentMeta.generatedAt = commitGenTime;
+
     if (newHtml && ((!renderedFullRsc && !composedFromCachedLayout) || now <= prevGenTime)) {
       newHtml = newHtml.replace(
         /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g,
-        new Date(newGenTime).toISOString()
+        new Date(commitGenTime).toISOString()
       );
     }
     currentMeta.pageGeneratedAt =
       didSpliceOnlyPageSlots && prevPageOwnGenTime > 0
         ? prevPageOwnGenTime
-        : newGenTime;
+        : commitGenTime;
 
     let finalPageRscToWrite = "";
     let finalFullRscToWrite = "";
@@ -803,7 +812,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
         now <= prevGenTime
           ? renderedRsc.replace(
               /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g,
-              new Date(newGenTime).toISOString()
+              new Date(commitGenTime).toISOString()
             )
           : renderedRsc;
       if (renderedFullRsc) {
@@ -811,7 +820,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
           now <= prevGenTime
             ? renderedFullRsc.replace(
                 /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g,
-                new Date(newGenTime).toISOString()
+                new Date(commitGenTime).toISOString()
               )
             : renderedFullRsc;
       }
@@ -827,7 +836,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
         if (cachedRsc && cachedRsc.content) {
           finalPageRscToWrite = cachedRsc.content.replace(
             /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g,
-            new Date(newGenTime).toISOString()
+            new Date(commitGenTime).toISOString()
           );
         }
       } catch (e) {}
@@ -835,8 +844,8 @@ async function revalidatePage(reqPath, internalOptions = {}) {
 
     // Causal commit order to guarantee zero hydration mismatch (#418) under concurrent ISR reads:
     // 1. _old snapshot already committed above (so buildId < currentGeneratedAt resolves T_prev)
-    // 2. metadata.json advances currentGeneratedAt to newGenTime (routing T_prev clients to _old)
-    // 3. page.rsc / shell.rsc / shell.page.json commit T_new before any HTML exposes buildId=newGenTime
+    // 2. metadata.json advances currentGeneratedAt to commitGenTime (routing T_prev clients to _old)
+    // 3. page.rsc / shell.rsc / shell.page.json commit T_new before any HTML exposes buildId=commitGenTime
     // 4. index.html / shell.html / cleanPathKey commit last
     await storage.set(metaKey, JSON.stringify(currentMeta));
 
@@ -866,7 +875,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
       await storage.set(cleanPathKey, newHtml, currentMeta);
     }
 
-    console.log(`✅ [Edge Revalidate] Successfully revalidated page ${cleanPath} (generatedAt: ${newGenTime})`);
+    console.log(`✅ [Edge Revalidate] Successfully revalidated page ${cleanPath} (generatedAt: ${commitGenTime})`);
   });
 }
 

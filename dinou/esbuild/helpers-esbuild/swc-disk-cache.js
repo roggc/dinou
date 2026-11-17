@@ -69,9 +69,12 @@ export async function transformToDisk(srcPath, projectRoot = process.cwd()) {
     return null;
   }
 
+  let compiledCode = raw;
   try {
     const { code } = await transform(raw, {
       filename: normSrc,
+      configFile: false,
+      swcrc: false,
       sourceMaps: "inline",
       jsc: {
         parser: { syntax: "typescript", tsx: true, dynamicImport: true },
@@ -85,14 +88,23 @@ export async function transformToDisk(srcPath, projectRoot = process.cwd()) {
         },
       },
     });
-    await fs.mkdir(path.dirname(targetPath), { recursive: true });
-    await fs.writeFile(targetPath, code, "utf8");
-    return targetPath;
+    compiledCode = code;
   } catch (err) {
-    await fs.mkdir(path.dirname(targetPath), { recursive: true });
-    await fs.writeFile(targetPath, raw, "utf8");
-    return targetPath;
+    compiledCode = raw;
   }
+
+  const targetDir = path.dirname(targetPath);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await fs.mkdir(targetDir, { recursive: true });
+      await fs.writeFile(targetPath, compiledCode, "utf8");
+      break;
+    } catch (ioErr) {
+      if (attempt === 2) throw ioErr;
+      await new Promise((r) => setTimeout(r, 15));
+    }
+  }
+  return targetPath;
 }
 
 export async function syncAllSwcFiles(srcDir = path.resolve("src"), projectRoot = process.cwd()) {

@@ -1,4 +1,3 @@
-import { TsconfigPathsPlugin } from "#esbuild-plugins/tsconfig-paths";
 import reactClientManifestPlugin from "../plugins-esbuild/react-client-manifest-plugin.js";
 import serverFunctionsPlugin from "../plugins-esbuild/server-functions-plugin.js";
 import cssProcessorPlugin from "../plugins-esbuild/css-processor-plugin.js";
@@ -9,28 +8,12 @@ import babelReactCompilerPlugin from "../plugins-esbuild/babel-react-compiler-pl
 import { esbuildContextualDinouPlugin } from "../../core/resolve-contextual-dinou.js";
 import { copyStaticDirectoriesToOutdir } from "../../core/copy-static-dirs.js";
 import { getEsbuildPublicEnvDefines } from "../../core/env.js";
-import { stripJsonCommentsAndTrailingCommas } from "../../core/get-abs-path-with-ext.js";
-import { existsSync, readFileSync } from "node:fs";
-
-function loadParsedTsconfig() {
-  const candidates = ["tsconfig.json", "jsconfig.json"];
-  for (const filename of candidates) {
-    if (!existsSync(filename)) continue;
-    try {
-      const raw = readFileSync(filename, "utf8");
-      const parsed = JSON.parse(stripJsonCommentsAndTrailingCommas(raw));
-      const compilerOptions = parsed?.compilerOptions || {};
-      return {
-        ...parsed,
-        compilerOptions: {
-          ...compilerOptions,
-          baseUrl: compilerOptions.baseUrl || ".",
-        },
-      };
-    } catch (e) {}
-  }
-  return { compilerOptions: { baseUrl: "." } };
-}
+import { getAssetExtensionsInfo } from "../../core/asset-extensions.js";
+import {
+  esbuildTsconfigAliasesPlugin,
+  getSanitizedEsbuildTsconfigRaw,
+} from "../../core/tsconfig-aliases.js";
+import { existsSync } from "node:fs";
 
 export default function getConfigEsbuildProd({
   entryPoints,
@@ -42,10 +25,18 @@ export default function getConfigEsbuildProd({
   reactCompiler = true,
 }) {
   const manifestData = {};
-  const parsedTsconfig = loadParsedTsconfig();
+  const projectRoot = process.cwd();
+  const parsedTsconfig = getSanitizedEsbuildTsconfigRaw(projectRoot);
+  const { regex: activeAssetRegex } = getAssetExtensionsInfo(
+    dinouConfig,
+    projectRoot
+  );
   let plugins = [
-    esbuildContextualDinouPlugin({ projectRoot: process.cwd() }),
-    TsconfigPathsPlugin({ tsconfig: parsedTsconfig }),
+    esbuildContextualDinouPlugin({ projectRoot }),
+    esbuildTsconfigAliasesPlugin({
+      projectRoot,
+      assetRegex: activeAssetRegex,
+    }),
     cssProcessorPlugin({ outdir }),
     reactClientManifestPlugin({
       manifest,
@@ -54,7 +45,7 @@ export default function getConfigEsbuildProd({
     assetsPlugin({
       dinouConfig,
       serverAssetPaths,
-      projectRoot: process.cwd(),
+      projectRoot,
     }),
     manifestGeneratorPlugin(manifestData),
     serverFunctionsPlugin({ manifestData, serverFiles }),
@@ -69,7 +60,7 @@ export default function getConfigEsbuildProd({
         name: "copy-static-files",
         setup(build) {
           build.onEnd(() => {
-            copyStaticDirectoriesToOutdir(process.cwd(), outdir);
+            copyStaticDirectoriesToOutdir(projectRoot, outdir);
           });
         },
       },

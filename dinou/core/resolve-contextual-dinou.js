@@ -2,9 +2,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getAliasCandidatePaths } from "./tsconfig-aliases.js";
 
 const CONTEXTUAL_DINOU_FILTER = /^\.\.?[\\/](?:.*[\\/])?dinou(?:\.js)?(?:[?#].*)?$/;
 const UNDERSCORE_SEGMENT_HINT_RE = /(?:^|[\\/])_[^\\/]+(?:[\\/]|$)/;
+const ESBUILD_FORBIDDEN_IMPORT_FILTER = /^[^.\/\\]|(?:^|[\\/])_[^\\/]+(?:[\\/]|$)/;
 
 /**
  * Glob ignore patterns for `fast-glob` calls rooted at `src/`.
@@ -127,7 +129,9 @@ export function checkForbiddenUnderscoreImport(
   }
 
   const cleanSpec = specifier.split("?")[0].split("#")[0].replace(/\\/g, "/");
-  if (!UNDERSCORE_SEGMENT_HINT_RE.test(cleanSpec)) {
+  const isRelativeSpec =
+    cleanSpec.startsWith("./") || cleanSpec.startsWith("../");
+  if (isRelativeSpec && !UNDERSCORE_SEGMENT_HINT_RE.test(cleanSpec)) {
     return null;
   }
 
@@ -162,57 +166,72 @@ export function checkForbiddenUnderscoreImport(
     return null;
   }
 
-  let candidateTarget = null;
-  if (cleanSpec.startsWith("./") || cleanSpec.startsWith("../")) {
-    candidateTarget = path.resolve(effectiveImporterDir, cleanSpec);
-  } else if (cleanSpec.startsWith("@/") || cleanSpec.startsWith("~/")) {
-    candidateTarget = path.resolve(srcDir, cleanSpec.slice(2));
-  } else if (cleanSpec.startsWith("src/")) {
-    candidateTarget = path.resolve(rootAbs, cleanSpec);
+  const candidateTargets = [];
+  if (isRelativeSpec) {
+    candidateTargets.push(path.resolve(effectiveImporterDir, cleanSpec));
   } else {
-    return null;
+    for (const aliasTarget of getAliasCandidatePaths(cleanSpec, rootAbs, {
+      includeBaseUrlFallback: true,
+    })) {
+      candidateTargets.push(aliasTarget);
+    }
+    if (candidateTargets.length === 0 && cleanSpec.startsWith("src/")) {
+      candidateTargets.push(path.resolve(rootAbs, cleanSpec));
+    }
   }
 
-  const normCandidate = normCompare(candidateTarget);
-  if (
-    normCandidate !== normSrcDir &&
-    !normCandidate.startsWith(normSrcDir + "/")
-  ) {
-    return null;
+  for (const candidateTarget of candidateTargets) {
+    const normCandidate = normCompare(candidateTarget);
+    if (
+      normCandidate !== normSrcDir &&
+      !normCandidate.startsWith(normSrcDir + "/")
+    ) {
+      continue;
+    }
+
+    const relTarget = path
+      .relative(srcDir, candidateTarget)
+      .replace(/\\/g, "/");
+    if (!relTarget || relTarget.startsWith("..")) {
+      continue;
+    }
+
+    const parts = relTarget.split("/").filter(Boolean);
+    let escapedIdx = parts
+      .slice(0, -1)
+      .findIndex((seg) => seg.startsWith("_"));
+
+    if (
+      escapedIdx === -1 &&
+      parts.length > 0 &&
+      parts[parts.length - 1].startsWith("_")
+    ) {
+      try {
+        if (
+          fs.existsSync(candidateTarget) &&
+          fs.statSync(candidateTarget).isDirectory()
+        ) {
+          escapedIdx = parts.length - 1;
+        }
+      } catch (e) {}
+    }
+
+    if (escapedIdx === -1) {
+      continue;
+    }
+
+    const escapedFolderRel = "src/" + parts.slice(0, escapedIdx + 1).join("/");
+    const importerRel = path
+      .relative(rootAbs, mappedImporter)
+      .replace(/\\/g, "/");
+
+    return (
+      `Cannot import "${specifier}" from "${importerRel}": directories prefixed with "_" ("${escapedFolderRel}") ` +
+      `are ignored by Dinou's router and bundlers. For active components, hooks, or actions, remove the leading "_" from the folder name.`
+    );
   }
 
-  const relTarget = path.relative(srcDir, candidateTarget).replace(/\\/g, "/");
-  if (!relTarget || relTarget.startsWith("..")) {
-    return null;
-  }
-
-  const parts = relTarget.split("/").filter(Boolean);
-  let escapedIdx = parts.slice(0, -1).findIndex((seg) => seg.startsWith("_"));
-
-  if (escapedIdx === -1 && parts.length > 0 && parts[parts.length - 1].startsWith("_")) {
-    try {
-      if (
-        fs.existsSync(candidateTarget) &&
-        fs.statSync(candidateTarget).isDirectory()
-      ) {
-        escapedIdx = parts.length - 1;
-      }
-    } catch (e) {}
-  }
-
-  if (escapedIdx === -1) {
-    return null;
-  }
-
-  const escapedFolderRel = "src/" + parts.slice(0, escapedIdx + 1).join("/");
-  const importerRel = path
-    .relative(rootAbs, mappedImporter)
-    .replace(/\\/g, "/");
-
-  return (
-    `Cannot import "${specifier}" from "${importerRel}": directories prefixed with "_" ("${escapedFolderRel}") ` +
-    `are ignored by Dinou's router and bundlers. For active components, hooks, or actions, remove the leading "_" from the folder name.`
-  );
+  return null;
 }
 
 /**
@@ -325,7 +344,7 @@ export function esbuildContextualDinouPlugin({
   return {
     name: "dinou-contextual-module",
     setup(build) {
-      build.onResolve({ filter: UNDERSCORE_SEGMENT_HINT_RE }, (args) => {
+      build.onResolve({ filter: ESBUILD_FORBIDDEN_IMPORT_FILTER }, (args) => {
         const importer = args.importer || args.resolveDir;
         const importerIsFile = Boolean(args.importer);
         const forbidden = checkForbiddenUnderscoreImport(

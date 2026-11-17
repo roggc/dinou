@@ -34,7 +34,11 @@ import {
 } from "../core/resolve-contextual-dinou.js";
 import { discoverLayoutsFromFs, sortEntriesByName } from "../core/discover-layouts.js";
 import { createServerCssModulesPlugin } from "../core/server-css-modules-plugin.js";
-import { createServerAssetPlugin } from "../core/asset-extensions.js";
+import {
+  createServerAssetPlugin,
+  getAssetExtensionsInfo,
+} from "../core/asset-extensions.js";
+import { esbuildTsconfigAliasesPlugin } from "../core/tsconfig-aliases.js";
 import {
   loadEnvFiles,
   getEsbuildPublicEnvDefines,
@@ -893,7 +897,6 @@ const externalList = [
 ];
 
 const commonAlias = {
-  "@": path.resolve(projectRoot, "src"),
   "dinou/config": path.resolve(dinouDir, "core/config.js"),
   dinou: dinouDir,
 };
@@ -1083,6 +1086,10 @@ const finalOutfile = path.join(bunDir, "server.js");
 
 const serverCssModulesPlugin = createServerCssModulesPlugin({ projectRoot });
 const serverAssetPlugin = createServerAssetPlugin({ projectRoot, dinouConfig });
+const serverTsconfigAliasesPlugin = esbuildTsconfigAliasesPlugin({
+  projectRoot,
+  assetRegex: getAssetExtensionsInfo(dinouConfig, projectRoot).regex,
+});
 
 try {
   // Pass A: RSC Engine
@@ -1097,7 +1104,7 @@ try {
     mainFields: ["module", "main"],
     conditions: ["bun", "worker", "react-server", "style"],
     external: externalList,
-    plugins: [esbuildContextualDinouPlugin({ projectRoot }), clientReferencesPlugin, serverReferencesPlugin, serverCssModulesPlugin, serverAssetPlugin],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverTsconfigAliasesPlugin, clientReferencesPlugin, serverReferencesPlugin, serverCssModulesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
@@ -1126,7 +1133,7 @@ try {
     mainFields: ["module", "main"],
     conditions: ["bun", "worker", "browser", "style"],
     external: externalList,
-    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr, serverCssModulesPlugin, serverAssetPlugin],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverTsconfigAliasesPlugin, serverReferencesPluginSsr, serverCssModulesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
@@ -1160,7 +1167,7 @@ try {
     conditions: ["bun", "worker", "browser"],
     external: externalList,
     banner,
-    plugins: [serverAssetPlugin],
+    plugins: [serverTsconfigAliasesPlugin, serverAssetPlugin],
     inject: setupFiles.length > 0 ? setupFiles : undefined,
     alias: commonAlias,
     loader: commonLoader,

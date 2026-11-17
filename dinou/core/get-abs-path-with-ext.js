@@ -3,120 +3,16 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import resolve from "resolve";
+import {
+  inferProjectRootFromDir,
+  resolveCandidateFile,
+  resolveTsconfigAlias,
+  stripJsonCommentsAndTrailingCommas,
+} from "./tsconfig-aliases.js";
 
-export function stripJsonCommentsAndTrailingCommas(raw) {
-  if (typeof raw !== "string") return "";
-  const withoutComments = raw.replace(
-    /"(?:\\.|[^"\\])*"|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g,
-    (match) => (match.startsWith('"') ? match : "")
-  );
-  return withoutComments.replace(/,(\s*[}\]])/g, "$1");
-}
+export { stripJsonCommentsAndTrailingCommas };
 
-let cachedAliasState = {
-  cwd: null,
-  configFile: null,
-  mtimeMs: -1,
-  map: new Map(),
-};
-
-// Reads tsconfig/jsconfig (tolerating JSONC comments & trailing commas) and builds a map of alias -> targetBase
-function getTsconfigAliases(customCwd) {
-  const cwd = path.resolve(customCwd || process.cwd());
-  const tsconfigPath = path.resolve(cwd, "tsconfig.json");
-  const jsconfigPath = path.resolve(cwd, "jsconfig.json");
-  const configFile = fs.existsSync(tsconfigPath)
-    ? tsconfigPath
-    : fs.existsSync(jsconfigPath)
-      ? jsconfigPath
-      : null;
-
-  if (!configFile) {
-    cachedAliasState = { cwd, configFile: null, mtimeMs: -1, map: new Map() };
-    return cachedAliasState.map;
-  }
-
-  let mtimeMs = 0;
-  try {
-    mtimeMs = fs.statSync(configFile).mtimeMs;
-  } catch (e) {
-    return new Map();
-  }
-
-  if (
-    cachedAliasState.cwd === cwd &&
-    cachedAliasState.configFile === configFile &&
-    cachedAliasState.mtimeMs === mtimeMs
-  ) {
-    return cachedAliasState.map;
-  }
-
-  let config;
-  try {
-    const cleaned = stripJsonCommentsAndTrailingCommas(
-      fs.readFileSync(configFile, "utf8")
-    );
-    config = JSON.parse(cleaned);
-  } catch (err) {
-    cachedAliasState = { cwd, configFile, mtimeMs, map: new Map() };
-    return cachedAliasState.map;
-  }
-
-  const paths = (config.compilerOptions && config.compilerOptions.paths) || {};
-  const baseUrl =
-    (config.compilerOptions && config.compilerOptions.baseUrl) || ".";
-  const absoluteBase = path.resolve(cwd, baseUrl);
-
-  const map = new Map();
-
-  for (const key of Object.keys(paths)) {
-    const targets = paths[key];
-    if (!targets || !targets.length) continue;
-
-    // Normalize: the first target is the one we will use
-    const target = Array.isArray(targets) ? targets[0] : targets;
-    if (typeof target !== "string") continue;
-
-    // Support patterns with /* at the end: "@/*" -> "src/*"
-    const keyIsWildcard = key.endsWith("/*");
-    const targetIsWildcard = target.endsWith("/*");
-
-    const alias = keyIsWildcard ? key.slice(0, -1) : key; // "@/"
-    const targetBase = targetIsWildcard ? target.slice(0, -1) : target; // "src" or "../lib"
-
-    // Resolve targetBase relative to baseUrl if it is not absolute
-    const resolvedTargetBase = path.resolve(absoluteBase, targetBase);
-
-    map.set(alias, {
-      resolvedTargetBase,
-      keyIsWildcard,
-      targetIsWildcard,
-    });
-  }
-
-  cachedAliasState = { cwd, configFile, mtimeMs, map };
-  return map;
-}
-
-// Add extensions if they do not exist
-function tryExtensions(filePath) {
-  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-    return filePath;
-  }
-  const exts = [".js", ".mjs", ".ts", ".jsx", ".tsx", ".css", ".json"];
-  for (const ext of exts) {
-    const f = filePath + ext;
-    if (fs.existsSync(f) && fs.statSync(f).isFile()) return f;
-  }
-  // If it is a folder, try index.*
-  if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
-    for (const ext of exts) {
-      const f = path.join(filePath, "index" + ext);
-      if (fs.existsSync(f) && fs.statSync(f).isFile()) return f;
-    }
-  }
-  return null;
-}
+const STYLESHEET_FILE_RE = /\.(css|scss|sass|less)$/i;
 
 function getParentDirectory(context) {
   if (context?.parentDir) {
@@ -135,25 +31,28 @@ function getParentDirectory(context) {
 }
 
 export function getAbsPathWithExt(specifier, context) {
-  const cleanSpecifier = specifier ? specifier.split("?")[0].split("#")[0] : specifier;
+  const cleanSpecifier = specifier
+    ? specifier.split("?")[0].split("#")[0]
+    : specifier;
   if (!cleanSpecifier) return null;
 
-  const aliasMap = getTsconfigAliases(context?.cwd);
-  if (aliasMap.size > 0) {
-    for (const [alias, info] of aliasMap.entries()) {
-      if (info.keyIsWildcard ? cleanSpecifier.startsWith(alias) : cleanSpecifier === alias) {
-        const absPath = info.keyIsWildcard
-          ? path.resolve(info.resolvedTargetBase, cleanSpecifier.slice(alias.length))
-          : info.resolvedTargetBase;
-        return tryExtensions(absPath);
-      }
-    }
-  }
+  const parentDir = getParentDirectory(context);
+  const projectRoot = inferProjectRootFromDir(parentDir, context?.cwd || null);
+  const preferStyles = Boolean(context?.preferStyles);
+  const extensions = context?.extensions || null;
 
   if (cleanSpecifier.startsWith("./") || cleanSpecifier.startsWith("../")) {
-    const parentDir = getParentDirectory(context);
     const absPath = path.resolve(parentDir, cleanSpecifier);
-    return tryExtensions(absPath);
+    return resolveCandidateFile(absPath, { extensions, preferStyles });
+  }
+
+  const viaAlias = resolveTsconfigAlias(cleanSpecifier, {
+    projectRoot,
+    extensions,
+    preferStyles,
+  });
+  if (viaAlias) {
+    return viaAlias;
   }
 
   return null;
@@ -193,7 +92,9 @@ function resolveBareStyleFromNodeModules(cleanSpecifier, basedir) {
   const normalizedSubpath = subpath === "." ? "." : `.${subpath}`;
 
   try {
-    const req = createRequire(path.join(basedir || process.cwd(), "__dinou_resolve__.js"));
+    const req = createRequire(
+      path.join(basedir || process.cwd(), "__dinou_resolve__.js")
+    );
     let pkgJsonPath = null;
     try {
       pkgJsonPath = req.resolve(`${pkgName}/package.json`);
@@ -234,8 +135,13 @@ function resolveBareStyleFromNodeModules(cleanSpecifier, basedir) {
         }
       }
       if (normalizedSubpath !== ".") {
-        const directCandidate = tryExtensions(path.resolve(pkgDir, normalizedSubpath));
-        if (directCandidate) return directCandidate;
+        const directCandidate = resolveCandidateFile(
+          path.resolve(pkgDir, normalizedSubpath),
+          { preferStyles: true }
+        );
+        if (directCandidate && STYLESHEET_FILE_RE.test(directCandidate)) {
+          return directCandidate;
+        }
       }
     }
   } catch (e) {}
@@ -257,12 +163,16 @@ function resolveBareStyleFromNodeModules(cleanSpecifier, basedir) {
   }
 }
 
-export function resolveCssImportSpecifier(specifier, basedir) {
-  const cleanSpecifier = specifier ? specifier.split("?")[0].split("#")[0] : specifier;
+export function resolveCssImportSpecifier(specifier, basedir, customCwd = null) {
+  const cleanSpecifier = specifier
+    ? specifier.split("?")[0].split("#")[0]
+    : specifier;
   if (!cleanSpecifier) return specifier;
 
   const resolvedAliasOrRel = getAbsPathWithExt(cleanSpecifier, {
     parentDir: basedir || process.cwd(),
+    cwd: customCwd || null,
+    preferStyles: true,
   });
   if (resolvedAliasOrRel) {
     return resolvedAliasOrRel;
@@ -270,13 +180,19 @@ export function resolveCssImportSpecifier(specifier, basedir) {
 
   // Relative CSS import without leading ./ (allowed inside CSS @import "tokens.css")
   if (!cleanSpecifier.startsWith("/")) {
-    const localCandidate = tryExtensions(path.resolve(basedir || process.cwd(), cleanSpecifier));
+    const localCandidate = resolveCandidateFile(
+      path.resolve(basedir || process.cwd(), cleanSpecifier),
+      { preferStyles: true }
+    );
     if (localCandidate) {
       return localCandidate;
     }
   }
 
-  const bareResolved = resolveBareStyleFromNodeModules(cleanSpecifier, basedir || process.cwd());
+  const bareResolved = resolveBareStyleFromNodeModules(
+    cleanSpecifier,
+    basedir || process.cwd()
+  );
   if (bareResolved) {
     return bareResolved;
   }
@@ -286,20 +202,28 @@ export function resolveCssImportSpecifier(specifier, basedir) {
   );
 }
 
-export function resolveStyleImportFromCode(specifier, importerFilePath) {
-  const cleanSpecifier = specifier ? specifier.split("?")[0].split("#")[0] : specifier;
+export function resolveStyleImportFromCode(
+  specifier,
+  importerFilePath,
+  customCwd = null
+) {
+  const cleanSpecifier = specifier
+    ? specifier.split("?")[0].split("#")[0]
+    : specifier;
   if (!cleanSpecifier) return null;
 
   const localOrAlias = getAbsPathWithExt(cleanSpecifier, {
     parentURL: pathToFileURL(importerFilePath).href,
+    cwd: customCwd || null,
+    preferStyles: true,
   });
-  if (localOrAlias) {
+  if (localOrAlias && STYLESHEET_FILE_RE.test(localOrAlias)) {
     return localOrAlias;
   }
 
   // Only resolve bare node_modules specifiers when they target stylesheets
   const looksLikeStylesheet =
-    /\.(css|scss|sass|less)$/i.test(cleanSpecifier) ||
+    STYLESHEET_FILE_RE.test(cleanSpecifier) ||
     /(?:^|\/)(?:styles?|css)(?:$|\/)/i.test(cleanSpecifier);
   if (!looksLikeStylesheet) {
     return null;
@@ -309,7 +233,7 @@ export function resolveStyleImportFromCode(specifier, importerFilePath) {
     cleanSpecifier,
     path.dirname(importerFilePath)
   );
-  if (resolved && /\.(css|scss|sass|less)$/i.test(resolved)) {
+  if (resolved && STYLESHEET_FILE_RE.test(resolved)) {
     return resolved;
   }
   return null;

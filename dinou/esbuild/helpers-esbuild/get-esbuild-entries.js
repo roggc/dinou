@@ -74,8 +74,9 @@ export default async function getEsbuildEntries({
       const absImportPathWithExt =
         getAbsPathWithExt(source, {
           parentURL: pathToFileURL(baseFilePath).href,
+          cwd: projectRoot,
         }) ||
-        resolveStyleImportFromCode(source, baseFilePath) ||
+        resolveStyleImportFromCode(source, baseFilePath, projectRoot) ||
         resolveAssetImport(source, {
           importer: baseFilePath,
           projectRoot,

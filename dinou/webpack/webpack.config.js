@@ -27,7 +27,10 @@ import {
   warnPublicStylesCssCollision,
 } from "../core/copy-static-dirs.js";
 import { getDinouConfig } from "../core/load-dinou-config.js";
-import TsconfigPathsPlugin from "#tsconfig-paths-webpack-plugin";
+import {
+  createWebpackTsconfigAliasesResolvePlugin,
+  getWatchedTsconfigFiles,
+} from "../core/tsconfig-aliases.js";
 import manifestGeneratorPlugin from "./plugins/manifest-generator-plugin.js";
 import ServerFunctionsPlugin from "./plugins/server-functions-plugin.js";
 import WebpackMemoryPlugin from "./plugins/webpack-memory-plugin.js";
@@ -56,18 +59,6 @@ loadEnvFiles(process.cwd(), {
   mode: isDevelopment ? "development" : "production",
 });
 const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
-
-function getConfigFileIfExists() {
-  const tsconfigPath = path.resolve(process.cwd(), "tsconfig.json");
-  const jsconfigPath = path.resolve(process.cwd(), "jsconfig.json");
-
-  if (fs.existsSync(tsconfigPath)) return tsconfigPath;
-  if (fs.existsSync(jsconfigPath)) return jsconfigPath;
-
-  return null;
-}
-
-const configFile = getConfigFileIfExists();
 
 const localDinouPath = path.resolve(process.cwd(), "dinou");
 const isEjected = fs.existsSync(localDinouPath);
@@ -493,6 +484,11 @@ export default async () => {
             if (fs.existsSync(srcDir)) {
               compilation.contextDependencies.add(srcDir);
             }
+            for (const cfgPath of getWatchedTsconfigFiles(process.cwd())) {
+              if (fs.existsSync(cfgPath)) {
+                compilation.fileDependencies.add(cfgPath);
+              }
+            }
           });
         },
       },
@@ -671,11 +667,13 @@ export default async () => {
     ].filter(Boolean),
     resolve: {
       conditionNames: ["style", "import", "module", "browser", "default"],
-      extensions: [".js", ".jsx", ".ts", ".tsx", ".css"],
+      extensions: [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".json", ".css"],
       modules: ["src", "node_modules"],
       extensionAlias: {
         ".js": [".js", ".ts", ".tsx"],
         ".jsx": [".jsx", ".tsx"],
+        ".mjs": [".mjs", ".mts"],
+        ".cjs": [".cjs", ".cts"],
       },
       // 🎯 ADD THIS:
       alias: {
@@ -685,14 +683,11 @@ export default async () => {
         async_hooks: false,
         "node:async_hooks": false,
       },
-      plugins: configFile
-        ? [
-          new TsconfigPathsPlugin({
-            configFile,
-            extensions: [".js", ".jsx", ".ts", ".tsx", ".css"],
-          }),
-        ]
-        : [],
+      plugins: [
+        createWebpackTsconfigAliasesResolvePlugin({
+          projectRoot: process.cwd(),
+        }),
+      ],
     },
     optimization: {
       // 2. RUNTIME CHUNK: Vital for sharing module state between entry points
@@ -795,18 +790,21 @@ export default async () => {
     },
     resolve: {
       conditionNames: ["react-server", "node", "import", "require"],
-      extensions: [".js", ".jsx", ".ts", ".tsx"],
+      extensions: [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".json"],
+      extensionAlias: {
+        ".js": [".js", ".ts", ".tsx"],
+        ".jsx": [".jsx", ".tsx"],
+        ".mjs": [".mjs", ".mts"],
+        ".cjs": [".cjs", ".cts"],
+      },
       alias: {
         ...(isEjected ? { dinou: localDinouPath } : {}),
       },
-      plugins: configFile
-        ? [
-            new TsconfigPathsPlugin({
-              configFile,
-              extensions: [".js", ".jsx", ".ts", ".tsx", ".css"],
-            }),
-          ]
-        : [],
+      plugins: [
+        createWebpackTsconfigAliasesResolvePlugin({
+          projectRoot: process.cwd(),
+        }),
+      ],
     },
     externals: [
       "express",

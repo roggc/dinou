@@ -11,8 +11,12 @@ import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-m
 import { generateRouteTypes } from "../core/generate-route-types.js";
 import { esbuildContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
 import { getDinouConfig } from "../core/load-dinou-config.js";
-import { createServerAssetPlugin } from "../core/asset-extensions.js";
+import {
+  createServerAssetPlugin,
+  getAssetExtensionsInfo,
+} from "../core/asset-extensions.js";
 import { createServerCssModulesPlugin } from "../core/server-css-modules-plugin.js";
+import { esbuildTsconfigAliasesPlugin } from "../core/tsconfig-aliases.js";
 import { loadEnvFiles, getEsbuildPublicEnvDefines } from "../core/env.js";
 import ensureVendorMode from "../core/ensure-vendor-mode.js";
 loadEnvFiles(process.cwd(), { mode: "production" });
@@ -152,6 +156,10 @@ try {
     }),
     plugins: [
       esbuildContextualDinouPlugin({ projectRoot: process.cwd() }),
+      esbuildTsconfigAliasesPlugin({
+        projectRoot: process.cwd(),
+        assetRegex: getAssetExtensionsInfo(dinouConfig, process.cwd()).regex,
+      }),
       createServerCssModulesPlugin({ projectRoot: process.cwd() }),
       createServerAssetPlugin({ projectRoot: process.cwd(), dinouConfig }),
     ],

@@ -23,7 +23,7 @@ import json from "#rollup/plugin-json";
 import reactRefreshWrapModules from "./react-refresh/react-refresh-wrap-modules.js";
 import { esmHmrPlugin } from "./react-refresh/rollup-plugin-esm-hmr.js";
 import dinouAssetPlugin from "./rollup-plugins/dinou-asset-plugin.js";
-import tsconfigPaths from "#rollup-plugin-tsconfig-paths";
+import { rollupTsconfigAliasesPlugin } from "../core/tsconfig-aliases.js";
 import serverFunctionsPlugin from "./rollup-plugins/rollup-plugin-server-functions.js";
 import { getAssetExtensionsInfo } from "../core/asset-extensions.js";
 import manifestGeneratorPlugin from "./rollup-plugins/manifest-generator-plugin.js";
@@ -186,7 +186,10 @@ export default async function () {
         dinouConfig,
         projectRoot: process.cwd(),
       }),
-      tsconfigPaths(),
+      rollupTsconfigAliasesPlugin({
+        projectRoot: process.cwd(),
+        assetRegex: activeAssetRegex,
+      }),
       replace({
         preventAssignment: true,
         values: rollupExactEnv,
@@ -198,7 +201,7 @@ export default async function () {
       }),
       json(),
       resolve({
-        extensions: [".mjs", ".js", ".jsx", ".ts", ".tsx", ".json", ".css"],
+        extensions: [".mjs", ".js", ".jsx", ".ts", ".tsx", ".cjs", ".json", ".css"],
         exportConditions: ["style"],
         browser: true,
         preferBuiltins: false,
@@ -379,7 +382,12 @@ export default async function () {
         projectRoot: process.cwd(),
         emitFiles: false,
       }),
+      rollupTsconfigAliasesPlugin({
+        projectRoot: process.cwd(),
+        assetRegex: activeAssetRegex,
+      }),
       resolve({
+        extensions: [".mjs", ".js", ".jsx", ".ts", ".tsx", ".cjs", ".json"],
         exportConditions: ["react-server", "node", "import"],
         preferBuiltins: true,
         browser: false,
