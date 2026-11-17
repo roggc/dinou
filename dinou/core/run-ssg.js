@@ -4,6 +4,8 @@ process.env.NODE_ENV = "production";
 process.env.DINOU_RUNTIME = "node-bundle";
 
 import { fileURLToPath } from "node:url";
+import { loadEnvFiles } from "./env.js";
+loadEnvFiles(process.cwd(), { mode: "production" });
 import generateStatic from "./generate-static.js";
 
 export async function runSSG() {

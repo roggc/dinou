@@ -26,6 +26,10 @@ import {
 import { getDinouConfig } from "../core/load-dinou-config.js";
 import { resolveSetupFiles } from "../core/resolve-setup-files.js";
 import {
+  loadEnvFiles,
+  getEsbuildPublicEnvDefines,
+} from "../core/env.js";
+import {
   esbuildContextualDinouPlugin,
   filterEscapedClientManifest,
 } from "../core/resolve-contextual-dinou.js";
@@ -36,6 +40,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export async function bundleDualEngine(options = {}) {
   const isDev = Boolean(options.isDev);
   const projectRoot = path.resolve(options.projectRoot || process.cwd());
+  loadEnvFiles(projectRoot, { mode: isDev ? "development" : "production" });
   const nodeDir = path.resolve(projectRoot, options.outDir || ".dinou/node");
   fs.mkdirSync(nodeDir, { recursive: true });
 
@@ -903,6 +908,9 @@ var __webpack_chunk_load__ = function(chunkId) {
 
   const serverCssModulesPlugin = createServerCssModulesPlugin({ projectRoot });
   const buildEnv = isDev ? "development" : "production";
+  const resolvedBuildTool = isWebpackBuild
+    ? "webpack"
+    : process.env.DINOU_BUILD_TOOL || "esbuild";
 
   // Pass A: RSC Engine
   await esbuild.build({
@@ -921,11 +929,14 @@ var __webpack_chunk_load__ = function(chunkId) {
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
-    define: {
-      "process.env.NODE_ENV": JSON.stringify(buildEnv),
-      "process.env.DINOU_RUNTIME": '"node-bundle"',
-      "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
-    },
+    define: getEsbuildPublicEnvDefines({
+      mode: buildEnv,
+      defineProcessEnvObject: false,
+      extra: {
+        DINOU_RUNTIME: "node-bundle",
+        DINOU_BUILD_TOOL: resolvedBuildTool,
+      },
+    }),
     logLevel: "warning",
   });
 
@@ -946,11 +957,17 @@ var __webpack_chunk_load__ = function(chunkId) {
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
-    define: {
-      "process.env.NODE_ENV": JSON.stringify(buildEnv),
-      "process.env.DINOU_RUNTIME": '"node-bundle"',
-      "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
-    },
+    define: getEsbuildPublicEnvDefines({
+      mode: buildEnv,
+      defineProcessEnvObject: true,
+      extra: {
+        DINOU_RUNTIME: "node-bundle",
+        DINOU_BUILD_TOOL: resolvedBuildTool,
+        ...(process.env.DINOU_DEBUG
+          ? { DINOU_DEBUG: process.env.DINOU_DEBUG }
+          : {}),
+      },
+    }),
     logLevel: "warning",
   });
 

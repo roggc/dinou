@@ -61,6 +61,7 @@ export type {
   StaticPathParams,
   StaticPathItem,
   StaticPathsResult,
+  DinouEnv,
   RequestContextStore,
   ResponseProxy,
   CookieOptions,
@@ -186,11 +187,12 @@ export declare function DinouCacheSlot(props: DinouCacheSlotProps): Promise<Reac
 export declare function noDynamic(): void;
 
 /**
- * Gets the current request context (req and res proxy) synchronously.
- * Must be called within a Server Component, `getProps`, or a `"use server"` Server Function.
- * @returns The current request context store, or `undefined` if called outside a request scope.
+ * Gets the current server request context (`req`, `res`, `env`, `ctx`) synchronously.
+ * Safe to call inside Server Components, `page_functions.ts` / `layout_functions.ts`,
+ * `plugin.onRequest`, and `"use server"` Server Functions across all runtimes.
+ * @returns The active request context store (with `env` always populated on the server).
  */
-export declare function getContext(): RequestContextStore | undefined;
+export declare function getContext(): RequestContextStore;
 
 // ====================================================================
 // STORAGE ADAPTER TYPES (ISR / CACHE)

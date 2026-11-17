@@ -1,4 +1,6 @@
 // dinou/core/request-context.js
+import { createUnifiedEnv } from "./runtime-env.js";
+
 const DINOU_CONTEXT_KEY = Symbol.for("dinou.request.context.storage");
 let requestStorage;
 
@@ -58,15 +60,55 @@ function getCurrentContext() {
   return undefined;
 }
 
+const noopResponseProxy = Object.freeze({
+  cookie() {},
+  clearCookie() {},
+  setHeader() {},
+  redirect() {},
+  status() {},
+});
+
+function createFallbackServerContext() {
+  const unifiedEnv = createUnifiedEnv();
+  return {
+    req: {
+      query: {},
+      cookies: {},
+      headers: {},
+      path: "/",
+      method: "GET",
+      env: unifiedEnv,
+      ctx: null,
+    },
+    res: noopResponseProxy,
+    env: unifiedEnv,
+    ctx: null,
+  };
+}
+
 function getContext() {
   if (typeof window !== "undefined") {
     console.error(
       "[Dinou] ❌ You are calling getContext() inside a Client Component running in the browser. This function is Server-Only. Pass the data as props from a Server Component instead."
     );
-    return {};
+    return {
+      req: { query: {}, cookies: {}, headers: {}, path: "/", method: "GET", env: {}, ctx: null },
+      res: noopResponseProxy,
+      env: {},
+      ctx: null,
+    };
   }
-  const store = requestStorage?.getStore();
-  return store || getCurrentContext() || {};
+  const store = requestStorage?.getStore() || getCurrentContext();
+  if (store) {
+    if (!store.env) {
+      store.env = createUnifiedEnv(store.platformContext?.env);
+    }
+    if (store.req && !store.req.env) {
+      store.req.env = store.env;
+    }
+    return store;
+  }
+  return createFallbackServerContext();
 }
 
 export {

@@ -6,6 +6,14 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { loadEnvFiles } from "../core/env.js";
+
+loadEnvFiles(
+  typeof process !== "undefined" && typeof process.cwd === "function"
+    ? process.cwd()
+    : ".",
+  { mode: "production" }
+);
 
 import ensureVendorMode from "../core/ensure-vendor-mode.js";
 if (!ensureVendorMode()) {

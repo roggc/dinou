@@ -1,12 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
+import { isDotEnvFileName } from "./runtime-env.js";
 
 const IGNORED_OS_BASENAMES = new Set([".ds_store", "thumbs.db"]);
 const warnedCollisionRoots = new Set();
 
 function shouldCopyStaticEntry(srcPath) {
   const baseLower = path.basename(srcPath).toLowerCase();
-  return !IGNORED_OS_BASENAMES.has(baseLower);
+  if (IGNORED_OS_BASENAMES.has(baseLower) || isDotEnvFileName(baseLower)) {
+    return false;
+  }
+  return true;
 }
 
 export function hasPublicStylesCss(projectRoot = process.cwd()) {

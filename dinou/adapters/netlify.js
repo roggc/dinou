@@ -64,7 +64,10 @@ import { handleRequest } from "../core/handler.js";
  * @returns {Promise<Response>}
  */
 export default async function netlifyHandler(request, context) {
-  return handleRequest(request);
+  return handleRequest(request, {
+    env: typeof process !== "undefined" && process.env ? process.env : {},
+    ctx: context || null,
+  });
 }
 
 export const config = {

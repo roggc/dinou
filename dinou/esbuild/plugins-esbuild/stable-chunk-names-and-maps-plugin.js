@@ -54,7 +54,16 @@ export default function stableChunkNamesAndMapsPlugin({ dev = true, changedIds }
             const stableName =
               dir === "." ? base : `${dir.replace(/\//g, "-")}-${base}`;
             const hash = oldRelPath.match(/-([A-Z0-9]+)\./)?.[1] || "";
-            const finalName = dev ? `${stableName}.js` : (hash ? `${stableName}-${hash}.js` : `${stableName}.js`);
+            const devEpoch =
+              dev && typeof globalThis !== "undefined"
+                ? Number(globalThis.__DINOU_DEV_BUNDLE_EPOCH__ || 0)
+                : 0;
+            const epochSuffix = devEpoch > 0 ? `-v${devEpoch}` : "";
+            const finalName = dev
+              ? `${stableName}${epochSuffix}.js`
+              : hash
+                ? `${stableName}-${hash}.js`
+                : `${stableName}.js`;
             const finalRelPath = `chunk-${finalName}`;
             const oldLocal = path.basename(oldRelPath);
             if (Array.from(renames.values()).includes(finalRelPath)) {

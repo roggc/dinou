@@ -8,7 +8,9 @@ import path from "node:path";
 import esbuild from "esbuild";
 import { fileURLToPath } from "node:url";
 import { bundleDualEngine } from "./bundle-dual-engine.js";
+import { loadEnvFiles } from "../core/env.js";
 import ensureVendorMode from "../core/ensure-vendor-mode.js";
+loadEnvFiles(process.cwd(), { mode: "production" });
 if (!ensureVendorMode()) {
   await new Promise(() => {});
 }
@@ -64,6 +66,10 @@ import {
   parseHttpByteRange,
   resolveConfinedStaticFile,
 } from "${dinouDirSlash}/core/static-assets.js";
+import { loadEnvFiles } from "${dinouDirSlash}/core/env.js";
+
+const initialCwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
+loadEnvFiles(initialCwd, { mode: "production" });
 
 if (typeof globalThis !== "undefined") {
   globalThis.__DINOU_RUNTIME__ = "node-bundle";

@@ -1,5 +1,9 @@
 import "./helpers/patch-webpack-internals.js";
-import "dotenv/config";
+import {
+  loadEnvFiles,
+  getWebpackPublicEnvDefines,
+  getEsbuildPublicEnvDefines,
+} from "../core/env.js";
 import path from "node:path";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
@@ -48,6 +52,9 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const isDevelopment = process.env.NODE_ENV !== "production";
+loadEnvFiles(process.cwd(), {
+  mode: isDevelopment ? "development" : "production",
+});
 const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
 
 function getConfigFileIfExists() {
@@ -99,6 +106,8 @@ function cleanDir(dir) {
 }
 
 export default async () => {
+  const envMode = isDevelopment ? "development" : "production";
+  loadEnvFiles(process.cwd(), { mode: envMode });
   const dinouConfig = await getDinouConfig();
   const enableReactCompiler = dinouConfig?.reactCompiler !== false;
   const { regex: activeAssetRegex } = getAssetExtensionsInfo(
@@ -495,7 +504,12 @@ export default async () => {
             noErrorOnMissing: true,
             globOptions: {
               dot: true,
-              ignore: ["**/.DS_Store", "**/Thumbs.db"],
+              ignore: [
+                "**/.DS_Store",
+                "**/Thumbs.db",
+                "**/.env",
+                "**/.env.*",
+              ],
             },
           },
         ],
@@ -515,14 +529,18 @@ export default async () => {
         manifest: manifestGeneratorPlugin.manifestData,
         serverFiles,
       }),
-      isDevelopment &&
-        new webpack.DefinePlugin({
-          "process.env.DINOU_HMR_PORT": JSON.stringify(
-            String(
-              process.env.HMR_PORT || Number(process.env.PORT || 3000) + 1
-            )
-          ),
-        }),
+      new webpack.DefinePlugin(
+        getWebpackPublicEnvDefines({
+          mode: envMode,
+          extra: isDevelopment
+            ? {
+                DINOU_HMR_PORT: String(
+                  process.env.HMR_PORT || Number(process.env.PORT || 3000) + 1
+                ),
+              }
+            : undefined,
+        })
+      ),
       {
         apply(compiler) {
           const pluginName = "DinouCssAssetsAndMinifyPlugin";
@@ -824,6 +842,12 @@ export default async () => {
     ],
     plugins: [
       webpackContextualDinouPlugin({ projectRoot: process.cwd() }),
+      new webpack.DefinePlugin(
+        getEsbuildPublicEnvDefines({
+          mode: "production",
+          defineProcessEnvObject: false,
+        })
+      ),
       new webpack.BannerPlugin({
         banner: "import { createRequire as ___createRequire } from 'node:module'; import { fileURLToPath as ___fileURLToPath } from 'node:url'; import ___path from 'node:path'; const require = ___createRequire(import.meta.url || ___path.resolve(process.cwd(), 'package.json')); globalThis.__dinou_require__ = require; const __filename = import.meta.url ? ___fileURLToPath(import.meta.url) : ___path.resolve(process.cwd(), 'index.js'); const __dirname = ___path.dirname(__filename); process.env.NODE_ENV = process.env.NODE_ENV || 'production';",
         raw: true,

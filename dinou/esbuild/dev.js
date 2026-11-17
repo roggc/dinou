@@ -18,11 +18,13 @@ import {
 } from "./helpers-esbuild/swc-disk-cache.js";
 import { generateRouteTypes } from "../core/generate-route-types.js";
 import { getDinouConfig } from "../core/load-dinou-config.js";
+import { loadEnvFiles } from "../core/env.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export async function startEsbuildDev(options = {}) {
+  loadEnvFiles(process.cwd(), { mode: "development" });
   const onRebuilt = options.onRebuilt || (() => {});
   const onBuildStart = options.onBuildStart || (() => {});
   const onBuildEnd = options.onBuildEnd || (() => {});

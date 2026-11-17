@@ -78,6 +78,13 @@ export interface ResponseProxy {
 // ====================================================================
 
 /**
+ * Augmentable server environment interface returned by `getContext().env`.
+ * Exposes standard text secrets (`process.env`, `Deno.env`) as well as live
+ * Edge/Cloudflare resource bindings (KV, D1, R2, Durable Objects, etc.).
+ */
+export interface DinouEnv extends Record<string, any> {}
+
+/**
  * The complete context object stored in AsyncLocalStorage.
  */
 export interface RequestContextStore {
@@ -90,7 +97,7 @@ export interface RequestContextStore {
     headers: Headers;
     path: string;
     method: "GET" | "POST" | string;
-    env?: Record<string, any>;
+    env: DinouEnv;
     ctx?: any;
     [key: string]: any;
   };
@@ -102,12 +109,12 @@ export interface RequestContextStore {
   res: ResponseProxy;
 
   /**
-   * Platform host environment (Cloudflare env, D1, KV, R2, etc.).
+   * Unified server & platform host environment (text variables + Cloudflare KV, D1, R2 bindings).
    */
-  env?: Record<string, any>;
+  env: DinouEnv;
 
   /**
-   * Platform execution context (Cloudflare ctx, waitUntil, etc.).
+   * Platform execution context (Cloudflare ctx, waitUntil, Netlify context, etc.).
    */
   ctx?: any;
 
@@ -390,14 +397,14 @@ export declare function defineConfig(config: DinouConfig): DinouConfig;
 // ====================================================================
 
 /**
- * Gets the current request context (req and res proxy) synchronously.
- * It must be called within a Server Function or an SSR component
- * wrapped inside requestStorage.run().
- * * NOTE: If no context is active, this function returns undefined.
- * The consumer must handle the guard clause (e.g., if (!context) return;).
- * @returns {RequestContextStore | undefined} The current context object or undefined if called out of scope.
+ * Gets the current server request context (`req`, `res`, `env`, `ctx`) synchronously.
+ * Safe to call inside Server Components, `page_functions.ts` / `layout_functions.ts`
+ * (`getProps`, `getStaticPaths`, `validateParams`, `getCacheTags`), `plugin.onRequest`,
+ * and `"use server"` Server Functions across Node.js, Bun, Deno, and Cloudflare Workers.
+ *
+ * @returns {RequestContextStore} The active request context (or a server fallback context with `env` populated outside an HTTP request).
  */
-export declare function getContext(): RequestContextStore | undefined;
+export declare function getContext(): RequestContextStore;
 
 /**
  * Opts the enclosing `<Suspense>` boundary out of becoming a Dynamic PPR Hole

@@ -35,10 +35,15 @@ import {
 import { discoverLayoutsFromFs, sortEntriesByName } from "../core/discover-layouts.js";
 import { createServerCssModulesPlugin } from "../core/server-css-modules-plugin.js";
 import { createServerAssetPlugin } from "../core/asset-extensions.js";
+import {
+  loadEnvFiles,
+  getEsbuildPublicEnvDefines,
+} from "../core/env.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const projectRoot = process.cwd();
+loadEnvFiles(projectRoot, { mode: "production" });
 const bunDir = path.resolve(projectRoot, ".dinou/bun");
 fs.mkdirSync(bunDir, { recursive: true });
 
@@ -748,6 +753,7 @@ import {
   parseHttpByteRange,
   resolveConfinedStaticFile,
 } from "${dinouDirSlash}/core/static-assets.js";
+import { loadEnvFiles } from "${dinouDirSlash}/core/env.js";
 import * as path from "node:path";
 import * as fs from "node:fs";
 
@@ -772,9 +778,12 @@ function initStorage() {
   }
 }
 
+const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
+try {
+  loadEnvFiles(cwd, { mode: "production" });
+} catch (e) {}
 const PORT = Number(process.env.PORT || 3000);
 const IDLE_TIMEOUT = Number(process.env.IDLE_TIMEOUT || 120);
-const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
 const dist3Dir = path.resolve(cwd, ".dinou/dist3");
 
 export async function fetch(req) {
@@ -1093,11 +1102,16 @@ try {
     loader: commonLoader,
     jsx: "automatic",
     inject: setupFiles.length > 0 ? setupFiles : undefined,
-    define: {
-      "process.env.NODE_ENV": '"production"',
-      "process.env.DINOU_RUNTIME": '"bun-bundle"',
-      "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
-    },
+    define: getEsbuildPublicEnvDefines({
+      mode: "production",
+      defineProcessEnvObject: false,
+      extra: {
+        DINOU_RUNTIME: "bun-bundle",
+        DINOU_BUILD_TOOL: isWebpackBuild
+          ? "webpack"
+          : process.env.DINOU_BUILD_TOOL || "esbuild",
+      },
+    }),
     logLevel: "warning",
   });
 
@@ -1117,11 +1131,19 @@ try {
     loader: commonLoader,
     jsx: "automatic",
     inject: setupFiles.length > 0 ? setupFiles : undefined,
-    define: {
-      "process.env.NODE_ENV": '"production"',
-      "process.env.DINOU_RUNTIME": '"bun-bundle"',
-      "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
-    },
+    define: getEsbuildPublicEnvDefines({
+      mode: "production",
+      defineProcessEnvObject: true,
+      extra: {
+        DINOU_RUNTIME: "bun-bundle",
+        DINOU_BUILD_TOOL: isWebpackBuild
+          ? "webpack"
+          : process.env.DINOU_BUILD_TOOL || "esbuild",
+        ...(process.env.DINOU_DEBUG
+          ? { DINOU_DEBUG: process.env.DINOU_DEBUG }
+          : {}),
+      },
+    }),
     logLevel: "warning",
   });
 

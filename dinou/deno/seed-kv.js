@@ -3,8 +3,12 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
+import { loadEnvFiles } from "../core/env.js";
 
 const cwd = typeof Deno !== "undefined" && typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
+try {
+  loadEnvFiles(cwd, { mode: "production" });
+} catch (e) {}
 const kvUrl = typeof Deno !== "undefined" ? Deno.env.get("DENO_KV_URL") : process.env.DENO_KV_URL;
 const dist2Dir = path.resolve(cwd, ".dinou/dist2");
 

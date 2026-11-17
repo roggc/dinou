@@ -8,6 +8,7 @@ import writePlugin from "../plugins-esbuild/write-plugin.js";
 import babelReactCompilerPlugin from "../plugins-esbuild/babel-react-compiler-plugin.js";
 import { esbuildContextualDinouPlugin } from "../../core/resolve-contextual-dinou.js";
 import { copyStaticDirectoriesToOutdir } from "../../core/copy-static-dirs.js";
+import { getEsbuildPublicEnvDefines } from "../../core/env.js";
 import { stripJsonCommentsAndTrailingCommas } from "../../core/get-abs-path-with-ext.js";
 import { existsSync, readFileSync } from "node:fs";
 
@@ -92,9 +93,7 @@ export default function getConfigEsbuildProd({
     metafile: true,
     logLevel: "warning",
     minify: true,
-    define: {
-      "process.env.NODE_ENV": JSON.stringify("production"),
-    },
+    define: getEsbuildPublicEnvDefines({ mode: "production" }),
     external: [
       "/__SERVER_FUNCTION_PROXY__",
       "/serverFunctionProxy.js",

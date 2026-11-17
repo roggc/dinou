@@ -32,6 +32,10 @@ import rollupSwcPlugin from "./rollup-plugins/rollup-plugin-swc.js";
 import { generateRouteTypes } from "../core/generate-route-types.js";
 import { rollupContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
 import { getDinouConfig } from "../core/load-dinou-config.js";
+import {
+  loadEnvFiles,
+  getRollupPublicEnvReplacements,
+} from "../core/env.js";
 import presetReactModule from "#babel/preset-react";
 import presetTypescriptModule from "#babel/preset-typescript";
 import pluginSyntaxImportMetaModule from "#babel/plugin-syntax-import-meta";
@@ -57,6 +61,10 @@ console.log(
 
 export default async function () {
   const isDevelopment = process.env.NODE_ENV !== "production";
+  const envMode = isDevelopment ? "development" : "production";
+  loadEnvFiles(process.cwd(), { mode: envMode });
+  const { exactValues: rollupExactEnv, objectValues: rollupObjectEnv } =
+    getRollupPublicEnvReplacements({ mode: envMode });
   const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
   const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDevelopment;
   const serverFiles = new Set();
@@ -181,9 +189,12 @@ export default async function () {
       tsconfigPaths(),
       replace({
         preventAssignment: true,
-        "process.env.NODE_ENV": JSON.stringify(
-          isDevelopment ? "development" : "production",
-        ),
+        values: rollupExactEnv,
+      }),
+      replace({
+        preventAssignment: true,
+        delimiters: ["(?<!\\.)\\b", "\\b"],
+        values: rollupObjectEnv,
       }),
       json(),
       resolve({
@@ -358,7 +369,7 @@ export default async function () {
     plugins: [
       replace({
         preventAssignment: true,
-        "process.env.NODE_ENV": JSON.stringify("production"),
+        values: rollupExactEnv,
       }),
       json(),
       rollupContextualDinouPlugin({ projectRoot: process.cwd() }),

@@ -5,6 +5,7 @@ import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
 import { getFilePathAndDynamicParams } from "./get-file-path-and-dynamic-params.js";
 import importModule from "./import-module.js";
 import { requestStorage } from "./request-context.js";
+import { createUnifiedEnv } from "./runtime-env.js";
 import { getLayoutProps, resolveLayoutFunctionsConfig, getLayoutFunctionsPath, resolveLayoutChainPpr } from "./layout-functions.js";
 import { runWithPprContext, getRegisteredHoles, resetPprHoles, markPageRootElement, markLayoutRootElement } from "./ppr-context.js";
 import { resolveModulePpr } from "./resolve-module-ppr.js";
@@ -907,18 +908,23 @@ async function buildStaticPages(onProgress = null) {
       // ====================================================================
       // 2. MOCK REQ: Fulfilling RequestContextStore['req']
       // ====================================================================
+      const unifiedEnv = createUnifiedEnv();
       const mockReq = {
         query: queryProxy,
         cookies: cookiesProxy,
         headers: headersProxy,
         path: reqPath,
         method: "GET",
+        env: unifiedEnv,
+        ctx: null,
       };
 
       // 3. FULL CONTEXT
       const mockContext = {
         req: mockReq,
         res: mockRes,
+        env: unifiedEnv,
+        ctx: null,
         _markDynamic: markAsDynamic,
       };
 

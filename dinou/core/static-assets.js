@@ -1,4 +1,5 @@
 import path from "node:path";
+import { isDotEnvFileName } from "./runtime-env.js";
 
 export const STATIC_MIME_TYPES = Object.freeze({
   // Scripts, WASM & Source Maps
@@ -142,7 +143,15 @@ export function isInternalDinouAssetPath(relPosixPath) {
   }
 
   const baseLower = segments[segments.length - 1].toLowerCase();
-  if (baseLower === ".ds_store" || baseLower === "thumbs.db") {
+  if (
+    baseLower === ".ds_store" ||
+    baseLower === "thumbs.db" ||
+    isDotEnvFileName(baseLower)
+  ) {
+    return true;
+  }
+
+  if (segments.some((seg) => isDotEnvFileName(seg))) {
     return true;
   }
 
@@ -298,7 +307,15 @@ export function shouldExportDist3Entry(relPosixPath) {
   }
 
   const baseLower = segments[segments.length - 1].toLowerCase();
-  if (baseLower === ".ds_store" || baseLower === "thumbs.db") {
+  if (
+    baseLower === ".ds_store" ||
+    baseLower === "thumbs.db" ||
+    isDotEnvFileName(baseLower)
+  ) {
+    return false;
+  }
+
+  if (segments.some((seg) => isDotEnvFileName(seg))) {
     return false;
   }
 

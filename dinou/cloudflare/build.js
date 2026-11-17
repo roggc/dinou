@@ -39,10 +39,15 @@ import {
 } from "../core/static-assets.js";
 import { createServerCssModulesPlugin } from "../core/server-css-modules-plugin.js";
 import { createServerAssetPlugin } from "../core/asset-extensions.js";
+import {
+  loadEnvFiles,
+  getEsbuildPublicEnvDefines,
+} from "../core/env.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const projectRoot = process.cwd();
+loadEnvFiles(projectRoot, { mode: "production" });
 const cloudflareDir = path.resolve(projectRoot, ".dinou/cloudflare");
 fs.mkdirSync(cloudflareDir, { recursive: true });
 
@@ -1139,9 +1144,16 @@ try {
     jsx: "automatic",
     inject: setupFiles.length > 0 ? setupFiles : undefined,
     define: {
-      "process.env.NODE_ENV": '"production"',
-      "process.env.DINOU_RUNTIME": '"edge"',
-      "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
+      ...getEsbuildPublicEnvDefines({
+        mode: "production",
+        defineProcessEnvObject: false,
+        extra: {
+          DINOU_RUNTIME: "edge",
+          DINOU_BUILD_TOOL: isWebpackBuild
+            ? "webpack"
+            : process.env.DINOU_BUILD_TOOL || "esbuild",
+        },
+      }),
       "import.meta.url": '"file:///worker.js"',
     },
     logLevel: "warning",
@@ -1164,9 +1176,19 @@ try {
     jsx: "automatic",
     inject: setupFiles.length > 0 ? setupFiles : undefined,
     define: {
-      "process.env.NODE_ENV": '"production"',
-      "process.env.DINOU_RUNTIME": '"edge"',
-      "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
+      ...getEsbuildPublicEnvDefines({
+        mode: "production",
+        defineProcessEnvObject: true,
+        extra: {
+          DINOU_RUNTIME: "edge",
+          DINOU_BUILD_TOOL: isWebpackBuild
+            ? "webpack"
+            : process.env.DINOU_BUILD_TOOL || "esbuild",
+          ...(process.env.DINOU_DEBUG
+            ? { DINOU_DEBUG: process.env.DINOU_DEBUG }
+            : {}),
+        },
+      }),
       "import.meta.url": '"file:///worker.js"',
     },
     logLevel: "warning",

@@ -8,6 +8,7 @@ import skipMissingEntryPointsPlugin from "../plugins-esbuild/skip-missing-entry-
 import { swcRedirectPlugin } from "./swc-disk-cache.js";
 import { esbuildContextualDinouPlugin } from "../../core/resolve-contextual-dinou.js";
 import { copyStaticDirectoriesToOutdir } from "../../core/copy-static-dirs.js";
+import { getEsbuildPublicEnvDefines } from "../../core/env.js";
 import { stripJsonCommentsAndTrailingCommas } from "../../core/get-abs-path-with-ext.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -165,9 +166,7 @@ export default function getConfigEsbuild({
     conditions: ["style"],
     metafile: true,
     logLevel: "warning",
-    define: {
-      "process.env.NODE_ENV": JSON.stringify("development"),
-    },
+    define: getEsbuildPublicEnvDefines({ mode: "development" }),
     external: [
       "/__SERVER_FUNCTION_PROXY__",
       "/serverFunctionProxy.js",

@@ -27,6 +27,11 @@ import { resolveLayoutFunctionsConfig, getActiveLayoutChain, resolveLayoutChainP
 import { revalidating, regenerating, inFlightGenerations } from "./revalidating.js";
 import { generatingISG } from "./generating-isg.js";
 import { requestStorage, setCurrentContext } from "./request-context.js";
+import {
+  createUnifiedEnv,
+  syncEdgeEnvToProcessEnv,
+  isBotEnvProbePath,
+} from "./runtime-env.js";
 import { getStatus } from "./status-manifest.js";
 import { discoverLayoutsFromFileRelPaths, discoverLayoutsFromFs } from "./discover-layouts.js";
 
@@ -424,6 +429,18 @@ const botGarbagePatterns = [
   /\.bak$/i,
   /\.log$/i,
 ];
+
+function isBotScannerRequest(pathname) {
+  if (!pathname || typeof pathname !== "string") return false;
+  if (isBotEnvProbePath(pathname)) return true;
+  let decoded = pathname;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {}
+  return botGarbagePatterns.some(
+    (pattern) => pattern.test(pathname) || pattern.test(decoded)
+  );
+}
 
 const IS_DYNAMIC_MAP_KEY = Symbol.for("dinou.isDynamic.map");
 if (!globalThis[IS_DYNAMIC_MAP_KEY]) {
@@ -1286,6 +1303,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
   const cookiesProxy = createBailoutProxy(simReq.cookies, "Cookies", markDynamic);
   const headersProxy = createBailoutProxy(simReq.headers, "Headers", markDynamic);
   const queryProxy = createBailoutProxy(simReq.query, "Query", markDynamic);
+  const unifiedEnv = createUnifiedEnv(platformContext.env);
 
   const context = {
     req: {
@@ -1294,7 +1312,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
       query: queryProxy,
       path: simReq.path,
       method: simReq.method,
-      env: platformContext.env || {},
+      env: unifiedEnv,
       ctx: platformContext.ctx || null,
     },
     res: {
@@ -1304,7 +1322,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
       cookie: (name, value, options) => safeResCall("cookie", name, value, options),
       redirect: (...args) => safeResCall("redirect", ...args),
     },
-    env: platformContext.env || {},
+    env: unifiedEnv,
     ctx: platformContext.ctx || null,
     platformContext,
     _markDynamic: markDynamic,
@@ -1331,6 +1349,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
  * Context for Server Function endpoints.
  */
 function createServerFunctionContext(simReq, resBridge, platformContext = {}) {
+  const unifiedEnv = createUnifiedEnv(platformContext.env);
   const context = {
     req: {
       cookies: { ...simReq.cookies },
@@ -1338,7 +1357,7 @@ function createServerFunctionContext(simReq, resBridge, platformContext = {}) {
       query: { ...simReq.query },
       path: simReq.path,
       method: simReq.method,
-      env: platformContext.env || {},
+      env: unifiedEnv,
       ctx: platformContext.ctx || null,
     },
     res: {
@@ -1397,7 +1416,7 @@ function createServerFunctionContext(simReq, resBridge, platformContext = {}) {
         resBridge.write(`D:{"type":"cookie","cookie":${JSON.stringify(cookieStr)}}\n`);
       },
     },
-    env: platformContext.env || {},
+    env: unifiedEnv,
     ctx: platformContext.ctx || null,
     platformContext,
     _dynamicState: { value: true },
@@ -1419,6 +1438,7 @@ async function handleRequest(request, platformContext = {}) {
     }
     if (platformContext?.env) {
       globalThis.__DINOU_ENV__ = platformContext.env;
+      syncEdgeEnvToProcessEnv(platformContext.env);
     }
   }
   const url = new URL(request.url);
@@ -1426,7 +1446,7 @@ async function handleRequest(request, platformContext = {}) {
 
   // 1. Anti-Bot Shield & Reserved Internal Namespace Guard
   if (
-    botGarbagePatterns.some((pattern) => pattern.test(pathname)) ||
+    isBotScannerRequest(pathname) ||
     isReservedCloudflareDist2RequestPath(pathname)
   ) {
     return new Response("Not Found", { status: 404 });
@@ -1493,7 +1513,9 @@ async function handleRequest(request, platformContext = {}) {
     for (const plugin of cfg.plugins) {
       if (typeof plugin.onRequest === "function") {
         try {
-          const result = await plugin.onRequest(request, rootContext);
+          const result = await requestStorage.run(rootContext, () =>
+            plugin.onRequest(request, rootContext)
+          );
           if (result instanceof Response) {
             return result;
           }
@@ -1809,25 +1831,27 @@ async function handleRequest(request, platformContext = {}) {
 
     let layoutConfig = null;
     let pageConfig = null;
-    if (isLayoutReq) {
-      layoutConfig = await resolveLayoutFunctionsConfig(layoutPath, layoutParams);
-      if (layoutConfig.isDynamic) {
-        dynamicState.value = true;
+    await requestStorage.run(rootContext, async () => {
+      if (isLayoutReq) {
+        layoutConfig = await resolveLayoutFunctionsConfig(layoutPath, layoutParams);
+        if (layoutConfig.isDynamic) {
+          dynamicState.value = true;
+        }
+      } else if (isPageReq) {
+        pageConfig = await resolvePageFunctionsConfig(
+          pagePath,
+          reqSegments,
+          queryObj,
+          dynamicParams,
+          reqPath,
+          Boolean(platformContext?.isSSG),
+        );
+        if (pageConfig.isDynamicConfig) {
+          dynamicState.value = true;
+        }
+        isPathBlocked = pageConfig.isPathBlocked;
       }
-    } else if (isPageReq) {
-      pageConfig = await resolvePageFunctionsConfig(
-        pagePath,
-        reqSegments,
-        queryObj,
-        dynamicParams,
-        reqPath,
-        Boolean(platformContext?.isSSG),
-      );
-      if (pageConfig.isDynamicConfig) {
-        dynamicState.value = true;
-      }
-      isPathBlocked = pageConfig.isPathBlocked;
-    }
+    });
 
     const nonBuildIdQueryKeys = Object.keys(queryObj);
     const hasQueryParams = nonBuildIdQueryKeys.length > 0;
@@ -2505,13 +2529,15 @@ async function handleRequest(request, platformContext = {}) {
     tags,
     ppr: isPprConfig,
     pagePpr: isPagePprConfig,
-  } = await resolvePageFunctionsConfig(
-    pagePath,
-    reqSegments,
-    queryObj,
-    dynamicParams,
-    reqPath,
-    Boolean(platformContext?.isSSG),
+  } = await requestStorage.run(rootContext, () =>
+    resolvePageFunctionsConfig(
+      pagePath,
+      reqSegments,
+      queryObj,
+      dynamicParams,
+      reqPath,
+      Boolean(platformContext?.isSSG),
+    )
   );
   let hasStaticDynamicConfig = Boolean(isDynamicConfig);
   if (isDynamicConfig) {
@@ -2536,45 +2562,47 @@ async function handleRequest(request, platformContext = {}) {
 
   const activeLayoutsForRoute = getActiveLayoutChain(reqSegments, queryObj, srcFolder);
   if (activeLayoutsForRoute.length > 0) {
-    for (const entry of activeLayoutsForRoute) {
-      const layoutConfig = await resolveLayoutFunctionsConfig(entry.layoutPath, entry.dParams);
+    await requestStorage.run(rootContext, async () => {
+      for (const entry of activeLayoutsForRoute) {
+        const layoutConfig = await resolveLayoutFunctionsConfig(entry.layoutPath, entry.dParams);
 
-      if (layoutConfig.isDynamic) {
-        dynamicState.value = true;
-        hasStaticDynamicConfig = true;
-      }
-
-      if (
-        await isLayoutSegmentBlocked(
-          entry.layoutPath,
-          entry.dParams,
-          layoutConfig,
-          entry.cleanLayoutKey,
-          reqPath,
-          isDevelopment,
-          Boolean(platformContext?.isSSG),
-        )
-      ) {
-        isPathBlocked = true;
-        allowISGValue = false;
-      }
-
-      if (typeof layoutConfig.revalidate === "number" && layoutConfig.revalidate >= 0) {
-        if (typeof combinedRevalidate === "number") {
-          combinedRevalidate = Math.min(combinedRevalidate, layoutConfig.revalidate);
-        } else {
-          combinedRevalidate = layoutConfig.revalidate;
+        if (layoutConfig.isDynamic) {
+          dynamicState.value = true;
+          hasStaticDynamicConfig = true;
         }
-      }
 
-      if (Array.isArray(layoutConfig.tags)) {
-        for (const t of layoutConfig.tags) {
-          if (!combinedTags.includes(t)) {
-            combinedTags.push(t);
+        if (
+          await isLayoutSegmentBlocked(
+            entry.layoutPath,
+            entry.dParams,
+            layoutConfig,
+            entry.cleanLayoutKey,
+            reqPath,
+            isDevelopment,
+            Boolean(platformContext?.isSSG),
+          )
+        ) {
+          isPathBlocked = true;
+          allowISGValue = false;
+        }
+
+        if (typeof layoutConfig.revalidate === "number" && layoutConfig.revalidate >= 0) {
+          if (typeof combinedRevalidate === "number") {
+            combinedRevalidate = Math.min(combinedRevalidate, layoutConfig.revalidate);
+          } else {
+            combinedRevalidate = layoutConfig.revalidate;
+          }
+        }
+
+        if (Array.isArray(layoutConfig.tags)) {
+          for (const t of layoutConfig.tags) {
+            if (!combinedTags.includes(t)) {
+              combinedTags.push(t);
+            }
           }
         }
       }
-    }
+    });
   }
 
   // Edge Runtime: ISR, ISG & Static Delivery via storageAdapter and env.ASSETS

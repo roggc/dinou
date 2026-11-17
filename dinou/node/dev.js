@@ -8,6 +8,14 @@ if (!process.env.NODE_ENV) {
   process.env.NODE_ENV = "development";
 }
 
+import {
+  loadEnvFiles,
+  getEsbuildPublicEnvDefines,
+  getWebpackPublicEnvDefines,
+  isWatchedDotEnvFile,
+} from "../core/env.js";
+loadEnvFiles(process.cwd(), { mode: "development" });
+
 import ensureVendorMode from "../core/ensure-vendor-mode.js";
 if (!ensureVendorMode()) {
   await new Promise(() => {});
@@ -329,6 +337,14 @@ async function updateManifestsState(options = {}) {
   const aPath = isWebpackBuild ? findManifest("manifest.json", "node-dev") : null;
 
   const rawClient = globalThis.__DINOU_RAW_CLIENT_MANIFEST__ || readJsonSafe(cPath);
+  const devBundleEpoch = !isWebpackBuild
+    ? Number(globalThis.__DINOU_DEV_BUNDLE_EPOCH__ || 0)
+    : 0;
+  const applyDevEpoch = (chunkUrl) => {
+    if (!chunkUrl || devBundleEpoch <= 0) return chunkUrl;
+    const base = String(chunkUrl).split("?")[0];
+    return base.endsWith(".js") ? `${base}?v=${devBundleEpoch}` : chunkUrl;
+  };
   if (rawClient) {
     const cleanClient = {};
     for (const [k, v] of Object.entries(rawClient)) {
@@ -344,7 +360,10 @@ async function updateManifestsState(options = {}) {
       ) {
         continue;
       }
-      cleanClient[k] = v;
+      cleanClient[k] =
+        devBundleEpoch > 0 && v?.id
+          ? { ...v, id: applyDevEpoch(v.id) }
+          : v;
     }
     parsedClientManifest = cleanClient;
   }
@@ -422,10 +441,10 @@ async function updateManifestsState(options = {}) {
 
   if (!isWebpackBuild) {
     if (!redirectChunkId || redirectChunkId.includes("node_modules")) {
-      redirectChunkId = "/dinouClientRedirect.js";
+      redirectChunkId = applyDevEpoch("/dinouClientRedirect.js");
     }
     if (!linkChunkId || linkChunkId.includes("node_modules")) {
-      linkChunkId = "/dinouLink.js";
+      linkChunkId = applyDevEpoch("/dinouLink.js");
     }
   }
 
@@ -464,7 +483,7 @@ async function updateManifestsState(options = {}) {
     }
   }
   if (!isWebpackBuild && (!slotChunkId || slotChunkId.includes("node_modules"))) {
-    slotChunkId = "/dinouSlot.js";
+    slotChunkId = applyDevEpoch("/dinouSlot.js");
   }
   if (slotChunkId) {
     const slotChunks = isWebpackBuild ? (slotEntry?.chunks || [slotChunkId]) : "DinouPageSlot";
@@ -516,7 +535,11 @@ async function updateManifestsState(options = {}) {
         await yieldToEventLoop();
       }
 
-      const isValidEntryId = (entry) => Boolean(entry?.id && (isWebpackBuild || entry.id.endsWith(".js")));
+      const isValidEntryId = (entry) =>
+        Boolean(
+          entry?.id &&
+            (isWebpackBuild || String(entry.id).split("?")[0].endsWith(".js"))
+        );
 
       // Check if parsedClientManifest already has an entry for this component
       let matchedEntry = null;
@@ -548,7 +571,7 @@ async function updateManifestsState(options = {}) {
 
       const compId = isValidEntryId(matchedEntry)
         ? matchedEntry.id
-        : getFallbackChunkId(comp);
+        : applyDevEpoch(getFallbackChunkId(comp));
       const compChunks = isWebpackBuild ? (matchedEntry?.chunks || []) : "default";
 
       for (const u of urlVariants) {
@@ -575,7 +598,11 @@ async function updateManifestsState(options = {}) {
     }
   } else {
     // Fast path: update normalized mapping for known client components without re-reading files or parsing AST
-    const isValidEntryId = (entry) => Boolean(entry?.id && (isWebpackBuild || entry.id.endsWith(".js")));
+    const isValidEntryId = (entry) =>
+      Boolean(
+        entry?.id &&
+          (isWebpackBuild || String(entry.id).split("?")[0].endsWith(".js"))
+      );
     for (const comp of clientComponents) {
       const urlVariants = generateAllUrlVariants(comp);
       const fileExports = getCachedFileExports(comp);
@@ -612,7 +639,7 @@ async function updateManifestsState(options = {}) {
 
       const compId = isValidEntryId(matchedEntry)
         ? matchedEntry.id
-        : getFallbackChunkId(comp);
+        : applyDevEpoch(getFallbackChunkId(comp));
       const compChunks = isWebpackBuild ? (matchedEntry?.chunks || []) : "default";
 
       for (const u of urlVariants) {
@@ -712,9 +739,15 @@ async function updateManifestsState(options = {}) {
 
   const registerModuleMapEntry = (chunkId, fileUrl, expName) => {
     if (!chunkId || !fileUrl) return;
-    const ids = [chunkId];
-    if (chunkId.startsWith("/")) ids.push(chunkId.slice(1));
-    else ids.push("/" + chunkId);
+    const baseChunkId = String(chunkId).split("?")[0];
+    const ids = Array.from(
+      new Set([
+        chunkId,
+        chunkId.startsWith("/") ? chunkId.slice(1) : "/" + chunkId,
+        baseChunkId,
+        baseChunkId.startsWith("/") ? baseChunkId.slice(1) : "/" + baseChunkId,
+      ])
+    );
 
     // Canonicalize fileUrl to 3 slashes (standard file URL)
     let canonicalUrl = fileUrl;
@@ -762,7 +795,10 @@ async function updateManifestsState(options = {}) {
   for (const [k, v] of Object.entries(normalized)) {
     const fileUrl = k.split("#")[0];
     const expName = k.includes("#") ? k.split("#")[1] : null;
-    if (v?.id && (isWebpackBuild || v.id.endsWith(".js"))) {
+    if (
+      v?.id &&
+      (isWebpackBuild || String(v.id).split("?")[0].endsWith(".js"))
+    ) {
       registerModuleMapEntry(v.id, fileUrl, expName);
     }
   }
@@ -1496,33 +1532,51 @@ const ctxA = await esbuild.context({
   logLevel: "warning",
 });
 
-const ctxB = await esbuild.context({
-  entryPoints: { "ssr-engine": path.join(devDir, "ssr-entry.mjs") },
-  outdir: devDir,
-  splitting: true,
-  outExtension: { ".js": ".mjs" },
-  chunkNames: "chunks/ssr/[name]-[hash]",
-  bundle: true,
-  format: "esm",
-  target: "node20",
-  platform: "node",
-  mainFields: ["module", "main"],
-  conditions: ["node", "worker", "browser", "style"],
-  external: externalList,
-  banner,
-  inject: setupFiles,
-  plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverReferencesPluginSsr, serverCssModulesPlugin, serverAssetPlugin, createDevExternalPackagesPlugin(false)],
-  alias: commonAlias,
-  loader: commonLoader,
-  jsx: "automatic",
-  define: {
-    "process.env.NODE_ENV": '"development"',
-    "process.env.DINOU_DEV": '"true"',
-    "process.env.DINOU_RUNTIME": '"node-bundle"',
-    "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
-  },
-  logLevel: "warning",
-});
+async function createSsrContext() {
+  return esbuild.context({
+    entryPoints: { "ssr-engine": path.join(devDir, "ssr-entry.mjs") },
+    outdir: devDir,
+    splitting: true,
+    outExtension: { ".js": ".mjs" },
+    chunkNames: "chunks/ssr/[name]-[hash]",
+    bundle: true,
+    format: "esm",
+    target: "node20",
+    platform: "node",
+    mainFields: ["module", "main"],
+    conditions: ["node", "worker", "browser", "style"],
+    external: externalList,
+    banner,
+    inject: setupFiles,
+    plugins: [
+      esbuildContextualDinouPlugin({ projectRoot }),
+      serverReferencesPluginSsr,
+      serverCssModulesPlugin,
+      serverAssetPlugin,
+      createDevExternalPackagesPlugin(false),
+    ],
+    alias: commonAlias,
+    loader: commonLoader,
+    jsx: "automatic",
+    define: getEsbuildPublicEnvDefines({
+      mode: "development",
+      defineProcessEnvObject: true,
+      extra: {
+        DINOU_DEV: "true",
+        DINOU_RUNTIME: "node-bundle",
+        DINOU_BUILD_TOOL: isWebpackBuild
+          ? "webpack"
+          : process.env.DINOU_BUILD_TOOL || "esbuild",
+        ...(process.env.DINOU_DEBUG
+          ? { DINOU_DEBUG: process.env.DINOU_DEBUG }
+          : {}),
+      },
+    }),
+    logLevel: "warning",
+  });
+}
+
+let ctxB = await createSsrContext();
 
 let rscModule = null;
 let ssrModule = null;
@@ -2140,6 +2194,93 @@ srcWatcher.on("all", (event, fullPath) => {
   }, 50);
 });
 
+// Watch root .env* files for live environment hot-reloading in dev
+let envDebounce = null;
+let pendingEnvChangedPath = null;
+let activeEnvReloadPromise = null;
+
+async function triggerEnvReload(fullPath) {
+  const prev = activeEnvReloadPromise;
+  const runPromise = (async () => {
+    if (prev) {
+      try {
+        await prev;
+      } catch (e) {}
+    }
+    try {
+      const envName = fullPath ? path.basename(fullPath) : ".env";
+      const reloadRes = loadEnvFiles(projectRoot, {
+        mode: "development",
+        reload: true,
+      });
+      try {
+        generateRouteTypes(projectRoot);
+      } catch (e) {}
+
+      if (!reloadRes.changed && !reloadRes.publicEnvChanged) {
+        return;
+      }
+
+      try {
+        const dist2Dir = path.resolve(projectRoot, ".dinou/dist2");
+        if (fs.existsSync(dist2Dir)) {
+          fs.rmSync(dist2Dir, { recursive: true, force: true });
+        }
+      } catch (e) {}
+
+      if (reloadRes.publicEnvChanged) {
+        logInfo(`Reloaded ${envName} (DINOU_PUBLIC_* updated). Rebuilding client & SSR...`);
+        globalThis.__DINOU_DEV_BUNDLE_EPOCH__ =
+          Number(globalThis.__DINOU_DEV_BUNDLE_EPOCH__ || 0) + 1;
+        fileTransformCache.clear();
+        if (clientBundlerHandle?.refreshPublicEnv) {
+          await clientBundlerHandle.refreshPublicEnv();
+        } else if (clientBundlerHandle?.restart) {
+          await clientBundlerHandle.restart();
+        }
+        await updateManifestsState({ forceRescan: false });
+        await ctxB.dispose();
+        ctxB = await createSsrContext();
+        await syncSsrEngine();
+      } else {
+        logSuccess(`Reloaded server environment from ${envName}`);
+      }
+
+      clientBundlerHandle?.broadcast?.({ type: "reload" });
+    } catch (err) {
+      console.error("❌ [Dinou Dev] Failed to hot-reload .env file:", err);
+    } finally {
+      if (activeEnvReloadPromise === runPromise) {
+        activeEnvReloadPromise = null;
+      }
+    }
+  })();
+  activeEnvReloadPromise = runPromise;
+  return runPromise;
+}
+
+const envWatcher = chokidar.watch(projectRoot, {
+  ignoreInitial: true,
+  depth: 0,
+  awaitWriteFinish: {
+    stabilityThreshold: 20,
+    pollInterval: 10,
+  },
+});
+
+envWatcher.on("all", (event, fullPath) => {
+  if (event === "addDir" || event === "unlinkDir") return;
+  if (!isWatchedDotEnvFile(fullPath, projectRoot)) return;
+  pendingEnvChangedPath = fullPath;
+  if (envDebounce) clearTimeout(envDebounce);
+  envDebounce = setTimeout(() => {
+    envDebounce = null;
+    const changedPath = pendingEnvChangedPath;
+    pendingEnvChangedPath = null;
+    triggerEnvReload(changedPath);
+  }, 50);
+});
+
 let clientManifestReady = false;
 
 function checkClientFilesPresent() {
@@ -2420,6 +2561,11 @@ async function startClientBundler(tool) {
     const webpackConfigMod = await import(pathToFileURL(path.resolve(dinouDir, "webpack/webpack.config.js")).href);
     const getWebpackConfig = webpackConfigMod.default || webpackConfigMod;
     const webpackConfig = await getWebpackConfig();
+    const definePlugin = Array.isArray(webpackConfig.plugins)
+      ? webpackConfig.plugins.find(
+          (p) => p && p.constructor && p.constructor.name === "DefinePlugin"
+        )
+      : null;
     const compiler = webpack(webpackConfig);
 
     let devServer = null;
@@ -2546,6 +2692,36 @@ async function startClientBundler(tool) {
               }
               await onManifestUpdated();
             },
+            refreshPublicEnv: async () => {
+              if (definePlugin) {
+                definePlugin.definitions = getWebpackPublicEnvDefines({
+                  mode: "development",
+                  extra: {
+                    DINOU_HMR_PORT: String(
+                      process.env.HMR_PORT || Number(process.env.PORT || 3000) + 1
+                    ),
+                  },
+                });
+              }
+              if (!globalThis.__DINOU_WEBPACK_MODIFIED_FILES__) {
+                globalThis.__DINOU_WEBPACK_MODIFIED_FILES__ = new Set();
+              }
+              for (const cf of knownClientFiles) {
+                globalThis.__DINOU_WEBPACK_MODIFIED_FILES__.add(
+                  path.resolve(cf).replace(/\\/g, "/").toLowerCase()
+                );
+              }
+              const waitP = startBuildWait();
+              try {
+                if (devServer?.middleware?.invalidate) {
+                  devServer.middleware.invalidate();
+                } else if (compiler.watching?.invalidate) {
+                  compiler.watching.invalidate();
+                }
+              } catch (e) {}
+              await waitP;
+              await onManifestUpdated();
+            },
             close: async () => {
               if (devServer) {
                 try {
@@ -2632,6 +2808,16 @@ const server = http.createServer(async (req, res) => {
       const batch = new Map(pendingSrcChanges);
       pendingSrcChanges.clear();
       await triggerRebuildBatch(batch);
+    }
+    if (envDebounce) {
+      clearTimeout(envDebounce);
+      envDebounce = null;
+      const changedPath = pendingEnvChangedPath;
+      pendingEnvChangedPath = null;
+      await triggerEnvReload(changedPath);
+    }
+    if (activeEnvReloadPromise) {
+      await activeEnvReloadPromise;
     }
     if (activeRebuildPromise) {
       await activeRebuildPromise;
@@ -2866,6 +3052,16 @@ const server = http.createServer(async (req, res) => {
     }
 
     // 3. Dynamic RSC + Native SSR Streaming
+    if (envDebounce) {
+      clearTimeout(envDebounce);
+      envDebounce = null;
+      const changedPath = pendingEnvChangedPath;
+      pendingEnvChangedPath = null;
+      await triggerEnvReload(changedPath);
+    }
+    if (activeEnvReloadPromise) {
+      await activeEnvReloadPromise;
+    }
     if (activeRebuildPromise) {
       await activeRebuildPromise;
     }
@@ -2982,6 +3178,7 @@ async function cleanup() {
   stopSpinner();
   try {
     srcWatcher.close();
+    envWatcher.close();
     if (clientBundlerHandle?.close) {
       await clientBundlerHandle.close();
     }

@@ -35,10 +35,15 @@ import {
 import { discoverLayoutsFromFs, sortEntriesByName } from "../core/discover-layouts.js";
 import { createServerCssModulesPlugin } from "../core/server-css-modules-plugin.js";
 import { createServerAssetPlugin } from "../core/asset-extensions.js";
+import {
+  loadEnvFiles,
+  getEsbuildPublicEnvDefines,
+} from "../core/env.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const projectRoot = process.cwd();
+loadEnvFiles(projectRoot, { mode: "production" });
 const denoDir = path.resolve(projectRoot, ".dinou/deno");
 fs.mkdirSync(denoDir, { recursive: true });
 
@@ -750,8 +755,14 @@ import {
   parseHttpByteRange,
   resolveConfinedStaticFile,
 } from "${dinouDirSlash}/core/static-assets.js";
+import { loadEnvFiles } from "${dinouDirSlash}/core/env.js";
 import * as path from "node:path";
 import * as fs from "node:fs";
+
+try {
+  const bootCwd = typeof Deno !== "undefined" && typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
+  loadEnvFiles(bootCwd, { mode: "production" });
+} catch (e) {}
 
 if (typeof globalThis !== "undefined") {
   globalThis.__DINOU_RUNTIME__ = "deno-edge";
@@ -1099,11 +1110,16 @@ try {
     loader: commonLoader,
     jsx: "automatic",
     inject: setupFiles.length > 0 ? setupFiles : undefined,
-    define: {
-      "process.env.NODE_ENV": '"production"',
-      "process.env.DINOU_RUNTIME": '"deno-edge"',
-      "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
-    },
+    define: getEsbuildPublicEnvDefines({
+      mode: "production",
+      defineProcessEnvObject: false,
+      extra: {
+        DINOU_RUNTIME: "deno-edge",
+        DINOU_BUILD_TOOL: isWebpackBuild
+          ? "webpack"
+          : process.env.DINOU_BUILD_TOOL || "esbuild",
+      },
+    }),
     logLevel: "warning",
   });
 
@@ -1123,11 +1139,19 @@ try {
     loader: commonLoader,
     jsx: "automatic",
     inject: setupFiles.length > 0 ? setupFiles : undefined,
-    define: {
-      "process.env.NODE_ENV": '"production"',
-      "process.env.DINOU_RUNTIME": '"deno-edge"',
-      "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
-    },
+    define: getEsbuildPublicEnvDefines({
+      mode: "production",
+      defineProcessEnvObject: true,
+      extra: {
+        DINOU_RUNTIME: "deno-edge",
+        DINOU_BUILD_TOOL: isWebpackBuild
+          ? "webpack"
+          : process.env.DINOU_BUILD_TOOL || "esbuild",
+        ...(process.env.DINOU_DEBUG
+          ? { DINOU_DEBUG: process.env.DINOU_DEBUG }
+          : {}),
+      },
+    }),
     logLevel: "warning",
   });
 
