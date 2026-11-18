@@ -1,91 +1,188 @@
 #!/usr/bin/env node
 
+import ensureVendorMode, {
+  isUnvendorizedRequested,
+} from "./core/ensure-vendor-mode.js";
+if (!ensureVendorMode()) {
+  await new Promise(() => {});
+}
 
 import { program } from "#commander";
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadEnvFiles, readEnvFilesMap } from "./core/env.js";
+import { loadEnvFiles } from "./core/env.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dinouPath = __dirname;
 const projectRoot = process.cwd();
 
+const dinouRequire = createRequire(import.meta.url);
+const projectRequire = createRequire(path.resolve(projectRoot, "package.json"));
+
+function resolveToolBin(specifier) {
+  try {
+    return dinouRequire.resolve(specifier);
+  } catch {
+    return projectRequire.resolve(specifier);
+  }
+}
+
+const dinouScript = (rel) => path.join(dinouPath, rel);
+
 // Global CLI options for Dinou v9 (Dual-Mode Vendoring)
 program
   .name("dinou")
-  .description("Full-stack React 19 framework with native RSC, progressive streaming, and dual-mode vendoring")
+  .description(
+    "Full-stack React 19 framework with native RSC, progressive streaming, and dual-mode vendoring"
+  )
   .version("9.4.0")
-  .option("-u, --unvendorized", "Run with standard node_modules dependencies instead of pre-bundled vendor packages");
+  .option(
+    "-u, --unvendorized",
+    "Run with standard node_modules dependencies instead of pre-bundled vendor packages"
+  );
 
-const isUnvendorizedRequested = () => {
-  if (
-    process.argv.includes("-u") ||
-    process.argv.includes("--unvendorized") ||
-    process.env.DINOU_UNVENDORIZED === "true" ||
-    process.env.DINOU_UNVENDORIZED === "1" ||
-    Boolean(program.opts?.().unvendorized)
-  ) {
-    return true;
-  }
-  try {
-    const dotEnvMap = readEnvFilesMap(projectRoot).values;
-    return (
-      dotEnvMap.DINOU_UNVENDORIZED === "true" ||
-      dotEnvMap.DINOU_UNVENDORIZED === "1"
-    );
-  } catch {
-    return false;
-  }
-};
-
-const pathKey = Object.keys(process.env).find((k) => k.toLowerCase() === "path") || "PATH";
+const pathKey =
+  Object.keys(process.env).find((k) => k.toLowerCase() === "path") || "PATH";
 const projectBin = path.join(projectRoot, "node_modules", ".bin");
 const dinouBin = path.join(dinouPath, "node_modules", ".bin");
 const dinouParentBin = path.resolve(dinouPath, "..", "node_modules", ".bin");
-const extendedPath = [projectBin, dinouBin, dinouParentBin, process.env[pathKey]].filter(Boolean).join(path.delimiter);
+const extendedPath = [
+  projectBin,
+  dinouBin,
+  dinouParentBin,
+  process.env[pathKey],
+]
+  .filter(Boolean)
+  .join(path.delimiter);
 
-const runCommand = (command, options = {}) => {
-  try {
-    const unvendorized = isUnvendorizedRequested();
-    const baseNodeOptions = process.env.NODE_OPTIONS || "";
-    const nodeOptions = unvendorized && !baseNodeOptions.includes("unvendorized")
-      ? (baseNodeOptions ? `${baseNodeOptions} ` : "") + "--conditions=unvendorized"
+function buildChildEnv(extraEnv = {}) {
+  const unvendorized =
+    isUnvendorizedRequested(projectRoot) ||
+    Boolean(program.opts?.().unvendorized);
+  const baseNodeOptions = process.env.NODE_OPTIONS || "";
+  const nodeOptions =
+    unvendorized && !baseNodeOptions.includes("unvendorized")
+      ? (baseNodeOptions ? `${baseNodeOptions} ` : "") +
+        "--conditions=unvendorized"
       : baseNodeOptions;
 
-    const env = {
+  return {
+    unvendorized,
+    env: {
       ...process.env,
       [pathKey]: extendedPath,
       Path: extendedPath,
       PATH: extendedPath,
       ...(unvendorized ? { DINOU_UNVENDORIZED: "true" } : {}),
       ...(nodeOptions ? { NODE_OPTIONS: nodeOptions } : {}),
-      ...(options.env || {}),
-    };
+      ...extraEnv,
+    },
+  };
+}
 
-    let finalCommand = command;
-    if (unvendorized) {
-      finalCommand = finalCommand.replace(/(node\s+(?:"[^"]+"|[^\s"&|]+))(?!\s+-u\b)(?=\s|$|[&|;])/g, "$1 -u");
+function jsStep(runner, scriptOrResolver, args = [], env = {}) {
+  return { kind: "js", runner, scriptOrResolver, args, env };
+}
+
+function cmdStep(bin, args = [], env = {}) {
+  return { kind: "cmd", bin, args, env };
+}
+
+function runSteps(steps, baseEnv = {}) {
+  const isBunRuntime =
+    typeof Bun !== "undefined" || Boolean(process.versions?.bun);
+
+  for (const step of steps) {
+    const mergedExtraEnv = { ...baseEnv, ...(step.env || {}) };
+    const { unvendorized, env } = buildChildEnv(mergedExtraEnv);
+
+    let bin;
+    let finalArgs;
+
+    if (step.kind === "js") {
+      const targetScript =
+        typeof step.scriptOrResolver === "function"
+          ? step.scriptOrResolver()
+          : step.scriptOrResolver;
+
+      if (step.runner === "bun") {
+        bin = isBunRuntime ? process.execPath : "bun";
+      } else {
+        bin = !isBunRuntime ? process.execPath : "node";
+      }
+
+      const conditionPrefix = unvendorized ? ["--conditions=unvendorized"] : [];
+      finalArgs = [...conditionPrefix, targetScript, ...(step.args || [])];
+    } else {
+      bin =
+        step.bin === "bun" && isBunRuntime ? process.execPath : step.bin;
+      finalArgs = [...(step.args || [])];
     }
 
-    execSync(finalCommand, { stdio: "inherit", cwd: projectRoot, ...options, env });
-  } catch (error) {
-    console.error(`Error executing "${command}":`, error.message);
-    process.exit(1);
+    let result = spawnSync(bin, finalArgs, {
+      stdio: "inherit",
+      cwd: projectRoot,
+      env,
+    });
+
+    if (
+      result.error &&
+      process.platform === "win32" &&
+      !path.isAbsolute(bin) &&
+      (result.error.code === "ENOENT" || result.error.code === "EINVAL")
+    ) {
+      result = spawnSync(bin, finalArgs, {
+        stdio: "inherit",
+        cwd: projectRoot,
+        env,
+        shell: true,
+      });
+    }
+
+    if (result.error) {
+      console.error(
+        `Error executing "${bin} ${finalArgs.join(" ")}":`,
+        result.error.message
+      );
+      process.exit(1);
+    }
+
+    if (result.status !== 0) {
+      if (result.signal) {
+        process.kill(process.pid, result.signal);
+      }
+      process.exit(result.status ?? 1);
+    }
   }
-};
+}
 
-const runProdCommand = (command, options = {}) =>
-  runCommand(command, {
-    ...options,
-    env: {
-      NODE_ENV: "production",
-      ...(options.env || {}),
-    },
+const runProdSteps = (steps, extraEnv = {}) =>
+  runSteps(steps, { NODE_ENV: "production", ...extraEnv });
+
+function bundlerStep(bundler, runner = "node") {
+  if (bundler === "rollup") {
+    return jsStep(
+      runner,
+      () => resolveToolBin("rollup/dist/bin/rollup"),
+      ["-c", dinouScript("rollup/rollup.config.js")],
+      { NODE_ENV: "production", DINOU_BUILD_TOOL: "rollup" }
+    );
+  }
+  if (bundler === "webpack") {
+    return jsStep(
+      runner,
+      () => resolveToolBin("webpack-cli/bin/cli.js"),
+      ["--config", dinouScript("webpack/webpack.config.js")],
+      { NODE_ENV: "production", DINOU_BUILD_TOOL: "webpack" }
+    );
+  }
+  return jsStep(runner, dinouScript("esbuild/build.js"), [], {
+    NODE_ENV: "production",
+    DINOU_BUILD_TOOL: "esbuild",
   });
-
-// Helper paths
-const p = (rel) => `"${path.join(dinouPath, rel).replaceAll("\\", "/")}"`;
+}
 
 // --- DEV ---
 
@@ -93,182 +190,253 @@ program
   .command("dev")
   .description("Start development server with Esbuild")
   .action(() => {
-    runCommand(`cross-env DINOU_BUILD_TOOL=esbuild node ${p("node/dev.js")}`);
+    runSteps([
+      jsStep("node", dinouScript("node/dev.js"), [], {
+        DINOU_BUILD_TOOL: "esbuild",
+      }),
+    ]);
   });
 
 program
   .command("dev:esbuild")
   .description("Start development server with Esbuild")
   .action(() => {
-    runCommand(`cross-env DINOU_BUILD_TOOL=esbuild node ${p("node/dev.js")}`);
+    runSteps([
+      jsStep("node", dinouScript("node/dev.js"), [], {
+        DINOU_BUILD_TOOL: "esbuild",
+      }),
+    ]);
   });
 
 program
   .command("dev:rollup")
   .description("Start development server with Rollup")
   .action(() => {
-    runCommand(`cross-env DINOU_BUILD_TOOL=rollup node ${p("node/dev.js")}`);
+    runSteps([
+      jsStep("node", dinouScript("node/dev.js"), [], {
+        DINOU_BUILD_TOOL: "rollup",
+      }),
+    ]);
   });
 
 program
   .command("dev:webpack")
   .description("Start development server with Webpack")
   .action(() => {
-    runCommand(`cross-env DINOU_BUILD_TOOL=webpack node ${p("node/dev.js")}`);
+    runSteps([
+      jsStep("node", dinouScript("node/dev.js"), [], {
+        DINOU_BUILD_TOOL: "webpack",
+      }),
+    ]);
   });
 
 // --- NODE (BUILD & START) ---
+
+const buildNodeSteps = (bundler, runner = "node") => [
+  bundlerStep(bundler, runner),
+  jsStep(runner, dinouScript("node/build.js"), [], {
+    NODE_ENV: "production",
+    DINOU_BUILD_TOOL: bundler,
+  }),
+];
 
 program
   .command("build")
   .description("Build the app for Node.js production (using esbuild)")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.js")} && node ${p("node/build.js")}`);
+    runProdSteps(buildNodeSteps("esbuild", "node"));
   });
 
 program
   .command("build:node")
   .description("Build the app for Node.js production (using esbuild)")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.js")} && node ${p("node/build.js")}`);
+    runProdSteps(buildNodeSteps("esbuild", "node"));
   });
 
 program
   .command("build:node:esbuild")
   .description("Build the app for Node.js with Esbuild")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.js")} && node ${p("node/build.js")}`);
+    runProdSteps(buildNodeSteps("esbuild", "node"));
   });
 
 program
   .command("build:node:rollup")
   .description("Build the app for Node.js with Rollup")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && node ${p("node/build.js")}`);
+    runProdSteps(buildNodeSteps("rollup", "node"));
   });
 
 program
   .command("build:node:webpack")
   .description("Build the app for Node.js with Webpack")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && cross-env DINOU_BUILD_TOOL=webpack node ${p("node/build.js")}`);
+    runProdSteps(buildNodeSteps("webpack", "node"));
   });
 
 program
   .command("start")
   .description("Start the app in production mode (Node.js)")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production node ${p("adapters/node.js")}`);
+    runProdSteps([jsStep("node", dinouScript("adapters/node.js"))]);
   });
 
 program
   .command("start:node")
   .description("Start the app in production mode (Node.js)")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production node ${p("adapters/node.js")}`);
+    runProdSteps([jsStep("node", dinouScript("adapters/node.js"))]);
   });
 
 program
   .command("start:node:esbuild")
   .description("Start the app in production mode (Esbuild build)")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production node ${p("adapters/node.js")}`);
+    runProdSteps([
+      jsStep("node", dinouScript("adapters/node.js"), [], {
+        DINOU_BUILD_TOOL: "esbuild",
+      }),
+    ]);
   });
 
 program
   .command("start:node:rollup")
   .description("Start the app in production mode (Rollup build)")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production node ${p("adapters/node.js")}`);
+    runProdSteps([
+      jsStep("node", dinouScript("adapters/node.js"), [], {
+        DINOU_BUILD_TOOL: "rollup",
+      }),
+    ]);
   });
 
 program
   .command("start:node:webpack")
   .description("Start the app in production mode (Webpack build)")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack node ${p("adapters/node.js")}`);
+    runProdSteps([
+      jsStep("node", dinouScript("adapters/node.js"), [], {
+        DINOU_BUILD_TOOL: "webpack",
+      }),
+    ]);
   });
 
 // --- NODE (COMPILE VIA BUN) ---
 
 const nodeTargets = [
-  { name: "", flags: "", outfile: "dist/server" },
-  { name: ":linux", flags: "--target=bun-linux-x64 ", outfile: "dist/server-linux" },
-  { name: ":linux_arm", flags: "--target=bun-linux-arm64 ", outfile: "dist/server-linux-arm" },
-  { name: ":mac", flags: "--target=bun-darwin-arm64 ", outfile: "dist/server-mac" },
-  { name: ":win", flags: "--target=bun-windows-x64 ", outfile: "dist/server-win" },
+  { name: "", args: [], outfile: "dist/server" },
+  {
+    name: ":linux",
+    args: ["--target=bun-linux-x64"],
+    outfile: "dist/server-linux",
+  },
+  {
+    name: ":linux_arm",
+    args: ["--target=bun-linux-arm64"],
+    outfile: "dist/server-linux-arm",
+  },
+  {
+    name: ":mac",
+    args: ["--target=bun-darwin-arm64"],
+    outfile: "dist/server-mac",
+  },
+  {
+    name: ":win",
+    args: ["--target=bun-windows-x64"],
+    outfile: "dist/server-win",
+  },
 ];
-
-const runNodeBuild = (bundler) => {
-  const bundlerCmd = bundler === "rollup"
-    ? `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`
-    : bundler === "webpack"
-      ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
-      : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
-
-  const envPrefix = bundler === "webpack" ? "cross-env DINOU_BUILD_TOOL=webpack " : "";
-  return `${bundlerCmd} && ${envPrefix}node ${p("node/build.js")}`;
-};
 
 for (const t of nodeTargets) {
   for (const b of ["esbuild", "rollup", "webpack"]) {
-    const cmdNames = b === "esbuild"
-      ? [`build:node:compile${t.name}`, `build:node:compile${t.name}:esbuild`]
-      : [`build:node:compile${t.name}:${b}`];
+    const cmdNames =
+      b === "esbuild"
+        ? [
+            `build:node:compile${t.name}`,
+            `build:node:compile${t.name}:esbuild`,
+          ]
+        : [`build:node:compile${t.name}:${b}`];
     for (const cmdName of cmdNames) {
       program
         .command(cmdName)
-        .description(`Compile standalone Node.js server executable with Bun (${t.name || "host"}, ${b})`)
+        .description(
+          `Compile standalone Node.js server executable with Bun (${t.name || "host"}, ${b})`
+        )
         .action(() => {
-          runProdCommand(`${runNodeBuild(b)} && bun build --compile ${t.flags}.dinou/node/server.mjs --outfile ${t.outfile}`);
+          runProdSteps([
+            ...buildNodeSteps(b, "node"),
+            cmdStep("bun", [
+              "build",
+              "--compile",
+              ...t.args,
+              ".dinou/node/server.mjs",
+              "--outfile",
+              t.outfile,
+            ]),
+          ]);
         });
     }
   }
 }
 
-// --- NODE (PURE BUN RUNNER COMPILE) ---
-
-const runNodePureBuild = (bundler) => {
-  if (bundler === "rollup") {
-    return `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && cross-env NODE_ENV=production DINOU_BUILD_TOOL=rollup bun ${p("node/build.js")}`;
-  }
-  if (bundler === "webpack") {
-    return `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack bun ${p("node/build.js")}`;
-  }
-  return `cross-env NODE_ENV=production bun ${p("esbuild/build.js")} && cross-env NODE_ENV=production bun ${p("node/build.js")}`;
-};
+// --- NODE (PURE BUN RUNNER & COMPILE) ---
 
 program
   .command("build:node:pure")
   .description("Build the app for Node.js with 100% Bun (using esbuild)")
-  .action(() => { runProdCommand(runNodePureBuild("esbuild")); });
+  .action(() => {
+    runProdSteps(buildNodeSteps("esbuild", "bun"));
+  });
 
 program
   .command("build:node:pure:esbuild")
   .description("Build the app for Node.js with 100% Bun (Esbuild)")
-  .action(() => { runProdCommand(runNodePureBuild("esbuild")); });
+  .action(() => {
+    runProdSteps(buildNodeSteps("esbuild", "bun"));
+  });
 
 program
   .command("build:node:pure:rollup")
   .description("Build the app for Node.js with 100% Bun (Rollup)")
-  .action(() => { runProdCommand(runNodePureBuild("rollup")); });
+  .action(() => {
+    runProdSteps(buildNodeSteps("rollup", "bun"));
+  });
 
 program
   .command("build:node:pure:webpack")
   .description("Build the app for Node.js with 100% Bun (Webpack)")
-  .action(() => { runProdCommand(runNodePureBuild("webpack")); });
+  .action(() => {
+    runProdSteps(buildNodeSteps("webpack", "bun"));
+  });
 
 for (const t of nodeTargets) {
   for (const b of ["esbuild", "rollup", "webpack"]) {
-    const cmdNames = b === "esbuild"
-      ? [`build:node:pure:compile${t.name}`, `build:node:pure:compile${t.name}:esbuild`]
-      : [`build:node:pure:compile${t.name}:${b}`];
+    const cmdNames =
+      b === "esbuild"
+        ? [
+            `build:node:pure:compile${t.name}`,
+            `build:node:pure:compile${t.name}:esbuild`,
+          ]
+        : [`build:node:pure:compile${t.name}:${b}`];
     for (const cmdName of cmdNames) {
       program
         .command(cmdName)
-        .description(`Compile standalone Node.js server executable with 100% Bun (${t.name || "host"}, ${b})`)
+        .description(
+          `Compile standalone Node.js server executable with 100% Bun (${t.name || "host"}, ${b})`
+        )
         .action(() => {
-          runProdCommand(`${runNodePureBuild(b)} && bun build --compile ${t.flags}.dinou/node/server.mjs --outfile ${t.outfile}`);
+          runProdSteps([
+            ...buildNodeSteps(b, "bun"),
+            cmdStep("bun", [
+              "build",
+              "--compile",
+              ...t.args,
+              ".dinou/node/server.mjs",
+              "--outfile",
+              t.outfile,
+            ]),
+          ]);
         });
     }
   }
@@ -276,227 +444,363 @@ for (const t of nodeTargets) {
 
 // --- CLOUDFLARE WORKERS ---
 
+const buildCloudflareSteps = (bundler) => [
+  bundlerStep(bundler, "node"),
+  jsStep("node", dinouScript("cloudflare/build.js"), [], {
+    NODE_ENV: "production",
+    DINOU_BUILD_TOOL: bundler,
+  }),
+];
+
 program
   .command("build:cloudflare")
   .description("Build the app for Cloudflare Workers (using esbuild)")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.js")} && node ${p("cloudflare/build.js")}`);
+    runProdSteps(buildCloudflareSteps("esbuild"));
   });
 
 program
   .command("build:cloudflare:esbuild")
   .description("Build the app for Cloudflare Workers with Esbuild")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.js")} && node ${p("cloudflare/build.js")}`);
+    runProdSteps(buildCloudflareSteps("esbuild"));
   });
 
 program
   .command("build:cloudflare:rollup")
   .description("Build the app for Cloudflare Workers with Rollup")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && cross-env DINOU_BUILD_TOOL=rollup node ${p("cloudflare/build.js")}`);
+    runProdSteps(buildCloudflareSteps("rollup"));
   });
 
 program
   .command("build:cloudflare:webpack")
   .description("Build the app for Cloudflare Workers with Webpack")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && cross-env DINOU_BUILD_TOOL=webpack node ${p("cloudflare/build.js")}`);
+    runProdSteps(buildCloudflareSteps("webpack"));
   });
 
 // --- DENO DEPLOY / EDGE ---
 
-const runDenoBuild = (bundler) => {
-  const bundlerCmd = bundler === "rollup"
-    ? `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`
-    : bundler === "webpack"
-      ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
-      : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
-
-  const envPrefix = bundler === "webpack" ? "cross-env DINOU_BUILD_TOOL=webpack " : "";
-  return `${bundlerCmd} && ${envPrefix}node ${p("deno/build.js")} && deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env ${p("deno/seed-kv.js")}`;
-};
+const buildDenoSteps = (bundler) => [
+  bundlerStep(bundler, "node"),
+  jsStep("node", dinouScript("deno/build.js"), [], {
+    NODE_ENV: "production",
+    DINOU_BUILD_TOOL: bundler,
+  }),
+  cmdStep(
+    "deno",
+    [
+      "run",
+      "--unstable-kv",
+      "--allow-net",
+      "--allow-read",
+      "--allow-write",
+      "--allow-env",
+      dinouScript("deno/seed-kv.js"),
+    ],
+    { NODE_ENV: "production", DINOU_BUILD_TOOL: bundler }
+  ),
+];
 
 program
   .command("build:deno")
   .description("Build the app for Deno Deploy / Edge (using esbuild)")
-  .action(() => { runProdCommand(runDenoBuild("esbuild")); });
+  .action(() => {
+    runProdSteps(buildDenoSteps("esbuild"));
+  });
 
 program
   .command("build:deno:esbuild")
   .description("Build the app for Deno Deploy with Esbuild")
-  .action(() => { runProdCommand(runDenoBuild("esbuild")); });
+  .action(() => {
+    runProdSteps(buildDenoSteps("esbuild"));
+  });
 
 program
   .command("build:deno:rollup")
   .description("Build the app for Deno Deploy with Rollup")
-  .action(() => { runProdCommand(runDenoBuild("rollup")); });
+  .action(() => {
+    runProdSteps(buildDenoSteps("rollup"));
+  });
 
 program
   .command("build:deno:webpack")
   .description("Build the app for Deno Deploy with Webpack")
-  .action(() => { runProdCommand(runDenoBuild("webpack")); });
+  .action(() => {
+    runProdSteps(buildDenoSteps("webpack"));
+  });
 
 program
   .command("start:deno")
   .description("Start the app in production mode with Deno")
   .action(() => {
-    runProdCommand(`deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env --allow-sys ${p("adapters/deno.js")}`);
+    runProdSteps([
+      cmdStep("deno", [
+        "run",
+        "--unstable-kv",
+        "--allow-net",
+        "--allow-read",
+        "--allow-write",
+        "--allow-env",
+        "--allow-sys",
+        dinouScript("adapters/deno.js"),
+      ]),
+    ]);
   });
 
-// Deno compile commands
 const denoTargets = [
-  { name: "", flags: "", outfile: "dist/deno-server" },
-  { name: ":linux", flags: "--target x86_64-unknown-linux-gnu ", outfile: "dist/deno-server-linux" },
-  { name: ":linux_arm", flags: "--target aarch64-unknown-linux-gnu ", outfile: "dist/deno-server-linux-arm" },
-  { name: ":mac", flags: "--target aarch64-apple-darwin ", outfile: "dist/deno-server-mac" },
-  { name: ":win", flags: "--target x86_64-pc-windows-msvc ", outfile: "dist/deno-server-win" },
+  { name: "", args: [], outfile: "dist/deno-server" },
+  {
+    name: ":linux",
+    args: ["--target", "x86_64-unknown-linux-gnu"],
+    outfile: "dist/deno-server-linux",
+  },
+  {
+    name: ":linux_arm",
+    args: ["--target", "aarch64-unknown-linux-gnu"],
+    outfile: "dist/deno-server-linux-arm",
+  },
+  {
+    name: ":mac",
+    args: ["--target", "aarch64-apple-darwin"],
+    outfile: "dist/deno-server-mac",
+  },
+  {
+    name: ":win",
+    args: ["--target", "x86_64-pc-windows-msvc"],
+    outfile: "dist/deno-server-win",
+  },
 ];
 
 for (const t of denoTargets) {
   for (const b of ["esbuild", "rollup", "webpack"]) {
-    const cmdNames = b === "esbuild"
-      ? [`build:deno:compile${t.name}`, `build:deno:compile${t.name}:esbuild`]
-      : [`build:deno:compile${t.name}:${b}`];
+    const cmdNames =
+      b === "esbuild"
+        ? [
+            `build:deno:compile${t.name}`,
+            `build:deno:compile${t.name}:esbuild`,
+          ]
+        : [`build:deno:compile${t.name}:${b}`];
     for (const cmdName of cmdNames) {
       program
         .command(cmdName)
-        .description(`Compile standalone Deno executable (${t.name || "host"}, ${b})`)
+        .description(
+          `Compile standalone Deno executable (${t.name || "host"}, ${b})`
+        )
         .action(() => {
-          runProdCommand(`${runDenoBuild(b)} && deno compile ${t.flags}--unstable-kv --no-check --no-config --allow-net --allow-read --allow-write --allow-env --allow-sys --output ${t.outfile} .dinou/deno/main.js`);
+          runProdSteps([
+            ...buildDenoSteps(b),
+            cmdStep("deno", [
+              "compile",
+              ...t.args,
+              "--unstable-kv",
+              "--no-check",
+              "--no-config",
+              "--allow-net",
+              "--allow-read",
+              "--allow-write",
+              "--allow-env",
+              "--allow-sys",
+              "--output",
+              t.outfile,
+              ".dinou/deno/main.js",
+            ]),
+          ]);
         });
     }
   }
 }
 
-// --- BUN (STANDARD) ---
+// --- BUN (STANDARD & PURE) ---
 
-const runBunBuild = (bundler) => {
-  const bundlerCmd = bundler === "rollup"
-    ? `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")}`
-    : bundler === "webpack"
-      ? `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")}`
-      : `cross-env NODE_ENV=production node ${p("esbuild/build.js")}`;
-
-  const envPrefix = bundler === "webpack" ? "cross-env DINOU_BUILD_TOOL=webpack " : "";
-  return `${bundlerCmd} && ${envPrefix}node ${p("bun/build.js")}`;
-};
+const buildBunSteps = (bundler, runner = "node") => [
+  bundlerStep(bundler, runner),
+  jsStep(runner, dinouScript("bun/build.js"), [], {
+    NODE_ENV: "production",
+    DINOU_BUILD_TOOL: bundler,
+  }),
+];
 
 program
   .command("build:bun")
   .description("Build the app for Bun (using esbuild)")
-  .action(() => { runProdCommand(runBunBuild("esbuild")); });
+  .action(() => {
+    runProdSteps(buildBunSteps("esbuild", "node"));
+  });
 
 program
   .command("build:bun:esbuild")
   .description("Build the app for Bun with Esbuild")
-  .action(() => { runProdCommand(runBunBuild("esbuild")); });
+  .action(() => {
+    runProdSteps(buildBunSteps("esbuild", "node"));
+  });
 
 program
   .command("build:bun:rollup")
   .description("Build the app for Bun with Rollup")
-  .action(() => { runProdCommand(runBunBuild("rollup")); });
+  .action(() => {
+    runProdSteps(buildBunSteps("rollup", "node"));
+  });
 
 program
   .command("build:bun:webpack")
   .description("Build the app for Bun with Webpack")
-  .action(() => { runProdCommand(runBunBuild("webpack")); });
+  .action(() => {
+    runProdSteps(buildBunSteps("webpack", "node"));
+  });
 
 program
   .command("start:bun")
   .description("Start the app in production mode with Bun")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production bun ${p("adapters/bun.js")}`);
+    runProdSteps([jsStep("bun", dinouScript("adapters/bun.js"))]);
   });
 
 program
   .command("start:bun:esbuild")
   .description("Start the app in production mode with Bun (Esbuild)")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production bun ${p("adapters/bun.js")}`);
+    runProdSteps([
+      jsStep("bun", dinouScript("adapters/bun.js"), [], {
+        DINOU_BUILD_TOOL: "esbuild",
+      }),
+    ]);
   });
 
 program
   .command("start:bun:rollup")
   .description("Start the app in production mode with Bun (Rollup)")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production bun ${p("adapters/bun.js")}`);
+    runProdSteps([
+      jsStep("bun", dinouScript("adapters/bun.js"), [], {
+        DINOU_BUILD_TOOL: "rollup",
+      }),
+    ]);
   });
 
 program
   .command("start:bun:webpack")
   .description("Start the app in production mode with Bun (Webpack)")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack bun ${p("adapters/bun.js")}`);
+    runProdSteps([
+      jsStep("bun", dinouScript("adapters/bun.js"), [], {
+        DINOU_BUILD_TOOL: "webpack",
+      }),
+    ]);
   });
 
 const bunTargets = [
-  { name: "", flags: "", outfile: "dist/server" },
-  { name: ":linux", flags: "--target=bun-linux-x64 ", outfile: "dist/server-linux" },
-  { name: ":linux_arm", flags: "--target=bun-linux-arm64 ", outfile: "dist/server-linux-arm" },
-  { name: ":mac", flags: "--target=bun-darwin-arm64 ", outfile: "dist/server-mac" },
-  { name: ":win", flags: "--target=bun-windows-x64 ", outfile: "dist/server-win" },
+  { name: "", args: [], outfile: "dist/server" },
+  {
+    name: ":linux",
+    args: ["--target=bun-linux-x64"],
+    outfile: "dist/server-linux",
+  },
+  {
+    name: ":linux_arm",
+    args: ["--target=bun-linux-arm64"],
+    outfile: "dist/server-linux-arm",
+  },
+  {
+    name: ":mac",
+    args: ["--target=bun-darwin-arm64"],
+    outfile: "dist/server-mac",
+  },
+  {
+    name: ":win",
+    args: ["--target=bun-windows-x64"],
+    outfile: "dist/server-win",
+  },
 ];
 
 for (const t of bunTargets) {
   for (const b of ["esbuild", "rollup", "webpack"]) {
-    const cmdNames = b === "esbuild"
-      ? [`build:bun:compile${t.name}`, `build:bun:compile${t.name}:esbuild`]
-      : [`build:bun:compile${t.name}:${b}`];
+    const cmdNames =
+      b === "esbuild"
+        ? [
+            `build:bun:compile${t.name}`,
+            `build:bun:compile${t.name}:esbuild`,
+          ]
+        : [`build:bun:compile${t.name}:${b}`];
     for (const cmdName of cmdNames) {
       program
         .command(cmdName)
-        .description(`Compile standalone Bun executable (${t.name || "host"}, ${b})`)
+        .description(
+          `Compile standalone Bun executable (${t.name || "host"}, ${b})`
+        )
         .action(() => {
-          runProdCommand(`${runBunBuild(b)} && bun build --compile ${t.flags}.dinou/bun/server.js --outfile ${t.outfile}`);
+          runProdSteps([
+            ...buildBunSteps(b, "node"),
+            cmdStep("bun", [
+              "build",
+              "--compile",
+              ...t.args,
+              ".dinou/bun/server.js",
+              "--outfile",
+              t.outfile,
+            ]),
+          ]);
         });
     }
   }
 }
 
-// --- BUN (PURE) ---
-
-const runBunPureBuild = (bundler) => {
-  if (bundler === "rollup") {
-    return `cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && cross-env NODE_ENV=production DINOU_BUILD_TOOL=rollup bun ${p("bun/build.js")}`;
-  }
-  if (bundler === "webpack") {
-    return `cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && cross-env NODE_ENV=production DINOU_BUILD_TOOL=webpack bun ${p("bun/build.js")}`;
-  }
-  return `cross-env NODE_ENV=production bun ${p("esbuild/build.js")} && cross-env NODE_ENV=production bun ${p("bun/build.js")}`;
-};
-
 program
   .command("build:bun:pure")
   .description("Build the app with 100% Bun (using esbuild)")
-  .action(() => { runProdCommand(runBunPureBuild("esbuild")); });
+  .action(() => {
+    runProdSteps(buildBunSteps("esbuild", "bun"));
+  });
 
 program
   .command("build:bun:pure:esbuild")
   .description("Build the app with 100% Bun (Esbuild)")
-  .action(() => { runProdCommand(runBunPureBuild("esbuild")); });
+  .action(() => {
+    runProdSteps(buildBunSteps("esbuild", "bun"));
+  });
 
 program
   .command("build:bun:pure:rollup")
   .description("Build the app with 100% Bun (Rollup)")
-  .action(() => { runProdCommand(runBunPureBuild("rollup")); });
+  .action(() => {
+    runProdSteps(buildBunSteps("rollup", "bun"));
+  });
 
 program
   .command("build:bun:pure:webpack")
   .description("Build the app with 100% Bun (Webpack)")
-  .action(() => { runProdCommand(runBunPureBuild("webpack")); });
+  .action(() => {
+    runProdSteps(buildBunSteps("webpack", "bun"));
+  });
 
 for (const t of bunTargets) {
   for (const b of ["esbuild", "rollup", "webpack"]) {
-    const cmdNames = b === "esbuild"
-      ? [`build:bun:pure:compile${t.name}`, `build:bun:pure:compile${t.name}:esbuild`]
-      : [`build:bun:pure:compile${t.name}:${b}`];
+    const cmdNames =
+      b === "esbuild"
+        ? [
+            `build:bun:pure:compile${t.name}`,
+            `build:bun:pure:compile${t.name}:esbuild`,
+          ]
+        : [`build:bun:pure:compile${t.name}:${b}`];
     for (const cmdName of cmdNames) {
       program
         .command(cmdName)
-        .description(`Compile standalone Bun Pure executable (${t.name || "host"}, ${b})`)
+        .description(
+          `Compile standalone Bun Pure executable (${t.name || "host"}, ${b})`
+        )
         .action(() => {
-          runProdCommand(`${runBunPureBuild(b)} && bun build --compile ${t.flags}.dinou/bun/server.js --outfile ${t.outfile}`);
+          runProdSteps([
+            ...buildBunSteps(b, "bun"),
+            cmdStep("bun", [
+              "build",
+              "--compile",
+              ...t.args,
+              ".dinou/bun/server.js",
+              "--outfile",
+              t.outfile,
+            ]),
+          ]);
         });
     }
   }
@@ -504,34 +808,41 @@ for (const t of bunTargets) {
 
 // --- EXPORT STATIC ---
 
+const exportStaticSteps = (bundler) => [
+  bundlerStep(bundler, "node"),
+  jsStep("node", dinouScript("core/export-static.js"), [], {
+    NODE_ENV: "production",
+    DINOU_BUILD_TOOL: bundler,
+  }),
+];
+
 program
   .command("export-static")
   .description("Export standalone static website (using esbuild)")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.js")} && node ${p("core/export-static.js")}`);
+    runProdSteps(exportStaticSteps("esbuild"));
   });
 
 program
   .command("export-static:esbuild")
   .description("Export standalone static website with Esbuild")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production node ${p("esbuild/build.js")} && node ${p("core/export-static.js")}`);
+    runProdSteps(exportStaticSteps("esbuild"));
   });
 
 program
   .command("export-static:rollup")
   .description("Export standalone static website with Rollup")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production npx rollup -c ${p("rollup/rollup.config.js")} && cross-env DINOU_BUILD_TOOL=rollup node ${p("core/export-static.js")}`);
+    runProdSteps(exportStaticSteps("rollup"));
   });
 
 program
   .command("export-static:webpack")
   .description("Export standalone static website with Webpack")
   .action(() => {
-    runProdCommand(`cross-env NODE_ENV=production npx webpack --config ${p("webpack/webpack.config.js")} && cross-env DINOU_BUILD_TOOL=webpack node ${p("core/export-static.js")}`);
+    runProdSteps(exportStaticSteps("webpack"));
   });
-
 
 // --- VENDORS ---
 
@@ -539,14 +850,16 @@ program
   .command("build:vendors")
   .description("Bundle dependencies into dinou/compiled vendors")
   .action(() => {
-    runCommand(`node ${p("scripts/build-vendors.js")}`);
+    runSteps([jsStep("node", dinouScript("scripts/build-vendors.js"))]);
   });
 
 // --- TYPEGEN ---
 
 program
   .command("typegen")
-  .description("Generate .dinou/types/routes.d.ts and .dinou/routes/**/dinou.{js,d.ts} from src/")
+  .description(
+    "Generate .dinou/types/routes.d.ts and .dinou/routes/**/dinou.{js,d.ts} from src/"
+  )
   .action(async () => {
     loadEnvFiles(projectRoot);
     const { generateRouteTypes } = await import("./core/generate-route-types.js");

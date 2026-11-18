@@ -25,6 +25,7 @@ import http from "node:http";
 import path from "node:path";
 import fs from "node:fs";
 import crypto from "node:crypto";
+import chokidarModule from "#chokidar";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Readable } from "node:stream";
@@ -103,9 +104,35 @@ const devTimings = {};
 startSpinner("Initializing Incremental Dual-Bundle Engine (No fork)...");
 
 const projectRoot = process.cwd();
-const require = createRequire(path.resolve(projectRoot, "package.json"));
+const dinouRequire = createRequire(import.meta.url);
+const projectRequire = createRequire(path.resolve(projectRoot, "package.json"));
+const require = Object.assign(
+  (id) => {
+    try {
+      return dinouRequire(id);
+    } catch {
+      return projectRequire(id);
+    }
+  },
+  {
+    resolve(id, options) {
+      if (options) {
+        try {
+          return projectRequire.resolve(id, options);
+        } catch {
+          return dinouRequire.resolve(id, options);
+        }
+      }
+      try {
+        return dinouRequire.resolve(id);
+      } catch {
+        return projectRequire.resolve(id);
+      }
+    },
+  }
+);
 const esbuild = require("esbuild");
-const chokidar = require("chokidar");
+const chokidar = chokidarModule?.default || chokidarModule;
 
 // Protect file descriptor operations against transient EMFILE spikes on Windows
 try {

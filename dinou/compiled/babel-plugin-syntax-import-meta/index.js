@@ -9,9 +9,9 @@ var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
 
-// ../node_modules/@babel/helper-plugin-utils/lib/index.js
+// node_modules/@babel/helper-plugin-utils/lib/index.js
 var require_lib = __commonJS({
-  "../node_modules/@babel/helper-plugin-utils/lib/index.js"(exports) {
+  "node_modules/@babel/helper-plugin-utils/lib/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", {
       value: true
@@ -87,9 +87,9 @@ var require_lib = __commonJS({
   }
 });
 
-// ../node_modules/@babel/plugin-syntax-import-meta/lib/index.js
+// node_modules/@babel/plugin-syntax-import-meta/lib/index.js
 var require_lib2 = __commonJS({
-  "../node_modules/@babel/plugin-syntax-import-meta/lib/index.js"(exports) {
+  "node_modules/@babel/plugin-syntax-import-meta/lib/index.js"(exports) {
     Object.defineProperty(exports, "__esModule", {
       value: true
     });

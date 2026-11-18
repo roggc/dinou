@@ -15,9 +15,9 @@ var __commonJS = (cb, mod) => function __require2() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
 
-// ../node_modules/schema-utils/dist/util/memorize.js
+// node_modules/schema-utils/dist/util/memorize.js
 var require_memorize = __commonJS({
-  "../node_modules/schema-utils/dist/util/memorize.js"(exports) {
+  "node_modules/schema-utils/dist/util/memorize.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", {
       value: true
@@ -40,9 +40,9 @@ var require_memorize = __commonJS({
   }
 });
 
-// ../node_modules/schema-utils/dist/util/Range.js
+// node_modules/schema-utils/dist/util/Range.js
 var require_Range = __commonJS({
-  "../node_modules/schema-utils/dist/util/Range.js"(exports, module) {
+  "node_modules/schema-utils/dist/util/Range.js"(exports, module) {
     "use strict";
     var Range = class _Range {
       /**
@@ -167,9 +167,9 @@ var require_Range = __commonJS({
   }
 });
 
-// ../node_modules/schema-utils/dist/util/humanize.js
+// node_modules/schema-utils/dist/util/humanize.js
 var require_humanize = __commonJS({
-  "../node_modules/schema-utils/dist/util/humanize.js"(exports, module) {
+  "node_modules/schema-utils/dist/util/humanize.js"(exports, module) {
     "use strict";
     var CAMEL_CASE_REGEXP = /([^A-Z])([A-Z])/g;
     var LEADING_UNDERSCORE_REGEXP = /^_/;
@@ -189,9 +189,9 @@ var require_humanize = __commonJS({
   }
 });
 
-// ../node_modules/schema-utils/dist/util/hints.js
+// node_modules/schema-utils/dist/util/hints.js
 var require_hints = __commonJS({
-  "../node_modules/schema-utils/dist/util/hints.js"(exports, module) {
+  "node_modules/schema-utils/dist/util/hints.js"(exports, module) {
     "use strict";
     var Range = require_Range();
     var humanize = require_humanize();
@@ -276,9 +276,9 @@ var require_hints = __commonJS({
   }
 });
 
-// ../node_modules/schema-utils/dist/ValidationError.js
+// node_modules/schema-utils/dist/ValidationError.js
 var require_ValidationError = __commonJS({
-  "../node_modules/schema-utils/dist/ValidationError.js"(exports) {
+  "node_modules/schema-utils/dist/ValidationError.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", {
       value: true
@@ -1273,9 +1273,9 @@ ${this.getSchemaPartText(parentSchema, false)}`;
   }
 });
 
-// ../node_modules/ajv/dist/compile/codegen/code.js
+// node_modules/ajv/dist/compile/codegen/code.js
 var require_code = __commonJS({
-  "../node_modules/ajv/dist/compile/codegen/code.js"(exports) {
+  "node_modules/ajv/dist/compile/codegen/code.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.regexpCode = exports.getEsmExportName = exports.getProperty = exports.safeStringify = exports.stringify = exports.strConcat = exports.addCodeArg = exports.str = exports._ = exports.nil = exports._Code = exports.Name = exports.IDENTIFIER = exports._CodeOrName = void 0;
@@ -1427,9 +1427,9 @@ var require_code = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/codegen/scope.js
+// node_modules/ajv/dist/compile/codegen/scope.js
 var require_scope = __commonJS({
-  "../node_modules/ajv/dist/compile/codegen/scope.js"(exports) {
+  "node_modules/ajv/dist/compile/codegen/scope.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.ValueScope = exports.ValueScopeName = exports.Scope = exports.varKinds = exports.UsedValueState = void 0;
@@ -1572,9 +1572,9 @@ var require_scope = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/codegen/index.js
+// node_modules/ajv/dist/compile/codegen/index.js
 var require_codegen = __commonJS({
-  "../node_modules/ajv/dist/compile/codegen/index.js"(exports) {
+  "node_modules/ajv/dist/compile/codegen/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.or = exports.and = exports.not = exports.CodeGen = exports.operators = exports.varKinds = exports.ValueScopeName = exports.ValueScope = exports.Scope = exports.Name = exports.regexpCode = exports.stringify = exports.getProperty = exports.nil = exports.strConcat = exports.str = exports._ = void 0;
@@ -2292,9 +2292,9 @@ var require_codegen = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/util.js
+// node_modules/ajv/dist/compile/util.js
 var require_util = __commonJS({
-  "../node_modules/ajv/dist/compile/util.js"(exports) {
+  "node_modules/ajv/dist/compile/util.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.checkStrictMode = exports.getErrorPath = exports.Type = exports.useFunc = exports.setEvaluated = exports.evaluatedPropsToName = exports.mergeEvaluated = exports.eachItem = exports.unescapeJsonPointer = exports.escapeJsonPointer = exports.escapeFragment = exports.unescapeFragment = exports.schemaRefOrVal = exports.schemaHasRulesButRef = exports.schemaHasRules = exports.checkUnknownRules = exports.alwaysValidSchema = exports.toHash = void 0;
@@ -2459,9 +2459,9 @@ var require_util = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/names.js
+// node_modules/ajv/dist/compile/names.js
 var require_names = __commonJS({
-  "../node_modules/ajv/dist/compile/names.js"(exports) {
+  "node_modules/ajv/dist/compile/names.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -2498,9 +2498,9 @@ var require_names = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/errors.js
+// node_modules/ajv/dist/compile/errors.js
 var require_errors = __commonJS({
-  "../node_modules/ajv/dist/compile/errors.js"(exports) {
+  "node_modules/ajv/dist/compile/errors.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.extendErrors = exports.resetErrorsCount = exports.reportExtraError = exports.reportError = exports.keyword$DataError = exports.keywordError = void 0;
@@ -2620,9 +2620,9 @@ var require_errors = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/validate/boolSchema.js
+// node_modules/ajv/dist/compile/validate/boolSchema.js
 var require_boolSchema = __commonJS({
-  "../node_modules/ajv/dist/compile/validate/boolSchema.js"(exports) {
+  "node_modules/ajv/dist/compile/validate/boolSchema.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.boolOrEmptySchema = exports.topBoolOrEmptySchema = void 0;
@@ -2671,9 +2671,9 @@ var require_boolSchema = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/rules.js
+// node_modules/ajv/dist/compile/rules.js
 var require_rules = __commonJS({
-  "../node_modules/ajv/dist/compile/rules.js"(exports) {
+  "node_modules/ajv/dist/compile/rules.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getRules = exports.isJSONType = void 0;
@@ -2702,9 +2702,9 @@ var require_rules = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/validate/applicability.js
+// node_modules/ajv/dist/compile/validate/applicability.js
 var require_applicability = __commonJS({
-  "../node_modules/ajv/dist/compile/validate/applicability.js"(exports) {
+  "node_modules/ajv/dist/compile/validate/applicability.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.shouldUseRule = exports.shouldUseGroup = exports.schemaHasRulesForType = void 0;
@@ -2725,9 +2725,9 @@ var require_applicability = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/validate/dataType.js
+// node_modules/ajv/dist/compile/validate/dataType.js
 var require_dataType = __commonJS({
-  "../node_modules/ajv/dist/compile/validate/dataType.js"(exports) {
+  "node_modules/ajv/dist/compile/validate/dataType.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.reportTypeError = exports.checkDataTypes = exports.checkDataType = exports.coerceAndCheckDataType = exports.getJSONTypes = exports.getSchemaTypes = exports.DataType = void 0;
@@ -2909,9 +2909,9 @@ var require_dataType = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/validate/defaults.js
+// node_modules/ajv/dist/compile/validate/defaults.js
 var require_defaults = __commonJS({
-  "../node_modules/ajv/dist/compile/validate/defaults.js"(exports) {
+  "node_modules/ajv/dist/compile/validate/defaults.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.assignDefaults = void 0;
@@ -2946,9 +2946,9 @@ var require_defaults = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/code.js
+// node_modules/ajv/dist/vocabularies/code.js
 var require_code2 = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/code.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/code.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateUnion = exports.validateArray = exports.usePattern = exports.callValidateCode = exports.schemaProperties = exports.allSchemaProperties = exports.noPropertyInData = exports.propertyInData = exports.isOwnProperty = exports.hasPropFunc = exports.reportMissingProp = exports.checkMissingProp = exports.checkReportMissingProp = void 0;
@@ -3079,9 +3079,9 @@ var require_code2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/validate/keyword.js
+// node_modules/ajv/dist/compile/validate/keyword.js
 var require_keyword = __commonJS({
-  "../node_modules/ajv/dist/compile/validate/keyword.js"(exports) {
+  "node_modules/ajv/dist/compile/validate/keyword.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateKeywordUsage = exports.validSchemaType = exports.funcKeywordCode = exports.macroKeywordCode = void 0;
@@ -3197,9 +3197,9 @@ var require_keyword = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/validate/subschema.js
+// node_modules/ajv/dist/compile/validate/subschema.js
 var require_subschema = __commonJS({
-  "../node_modules/ajv/dist/compile/validate/subschema.js"(exports) {
+  "node_modules/ajv/dist/compile/validate/subschema.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.extendSubschemaMode = exports.extendSubschemaData = exports.getSubschema = void 0;
@@ -3280,9 +3280,9 @@ var require_subschema = __commonJS({
   }
 });
 
-// ../node_modules/fast-deep-equal/index.js
+// node_modules/fast-deep-equal/index.js
 var require_fast_deep_equal = __commonJS({
-  "../node_modules/fast-deep-equal/index.js"(exports, module) {
+  "node_modules/fast-deep-equal/index.js"(exports, module) {
     "use strict";
     module.exports = function equal(a, b) {
       if (a === b) return true;
@@ -3315,9 +3315,9 @@ var require_fast_deep_equal = __commonJS({
   }
 });
 
-// ../node_modules/json-schema-traverse/index.js
+// node_modules/json-schema-traverse/index.js
 var require_json_schema_traverse = __commonJS({
-  "../node_modules/json-schema-traverse/index.js"(exports, module) {
+  "node_modules/json-schema-traverse/index.js"(exports, module) {
     "use strict";
     var traverse = module.exports = function(schema, opts, cb) {
       if (typeof opts == "function") {
@@ -3403,9 +3403,9 @@ var require_json_schema_traverse = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/resolve.js
+// node_modules/ajv/dist/compile/resolve.js
 var require_resolve = __commonJS({
-  "../node_modules/ajv/dist/compile/resolve.js"(exports) {
+  "node_modules/ajv/dist/compile/resolve.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getSchemaRefs = exports.resolveUrl = exports.normalizeId = exports._getFullPath = exports.getFullPath = exports.inlineRef = void 0;
@@ -3559,9 +3559,9 @@ var require_resolve = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/validate/index.js
+// node_modules/ajv/dist/compile/validate/index.js
 var require_validate = __commonJS({
-  "../node_modules/ajv/dist/compile/validate/index.js"(exports) {
+  "node_modules/ajv/dist/compile/validate/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.getData = exports.KeywordCxt = exports.validateFunctionCode = void 0;
@@ -4067,9 +4067,9 @@ var require_validate = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/runtime/validation_error.js
+// node_modules/ajv/dist/runtime/validation_error.js
 var require_validation_error = __commonJS({
-  "../node_modules/ajv/dist/runtime/validation_error.js"(exports) {
+  "node_modules/ajv/dist/runtime/validation_error.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var ValidationError = class extends Error {
@@ -4083,9 +4083,9 @@ var require_validation_error = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/ref_error.js
+// node_modules/ajv/dist/compile/ref_error.js
 var require_ref_error = __commonJS({
-  "../node_modules/ajv/dist/compile/ref_error.js"(exports) {
+  "node_modules/ajv/dist/compile/ref_error.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var resolve_1 = require_resolve();
@@ -4100,9 +4100,9 @@ var require_ref_error = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/compile/index.js
+// node_modules/ajv/dist/compile/index.js
 var require_compile = __commonJS({
-  "../node_modules/ajv/dist/compile/index.js"(exports) {
+  "node_modules/ajv/dist/compile/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.resolveSchema = exports.getCompilingSchema = exports.resolveRef = exports.compileSchema = exports.SchemaEnv = void 0;
@@ -4324,9 +4324,9 @@ var require_compile = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/refs/data.json
+// node_modules/ajv/dist/refs/data.json
 var require_data = __commonJS({
-  "../node_modules/ajv/dist/refs/data.json"(exports, module) {
+  "node_modules/ajv/dist/refs/data.json"(exports, module) {
     module.exports = {
       $id: "https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/data.json#",
       description: "Meta-schema for $data reference (JSON AnySchema extension proposal)",
@@ -4343,9 +4343,9 @@ var require_data = __commonJS({
   }
 });
 
-// ../node_modules/fast-uri/lib/utils.js
+// node_modules/fast-uri/lib/utils.js
 var require_utils = __commonJS({
-  "../node_modules/fast-uri/lib/utils.js"(exports, module) {
+  "node_modules/fast-uri/lib/utils.js"(exports, module) {
     "use strict";
     var isUUID = RegExp.prototype.test.bind(/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/iu);
     var isIPv4 = RegExp.prototype.test.bind(/^(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)$/u);
@@ -4845,9 +4845,9 @@ var require_utils = __commonJS({
   }
 });
 
-// ../node_modules/fast-uri/lib/schemes.js
+// node_modules/fast-uri/lib/schemes.js
 var require_schemes = __commonJS({
-  "../node_modules/fast-uri/lib/schemes.js"(exports, module) {
+  "node_modules/fast-uri/lib/schemes.js"(exports, module) {
     "use strict";
     var { isUUID } = require_utils();
     var URN_REG = /^([\da-z][\d\-a-z]{0,31}):((?:[\w!$'()*+,\-./:;=@]|%[\da-f]{2})+)$/iu;
@@ -5056,9 +5056,9 @@ var require_schemes = __commonJS({
   }
 });
 
-// ../node_modules/fast-uri/index.js
+// node_modules/fast-uri/index.js
 var require_fast_uri = __commonJS({
-  "../node_modules/fast-uri/index.js"(exports, module) {
+  "node_modules/fast-uri/index.js"(exports, module) {
     "use strict";
     var { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizePercentEncoding, normalizePathEncoding, serializePathEncoding, normalizeQueryFragmentEncoding, encodeQuery, encodeFragment, reescapeHostDelimiters, isIPv4, nonSimpleDomain } = require_utils();
     var { SCHEMES, getSchemeHandler } = require_schemes();
@@ -5462,9 +5462,9 @@ var require_fast_uri = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/runtime/uri.js
+// node_modules/ajv/dist/runtime/uri.js
 var require_uri = __commonJS({
-  "../node_modules/ajv/dist/runtime/uri.js"(exports) {
+  "node_modules/ajv/dist/runtime/uri.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var uri = require_fast_uri();
@@ -5473,9 +5473,9 @@ var require_uri = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/core.js
+// node_modules/ajv/dist/core.js
 var require_core = __commonJS({
-  "../node_modules/ajv/dist/core.js"(exports) {
+  "node_modules/ajv/dist/core.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = void 0;
@@ -6084,9 +6084,9 @@ var require_core = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/core/id.js
+// node_modules/ajv/dist/vocabularies/core/id.js
 var require_id = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/core/id.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/core/id.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var def = {
@@ -6099,9 +6099,9 @@ var require_id = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/core/ref.js
+// node_modules/ajv/dist/vocabularies/core/ref.js
 var require_ref = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/core/ref.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/core/ref.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.callRef = exports.getValidate = void 0;
@@ -6221,9 +6221,9 @@ var require_ref = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/core/index.js
+// node_modules/ajv/dist/vocabularies/core/index.js
 var require_core2 = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/core/index.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/core/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var id_1 = require_id();
@@ -6242,9 +6242,9 @@ var require_core2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/validation/limitNumber.js
+// node_modules/ajv/dist/vocabularies/validation/limitNumber.js
 var require_limitNumber = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/validation/limitNumber.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/validation/limitNumber.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -6274,9 +6274,9 @@ var require_limitNumber = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/validation/multipleOf.js
+// node_modules/ajv/dist/vocabularies/validation/multipleOf.js
 var require_multipleOf = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/validation/multipleOf.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/validation/multipleOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -6302,9 +6302,9 @@ var require_multipleOf = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/runtime/ucs2length.js
+// node_modules/ajv/dist/runtime/ucs2length.js
 var require_ucs2length = __commonJS({
-  "../node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
+  "node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     function ucs2length(str) {
@@ -6328,9 +6328,9 @@ var require_ucs2length = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/validation/limitLength.js
+// node_modules/ajv/dist/vocabularies/validation/limitLength.js
 var require_limitLength = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/validation/limitLength.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/validation/limitLength.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -6360,9 +6360,9 @@ var require_limitLength = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/validation/pattern.js
+// node_modules/ajv/dist/vocabularies/validation/pattern.js
 var require_pattern = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/validation/pattern.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/validation/pattern.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -6397,9 +6397,9 @@ var require_pattern = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/validation/limitProperties.js
+// node_modules/ajv/dist/vocabularies/validation/limitProperties.js
 var require_limitProperties = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/validation/limitProperties.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/validation/limitProperties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -6426,9 +6426,9 @@ var require_limitProperties = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/validation/required.js
+// node_modules/ajv/dist/vocabularies/validation/required.js
 var require_required = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/validation/required.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/validation/required.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -6508,9 +6508,9 @@ var require_required = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/validation/limitItems.js
+// node_modules/ajv/dist/vocabularies/validation/limitItems.js
 var require_limitItems = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/validation/limitItems.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/validation/limitItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -6537,9 +6537,9 @@ var require_limitItems = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/runtime/equal.js
+// node_modules/ajv/dist/runtime/equal.js
 var require_equal = __commonJS({
-  "../node_modules/ajv/dist/runtime/equal.js"(exports) {
+  "node_modules/ajv/dist/runtime/equal.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var equal = require_fast_deep_equal();
@@ -6548,9 +6548,9 @@ var require_equal = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
+// node_modules/ajv/dist/vocabularies/validation/uniqueItems.js
 var require_uniqueItems = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/validation/uniqueItems.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/validation/uniqueItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var dataType_1 = require_dataType();
@@ -6615,9 +6615,9 @@ var require_uniqueItems = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/validation/const.js
+// node_modules/ajv/dist/vocabularies/validation/const.js
 var require_const = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/validation/const.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/validation/const.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -6644,9 +6644,9 @@ var require_const = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/validation/enum.js
+// node_modules/ajv/dist/vocabularies/validation/enum.js
 var require_enum = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/validation/enum.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/validation/enum.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -6693,9 +6693,9 @@ var require_enum = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/validation/index.js
+// node_modules/ajv/dist/vocabularies/validation/index.js
 var require_validation = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/validation/index.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/validation/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var limitNumber_1 = require_limitNumber();
@@ -6731,9 +6731,9 @@ var require_validation = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
+// node_modules/ajv/dist/vocabularies/applicator/additionalItems.js
 var require_additionalItems = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/additionalItems.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/additionalItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateAdditionalItems = void 0;
@@ -6784,9 +6784,9 @@ var require_additionalItems = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/items.js
+// node_modules/ajv/dist/vocabularies/applicator/items.js
 var require_items = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/items.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/items.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateTuple = void 0;
@@ -6841,9 +6841,9 @@ var require_items = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
+// node_modules/ajv/dist/vocabularies/applicator/prefixItems.js
 var require_prefixItems = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/prefixItems.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/prefixItems.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var items_1 = require_items();
@@ -6858,9 +6858,9 @@ var require_prefixItems = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/items2020.js
+// node_modules/ajv/dist/vocabularies/applicator/items2020.js
 var require_items2020 = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/items2020.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/items2020.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -6893,9 +6893,9 @@ var require_items2020 = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/contains.js
+// node_modules/ajv/dist/vocabularies/applicator/contains.js
 var require_contains = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/contains.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/contains.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -6987,9 +6987,9 @@ var require_contains = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/dependencies.js
+// node_modules/ajv/dist/vocabularies/applicator/dependencies.js
 var require_dependencies = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/dependencies.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/dependencies.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.validateSchemaDeps = exports.validatePropertyDeps = exports.error = void 0;
@@ -7081,9 +7081,9 @@ var require_dependencies = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
+// node_modules/ajv/dist/vocabularies/applicator/propertyNames.js
 var require_propertyNames = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/propertyNames.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/propertyNames.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -7124,9 +7124,9 @@ var require_propertyNames = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
+// node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js
 var require_additionalProperties = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/additionalProperties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -7230,9 +7230,9 @@ var require_additionalProperties = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/properties.js
+// node_modules/ajv/dist/vocabularies/applicator/properties.js
 var require_properties = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/properties.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/properties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var validate_1 = require_validate();
@@ -7288,9 +7288,9 @@ var require_properties = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
+// node_modules/ajv/dist/vocabularies/applicator/patternProperties.js
 var require_patternProperties = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/patternProperties.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/patternProperties.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -7362,9 +7362,9 @@ var require_patternProperties = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/not.js
+// node_modules/ajv/dist/vocabularies/applicator/not.js
 var require_not = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/not.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/not.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var util_1 = require_util();
@@ -7393,9 +7393,9 @@ var require_not = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/anyOf.js
+// node_modules/ajv/dist/vocabularies/applicator/anyOf.js
 var require_anyOf = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/anyOf.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/anyOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var code_1 = require_code2();
@@ -7410,9 +7410,9 @@ var require_anyOf = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/oneOf.js
+// node_modules/ajv/dist/vocabularies/applicator/oneOf.js
 var require_oneOf = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/oneOf.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/oneOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -7468,9 +7468,9 @@ var require_oneOf = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/allOf.js
+// node_modules/ajv/dist/vocabularies/applicator/allOf.js
 var require_allOf = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/allOf.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/allOf.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var util_1 = require_util();
@@ -7495,9 +7495,9 @@ var require_allOf = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/if.js
+// node_modules/ajv/dist/vocabularies/applicator/if.js
 var require_if = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/if.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/if.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -7564,9 +7564,9 @@ var require_if = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/thenElse.js
+// node_modules/ajv/dist/vocabularies/applicator/thenElse.js
 var require_thenElse = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/thenElse.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/thenElse.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var util_1 = require_util();
@@ -7582,9 +7582,9 @@ var require_thenElse = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/applicator/index.js
+// node_modules/ajv/dist/vocabularies/applicator/index.js
 var require_applicator = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/applicator/index.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/applicator/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var additionalItems_1 = require_additionalItems();
@@ -7630,9 +7630,9 @@ var require_applicator = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/format/format.js
+// node_modules/ajv/dist/vocabularies/format/format.js
 var require_format = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/format/format.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/format/format.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -7720,9 +7720,9 @@ var require_format = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/format/index.js
+// node_modules/ajv/dist/vocabularies/format/index.js
 var require_format2 = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/format/index.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/format/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var format_1 = require_format();
@@ -7731,9 +7731,9 @@ var require_format2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/metadata.js
+// node_modules/ajv/dist/vocabularies/metadata.js
 var require_metadata = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/metadata.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/metadata.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.contentVocabulary = exports.metadataVocabulary = void 0;
@@ -7754,9 +7754,9 @@ var require_metadata = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/draft7.js
+// node_modules/ajv/dist/vocabularies/draft7.js
 var require_draft7 = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/draft7.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/draft7.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var core_1 = require_core2();
@@ -7776,9 +7776,9 @@ var require_draft7 = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/discriminator/types.js
+// node_modules/ajv/dist/vocabularies/discriminator/types.js
 var require_types = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/discriminator/types.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/discriminator/types.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.DiscrError = void 0;
@@ -7790,9 +7790,9 @@ var require_types = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/vocabularies/discriminator/index.js
+// node_modules/ajv/dist/vocabularies/discriminator/index.js
 var require_discriminator = __commonJS({
-  "../node_modules/ajv/dist/vocabularies/discriminator/index.js"(exports) {
+  "node_modules/ajv/dist/vocabularies/discriminator/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -7895,9 +7895,9 @@ var require_discriminator = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/refs/json-schema-draft-07.json
+// node_modules/ajv/dist/refs/json-schema-draft-07.json
 var require_json_schema_draft_07 = __commonJS({
-  "../node_modules/ajv/dist/refs/json-schema-draft-07.json"(exports, module) {
+  "node_modules/ajv/dist/refs/json-schema-draft-07.json"(exports, module) {
     module.exports = {
       $schema: "http://json-schema.org/draft-07/schema#",
       $id: "http://json-schema.org/draft-07/schema#",
@@ -8052,9 +8052,9 @@ var require_json_schema_draft_07 = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/ajv.js
+// node_modules/ajv/dist/ajv.js
 var require_ajv = __commonJS({
-  "../node_modules/ajv/dist/ajv.js"(exports, module) {
+  "node_modules/ajv/dist/ajv.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.MissingRefError = exports.ValidationError = exports.CodeGen = exports.Name = exports.nil = exports.stringify = exports.str = exports._ = exports.KeywordCxt = exports.Ajv = void 0;
@@ -8122,9 +8122,9 @@ var require_ajv = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/typeof.js
+// node_modules/ajv-keywords/dist/definitions/typeof.js
 var require_typeof = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/typeof.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/typeof.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -8150,9 +8150,9 @@ var require_typeof = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/typeof.js
+// node_modules/ajv-keywords/dist/keywords/typeof.js
 var require_typeof2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/typeof.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/typeof.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8165,9 +8165,9 @@ var require_typeof2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/instanceof.js
+// node_modules/ajv-keywords/dist/definitions/instanceof.js
 var require_instanceof = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/instanceof.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/instanceof.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var CONSTRUCTORS = {
@@ -8221,9 +8221,9 @@ var require_instanceof = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/instanceof.js
+// node_modules/ajv-keywords/dist/keywords/instanceof.js
 var require_instanceof2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/instanceof.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/instanceof.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8236,9 +8236,9 @@ var require_instanceof2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/_range.js
+// node_modules/ajv-keywords/dist/definitions/_range.js
 var require_range = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/_range.js"(exports) {
+  "node_modules/ajv-keywords/dist/definitions/_range.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     function getRangeDef(keyword) {
@@ -8267,9 +8267,9 @@ var require_range = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/range.js
+// node_modules/ajv-keywords/dist/definitions/range.js
 var require_range2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/range.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/range.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8282,9 +8282,9 @@ var require_range2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/range.js
+// node_modules/ajv-keywords/dist/keywords/range.js
 var require_range3 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/range.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/range.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8297,9 +8297,9 @@ var require_range3 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/exclusiveRange.js
+// node_modules/ajv-keywords/dist/definitions/exclusiveRange.js
 var require_exclusiveRange = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/exclusiveRange.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/exclusiveRange.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8312,9 +8312,9 @@ var require_exclusiveRange = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/exclusiveRange.js
+// node_modules/ajv-keywords/dist/keywords/exclusiveRange.js
 var require_exclusiveRange2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/exclusiveRange.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/exclusiveRange.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8327,9 +8327,9 @@ var require_exclusiveRange2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/_util.js
+// node_modules/ajv-keywords/dist/definitions/_util.js
 var require_util2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/_util.js"(exports) {
+  "node_modules/ajv-keywords/dist/definitions/_util.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.usePattern = exports.metaSchemaRef = void 0;
@@ -8351,9 +8351,9 @@ var require_util2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/regexp.js
+// node_modules/ajv-keywords/dist/definitions/regexp.js
 var require_regexp = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/regexp.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/regexp.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -8396,9 +8396,9 @@ var require_regexp = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/regexp.js
+// node_modules/ajv-keywords/dist/keywords/regexp.js
 var require_regexp2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/regexp.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/regexp.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8411,9 +8411,9 @@ var require_regexp2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/transform.js
+// node_modules/ajv-keywords/dist/definitions/transform.js
 var require_transform = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/transform.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/transform.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -8491,9 +8491,9 @@ var require_transform = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/transform.js
+// node_modules/ajv-keywords/dist/keywords/transform.js
 var require_transform2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/transform.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/transform.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8506,9 +8506,9 @@ var require_transform2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/uniqueItemProperties.js
+// node_modules/ajv-keywords/dist/definitions/uniqueItemProperties.js
 var require_uniqueItemProperties = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/uniqueItemProperties.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/uniqueItemProperties.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var equal = require_fast_deep_equal();
@@ -8573,9 +8573,9 @@ var require_uniqueItemProperties = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/uniqueItemProperties.js
+// node_modules/ajv-keywords/dist/keywords/uniqueItemProperties.js
 var require_uniqueItemProperties2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/uniqueItemProperties.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/uniqueItemProperties.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8588,9 +8588,9 @@ var require_uniqueItemProperties2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/allRequired.js
+// node_modules/ajv-keywords/dist/definitions/allRequired.js
 var require_allRequired = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/allRequired.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/allRequired.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     function getDef() {
@@ -8614,9 +8614,9 @@ var require_allRequired = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/allRequired.js
+// node_modules/ajv-keywords/dist/keywords/allRequired.js
 var require_allRequired2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/allRequired.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/allRequired.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8629,9 +8629,9 @@ var require_allRequired2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/_required.js
+// node_modules/ajv-keywords/dist/definitions/_required.js
 var require_required2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/_required.js"(exports) {
+  "node_modules/ajv-keywords/dist/definitions/_required.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     function getRequiredDef(keyword) {
@@ -8657,9 +8657,9 @@ var require_required2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/anyRequired.js
+// node_modules/ajv-keywords/dist/definitions/anyRequired.js
 var require_anyRequired = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/anyRequired.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/anyRequired.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8672,9 +8672,9 @@ var require_anyRequired = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/anyRequired.js
+// node_modules/ajv-keywords/dist/keywords/anyRequired.js
 var require_anyRequired2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/anyRequired.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/anyRequired.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8687,9 +8687,9 @@ var require_anyRequired2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/oneRequired.js
+// node_modules/ajv-keywords/dist/definitions/oneRequired.js
 var require_oneRequired = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/oneRequired.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/oneRequired.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8702,9 +8702,9 @@ var require_oneRequired = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/oneRequired.js
+// node_modules/ajv-keywords/dist/keywords/oneRequired.js
 var require_oneRequired2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/oneRequired.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/oneRequired.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8717,9 +8717,9 @@ var require_oneRequired2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/patternRequired.js
+// node_modules/ajv-keywords/dist/definitions/patternRequired.js
 var require_patternRequired = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/patternRequired.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/patternRequired.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -8764,9 +8764,9 @@ var require_patternRequired = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/patternRequired.js
+// node_modules/ajv-keywords/dist/keywords/patternRequired.js
 var require_patternRequired2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/patternRequired.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/patternRequired.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8779,9 +8779,9 @@ var require_patternRequired2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/prohibited.js
+// node_modules/ajv-keywords/dist/definitions/prohibited.js
 var require_prohibited = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/prohibited.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/prohibited.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     function getDef() {
@@ -8807,9 +8807,9 @@ var require_prohibited = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/prohibited.js
+// node_modules/ajv-keywords/dist/keywords/prohibited.js
 var require_prohibited2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/prohibited.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/prohibited.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8822,9 +8822,9 @@ var require_prohibited2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/deepProperties.js
+// node_modules/ajv-keywords/dist/definitions/deepProperties.js
 var require_deepProperties = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/deepProperties.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/deepProperties.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var _util_1 = require_util2();
@@ -8880,9 +8880,9 @@ var require_deepProperties = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/deepProperties.js
+// node_modules/ajv-keywords/dist/keywords/deepProperties.js
 var require_deepProperties2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/deepProperties.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/deepProperties.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8895,9 +8895,9 @@ var require_deepProperties2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/deepRequired.js
+// node_modules/ajv-keywords/dist/definitions/deepRequired.js
 var require_deepRequired = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/deepRequired.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/deepRequired.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -8933,9 +8933,9 @@ var require_deepRequired = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/deepRequired.js
+// node_modules/ajv-keywords/dist/keywords/deepRequired.js
 var require_deepRequired2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/deepRequired.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/deepRequired.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -8948,9 +8948,9 @@ var require_deepRequired2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/dynamicDefaults.js
+// node_modules/ajv-keywords/dist/definitions/dynamicDefaults.js
 var require_dynamicDefaults = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/dynamicDefaults.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/dynamicDefaults.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var sequences = {};
@@ -9037,9 +9037,9 @@ var require_dynamicDefaults = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/dynamicDefaults.js
+// node_modules/ajv-keywords/dist/keywords/dynamicDefaults.js
 var require_dynamicDefaults2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/dynamicDefaults.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/dynamicDefaults.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -9052,9 +9052,9 @@ var require_dynamicDefaults2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/definitions/select.js
+// node_modules/ajv-keywords/dist/definitions/select.js
 var require_select = __commonJS({
-  "../node_modules/ajv-keywords/dist/definitions/select.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/definitions/select.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var codegen_1 = require_codegen();
@@ -9118,9 +9118,9 @@ var require_select = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/select.js
+// node_modules/ajv-keywords/dist/keywords/select.js
 var require_select2 = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/select.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/select.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -9136,9 +9136,9 @@ var require_select2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/keywords/index.js
+// node_modules/ajv-keywords/dist/keywords/index.js
 var require_keywords = __commonJS({
-  "../node_modules/ajv-keywords/dist/keywords/index.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/keywords/index.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -9183,9 +9183,9 @@ var require_keywords = __commonJS({
   }
 });
 
-// ../node_modules/ajv-keywords/dist/index.js
+// node_modules/ajv-keywords/dist/index.js
 var require_dist = __commonJS({
-  "../node_modules/ajv-keywords/dist/index.js"(exports, module) {
+  "node_modules/ajv-keywords/dist/index.js"(exports, module) {
     "use strict";
     var __importDefault = exports && exports.__importDefault || function(mod) {
       return mod && mod.__esModule ? mod : { "default": mod };
@@ -9219,9 +9219,9 @@ var require_dist = __commonJS({
   }
 });
 
-// ../node_modules/ajv-formats/dist/formats.js
+// node_modules/ajv-formats/dist/formats.js
 var require_formats = __commonJS({
-  "../node_modules/ajv-formats/dist/formats.js"(exports) {
+  "node_modules/ajv-formats/dist/formats.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.formatNames = exports.fastFormats = exports.fullFormats = void 0;
@@ -9422,9 +9422,9 @@ var require_formats = __commonJS({
   }
 });
 
-// ../node_modules/ajv-formats/dist/limit.js
+// node_modules/ajv-formats/dist/limit.js
 var require_limit = __commonJS({
-  "../node_modules/ajv-formats/dist/limit.js"(exports) {
+  "node_modules/ajv-formats/dist/limit.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.formatLimitDefinition = void 0;
@@ -9494,9 +9494,9 @@ var require_limit = __commonJS({
   }
 });
 
-// ../node_modules/ajv-formats/dist/index.js
+// node_modules/ajv-formats/dist/index.js
 var require_dist2 = __commonJS({
-  "../node_modules/ajv-formats/dist/index.js"(exports, module) {
+  "node_modules/ajv-formats/dist/index.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var formats_1 = require_formats();
@@ -9536,9 +9536,9 @@ var require_dist2 = __commonJS({
   }
 });
 
-// ../node_modules/schema-utils/dist/keywords/absolutePath.js
+// node_modules/schema-utils/dist/keywords/absolutePath.js
 var require_absolutePath = __commonJS({
-  "../node_modules/schema-utils/dist/keywords/absolutePath.js"(exports) {
+  "node_modules/schema-utils/dist/keywords/absolutePath.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", {
       value: true
@@ -9596,9 +9596,9 @@ var require_absolutePath = __commonJS({
   }
 });
 
-// ../node_modules/schema-utils/dist/keywords/limit.js
+// node_modules/schema-utils/dist/keywords/limit.js
 var require_limit2 = __commonJS({
-  "../node_modules/schema-utils/dist/keywords/limit.js"(exports) {
+  "node_modules/schema-utils/dist/keywords/limit.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", {
       value: true
@@ -9735,9 +9735,9 @@ var require_limit2 = __commonJS({
   }
 });
 
-// ../node_modules/schema-utils/dist/keywords/undefinedAsNull.js
+// node_modules/schema-utils/dist/keywords/undefinedAsNull.js
 var require_undefinedAsNull = __commonJS({
-  "../node_modules/schema-utils/dist/keywords/undefinedAsNull.js"(exports) {
+  "node_modules/schema-utils/dist/keywords/undefinedAsNull.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", {
       value: true
@@ -9765,9 +9765,9 @@ var require_undefinedAsNull = __commonJS({
   }
 });
 
-// ../node_modules/schema-utils/dist/validate.js
+// node_modules/schema-utils/dist/validate.js
 var require_validate2 = __commonJS({
-  "../node_modules/schema-utils/dist/validate.js"(exports) {
+  "node_modules/schema-utils/dist/validate.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", {
       value: true
@@ -10039,9 +10039,9 @@ var require_validate2 = __commonJS({
   }
 });
 
-// ../node_modules/ajv/dist/standalone/index.js
+// node_modules/ajv/dist/standalone/index.js
 var require_standalone = __commonJS({
-  "../node_modules/ajv/dist/standalone/index.js"(exports, module) {
+  "node_modules/ajv/dist/standalone/index.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var scope_1 = require_scope();
@@ -10126,9 +10126,9 @@ var require_standalone = __commonJS({
   }
 });
 
-// ../node_modules/schema-utils/dist/precompile.js
+// node_modules/schema-utils/dist/precompile.js
 var require_precompile = __commonJS({
-  "../node_modules/schema-utils/dist/precompile.js"(exports, module) {
+  "node_modules/schema-utils/dist/precompile.js"(exports, module) {
     "use strict";
     Object.defineProperty(exports, "__esModule", {
       value: true
@@ -10368,9 +10368,9 @@ ${code}`;
   }
 });
 
-// ../node_modules/schema-utils/dist/index.js
+// node_modules/schema-utils/dist/index.js
 var require_dist3 = __commonJS({
-  "../node_modules/schema-utils/dist/index.js"(exports, module) {
+  "node_modules/schema-utils/dist/index.js"(exports, module) {
     "use strict";
     var {
       ValidationError,
@@ -10391,9 +10391,9 @@ var require_dist3 = __commonJS({
   }
 });
 
-// ../node_modules/copy-webpack-plugin/package.json
+// node_modules/copy-webpack-plugin/package.json
 var require_package = __commonJS({
-  "../node_modules/copy-webpack-plugin/package.json"(exports, module) {
+  "node_modules/copy-webpack-plugin/package.json"(exports, module) {
     module.exports = {
       name: "copy-webpack-plugin",
       version: "14.0.0",
@@ -10492,9 +10492,9 @@ var require_package = __commonJS({
   }
 });
 
-// ../node_modules/copy-webpack-plugin/dist/options.json
+// node_modules/copy-webpack-plugin/dist/options.json
 var require_options = __commonJS({
-  "../node_modules/copy-webpack-plugin/dist/options.json"(exports, module) {
+  "node_modules/copy-webpack-plugin/dist/options.json"(exports, module) {
     module.exports = {
       definitions: {
         ObjectPattern: {
@@ -10659,9 +10659,9 @@ var require_options = __commonJS({
   }
 });
 
-// ../node_modules/copy-webpack-plugin/dist/utils.js
+// node_modules/copy-webpack-plugin/dist/utils.js
 var require_utils2 = __commonJS({
-  "../node_modules/copy-webpack-plugin/dist/utils.js"(exports, module) {
+  "node_modules/copy-webpack-plugin/dist/utils.js"(exports, module) {
     "use strict";
     function stat(inputFileSystem, path) {
       return new Promise((resolve, reject) => {
@@ -10766,9 +10766,9 @@ var require_utils2 = __commonJS({
   }
 });
 
-// ../node_modules/normalize-path/index.js
+// node_modules/normalize-path/index.js
 var require_normalize_path = __commonJS({
-  "../node_modules/normalize-path/index.js"(exports, module) {
+  "node_modules/normalize-path/index.js"(exports, module) {
     module.exports = function(path, stripTrailing) {
       if (typeof path !== "string") {
         throw new TypeError("expected path to be a string");
@@ -10793,9 +10793,9 @@ var require_normalize_path = __commonJS({
   }
 });
 
-// ../node_modules/is-extglob/index.js
+// node_modules/is-extglob/index.js
 var require_is_extglob = __commonJS({
-  "../node_modules/is-extglob/index.js"(exports, module) {
+  "node_modules/is-extglob/index.js"(exports, module) {
     module.exports = function isExtglob(str) {
       if (typeof str !== "string" || str === "") {
         return false;
@@ -10810,9 +10810,9 @@ var require_is_extglob = __commonJS({
   }
 });
 
-// ../node_modules/is-glob/index.js
+// node_modules/is-glob/index.js
 var require_is_glob = __commonJS({
-  "../node_modules/is-glob/index.js"(exports, module) {
+  "node_modules/is-glob/index.js"(exports, module) {
     var isExtglob = require_is_extglob();
     var chars = { "{": "}", "(": ")", "[": "]" };
     var strictCheck = function(str) {
@@ -10941,9 +10941,9 @@ var require_is_glob = __commonJS({
   }
 });
 
-// ../node_modules/glob-parent/index.js
+// node_modules/glob-parent/index.js
 var require_glob_parent = __commonJS({
-  "../node_modules/glob-parent/index.js"(exports, module) {
+  "node_modules/glob-parent/index.js"(exports, module) {
     "use strict";
     var isGlob = require_is_glob();
     var pathPosixDirname = __require("path").posix.dirname;
@@ -10999,18 +10999,18 @@ var require_glob_parent = __commonJS({
   }
 });
 
-// ../node_modules/copy-webpack-plugin/node_modules/serialize-javascript/index.js
+// node_modules/serialize-javascript/index.js
 var require_serialize_javascript = __commonJS({
-  "../node_modules/copy-webpack-plugin/node_modules/serialize-javascript/index.js"(exports, module) {
+  "node_modules/serialize-javascript/index.js"(exports, module) {
     "use strict";
     var UID_LENGTH = 16;
     var UID = generateUID();
     var PLACE_HOLDER_REGEXP = new RegExp('(\\\\)?"@__(F|R|D|M|S|A|U|I|B|L)-' + UID + '-(\\d+)__@"', "g");
-    var IS_NATIVE_CODE_REGEXP = /\{\s*\[native code\]\s*\}/g;
+    var IS_NATIVE_CODE_REGEXP = /\{\s*\[native code\]\s*\}/;
     var IS_PURE_FUNCTION = /function.*?\(/;
     var IS_ARROW_FUNCTION = /.*?=>.*?/;
     var UNSAFE_CHARS_REGEXP = /[<>\/\u2028\u2029]/g;
-    var SCRIPT_CLOSE_REGEXP = /<\/script[^>]*>/gi;
+    var SCRIPT_CLOSE_REGEXP = /<\/script[^<>]*>|<\/script(?=[\t\n\f\r \/>])/gi;
     var RESERVED_SYMBOLS = ["*", "async"];
     var ESCAPED_CHARS = {
       "<": "\\u003C",
@@ -11022,9 +11022,25 @@ var require_serialize_javascript = __commonJS({
     function escapeUnsafeChars(unsafeChar) {
       return ESCAPED_CHARS[unsafeChar];
     }
+    var STRING_OR_COMMENT_REGEXP = /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`|\/(?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^\/\\\n])+\//g;
     function escapeFunctionBody(str) {
-      str = str.replace(SCRIPT_CLOSE_REGEXP, function(match) {
-        return match.replace(/</g, "\\u003C").replace(/\//g, "\\u002F").replace(/>/g, "\\u003E");
+      var stringAndCommentSpans = [];
+      var match;
+      STRING_OR_COMMENT_REGEXP.lastIndex = 0;
+      while (match = STRING_OR_COMMENT_REGEXP.exec(str)) {
+        stringAndCommentSpans.push([match.index, match.index + match[0].length]);
+      }
+      var spanCursor = 0;
+      str = str.replace(SCRIPT_CLOSE_REGEXP, function(scriptCloseMatch, offset) {
+        while (spanCursor < stringAndCommentSpans.length && stringAndCommentSpans[spanCursor][1] <= offset) {
+          spanCursor++;
+        }
+        var span = stringAndCommentSpans[spanCursor];
+        var inStringOrComment = !!span && offset >= span[0] && offset < span[1];
+        if (!inStringOrComment) {
+          return "< " + scriptCloseMatch.slice(1);
+        }
+        return scriptCloseMatch.replace(/</g, "\\u003C").replace(/\//g, "\\u002F").replace(/>/g, "\\u003E");
       });
       str = str.replace(/\u2028/g, "\\u2028");
       str = str.replace(/\u2029/g, "\\u2029");
@@ -11112,6 +11128,9 @@ var require_serialize_javascript = __commonJS({
       }
       function serializeFunc(fn, options2) {
         var serializedFn = fn.toString();
+        if (typeof serializedFn !== "string") {
+          throw new TypeError("Function.toString() must return a string");
+        }
         if (IS_NATIVE_CODE_REGEXP.test(serializedFn)) {
           throw new TypeError("Serializing native function: " + fn.name);
         }
@@ -11170,7 +11189,11 @@ var require_serialize_javascript = __commonJS({
         }
         if (type === "R") {
           var flags = String(regexps[valueIndex].flags).replace(/[^gimsuydv]/g, "");
-          return "new RegExp(" + serialize(regexps[valueIndex].source) + ', "' + flags + '")';
+          var regexpSource = regexps[valueIndex].source;
+          if (typeof regexpSource !== "string") {
+            throw new TypeError("RegExp.source must be a string");
+          }
+          return "new RegExp(" + serialize(regexpSource) + ', "' + flags + '")';
         }
         if (type === "M") {
           return "new Map(" + serialize(Array.from(maps[valueIndex].entries()), options) + ")";
@@ -11204,9 +11227,9 @@ var require_serialize_javascript = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/lib/constants.js
+// node_modules/picomatch/lib/constants.js
 var require_constants = __commonJS({
-  "../node_modules/picomatch/lib/constants.js"(exports, module) {
+  "node_modules/picomatch/lib/constants.js"(exports, module) {
     "use strict";
     var WIN_SLASH = "\\\\/";
     var WIN_NO_SLASH = `[^${WIN_SLASH}]`;
@@ -11406,9 +11429,9 @@ var require_constants = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/lib/utils.js
+// node_modules/picomatch/lib/utils.js
 var require_utils3 = __commonJS({
-  "../node_modules/picomatch/lib/utils.js"(exports) {
+  "node_modules/picomatch/lib/utils.js"(exports) {
     "use strict";
     var {
       REGEX_BACKSLASH,
@@ -11470,9 +11493,9 @@ var require_utils3 = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/lib/scan.js
+// node_modules/picomatch/lib/scan.js
 var require_scan = __commonJS({
-  "../node_modules/picomatch/lib/scan.js"(exports, module) {
+  "node_modules/picomatch/lib/scan.js"(exports, module) {
     "use strict";
     var utils = require_utils3();
     var {
@@ -11808,9 +11831,9 @@ var require_scan = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/lib/parse.js
+// node_modules/picomatch/lib/parse.js
 var require_parse = __commonJS({
-  "../node_modules/picomatch/lib/parse.js"(exports, module) {
+  "node_modules/picomatch/lib/parse.js"(exports, module) {
     "use strict";
     var constants = require_constants();
     var utils = require_utils3();
@@ -12823,9 +12846,9 @@ var require_parse = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/lib/picomatch.js
+// node_modules/picomatch/lib/picomatch.js
 var require_picomatch = __commonJS({
-  "../node_modules/picomatch/lib/picomatch.js"(exports, module) {
+  "node_modules/picomatch/lib/picomatch.js"(exports, module) {
     "use strict";
     var scan = require_scan();
     var parse = require_parse();
@@ -12963,9 +12986,9 @@ var require_picomatch = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/index.js
+// node_modules/picomatch/index.js
 var require_picomatch2 = __commonJS({
-  "../node_modules/picomatch/index.js"(exports, module) {
+  "node_modules/picomatch/index.js"(exports, module) {
     "use strict";
     var pico = require_picomatch();
     var utils = require_utils3();
@@ -12980,9 +13003,9 @@ var require_picomatch2 = __commonJS({
   }
 });
 
-// ../node_modules/fdir/dist/index.cjs
+// node_modules/fdir/dist/index.cjs
 var require_dist4 = __commonJS({
-  "../node_modules/fdir/dist/index.cjs"(exports) {
+  "node_modules/fdir/dist/index.cjs"(exports) {
     var __create = Object.create;
     var __defProp = Object.defineProperty;
     var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -13512,9 +13535,10 @@ var require_dist4 = __commonJS({
   }
 });
 
-// ../node_modules/tinyglobby/dist/index.cjs
+// node_modules/tinyglobby/dist/index.cjs
 var require_dist5 = __commonJS({
-  "../node_modules/tinyglobby/dist/index.cjs"(exports) {
+  "node_modules/tinyglobby/dist/index.cjs"(exports) {
+    Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
     var __create = Object.create;
     var __defProp = Object.defineProperty;
     var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -13536,46 +13560,43 @@ var require_dist5 = __commonJS({
       enumerable: true
     }) : target, mod));
     var fs = __require("fs");
-    fs = __toESM(fs);
     var path = __require("path");
-    path = __toESM(path);
     var url = __require("url");
-    url = __toESM(url);
     var fdir = require_dist4();
-    fdir = __toESM(fdir);
     var picomatch = require_picomatch2();
-    picomatch = __toESM(picomatch);
+    picomatch = __toESM(picomatch, 1);
     var isReadonlyArray = Array.isArray;
+    var BACKSLASHES = /\\/g;
+    var DRIVE_RELATIVE_PATH = /^[A-Za-z]:$/;
     var isWin = process.platform === "win32";
     var ONLY_PARENT_DIRECTORIES = /^(\/?\.\.)+$/;
     function getPartialMatcher(patterns, options = {}) {
       const patternsCount = patterns.length;
       const patternsParts = Array(patternsCount);
       const matchers = Array(patternsCount);
-      const globstarEnabled = !options.noglobstar;
-      for (let i = 0; i < patternsCount; i++) {
+      let i, j;
+      for (i = 0; i < patternsCount; i++) {
         const parts = splitPattern(patterns[i]);
         patternsParts[i] = parts;
         const partsCount = parts.length;
         const partMatchers = Array(partsCount);
-        for (let j = 0; j < partsCount; j++) partMatchers[j] = (0, picomatch.default)(parts[j], options);
+        for (j = 0; j < partsCount; j++) partMatchers[j] = (0, picomatch.default)(parts[j], options);
         matchers[i] = partMatchers;
       }
       return (input) => {
         const inputParts = input.split("/");
         if (inputParts[0] === ".." && ONLY_PARENT_DIRECTORIES.test(input)) return true;
-        for (let i = 0; i < patterns.length; i++) {
+        for (i = 0; i < patternsCount; i++) {
           const patternParts = patternsParts[i];
           const matcher = matchers[i];
           const inputPatternCount = inputParts.length;
           const minParts = Math.min(inputPatternCount, patternParts.length);
-          let j = 0;
+          j = 0;
           while (j < minParts) {
             const part = patternParts[j];
             if (part.includes("/")) return true;
-            const match = matcher[j](inputParts[j]);
-            if (!match) break;
-            if (globstarEnabled && part === "**") return true;
+            if (!matcher[j](inputParts[j])) break;
+            if (!options.noglobstar && part === "**") return true;
             j++;
           }
           if (j === inputPatternCount) return true;
@@ -13588,7 +13609,7 @@ var require_dist5 = __commonJS({
     function buildFormat(cwd, root, absolute) {
       if (cwd === root || root.startsWith(`${cwd}/`)) {
         if (absolute) {
-          const start = isRoot(cwd) ? cwd.length : cwd.length + 1;
+          const start = cwd.length + +!isRoot(cwd);
           return (p, isDir) => p.slice(start, isDir ? -1 : void 0) || ".";
         }
         const prefix = root.slice(cwd.length + 1);
@@ -13609,9 +13630,11 @@ var require_dist5 = __commonJS({
       }
       return (p) => {
         const result = path.posix.relative(cwd, `${root}/${p}`);
-        if (p.endsWith("/") && result !== "") return `${result}/`;
-        return result || ".";
+        return p[p.length - 1] === "/" && result !== "" ? `${result}/` : result || ".";
       };
+    }
+    function ensureNonDriveRelativePath(path$1) {
+      return path$1.replace(DRIVE_RELATIVE_PATH, (match) => `${match}/`);
     }
     var splitPatternOptions = { parts: true };
     function splitPattern(path$2) {
@@ -13620,17 +13643,17 @@ var require_dist5 = __commonJS({
       return ((_result$parts = result.parts) === null || _result$parts === void 0 ? void 0 : _result$parts.length) ? result.parts : [path$2];
     }
     var ESCAPED_WIN32_BACKSLASHES = /\\(?![()[\]{}!+@])/g;
-    function convertPosixPathToPattern(path$2) {
-      return escapePosixPath(path$2);
+    function convertPosixPathToPattern(path$3) {
+      return escapePosixPath(path$3);
     }
-    function convertWin32PathToPattern(path$2) {
-      return escapeWin32Path(path$2).replace(ESCAPED_WIN32_BACKSLASHES, "/");
+    function convertWin32PathToPattern(path$4) {
+      return escapeWin32Path(path$4).replace(ESCAPED_WIN32_BACKSLASHES, "/");
     }
     var convertPathToPattern = isWin ? convertWin32PathToPattern : convertPosixPathToPattern;
     var POSIX_UNESCAPED_GLOB_SYMBOLS = /(?<!\\)([()[\]{}*?|]|^!|[!+@](?=\()|\\(?![()[\]{}!*+?@|]))/g;
     var WIN32_UNESCAPED_GLOB_SYMBOLS = /(?<!\\)([()[\]{}]|^!|[!+@](?=\())/g;
-    var escapePosixPath = (path$2) => path$2.replace(POSIX_UNESCAPED_GLOB_SYMBOLS, "\\$&");
-    var escapeWin32Path = (path$2) => path$2.replace(WIN32_UNESCAPED_GLOB_SYMBOLS, "\\$&");
+    var escapePosixPath = (path$5) => path$5.replace(POSIX_UNESCAPED_GLOB_SYMBOLS, "\\$&");
+    var escapeWin32Path = (path$6) => path$6.replace(WIN32_UNESCAPED_GLOB_SYMBOLS, "\\$&");
     var escapePath = isWin ? escapeWin32Path : escapePosixPath;
     function isDynamicPattern(pattern, options) {
       if ((options === null || options === void 0 ? void 0 : options.caseSensitiveMatch) === false) return true;
@@ -13640,29 +13663,32 @@ var require_dist5 = __commonJS({
     function log(...tasks) {
       console.log(`[tinyglobby ${(/* @__PURE__ */ new Date()).toLocaleTimeString("es")}]`, ...tasks);
     }
+    function ensureStringArray(value) {
+      return typeof value === "string" ? [value] : value !== null && value !== void 0 ? value : [];
+    }
     var PARENT_DIRECTORY = /^(\/?\.\.)+/;
     var ESCAPING_BACKSLASHES = /\\(?=[()[\]{}!*+?@|])/g;
-    var BACKSLASHES = /\\/g;
-    function normalizePattern(pattern, expandDirectories, cwd, props, isIgnore) {
+    function normalizePattern(pattern, opts, props, isIgnore) {
+      var _PARENT_DIRECTORY$exe;
+      const cwd = opts.cwd;
       let result = pattern;
-      if (pattern.endsWith("/")) result = pattern.slice(0, -1);
-      if (!result.endsWith("*") && expandDirectories) result += "/**";
+      if (pattern[pattern.length - 1] === "/") result = pattern.slice(0, -1);
+      if (result[result.length - 1] !== "*" && opts.expandDirectories) result += "/**";
       const escapedCwd = escapePath(cwd);
-      if (path.default.isAbsolute(result.replace(ESCAPING_BACKSLASHES, ""))) result = path.posix.relative(escapedCwd, result);
-      else result = path.posix.normalize(result);
-      const parentDirectoryMatch = PARENT_DIRECTORY.exec(result);
+      result = (0, path.isAbsolute)(result.replace(ESCAPING_BACKSLASHES, "")) ? path.posix.relative(escapedCwd, result) : path.posix.normalize(result);
+      const parentDir = (_PARENT_DIRECTORY$exe = PARENT_DIRECTORY.exec(result)) === null || _PARENT_DIRECTORY$exe === void 0 ? void 0 : _PARENT_DIRECTORY$exe[0];
       const parts = splitPattern(result);
-      if (parentDirectoryMatch === null || parentDirectoryMatch === void 0 ? void 0 : parentDirectoryMatch[0]) {
-        const n = (parentDirectoryMatch[0].length + 1) / 3;
+      if (parentDir) {
+        const n = (parentDir.length + 1) / 3;
         let i = 0;
         const cwdParts = escapedCwd.split("/");
         while (i < n && parts[i + n] === cwdParts[cwdParts.length + i - n]) {
           result = result.slice(0, (n - i - 1) * 3) + result.slice((n - i) * 3 + parts[i + n].length + 1) || ".";
           i++;
         }
-        const potentialRoot = path.posix.join(cwd, parentDirectoryMatch[0].slice(i * 3));
-        if (!potentialRoot.startsWith(".") && props.root.length > potentialRoot.length) {
-          props.root = potentialRoot;
+        const potentialRoot = path.posix.join(cwd, parentDir.slice(i * 3));
+        if (potentialRoot[0] !== "." && props.root.length > potentialRoot.length) {
+          props.root = ensureNonDriveRelativePath(potentialRoot);
           props.depthOffset = -n + i;
         }
       }
@@ -13677,154 +13703,136 @@ var require_dist5 = __commonJS({
             newCommonPath.pop();
             break;
           }
-          if (part !== props.commonPath[i] || isDynamicPattern(part) || i === parts.length - 1) break;
+          if (i === parts.length - 1 || part !== props.commonPath[i] || isDynamicPattern(part)) break;
           newCommonPath.push(part);
         }
         props.depthOffset = newCommonPath.length;
         props.commonPath = newCommonPath;
-        props.root = newCommonPath.length > 0 ? path.posix.join(cwd, ...newCommonPath) : cwd;
+        props.root = ensureNonDriveRelativePath(newCommonPath.length > 0 ? path.posix.join(cwd, ...newCommonPath) : cwd);
       }
       return result;
     }
-    function processPatterns({ patterns = ["**/*"], ignore = [], expandDirectories = true }, cwd, props) {
-      if (typeof patterns === "string") patterns = [patterns];
-      if (typeof ignore === "string") ignore = [ignore];
+    function processPatterns(options, patterns, props) {
       const matchPatterns = [];
       const ignorePatterns = [];
-      for (const pattern of ignore) {
+      for (const pattern of options.ignore) {
         if (!pattern) continue;
-        if (pattern[0] !== "!" || pattern[1] === "(") ignorePatterns.push(normalizePattern(pattern, expandDirectories, cwd, props, true));
+        if (pattern[0] !== "!" || pattern[1] === "(") ignorePatterns.push(normalizePattern(pattern, options, props, true));
       }
       for (const pattern of patterns) {
         if (!pattern) continue;
-        if (pattern[0] !== "!" || pattern[1] === "(") matchPatterns.push(normalizePattern(pattern, expandDirectories, cwd, props, false));
-        else if (pattern[1] !== "!" || pattern[2] === "(") ignorePatterns.push(normalizePattern(pattern.slice(1), expandDirectories, cwd, props, true));
+        if (pattern[0] !== "!" || pattern[1] === "(") matchPatterns.push(normalizePattern(pattern, options, props, false));
+        else if (pattern[1] !== "!" || pattern[2] === "(") ignorePatterns.push(normalizePattern(pattern.slice(1), options, props, true));
       }
       return {
         match: matchPatterns,
         ignore: ignorePatterns
       };
     }
-    function formatPaths(paths, relative) {
-      for (let i = paths.length - 1; i >= 0; i--) {
-        const path$2 = paths[i];
-        paths[i] = relative(path$2);
-      }
-      return paths;
-    }
-    function normalizeCwd(cwd) {
-      if (!cwd) return process.cwd().replace(BACKSLASHES, "/");
-      if (cwd instanceof URL) return (0, url.fileURLToPath)(cwd).replace(BACKSLASHES, "/");
-      return path.default.resolve(cwd).replace(BACKSLASHES, "/");
-    }
-    function getCrawler(patterns, inputOptions = {}) {
-      const options = process.env.TINYGLOBBY_DEBUG ? {
-        ...inputOptions,
-        debug: true
-      } : inputOptions;
-      const cwd = normalizeCwd(options.cwd);
-      if (options.debug) log("globbing with:", {
-        patterns,
-        options,
-        cwd
-      });
-      if (Array.isArray(patterns) && patterns.length === 0) return [{
-        sync: () => [],
-        withPromise: async () => []
-      }, false];
+    function buildCrawler(options, patterns) {
+      const cwd = options.cwd;
       const props = {
         root: cwd,
-        commonPath: null,
         depthOffset: 0
       };
-      const processed = processPatterns({
-        ...options,
-        patterns
-      }, cwd, props);
+      const processed = processPatterns(options, patterns, props);
       if (options.debug) log("internal processing patterns:", processed);
+      const { absolute, caseSensitiveMatch, debug, dot, followSymbolicLinks, onlyDirectories } = options;
+      const root = props.root.replace(BACKSLASHES, "");
       const matchOptions = {
-        dot: options.dot,
+        dot,
         nobrace: options.braceExpansion === false,
-        nocase: options.caseSensitiveMatch === false,
+        nocase: !caseSensitiveMatch,
         noextglob: options.extglob === false,
         noglobstar: options.globstar === false,
         posix: true
       };
-      const matcher = (0, picomatch.default)(processed.match, {
-        ...matchOptions,
-        ignore: processed.ignore
-      });
+      const matcher = (0, picomatch.default)(processed.match, matchOptions);
       const ignore = (0, picomatch.default)(processed.ignore, matchOptions);
       const partialMatcher = getPartialMatcher(processed.match, matchOptions);
-      const format = buildFormat(cwd, props.root, options.absolute);
-      const formatExclude = options.absolute ? format : buildFormat(cwd, props.root, true);
-      const fdirOptions = {
-        filters: [options.debug ? (p, isDirectory) => {
-          const path$2 = format(p, isDirectory);
-          const matches = matcher(path$2);
-          if (matches) log(`matched ${path$2}`);
-          return matches;
-        } : (p, isDirectory) => matcher(format(p, isDirectory))],
-        exclude: options.debug ? (_, p) => {
-          const relativePath = formatExclude(p, true);
-          const skipped = relativePath !== "." && !partialMatcher(relativePath) || ignore(relativePath);
-          if (skipped) log(`skipped ${p}`);
-          else log(`crawling ${p}`);
-          return skipped;
-        } : (_, p) => {
-          const relativePath = formatExclude(p, true);
-          return relativePath !== "." && !partialMatcher(relativePath) || ignore(relativePath);
-        },
-        fs: options.fs ? {
-          readdir: options.fs.readdir || fs.default.readdir,
-          readdirSync: options.fs.readdirSync || fs.default.readdirSync,
-          realpath: options.fs.realpath || fs.default.realpath,
-          realpathSync: options.fs.realpathSync || fs.default.realpathSync,
-          stat: options.fs.stat || fs.default.stat,
-          statSync: options.fs.statSync || fs.default.statSync
-        } : void 0,
-        pathSeparator: "/",
-        relativePaths: true,
-        resolveSymlinks: true,
-        signal: options.signal
+      const format = buildFormat(cwd, root, absolute);
+      const excludeFormatter = absolute ? format : buildFormat(cwd, root, true);
+      const excludePredicate = (_, p) => {
+        const relativePath = excludeFormatter(p, true);
+        return relativePath !== "." && !partialMatcher(relativePath) || ignore(relativePath);
       };
-      if (options.deep !== void 0) fdirOptions.maxDepth = Math.round(options.deep - props.depthOffset);
-      if (options.absolute) {
-        fdirOptions.relativePaths = false;
-        fdirOptions.resolvePaths = true;
-        fdirOptions.includeBasePath = true;
-      }
-      if (options.followSymbolicLinks === false) {
-        fdirOptions.resolveSymlinks = false;
-        fdirOptions.excludeSymlinks = true;
-      }
-      if (options.onlyDirectories) {
-        fdirOptions.excludeFiles = true;
-        fdirOptions.includeDirs = true;
-      } else if (options.onlyFiles === false) fdirOptions.includeDirs = true;
-      props.root = props.root.replace(BACKSLASHES, "");
-      const root = props.root;
-      if (options.debug) log("internal properties:", props);
-      const relative = cwd !== root && !options.absolute && buildRelative(cwd, props.root);
-      return [new fdir.fdir(fdirOptions).crawl(root), relative];
+      let maxDepth;
+      if (options.deep !== void 0) maxDepth = Math.round(options.deep - props.depthOffset);
+      const crawler = new fdir.fdir({
+        filters: [debug ? (p, isDirectory) => {
+          const path2 = format(p, isDirectory);
+          const matches = matcher(path2) && !ignore(path2);
+          if (matches) log(`matched ${path2}`);
+          return matches;
+        } : (p, isDirectory) => {
+          const path2 = format(p, isDirectory);
+          return matcher(path2) && !ignore(path2);
+        }],
+        exclude: debug ? (_, p) => {
+          const skipped = excludePredicate(_, p);
+          log(`${skipped ? "skipped" : "crawling"} ${p}`);
+          return skipped;
+        } : excludePredicate,
+        fs: options.fs,
+        pathSeparator: "/",
+        relativePaths: !absolute,
+        resolvePaths: absolute,
+        includeBasePath: absolute,
+        resolveSymlinks: followSymbolicLinks,
+        excludeSymlinks: !followSymbolicLinks,
+        excludeFiles: onlyDirectories,
+        includeDirs: onlyDirectories || !options.onlyFiles,
+        maxDepth,
+        signal: options.signal
+      }).crawl(root);
+      if (options.debug) log("internal properties:", {
+        ...props,
+        root
+      });
+      return [crawler, cwd !== root && !absolute && buildRelative(cwd, root)];
     }
-    async function glob(patternsOrOptions, options) {
-      if (patternsOrOptions && (options === null || options === void 0 ? void 0 : options.patterns)) throw new Error("Cannot pass patterns as both an argument and an option");
-      const isModern = isReadonlyArray(patternsOrOptions) || typeof patternsOrOptions === "string";
-      const opts = isModern ? options : patternsOrOptions;
-      const patterns = isModern ? patternsOrOptions : patternsOrOptions.patterns;
-      const [crawler, relative] = getCrawler(patterns, opts);
-      if (!relative) return crawler.withPromise();
-      return formatPaths(await crawler.withPromise(), relative);
+    function formatPaths(paths, mapper) {
+      if (mapper) for (let i = paths.length - 1; i >= 0; i--) paths[i] = mapper(paths[i]);
+      return paths;
     }
-    function globSync(patternsOrOptions, options) {
-      if (patternsOrOptions && (options === null || options === void 0 ? void 0 : options.patterns)) throw new Error("Cannot pass patterns as both an argument and an option");
-      const isModern = isReadonlyArray(patternsOrOptions) || typeof patternsOrOptions === "string";
-      const opts = isModern ? options : patternsOrOptions;
-      const patterns = isModern ? patternsOrOptions : patternsOrOptions.patterns;
-      const [crawler, relative] = getCrawler(patterns, opts);
-      if (!relative) return crawler.sync();
-      return formatPaths(crawler.sync(), relative);
+    var defaultOptions = {
+      caseSensitiveMatch: true,
+      debug: !!process.env.TINYGLOBBY_DEBUG,
+      expandDirectories: true,
+      followSymbolicLinks: true,
+      onlyFiles: true
+    };
+    function getOptions(options) {
+      const opts = Object.assign({}, options);
+      for (const key in defaultOptions) if (opts[key] === void 0) Object.assign(opts, { [key]: defaultOptions[key] });
+      opts.cwd = (opts.cwd instanceof URL ? (0, url.fileURLToPath)(opts.cwd) : (0, path.resolve)(opts.cwd || process.cwd())).replace(BACKSLASHES, "/");
+      opts.ignore = ensureStringArray(opts.ignore);
+      opts.fs && (opts.fs = {
+        readdir: opts.fs.readdir || fs.readdir,
+        readdirSync: opts.fs.readdirSync || fs.readdirSync,
+        realpath: opts.fs.realpath || fs.realpath,
+        realpathSync: opts.fs.realpathSync || fs.realpathSync,
+        stat: opts.fs.stat || fs.stat,
+        statSync: opts.fs.statSync || fs.statSync
+      });
+      if (opts.debug) log("globbing with options:", opts);
+      return opts;
+    }
+    function getCrawler(globInput, inputOptions = {}) {
+      var _ref;
+      if (globInput && (inputOptions === null || inputOptions === void 0 ? void 0 : inputOptions.patterns)) throw new Error("Cannot pass patterns as both an argument and an option");
+      const isModern = isReadonlyArray(globInput) || typeof globInput === "string";
+      const patterns = ensureStringArray((_ref = isModern ? globInput : globInput.patterns) !== null && _ref !== void 0 ? _ref : "**/*");
+      const options = getOptions(isModern ? inputOptions : globInput);
+      return patterns.length > 0 ? buildCrawler(options, patterns) : [];
+    }
+    async function glob(globInput, options) {
+      const [crawler, relative] = getCrawler(globInput, options);
+      return crawler ? formatPaths(await crawler.withPromise(), relative) : [];
+    }
+    function globSync(globInput, options) {
+      const [crawler, relative] = getCrawler(globInput, options);
+      return crawler ? formatPaths(crawler.sync(), relative) : [];
     }
     exports.convertPathToPattern = convertPathToPattern;
     exports.escapePath = escapePath;
@@ -13834,9 +13842,9 @@ var require_dist5 = __commonJS({
   }
 });
 
-// ../node_modules/copy-webpack-plugin/dist/index.js
+// node_modules/copy-webpack-plugin/dist/index.js
 var require_dist6 = __commonJS({
-  "../node_modules/copy-webpack-plugin/dist/index.js"(exports, module) {
+  "node_modules/copy-webpack-plugin/dist/index.js"(exports, module) {
     var path = __require("node:path");
     var {
       validate

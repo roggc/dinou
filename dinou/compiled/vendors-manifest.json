@@ -2,132 +2,122 @@
   "babel-parser": {
     "entry": "@babel/parser",
     "sizeKb": 560.3,
-    "builtAt": "2026-10-24T12:48:51.225Z"
+    "builtAt": "2026-11-18T11:56:43.204Z"
   },
   "babel-traverse": {
     "entry": "@babel/traverse",
-    "sizeKb": 1582.9,
-    "builtAt": "2026-10-24T12:48:51.294Z"
+    "sizeKb": 1583.3,
+    "builtAt": "2026-11-18T11:56:43.291Z"
   },
   "babel-core": {
     "entry": "@babel/core",
-    "sizeKb": 2658.5,
-    "builtAt": "2026-10-24T12:48:51.389Z"
+    "sizeKb": 2657.2,
+    "builtAt": "2026-11-18T11:56:43.423Z"
   },
   "babel-generator": {
     "entry": "@babel/generator",
-    "sizeKb": 759.9,
-    "builtAt": "2026-10-24T12:48:51.436Z"
+    "sizeKb": 761,
+    "builtAt": "2026-11-18T11:56:43.470Z"
   },
   "babel-types": {
     "entry": "@babel/types",
-    "sizeKb": 524.9,
-    "builtAt": "2026-10-24T12:48:51.465Z"
+    "sizeKb": 524.4,
+    "builtAt": "2026-11-18T11:56:43.512Z"
   },
   "babel-preset-react": {
     "entry": "@babel/preset-react",
-    "sizeKb": 2691.7,
-    "builtAt": "2026-10-24T12:48:51.564Z"
+    "sizeKb": 2690.4,
+    "builtAt": "2026-11-18T11:56:43.786Z"
   },
   "babel-preset-typescript": {
     "entry": "@babel/preset-typescript",
-    "sizeKb": 2658.5,
-    "builtAt": "2026-10-24T12:48:51.665Z"
+    "sizeKb": 2657.2,
+    "builtAt": "2026-11-18T11:56:43.917Z"
   },
   "babel-plugin-syntax-import-meta": {
     "entry": "@babel/plugin-syntax-import-meta",
     "sizeKb": 4,
-    "builtAt": "2026-10-24T12:48:51.675Z"
+    "builtAt": "2026-11-18T11:56:43.928Z"
   },
   "babel-plugin-react-compiler": {
     "entry": "babel-plugin-react-compiler",
-    "sizeKb": 4633.7,
-    "builtAt": "2026-10-24T12:48:51.877Z"
+    "sizeKb": 4633.2,
+    "builtAt": "2026-11-18T11:56:44.137Z"
   },
   "postcss": {
     "entry": "postcss",
-    "sizeKb": 211.2,
-    "builtAt": "2026-10-24T12:48:51.897Z"
+    "sizeKb": 210.9,
+    "builtAt": "2026-11-18T11:56:44.169Z"
   },
   "postcss-import": {
     "entry": "postcss-import",
-    "sizeKb": 82.6,
-    "builtAt": "2026-10-24T12:48:51.915Z"
+    "sizeKb": 83.1,
+    "builtAt": "2026-11-18T11:56:44.197Z"
   },
   "postcss-modules": {
     "entry": "postcss-modules",
-    "sizeKb": 460.7,
-    "builtAt": "2026-10-24T12:48:51.951Z"
+    "sizeKb": 460.1,
+    "builtAt": "2026-11-18T11:56:44.258Z"
   },
   "autoprefixer": {
     "entry": "autoprefixer",
-    "sizeKb": 758.7,
-    "builtAt": "2026-10-24T12:48:52.017Z"
+    "sizeKb": 756.5,
+    "builtAt": "2026-11-18T11:56:44.331Z"
   },
   "generic-names": {
     "entry": "generic-names",
-    "sizeKb": 23.9,
-    "builtAt": "2026-10-24T12:48:52.029Z"
+    "sizeKb": 23.8,
+    "builtAt": "2026-11-18T11:56:44.350Z"
   },
   "tailwindcss-postcss": {
     "entry": "@tailwindcss/postcss",
-    "sizeKb": 1205.5,
-    "builtAt": "2026-10-24T12:48:52.095Z"
+    "sizeKb": 1205,
+    "builtAt": "2026-11-18T11:56:44.423Z"
   },
   "rollup-plugin-babel": {
     "entry": "@rollup/plugin-babel",
-    "sizeKb": 2732.9,
-    "builtAt": "2026-10-24T12:48:52.206Z"
+    "sizeKb": 2731.6,
+    "builtAt": "2026-11-18T11:56:44.570Z"
   },
   "rollup-plugin-commonjs": {
     "entry": "@rollup/plugin-commonjs",
     "sizeKb": 190.8,
-    "builtAt": "2026-10-24T12:48:52.224Z"
+    "builtAt": "2026-11-18T11:56:44.598Z"
   },
   "rollup-plugin-json": {
     "entry": "@rollup/plugin-json",
-    "sizeKb": 68.1,
-    "builtAt": "2026-10-24T12:48:52.240Z"
+    "sizeKb": 68.2,
+    "builtAt": "2026-11-18T11:56:44.627Z"
   },
   "rollup-plugin-node-resolve": {
     "entry": "@rollup/plugin-node-resolve",
-    "sizeKb": 144.8,
-    "builtAt": "2026-10-24T12:48:52.263Z"
+    "sizeKb": 145.4,
+    "builtAt": "2026-11-18T11:56:44.658Z"
   },
   "rollup-plugin-replace": {
     "entry": "@rollup/plugin-replace",
-    "sizeKb": 100.2,
-    "builtAt": "2026-10-24T12:48:52.281Z"
-  },
-  "rollup-plugin-copy": {
-    "entry": "rollup-plugin-copy",
-    "sizeKb": 392.9,
-    "builtAt": "2026-10-24T12:48:52.329Z"
+    "sizeKb": 100.3,
+    "builtAt": "2026-11-18T11:56:44.682Z"
   },
   "rollup-plugin-delete": {
     "entry": "rollup-plugin-delete",
-    "sizeKb": 234.3,
-    "builtAt": "2026-10-24T12:48:52.369Z"
+    "sizeKb": 245.7,
+    "builtAt": "2026-11-18T11:56:44.734Z"
   },
   "rollup-plugin-postcss": {
     "entry": "rollup-plugin-postcss",
-    "sizeKb": 3920,
-    "builtAt": "2026-10-24T12:48:52.640Z"
-  },
-  "rollup-plugin-tsconfig-paths": {
-    "entry": "rollup-plugin-tsconfig-paths",
-    "sizeKb": 18.4,
-    "builtAt": "2026-10-24T12:48:52.649Z"
+    "sizeKb": 3911.6,
+    "builtAt": "2026-11-18T11:56:45.161Z"
   },
   "babel-loader": {
     "entry": "babel-loader",
-    "sizeKb": 2689,
-    "builtAt": "2026-10-24T12:48:52.756Z"
+    "sizeKb": 2687.7,
+    "builtAt": "2026-11-18T11:56:45.285Z"
   },
   "css-loader": {
     "entry": "css-loader",
-    "sizeKb": 557.8,
-    "builtAt": "2026-10-24T12:48:52.796Z"
+    "sizeKb": 556.9,
+    "builtAt": "2026-11-18T11:56:45.363Z"
   },
   "mini-css-extract-plugin": {
     "entry": {
@@ -135,50 +125,36 @@
       "loader": "mini-css-extract-plugin/dist/loader.js"
     },
     "sizeKb": 0.4,
-    "builtAt": "2026-10-24T12:48:52.879Z"
+    "builtAt": "2026-11-18T11:56:45.480Z"
   },
   "copy-webpack-plugin": {
     "entry": "copy-webpack-plugin",
-    "sizeKb": 535.8,
-    "builtAt": "2026-10-24T12:48:52.934Z"
-  },
-  "tsconfig-paths-webpack-plugin": {
-    "entry": "tsconfig-paths-webpack-plugin",
-    "sizeKb": 140.8,
-    "builtAt": "2026-10-24T12:48:52.951Z"
+    "sizeKb": 535.4,
+    "builtAt": "2026-11-18T11:56:45.542Z"
   },
   "commander": {
     "entry": "commander",
     "sizeKb": 124,
-    "builtAt": "2026-10-24T12:48:52.966Z"
-  },
-  "dotenv": {
-    "entry": "dotenv",
-    "sizeKb": 13.2,
-    "builtAt": "2026-10-24T12:48:52.979Z"
-  },
-  "cross-env": {
-    "entry": "cross-env",
-    "sizeKb": 21.4,
-    "builtAt": "2026-10-24T12:48:52.996Z"
+    "builtAt": "2026-11-18T11:56:45.557Z"
   },
   "ws": {
     "entry": "ws",
     "sizeKb": 126.8,
-    "builtAt": "2026-10-24T12:48:53.011Z"
+    "builtAt": "2026-11-18T11:56:45.578Z"
   },
   "chokidar": {
     "entry": "chokidar",
     "sizeKb": 47.2,
-    "builtAt": "2026-10-24T12:48:53.025Z"
+    "builtAt": "2026-11-18T11:56:45.600Z"
   },
-  "esbuild-copy-static-files": {
-    "entry": "esbuild-copy-static-files",
-    "sizeKb": 2.4,
-    "builtAt": "2026-10-24T12:48:53.034Z"
+  "fast-glob": {
+    "entry": "fast-glob",
+    "sizeKb": 192.6,
+    "builtAt": "2026-11-18T11:56:45.643Z"
   },
-  "esbuild-tsconfig-paths": {
-    "sizeKb": 39.4,
-    "builtAt": "2026-10-24T12:48:53.050Z"
+  "resolve": {
+    "entry": "resolve",
+    "sizeKb": 43.6,
+    "builtAt": "2026-11-18T11:56:45.659Z"
   }
 }

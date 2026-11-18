@@ -1,7 +1,9 @@
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
-import glob from "fast-glob";
+import globModule from "#fast-glob";
+
+const glob = globModule?.default || globModule;
 import { transform } from "@swc/core";
 import { useClientRegex, useServerRegex } from "../../constants.js";
 import { hasServerFunctions, extractServerFunctions } from "../../core/transform-server-functions.js";

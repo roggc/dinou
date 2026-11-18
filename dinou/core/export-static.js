@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadEnvFiles } from "./env.js";
+import ensureVendorMode from "./ensure-vendor-mode.js";
 import {
   shouldExportDist3Entry,
   shouldExportDist2File,
@@ -13,6 +14,9 @@ import {
 
 const projectRoot = process.cwd();
 loadEnvFiles(projectRoot, { mode: "production" });
+if (!ensureVendorMode()) {
+  await new Promise(() => {});
+}
 const outDir = path.resolve(projectRoot, "out");
 const dist3Dir = path.resolve(projectRoot, ".dinou/dist3");
 const dist2Dir = path.resolve(projectRoot, ".dinou/dist2");

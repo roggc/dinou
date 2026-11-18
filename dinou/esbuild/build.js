@@ -22,7 +22,9 @@ import {
 import { createServerCssModulesPlugin } from "../core/server-css-modules-plugin.js";
 import { esbuildTsconfigAliasesPlugin } from "../core/tsconfig-aliases.js";
 import { loadEnvFiles, getEsbuildPublicEnvDefines } from "../core/env.js";
-import ensureVendorMode from "../core/ensure-vendor-mode.js";
+import ensureVendorMode, {
+  isUnvendorizedRequested,
+} from "../core/ensure-vendor-mode.js";
 loadEnvFiles(process.cwd(), { mode: "production" });
 if (!ensureVendorMode()) {
   await new Promise(() => {});
@@ -53,11 +55,6 @@ const frameworkEntryPoints = {
   serverFunctionProxy: path.resolve(
     __dirname,
     "../core/server-function-proxy.js"
-  ),
-  runtime: path.resolve(__dirname, "react-refresh/react-refresh-runtime.js"),
-  "react-refresh-entry": path.resolve(
-    __dirname,
-    "react-refresh/react-refresh-entry.js"
   ),
   dinouClientRedirect: absPathToClientRedirect,
   dinouLink: absPathToLink,
@@ -187,11 +184,25 @@ try {
   );
 
   // 🏗️ Pre-render static pages (SSG) at build time
-  const { execSync } = await import("node:child_process");
-  execSync(`"${process.execPath}" --conditions=react-server "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
+  const { spawnSync } = await import("node:child_process");
+  const ssgArgs = [
+    "--conditions=react-server",
+    ...(isUnvendorizedRequested() ? ["--conditions=unvendorized"] : []),
+    path.resolve(__dirname, "../core/run-ssg.js"),
+  ];
+  const ssgRes = spawnSync(process.execPath, ssgArgs, {
     stdio: "inherit",
-    env: { ...process.env, NODE_ENV: "production" },
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      DINOU_BUILD_TOOL: "esbuild",
+    },
   });
+  if (ssgRes.status !== 0) {
+    throw new Error(
+      `[Dinou SSG] Static generation exited with code ${ssgRes.status ?? 1}`
+    );
+  }
 } catch (err) {
   console.error("Error in build:", err);
   process.exit(1);

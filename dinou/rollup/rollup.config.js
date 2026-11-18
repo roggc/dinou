@@ -1,7 +1,8 @@
 import path from "node:path";
 import fs from "node:fs";
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { isUnvendorizedRequested } from "../core/ensure-vendor-mode.js";
 import esbuild from "esbuild";
 import postcss from "#rollup-plugin-postcss";
 import {
@@ -430,10 +431,24 @@ export default async function () {
             path.join(serverDir, "package.json"),
             JSON.stringify({ type: "module" }, null, 2)
           );
-          execSync(`"${process.execPath}" --conditions=react-server "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
+          const ssgArgs = [
+            "--conditions=react-server",
+            ...(isUnvendorizedRequested() ? ["--conditions=unvendorized"] : []),
+            path.resolve(__dirname, "../core/run-ssg.js"),
+          ];
+          const ssgRes = spawnSync(process.execPath, ssgArgs, {
             stdio: "inherit",
-            env: { ...process.env, NODE_ENV: "production" },
+            env: {
+              ...process.env,
+              NODE_ENV: "production",
+              DINOU_BUILD_TOOL: "rollup",
+            },
           });
+          if (ssgRes.status !== 0) {
+            throw new Error(
+              `[Dinou SSG] Static generation exited with code ${ssgRes.status ?? 1}`
+            );
+          }
         },
       },
     ],

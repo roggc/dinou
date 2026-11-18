@@ -1,6 +1,8 @@
 import { readFileSync } from "fs";
 import path from "node:path";
-import glob from "fast-glob";
+import globModule from "#fast-glob";
+
+const glob = globModule?.default || globModule;
 import { pathToFileURL } from "node:url";
 import parser from "#babel/parser";
 import traverse from "#babel/traverse";

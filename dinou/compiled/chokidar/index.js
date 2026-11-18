@@ -5,13 +5,13 @@ const require = __dinou_createRequire(import.meta.url);
 const __filename = __dinou_fileURLToPath(import.meta.url);
 const __dirname = __dinou_path.dirname(__filename);
 
-// ../node_modules/chokidar/esm/index.js
+// node_modules/chokidar/esm/index.js
 import { stat as statcb } from "fs";
 import { stat as stat3, readdir as readdir2 } from "fs/promises";
 import { EventEmitter } from "events";
 import * as sysPath2 from "path";
 
-// ../node_modules/readdirp/esm/index.js
+// node_modules/readdirp/esm/index.js
 import { stat, lstat, readdir, realpath } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { resolve as presolve, relative as prelative, join as pjoin, sep as psep } from "node:path";
@@ -230,7 +230,7 @@ function readdirp(root, options = {}) {
   return new ReaddirpStream(options);
 }
 
-// ../node_modules/chokidar/esm/handler.js
+// node_modules/chokidar/esm/handler.js
 import { watchFile, unwatchFile, watch as fs_watch } from "fs";
 import { open, stat as stat2, lstat as lstat2, realpath as fsrealpath } from "fs/promises";
 import * as sysPath from "path";
@@ -986,7 +986,7 @@ var NodeFsHandler = class {
   }
 };
 
-// ../node_modules/chokidar/esm/index.js
+// node_modules/chokidar/esm/index.js
 var SLASH = "/";
 var SLASH_SLASH = "//";
 var ONE_DOT = ".";

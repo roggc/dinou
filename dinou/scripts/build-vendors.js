@@ -1,12 +1,14 @@
 import esbuild from "esbuild";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DINOU_ROOT = path.resolve(__dirname, "..");
 const COMPILED_DIR = path.join(DINOU_ROOT, "compiled");
+const vendorRequire = createRequire(import.meta.url);
 
 const BANNER_JS = `
 import { createRequire as __dinou_createRequire } from "node:module";
@@ -47,18 +49,34 @@ const VENDORS = [
   { name: "rollup-plugin-json", entry: "@rollup/plugin-json" },
   { name: "rollup-plugin-node-resolve", entry: "@rollup/plugin-node-resolve" },
   { name: "rollup-plugin-replace", entry: "@rollup/plugin-replace" },
-  { name: "rollup-plugin-copy", entry: "rollup-plugin-copy" },
   { name: "rollup-plugin-delete", entry: "rollup-plugin-delete" },
   { name: "rollup-plugin-postcss", entry: "rollup-plugin-postcss" },
-  {
-    name: "rollup-plugin-tsconfig-paths",
-    entry: "rollup-plugin-tsconfig-paths",
-    external: ["typescript"]
-  },
 
   // --- Webpack Loaders & Plugins ---
   { name: "babel-loader", entry: "babel-loader" },
-  { name: "css-loader", entry: "css-loader" },
+  {
+    name: "css-loader",
+    entry: "css-loader",
+    postProcess: async (vendorOutdir) => {
+      const indexFile = path.join(vendorOutdir, "index.js");
+      let indexContent = await fs.readFile(indexFile, "utf8");
+      indexContent = indexContent.replaceAll(
+        '"../runtime/getUrl.js"',
+        '"./runtime/getUrl.js"'
+      );
+      await fs.writeFile(indexFile, indexContent, "utf8");
+
+      const cssLoaderEntry = vendorRequire.resolve("css-loader");
+      const srcRuntimeDir = path.join(path.dirname(cssLoaderEntry), "runtime");
+      const destRuntimeDir = path.join(vendorOutdir, "runtime");
+      await fs.cp(srcRuntimeDir, destRuntimeDir, { recursive: true });
+      await fs.writeFile(
+        path.join(destRuntimeDir, "package.json"),
+        JSON.stringify({ type: "commonjs" }, null, 2),
+        "utf8"
+      );
+    }
+  },
   {
     name: "mini-css-extract-plugin",
     entries: {
@@ -74,33 +92,27 @@ const VENDORS = [
         "const _loader = require_loader();\nexport default _loader;\nexport const pitch = _loader.pitch;\nexport const hotLoader = _loader.hotLoader;\n"
       );
       await fs.writeFile(loaderFile, content, "utf8");
+
+      const mcepEntry = vendorRequire.resolve("mini-css-extract-plugin");
+      const srcHmrDir = path.join(path.dirname(mcepEntry), "hmr");
+      const destHmrDir = path.join(vendorOutdir, "hmr");
+      await fs.cp(srcHmrDir, destHmrDir, { recursive: true });
+      await fs.writeFile(
+        path.join(destHmrDir, "package.json"),
+        JSON.stringify({ type: "commonjs" }, null, 2),
+        "utf8"
+      );
     },
     external: ["webpack", "schema-utils"]
   },
   { name: "copy-webpack-plugin", entry: "copy-webpack-plugin" },
-  {
-    name: "tsconfig-paths-webpack-plugin",
-    entry: "tsconfig-paths-webpack-plugin",
-    external: ["enhanced-resolve*", "typescript"]
-  },
 
-  // --- CLI & Utilities ---
+  // --- CLI & Core Utilities ---
   { name: "commander", entry: "commander" },
-  { name: "dotenv", entry: "dotenv" },
-  { name: "cross-env", entry: "cross-env" },
   { name: "ws", entry: "ws" },
   { name: "chokidar", entry: "chokidar" },
-  { name: "esbuild-copy-static-files", entry: "esbuild-copy-static-files" },
-  {
-    name: "esbuild-tsconfig-paths",
-    wrapper: `
-      import pkg from "@esbuild-plugins/tsconfig-paths";
-      const actual = pkg?.default || pkg;
-      export const TsconfigPathsPlugin = actual.TsconfigPathsPlugin || actual;
-      export default actual;
-    `,
-    external: ["typescript"]
-  }
+  { name: "fast-glob", entry: "fast-glob" },
+  { name: "resolve", entry: "resolve" }
 ];
 
 const GLOBAL_EXTERNALS = [
@@ -116,6 +128,18 @@ async function buildVendors() {
   console.log("🦖 [Dinou v9] Compiling vendor dependencies with esbuild...\n");
   const startTime = Date.now();
   await fs.mkdir(COMPILED_DIR, { recursive: true });
+
+  const activeVendorNames = new Set(VENDORS.map((v) => v.name));
+  const existingEntries = await fs.readdir(COMPILED_DIR, { withFileTypes: true });
+  for (const entry of existingEntries) {
+    if (entry.isDirectory() && !activeVendorNames.has(entry.name)) {
+      await fs.rm(path.join(COMPILED_DIR, entry.name), {
+        recursive: true,
+        force: true,
+      });
+      console.log(`  🧹 Removed obsolete vendor directory: ${entry.name}`);
+    }
+  }
 
   const manifest = {};
   let successCount = 0;
@@ -176,6 +200,9 @@ async function buildVendors() {
           banner: { js: BANNER_JS },
           external: externals
         });
+        if (vendor.postProcess) {
+          await vendor.postProcess(vendorOutdir);
+        }
       }
 
       const elapsed = Date.now() - t0;

@@ -1,15 +1,15 @@
-import "./helpers/patch-webpack-internals.js";
+import { loadReactServerWebpackPlugin } from "./helpers/patch-webpack-internals.js";
 import {
   loadEnvFiles,
   getWebpackPublicEnvDefines,
   getEsbuildPublicEnvDefines,
 } from "../core/env.js";
+import { isUnvendorizedRequested } from "../core/ensure-vendor-mode.js";
 import path from "node:path";
 import fs from "node:fs";
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import ReactServerWebpackPlugin from "react-server-dom-webpack/plugin";
 import CopyWebpackPlugin from "#copy-webpack-plugin";
 import MiniCssExtractPlugin from "#mini-css-extract-plugin";
 import presetReactModule from "#babel/preset-react";
@@ -140,8 +140,19 @@ export default async () => {
     assetInclude: activeAssetRegex,
     dinouConfig,
   });
-  const require = createRequire(import.meta.url);
-  const babelLoaderPath = require.resolve("#babel-loader");
+  const ReactServerWebpackPlugin = loadReactServerWebpackPlugin();
+  const dinouReq = createRequire(import.meta.url);
+  const projectReq = createRequire(path.resolve(process.cwd(), "package.json"));
+  const resolveLoader = (specifier) => {
+    try {
+      return dinouReq.resolve(specifier);
+    } catch {
+      return projectReq.resolve(specifier);
+    }
+  };
+  const babelLoaderPath = resolveLoader("#babel-loader");
+  const cssLoaderPath = resolveLoader("#css-loader");
+  const postcssLoaderPath = resolveLoader("postcss-loader");
   const unwrapBabel = (mod) => mod?.default ?? mod;
   const presetReact = unwrapBabel(presetReactModule);
   const presetTypescript = unwrapBabel(presetTypescriptModule);
@@ -182,10 +193,22 @@ export default async () => {
         path.join(serverDir, "package.json"),
         JSON.stringify({ type: "module" }, null, 2)
       );
-      execSync(`"${process.execPath}" --conditions=react-server "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
+      const ssgArgs = [
+        "--conditions=react-server",
+        ...(isUnvendorizedRequested() ? ["--conditions=unvendorized"] : []),
+        path.resolve(__dirname, "../core/run-ssg.js"),
+      ];
+      const ssgRes = spawnSync(process.execPath, ssgArgs, {
         stdio: "inherit",
-        env: { ...process.env, NODE_ENV: "production", DINOU_BUILD_TOOL: "webpack" },
+        env: {
+          ...process.env,
+          NODE_ENV: "production",
+          DINOU_BUILD_TOOL: "webpack",
+        },
       });
+      if (ssgRes.status !== 0) {
+        throw new Error(`[Dinou SSG] Static generation exited with code ${ssgRes.status ?? 1}`);
+      }
     }
   }
   const clientConfig = {
@@ -288,7 +311,7 @@ export default async () => {
               },
             },
             {
-              loader: "css-loader",
+              loader: cssLoaderPath,
               options: {
                 url: {
                   filter: (url) => !url.startsWith("/"),
@@ -303,7 +326,7 @@ export default async () => {
               },
             },
             {
-              loader: "postcss-loader",
+              loader: postcssLoaderPath,
               options: {
                 postcssOptions: {
                   config: false,
@@ -319,7 +342,7 @@ export default async () => {
           use: [
             MiniCssExtractPlugin.loader,
             {
-              loader: "css-loader",
+              loader: cssLoaderPath,
               options: {
                 url: {
                   filter: (url) => !url.startsWith("/"),
@@ -329,7 +352,7 @@ export default async () => {
               },
             },
             {
-              loader: "postcss-loader",
+              loader: postcssLoaderPath,
               options: {
                 postcssOptions: {
                   config: false,

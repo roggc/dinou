@@ -9,9 +9,9 @@ var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
 
-// ../node_modules/@babel/parser/lib/index.js
+// node_modules/@babel/parser/lib/index.js
 var require_lib = __commonJS({
-  "../node_modules/@babel/parser/lib/index.js"(exports) {
+  "node_modules/@babel/parser/lib/index.js"(exports) {
     Object.defineProperty(exports, "__esModule", {
       value: true
     });

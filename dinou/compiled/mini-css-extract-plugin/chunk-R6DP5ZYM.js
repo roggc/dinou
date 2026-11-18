@@ -15,9 +15,9 @@ var __commonJS = (cb, mod) => function __require2() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
 
-// ../node_modules/tapable/lib/Hook.js
+// node_modules/tapable/lib/Hook.js
 var require_Hook = __commonJS({
-  "../node_modules/tapable/lib/Hook.js"(exports, module) {
+  "node_modules/tapable/lib/Hook.js"(exports, module) {
     "use strict";
     var util = __require("util");
     var deprecateContext = util.deprecate(
@@ -203,9 +203,9 @@ var require_Hook = __commonJS({
   }
 });
 
-// ../node_modules/tapable/lib/HookCodeFactory.js
+// node_modules/tapable/lib/HookCodeFactory.js
 var require_HookCodeFactory = __commonJS({
-  "../node_modules/tapable/lib/HookCodeFactory.js"(exports, module) {
+  "node_modules/tapable/lib/HookCodeFactory.js"(exports, module) {
     "use strict";
     var HookCodeFactory = class {
       constructor(config) {
@@ -685,9 +685,9 @@ ${this.header()}${this.contentWithInterceptors({
   }
 });
 
-// ../node_modules/tapable/lib/AsyncParallelBailHook.js
+// node_modules/tapable/lib/AsyncParallelBailHook.js
 var require_AsyncParallelBailHook = __commonJS({
-  "../node_modules/tapable/lib/AsyncParallelBailHook.js"(exports, module) {
+  "node_modules/tapable/lib/AsyncParallelBailHook.js"(exports, module) {
     "use strict";
     var Hook = require_Hook();
     var HookCodeFactory = require_HookCodeFactory();
@@ -767,9 +767,9 @@ var require_AsyncParallelBailHook = __commonJS({
   }
 });
 
-// ../node_modules/tapable/lib/AsyncParallelHook.js
+// node_modules/tapable/lib/AsyncParallelHook.js
 var require_AsyncParallelHook = __commonJS({
-  "../node_modules/tapable/lib/AsyncParallelHook.js"(exports, module) {
+  "node_modules/tapable/lib/AsyncParallelHook.js"(exports, module) {
     "use strict";
     var Hook = require_Hook();
     var HookCodeFactory = require_HookCodeFactory();
@@ -799,9 +799,9 @@ var require_AsyncParallelHook = __commonJS({
   }
 });
 
-// ../node_modules/tapable/lib/AsyncSeriesBailHook.js
+// node_modules/tapable/lib/AsyncSeriesBailHook.js
 var require_AsyncSeriesBailHook = __commonJS({
-  "../node_modules/tapable/lib/AsyncSeriesBailHook.js"(exports, module) {
+  "node_modules/tapable/lib/AsyncSeriesBailHook.js"(exports, module) {
     "use strict";
     var Hook = require_Hook();
     var HookCodeFactory = require_HookCodeFactory();
@@ -839,9 +839,9 @@ ${next()}}
   }
 });
 
-// ../node_modules/tapable/lib/AsyncSeriesHook.js
+// node_modules/tapable/lib/AsyncSeriesHook.js
 var require_AsyncSeriesHook = __commonJS({
-  "../node_modules/tapable/lib/AsyncSeriesHook.js"(exports, module) {
+  "node_modules/tapable/lib/AsyncSeriesHook.js"(exports, module) {
     "use strict";
     var Hook = require_Hook();
     var HookCodeFactory = require_HookCodeFactory();
@@ -871,9 +871,9 @@ var require_AsyncSeriesHook = __commonJS({
   }
 });
 
-// ../node_modules/tapable/lib/AsyncSeriesLoopHook.js
+// node_modules/tapable/lib/AsyncSeriesLoopHook.js
 var require_AsyncSeriesLoopHook = __commonJS({
-  "../node_modules/tapable/lib/AsyncSeriesLoopHook.js"(exports, module) {
+  "node_modules/tapable/lib/AsyncSeriesLoopHook.js"(exports, module) {
     "use strict";
     var Hook = require_Hook();
     var HookCodeFactory = require_HookCodeFactory();
@@ -903,9 +903,9 @@ var require_AsyncSeriesLoopHook = __commonJS({
   }
 });
 
-// ../node_modules/tapable/lib/AsyncSeriesWaterfallHook.js
+// node_modules/tapable/lib/AsyncSeriesWaterfallHook.js
 var require_AsyncSeriesWaterfallHook = __commonJS({
-  "../node_modules/tapable/lib/AsyncSeriesWaterfallHook.js"(exports, module) {
+  "node_modules/tapable/lib/AsyncSeriesWaterfallHook.js"(exports, module) {
     "use strict";
     var Hook = require_Hook();
     var HookCodeFactory = require_HookCodeFactory();
@@ -948,9 +948,9 @@ var require_AsyncSeriesWaterfallHook = __commonJS({
   }
 });
 
-// ../node_modules/tapable/lib/HookMap.js
+// node_modules/tapable/lib/HookMap.js
 var require_HookMap = __commonJS({
-  "../node_modules/tapable/lib/HookMap.js"(exports, module) {
+  "node_modules/tapable/lib/HookMap.js"(exports, module) {
     "use strict";
     var util = __require("util");
     var defaultFactory = (key, hook) => hook;
@@ -1002,9 +1002,9 @@ var require_HookMap = __commonJS({
   }
 });
 
-// ../node_modules/tapable/lib/MultiHook.js
+// node_modules/tapable/lib/MultiHook.js
 var require_MultiHook = __commonJS({
-  "../node_modules/tapable/lib/MultiHook.js"(exports, module) {
+  "node_modules/tapable/lib/MultiHook.js"(exports, module) {
     "use strict";
     var MultiHook = class _MultiHook {
       constructor(hooks, name = void 0) {
@@ -1053,9 +1053,9 @@ var require_MultiHook = __commonJS({
   }
 });
 
-// ../node_modules/tapable/lib/SyncBailHook.js
+// node_modules/tapable/lib/SyncBailHook.js
 var require_SyncBailHook = __commonJS({
-  "../node_modules/tapable/lib/SyncBailHook.js"(exports, module) {
+  "node_modules/tapable/lib/SyncBailHook.js"(exports, module) {
     "use strict";
     var Hook = require_Hook();
     var HookCodeFactory = require_HookCodeFactory();
@@ -1100,9 +1100,9 @@ ${next()}}
   }
 });
 
-// ../node_modules/tapable/lib/SyncHook.js
+// node_modules/tapable/lib/SyncHook.js
 var require_SyncHook = __commonJS({
-  "../node_modules/tapable/lib/SyncHook.js"(exports, module) {
+  "node_modules/tapable/lib/SyncHook.js"(exports, module) {
     "use strict";
     var Hook = require_Hook();
     var HookCodeFactory = require_HookCodeFactory();
@@ -1139,9 +1139,9 @@ var require_SyncHook = __commonJS({
   }
 });
 
-// ../node_modules/tapable/lib/SyncLoopHook.js
+// node_modules/tapable/lib/SyncLoopHook.js
 var require_SyncLoopHook = __commonJS({
-  "../node_modules/tapable/lib/SyncLoopHook.js"(exports, module) {
+  "node_modules/tapable/lib/SyncLoopHook.js"(exports, module) {
     "use strict";
     var Hook = require_Hook();
     var HookCodeFactory = require_HookCodeFactory();
@@ -1178,9 +1178,9 @@ var require_SyncLoopHook = __commonJS({
   }
 });
 
-// ../node_modules/tapable/lib/SyncWaterfallHook.js
+// node_modules/tapable/lib/SyncWaterfallHook.js
 var require_SyncWaterfallHook = __commonJS({
-  "../node_modules/tapable/lib/SyncWaterfallHook.js"(exports, module) {
+  "node_modules/tapable/lib/SyncWaterfallHook.js"(exports, module) {
     "use strict";
     var Hook = require_Hook();
     var HookCodeFactory = require_HookCodeFactory();
@@ -1231,9 +1231,9 @@ var require_SyncWaterfallHook = __commonJS({
   }
 });
 
-// ../node_modules/tapable/lib/index.js
+// node_modules/tapable/lib/index.js
 var require_lib = __commonJS({
-  "../node_modules/tapable/lib/index.js"(exports, module) {
+  "node_modules/tapable/lib/index.js"(exports, module) {
     "use strict";
     module.exports.AsyncParallelBailHook = require_AsyncParallelBailHook();
     module.exports.AsyncParallelHook = require_AsyncParallelHook();
@@ -1251,9 +1251,9 @@ var require_lib = __commonJS({
   }
 });
 
-// ../node_modules/mini-css-extract-plugin/dist/plugin-options.json
+// node_modules/mini-css-extract-plugin/dist/plugin-options.json
 var require_plugin_options = __commonJS({
-  "../node_modules/mini-css-extract-plugin/dist/plugin-options.json"(exports, module) {
+  "node_modules/mini-css-extract-plugin/dist/plugin-options.json"(exports, module) {
     module.exports = {
       title: "Mini CSS Extract Plugin options",
       type: "object",
@@ -1336,9 +1336,9 @@ var require_plugin_options = __commonJS({
   }
 });
 
-// ../node_modules/mini-css-extract-plugin/dist/utils.js
+// node_modules/mini-css-extract-plugin/dist/utils.js
 var require_utils = __commonJS({
-  "../node_modules/mini-css-extract-plugin/dist/utils.js"(exports, module) {
+  "node_modules/mini-css-extract-plugin/dist/utils.js"(exports, module) {
     "use strict";
     var NativeModule = __require("module");
     var path = __require("path");
@@ -1611,9 +1611,9 @@ var require_utils = __commonJS({
   }
 });
 
-// ../node_modules/mini-css-extract-plugin/dist/index.js
+// node_modules/mini-css-extract-plugin/dist/index.js
 var require_dist = __commonJS({
-  "../node_modules/mini-css-extract-plugin/dist/index.js"(exports, module) {
+  "node_modules/mini-css-extract-plugin/dist/index.js"(exports, module) {
     var path = __require("path");
     var {
       validate
