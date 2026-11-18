@@ -893,7 +893,9 @@ async function readDist2Fallback(storage, key, knownTags = []) {
     const cwd =
       typeof process !== "undefined" && typeof process.cwd === "function"
         ? process.cwd()
-        : null;
+        : typeof Deno !== "undefined" && typeof Deno.cwd === "function"
+          ? Deno.cwd()
+          : null;
     if (!cwd) return null;
 
     const dist2Dir = path.resolve(cwd, ".dinou/dist2");

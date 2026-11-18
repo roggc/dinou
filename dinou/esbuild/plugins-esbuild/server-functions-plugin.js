@@ -43,7 +43,8 @@ export default function serverFunctionsPlugin({
       // 1. TRANSFORM FILES DURING BUILD
       build.onLoad({ filter: sfFilter }, async (args) => {
         const normPath = args.path.replace(/\\/g, "/");
-        if (normPath.includes("/node_modules/") || normPath.includes("/.dinou/")) return null;
+        const relFromRoot = path.relative(root, args.path).replace(/\\/g, "/");
+        if (normPath.includes("/node_modules/") || relFromRoot.startsWith(".dinou/")) return null;
 
         if (serverFilesSet) {
           const absNorm = normalizeNormPath(args.path);

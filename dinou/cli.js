@@ -442,6 +442,38 @@ for (const t of nodeTargets) {
   }
 }
 
+// --- NETLIFY FUNCTIONS V2 ---
+
+const buildNetlifySteps = (bundler) => [bundlerStep(bundler, "node")];
+
+program
+  .command("build:netlify")
+  .description("Build the app for Netlify Serverless Functions v2 (using esbuild)")
+  .action(() => {
+    runProdSteps(buildNetlifySteps("esbuild"));
+  });
+
+program
+  .command("build:netlify:esbuild")
+  .description("Build the app for Netlify Serverless Functions v2 with Esbuild")
+  .action(() => {
+    runProdSteps(buildNetlifySteps("esbuild"));
+  });
+
+program
+  .command("build:netlify:rollup")
+  .description("Build the app for Netlify Serverless Functions v2 with Rollup")
+  .action(() => {
+    runProdSteps(buildNetlifySteps("rollup"));
+  });
+
+program
+  .command("build:netlify:webpack")
+  .description("Build the app for Netlify Serverless Functions v2 with Webpack")
+  .action(() => {
+    runProdSteps(buildNetlifySteps("webpack"));
+  });
+
 // --- CLOUDFLARE WORKERS ---
 
 const buildCloudflareSteps = (bundler) => [

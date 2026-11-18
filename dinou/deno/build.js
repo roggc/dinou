@@ -728,8 +728,12 @@ const rscEntryContent = `// Auto-generated RSC Engine entry for Deno Deploy / Ed
 import "./env-setup.js";
 ${aotConfigPrelude}import "./route-modules.js";
 import * as edgeRenderer from "react-server-dom-webpack/server.edge";
+import { handleRequest as coreHandleRequest } from "${dinouDirSlash}/core/handler.js";
 globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
-export { handleRequest } from "${dinouDirSlash}/core/handler.js";
+export function handleRequest(request, platformContext) {
+  globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
+  return coreHandleRequest(request, platformContext);
+}
 `;
 const rscEntryPath = path.join(denoDir, "rsc-entry.js");
 fs.writeFileSync(rscEntryPath, rscEntryContent, "utf8");
@@ -740,7 +744,7 @@ import { renderRscStreamToHtmlStream } from "${dinouDirSlash}/core/edge-ssr.js";
 import { clientModules, ssrConsumerManifest } from "./ssr-client-manifest.js";
 
 const lowerMap = new Map();
-globalThis.__webpack_require__ = (id) => {
+const localWebpackRequire = (id) => {
   if (clientModules[id]) return clientModules[id];
   if (typeof id === "string") {
     if (lowerMap.size === 0) {
@@ -752,10 +756,12 @@ globalThis.__webpack_require__ = (id) => {
   console.error("[SSR Engine] Module not found in __webpack_require__:", id);
   return {};
 };
-globalThis.__webpack_require__.u = (chunkId) => "" + chunkId + ".js";
+localWebpackRequire.u = (chunkId) => "" + chunkId + ".js";
+globalThis.__webpack_require__ = localWebpackRequire;
 globalThis.__webpack_chunk_load__ = () => Promise.resolve();
 
 export async function renderHtml(rscStream, options = {}) {
+  globalThis.__webpack_require__ = localWebpackRequire;
   return renderRscStreamToHtmlStream(rscStream, ssrConsumerManifest, options);
 }
 `;

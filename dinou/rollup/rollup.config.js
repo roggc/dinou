@@ -32,11 +32,7 @@ import rollupMemoryPlugin from "./rollup-plugins/rollup-plugin-memory.js";
 import rollupSwcPlugin from "./rollup-plugins/rollup-plugin-swc.js";
 import { generateRouteTypes } from "../core/generate-route-types.js";
 import { rollupContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
-import {
-  getDinouConfig,
-  prepareDist1ServerEntries,
-} from "../core/load-dinou-config.js";
-import { resolveSetupFiles } from "../core/resolve-setup-files.js";
+import { getDinouConfig } from "../core/load-dinou-config.js";
 import {
   loadEnvFiles,
   getRollupPublicEnvReplacements,
@@ -75,6 +71,10 @@ export default async function () {
   if (!isDevelopment && shouldWriteToDisk) {
     try {
       fs.rmSync(path.resolve(process.cwd(), ".dinou/dist1"), {
+        recursive: true,
+        force: true,
+      });
+      fs.rmSync(path.resolve(process.cwd(), ".dinou/netlify"), {
         recursive: true,
         force: true,
       });
@@ -315,6 +315,29 @@ export default async function () {
       !isDevelopment && manifestGeneratorPlugin(),
       serverFunctionsPlugin({ serverFiles }),
       isDevelopment && rollupMemoryPlugin(),
+      !isDevelopment && {
+        name: "post-build-ssg",
+        closeBundle() {
+          const ssgArgs = [
+            "--conditions=react-server",
+            ...(isUnvendorizedRequested() ? ["--conditions=unvendorized"] : []),
+            path.resolve(__dirname, "../core/run-ssg.js"),
+          ];
+          const ssgRes = spawnSync(process.execPath, ssgArgs, {
+            stdio: "inherit",
+            env: {
+              ...process.env,
+              NODE_ENV: "production",
+              DINOU_BUILD_TOOL: "rollup",
+            },
+          });
+          if (ssgRes.status !== 0) {
+            throw new Error(
+              `[Dinou SSG] Static generation exited with code ${ssgRes.status ?? 1}`
+            );
+          }
+        },
+      },
     ].filter(Boolean),
     watch: {
       buildDelay: 100,
@@ -356,109 +379,5 @@ export default async function () {
     },
   };
 
-  if (isDevelopment) {
-    return clientConfig;
-  }
-
-  const setupFiles = resolveSetupFiles(process.cwd(), dinouConfig);
-  const { handlerEntry, netlifyEntry } = await prepareDist1ServerEntries({
-    projectRoot: process.cwd(),
-    setupFiles,
-    handlerPath: path.resolve(__dirname, "../core/handler.js"),
-    netlifyPath: path.resolve(__dirname, "../adapters/netlify.js"),
-  });
-
-  const serverConfig = {
-    input: {
-      handler: handlerEntry,
-      netlify: netlifyEntry,
-    },
-    output: {
-      dir: path.resolve(process.cwd(), ".dinou/dist1/server"),
-      format: "esm",
-      entryFileNames: "[name].js",
-      chunkFileNames: "[name]-[hash].js",
-      sourcemap: true,
-      banner: "import { createRequire as ___createRequire } from 'node:module'; import { fileURLToPath as ___fileURLToPath } from 'node:url'; import ___path from 'node:path'; const require = ___createRequire(import.meta.url || ___path.resolve(process.cwd(), 'package.json')); globalThis.__dinou_require__ = require; const __filename = import.meta.url ? ___fileURLToPath(import.meta.url) : ___path.resolve(process.cwd(), 'index.js'); const __dirname = ___path.dirname(__filename); process.env.NODE_ENV = process.env.NODE_ENV || 'production';",
-    },
-    external: [
-      "express",
-      "chokidar",
-      "dotenv",
-      "fsevents",
-      "@swc/core",
-      "@babel/core",
-      "esbuild",
-    ],
-    plugins: [
-      replace({
-        preventAssignment: true,
-        values: rollupExactEnv,
-      }),
-      json(),
-      rollupContextualDinouPlugin({ projectRoot: process.cwd() }),
-      dinouAssetPlugin({
-        include: activeAssetRegex,
-        dinouConfig,
-        projectRoot: process.cwd(),
-        emitFiles: false,
-      }),
-      rollupTsconfigAliasesPlugin({
-        projectRoot: process.cwd(),
-        assetRegex: activeAssetRegex,
-      }),
-      resolve({
-        extensions: [".mjs", ".js", ".jsx", ".ts", ".tsx", ".cjs", ".json"],
-        exportConditions: ["react-server", "node", "import"],
-        preferBuiltins: true,
-        browser: false,
-      }),
-      commonjs({
-        ignoreDynamicRequires: true,
-      }),
-      {
-        name: "post-build-server",
-        closeBundle() {
-          try {
-            fs.rmSync(path.resolve(process.cwd(), ".dinou/dist1/_entries"), {
-              recursive: true,
-              force: true,
-            });
-          } catch (e) {}
-          const serverDir = path.resolve(process.cwd(), ".dinou/dist1/server");
-          fs.mkdirSync(serverDir, { recursive: true });
-          fs.writeFileSync(
-            path.join(serverDir, "package.json"),
-            JSON.stringify({ type: "module" }, null, 2)
-          );
-          const ssgArgs = [
-            "--conditions=react-server",
-            ...(isUnvendorizedRequested() ? ["--conditions=unvendorized"] : []),
-            path.resolve(__dirname, "../core/run-ssg.js"),
-          ];
-          const ssgRes = spawnSync(process.execPath, ssgArgs, {
-            stdio: "inherit",
-            env: {
-              ...process.env,
-              NODE_ENV: "production",
-              DINOU_BUILD_TOOL: "rollup",
-            },
-          });
-          if (ssgRes.status !== 0) {
-            throw new Error(
-              `[Dinou SSG] Static generation exited with code ${ssgRes.status ?? 1}`
-            );
-          }
-        },
-      },
-    ],
-    onwarn(warning, warn) {
-      if (warning.code === "CIRCULAR_DEPENDENCY" || warning.code === "EVAL" || warning.code === "MODULE_LEVEL_DIRECTIVE") {
-        return;
-      }
-      warn(warning);
-    },
-  };
-
-  return [clientConfig, serverConfig];
+  return clientConfig;
 };

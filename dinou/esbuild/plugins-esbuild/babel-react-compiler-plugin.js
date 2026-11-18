@@ -35,13 +35,15 @@ export default function babelReactCompilerPlugin({ serverFiles = null } = {}) {
   return {
     name: "babel-react-compiler-bridge",
     setup(build) {
+      const root = build.initialOptions?.absWorkingDir || process.cwd();
       // Intercept user JS/TS/JSX/TSX modules across the entire client graph
       // (including child components and custom hooks without their own "use client" directive).
       build.onLoad({ filter: /\.[jt]sx?$/, namespace: "file" }, async (args) => {
         const normPath = args.path.replace(/\\/g, "/");
+        const relFromRoot = path.relative(root, args.path).replace(/\\/g, "/");
         if (
           normPath.includes("/node_modules/") ||
-          normPath.includes("/.dinou/")
+          relFromRoot.startsWith(".dinou/")
         ) {
           return null;
         }

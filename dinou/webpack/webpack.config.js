@@ -2,7 +2,6 @@ import { loadReactServerWebpackPlugin } from "./helpers/patch-webpack-internals.
 import {
   loadEnvFiles,
   getWebpackPublicEnvDefines,
-  getEsbuildPublicEnvDefines,
 } from "../core/env.js";
 import { isUnvendorizedRequested } from "../core/ensure-vendor-mode.js";
 import path from "node:path";
@@ -26,11 +25,7 @@ import {
   hasPublicStylesCss,
   warnPublicStylesCssCollision,
 } from "../core/copy-static-dirs.js";
-import {
-  getDinouConfig,
-  prepareDist1ServerEntries,
-} from "../core/load-dinou-config.js";
-import { resolveSetupFiles } from "../core/resolve-setup-files.js";
+import { getDinouConfig } from "../core/load-dinou-config.js";
 import {
   createWebpackTsconfigAliasesResolvePlugin,
   getWatchedTsconfigFiles,
@@ -122,6 +117,7 @@ export default async () => {
     cleanDir(outputDir);
     if (!isDevelopment) {
       cleanDir(path.resolve(process.cwd(), ".dinou/dist1"));
+      cleanDir(path.resolve(process.cwd(), ".dinou/netlify"));
     } else {
       const nodeDevDir = path.resolve(process.cwd(), ".dinou/node-dev");
       for (const stale of [
@@ -174,25 +170,11 @@ export default async () => {
     );
   }
 
-  let clientDone = false;
-  let serverDone = false;
   let ssgExecuted = false;
 
   function runPostBuild() {
-    if (clientDone && serverDone && !ssgExecuted) {
+    if (!ssgExecuted) {
       ssgExecuted = true;
-      try {
-        fs.rmSync(path.resolve(process.cwd(), ".dinou/dist1/_entries"), {
-          recursive: true,
-          force: true,
-        });
-      } catch (e) {}
-      const serverDir = path.resolve(process.cwd(), ".dinou/dist1/server");
-      fs.mkdirSync(serverDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(serverDir, "package.json"),
-        JSON.stringify({ type: "module" }, null, 2)
-      );
       const ssgArgs = [
         "--conditions=react-server",
         ...(isUnvendorizedRequested() ? ["--conditions=unvendorized"] : []),
@@ -691,8 +673,8 @@ export default async () => {
       isDevelopment && new WebpackMemoryPlugin(),
       !isDevelopment && {
         apply(compiler) {
-          compiler.hooks.done.tap("PostBuildClient", () => {
-            clientDone = true;
+          compiler.hooks.done.tap("PostBuildClient", (stats) => {
+            if (stats.hasErrors()) return;
             runPostBuild();
           });
         },
@@ -799,109 +781,5 @@ export default async () => {
       : {}),
   };
 
-  if (isDevelopment) {
-    return clientConfig;
-  }
-
-  const setupFiles = resolveSetupFiles(process.cwd(), dinouConfig);
-  const { handlerEntry, netlifyEntry } = await prepareDist1ServerEntries({
-    projectRoot: process.cwd(),
-    setupFiles,
-    handlerPath: path.resolve(__dirname, "../core/handler.js"),
-    netlifyPath: path.resolve(__dirname, "../adapters/netlify.js"),
-  });
-
-  const serverConfig = {
-    mode: "production",
-    target: "node20",
-    experiments: {
-      outputModule: true,
-    },
-    entry: {
-      handler: handlerEntry,
-      netlify: netlifyEntry,
-    },
-    output: {
-      path: path.resolve(process.cwd(), ".dinou/dist1/server"),
-      filename: "[name].js",
-      library: {
-        type: "module",
-      },
-      chunkFormat: "module",
-    },
-    resolve: {
-      conditionNames: ["react-server", "node", "import", "require"],
-      extensions: [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".json"],
-      extensionAlias: {
-        ".js": [".js", ".ts", ".tsx"],
-        ".jsx": [".jsx", ".tsx"],
-        ".mjs": [".mjs", ".mts"],
-        ".cjs": [".cjs", ".cts"],
-      },
-      alias: {
-        ...(isEjected ? { dinou: localDinouPath } : {}),
-      },
-      plugins: [
-        createWebpackTsconfigAliasesResolvePlugin({
-          projectRoot: process.cwd(),
-        }),
-      ],
-    },
-    externals: [
-      "express",
-      "chokidar",
-      "dotenv",
-      "fsevents",
-      "@swc/core",
-      "@babel/core",
-      "esbuild",
-    ],
-    module: {
-      exprContextCritical: false,
-      rules: [
-        {
-          test: activeAssetRegex,
-          type: "asset/resource",
-          generator: {
-            emit: false,
-            filename: (pathData) => {
-              const resourcePath =
-                pathData.module?.resourceResolveData?.path ||
-                pathData.module?.resource ||
-                pathData.filename;
-              return getAssetFileName(resourcePath, process.cwd());
-            },
-            publicPath: "/",
-          },
-        },
-      ],
-    },
-    ignoreWarnings: [
-      /Critical dependency/,
-    ],
-    plugins: [
-      webpackContextualDinouPlugin({ projectRoot: process.cwd() }),
-      new webpack.DefinePlugin(
-        getEsbuildPublicEnvDefines({
-          mode: "production",
-          defineProcessEnvObject: false,
-        })
-      ),
-      new webpack.BannerPlugin({
-        banner: "import { createRequire as ___createRequire } from 'node:module'; import { fileURLToPath as ___fileURLToPath } from 'node:url'; import ___path from 'node:path'; const require = ___createRequire(import.meta.url || ___path.resolve(process.cwd(), 'package.json')); globalThis.__dinou_require__ = require; const __filename = import.meta.url ? ___fileURLToPath(import.meta.url) : ___path.resolve(process.cwd(), 'index.js'); const __dirname = ___path.dirname(__filename); process.env.NODE_ENV = process.env.NODE_ENV || 'production';",
-        raw: true,
-        entryOnly: false,
-      }),
-      {
-        apply(compiler) {
-          compiler.hooks.done.tap("PostBuildServer", () => {
-            serverDone = true;
-            runPostBuild();
-          });
-        },
-      },
-    ],
-  };
-
-  return [clientConfig, serverConfig];
+  return clientConfig;
 };

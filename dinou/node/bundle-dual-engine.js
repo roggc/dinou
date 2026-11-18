@@ -30,6 +30,7 @@ import {
 import {
   getDinouConfig,
   findDinouConfigFile,
+  prepareDist1ServerEntries,
 } from "../core/load-dinou-config.js";
 import { resolveSetupFiles } from "../core/resolve-setup-files.js";
 import {
@@ -715,8 +716,17 @@ globalThis.__DINOU_CONFIG__ = __resolvedDinouCfg;
 import "./env-setup.mjs";
 ${aotConfigPrelude}import "./route-modules.mjs";
 import * as edgeRenderer from "react-server-dom-webpack/server.edge";
+import {
+  handleRequest as coreHandleRequest,
+  WebResponseBridge,
+  resolvePageFunctionsConfig,
+} from "${dinouDirSlash}/core/handler.js";
 globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
-export { handleRequest } from "${dinouDirSlash}/core/handler.js";
+export function handleRequest(request, platformContext) {
+  globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
+  return coreHandleRequest(request, platformContext);
+}
+export { WebResponseBridge, resolvePageFunctionsConfig };
 export { buildStaticPages, getStaticPaths, getStaticLayouts, getStaticMetadata } from "${dinouDirSlash}/core/build-static-pages.js";
 `;
   const rscEntryPath = path.join(nodeDir, "rsc-entry.mjs");
@@ -727,7 +737,7 @@ import { renderRscStreamToHtmlStream } from "${dinouDirSlash}/core/edge-ssr.js";
 import { clientModules, ssrConsumerManifest } from "./ssr-client-manifest.mjs";
 
 const lowerMap = new Map();
-globalThis.__webpack_require__ = (id) => {
+const localWebpackRequire = (id) => {
   if (clientModules[id]) return clientModules[id];
   if (typeof id === "string") {
     if (lowerMap.size === 0) {
@@ -739,10 +749,12 @@ globalThis.__webpack_require__ = (id) => {
   console.error("[SSR Engine] Module not found in __webpack_require__:", id);
   return {};
 };
-globalThis.__webpack_require__.u = (chunkId) => "" + chunkId + ".js";
+localWebpackRequire.u = (chunkId) => "" + chunkId + ".js";
+globalThis.__webpack_require__ = localWebpackRequire;
 globalThis.__webpack_chunk_load__ = () => Promise.resolve();
 
 export async function renderHtml(rscStream, options = {}) {
+  globalThis.__webpack_require__ = localWebpackRequire;
   return renderRscStreamToHtmlStream(rscStream, ssrConsumerManifest, options);
 }
 `;
@@ -780,9 +792,9 @@ export async function renderHtml(rscStream, options = {}) {
   const banner = {
     js: `import { createRequire as ___createRequire } from 'node:module';
 import { AsyncLocalStorage as ___AsyncLocalStorage } from 'node:async_hooks';
-const require = ___createRequire(import.meta.url || 'file:///server.js');
-const __dirname = '';
-const __filename = '';
+var require = ___createRequire(import.meta.url || 'file:///server.js');
+var __dirname = '';
+var __filename = '';
 globalThis.__dinou_require__ = require;
 if (typeof globalThis.AsyncLocalStorage === 'undefined' && typeof ___AsyncLocalStorage !== 'undefined') {
   globalThis.AsyncLocalStorage = ___AsyncLocalStorage;
@@ -1002,6 +1014,7 @@ var __webpack_chunk_load__ = function(chunkId) {
   });
 
   return {
+    projectRoot,
     nodeDir,
     rscEnginePath: rscOutfile,
     ssrEnginePath: ssrOutfile,
@@ -1022,4 +1035,263 @@ var __webpack_chunk_load__ = function(chunkId) {
   };
 }
 
-export default { bundleDualEngine };
+/**
+ * Compiles self-contained AOT Dual-Bundle server artifacts from Pass A (`rsc-engine.mjs`)
+ * and Pass B (`ssr-engine.mjs`) into:
+ * - `.dinou/netlify/functions/ssr.mjs` (dedicated single-function Netlify Functions v2 directory)
+ * - `.dinou/dist1/server/netlify.js` (backward-compatible Netlify Functions v2 bundle)
+ * - `.dinou/dist1/server/handler.js` (universal Web Standards `(Request) => Promise<Response>` bundle)
+ */
+export async function bundleServerAndNetlifyAdapters(engineResult) {
+  const {
+    projectRoot = process.cwd(),
+    nodeDir,
+    dinouDirSlash,
+    externalList,
+    commonAlias,
+    commonLoader,
+    serverAssetPlugin,
+    serverTsconfigAliasesPlugin,
+    isWebpackBuild,
+    setupFiles = [],
+    configFile,
+  } = engineResult;
+
+  const resolvedBuildTool = isWebpackBuild
+    ? "webpack"
+    : process.env.DINOU_BUILD_TOOL || "esbuild";
+
+  // Emit pre-transpiled dinou-server-bootstrap.mjs for --omit=dev config fallback if needed
+  if ((setupFiles && setupFiles.length > 0) || configFile) {
+    try {
+      await prepareDist1ServerEntries({
+        projectRoot,
+        setupFiles,
+        handlerPath: path.resolve(dinouDirSlash, "core/handler.js"),
+        netlifyPath: path.resolve(dinouDirSlash, "adapters/netlify.js"),
+      });
+      fs.rmSync(path.resolve(projectRoot, ".dinou/dist1/_entries"), {
+        recursive: true,
+        force: true,
+      });
+    } catch (e) {}
+  }
+
+  const configImportLine = configFile
+    ? `import * as __dinouPassCConfigMod from ${JSON.stringify(configFile.replace(/\\/g, "/"))};\nconst __bundledPassCConfig = (__dinouPassCConfigMod && __dinouPassCConfigMod.default) ? __dinouPassCConfigMod.default : (__dinouPassCConfigMod || { plugins: [] });\nglobalThis.__DINOU_AOT_CONFIG__ = __bundledPassCConfig;\nglobalThis.__DINOU_CONFIG__ = __bundledPassCConfig;\n`
+    : "";
+
+  const passCConfigAliasPlugin = configFile
+    ? {
+        name: "dinou-passc-config-alias",
+        setup(build) {
+          const normConfig = path.resolve(configFile).toLowerCase();
+          build.onResolve({ filter: /^dinou$/ }, (args) => {
+            if (
+              args.importer &&
+              path.resolve(args.importer).toLowerCase() === normConfig
+            ) {
+              return { path: path.resolve(dinouDirSlash, "core/config.js") };
+            }
+            return null;
+          });
+        },
+      }
+    : null;
+
+  const handlerEntryCode = `// Auto-generated Universal Web Standards Handler (AOT Dual-Bundle)
+import path from "node:path";
+import {
+  handleRequest as rawHandleRequest,
+  WebResponseBridge,
+  resolvePageFunctionsConfig,
+} from "./rsc-engine.mjs";
+import { renderHtml } from "./ssr-engine.mjs";
+import {
+  setStorageAdapter,
+  hasExplicitStorageAdapter,
+  FileSystemStorage,
+  MemoryStorage,
+} from "${dinouDirSlash}/core/storage-adapter.js";
+import { loadEnvFiles } from "${dinouDirSlash}/core/env.js";
+${configImportLine}
+const initialCwd =
+  typeof process !== "undefined" && typeof process.cwd === "function"
+    ? process.cwd()
+    : ".";
+try {
+  loadEnvFiles(initialCwd, { mode: "production" });
+} catch (e) {}
+
+if (typeof globalThis !== "undefined") {
+  globalThis.__DINOU_RUNTIME__ = "node-bundle";
+}
+
+let storageInitialized = false;
+
+function initHandlerStorage() {
+  if (!storageInitialized) {
+    if (!hasExplicitStorageAdapter()) {
+      try {
+        const cwd =
+          typeof process !== "undefined" && typeof process.cwd === "function"
+            ? process.cwd()
+            : ".";
+        setStorageAdapter(
+          new FileSystemStorage(path.resolve(cwd, ".dinou/dist2"))
+        );
+      } catch (e) {
+        setStorageAdapter(new MemoryStorage({ hydrateFromDisk: true }));
+      }
+    }
+    storageInitialized = true;
+  }
+}
+
+export async function handleRequest(request, platformContext = {}) {
+  initHandlerStorage();
+  const runtimeEnv =
+    platformContext?.env ||
+    (typeof process !== "undefined" && process.env ? process.env : {});
+  return rawHandleRequest(request, {
+    ...platformContext,
+    env: runtimeEnv,
+    runtime: platformContext?.runtime || "node-bundle",
+    renderHtmlStream: platformContext?.renderHtmlStream || renderHtml,
+  });
+}
+
+export { WebResponseBridge, resolvePageFunctionsConfig };
+export default handleRequest;
+`;
+
+  const netlifyEntryCode = `// Auto-generated Netlify Functions v2 Adapter (AOT Dual-Bundle)
+import { handleRequest as rawHandleRequest } from "./rsc-engine.mjs";
+import { renderHtml } from "./ssr-engine.mjs";
+import {
+  setStorageAdapter,
+  hasExplicitStorageAdapter,
+  MemoryStorage,
+} from "${dinouDirSlash}/core/storage-adapter.js";
+import { loadEnvFiles } from "${dinouDirSlash}/core/env.js";
+${configImportLine}
+const initialCwd =
+  typeof process !== "undefined" && typeof process.cwd === "function"
+    ? process.cwd()
+    : ".";
+try {
+  loadEnvFiles(initialCwd, { mode: "production" });
+} catch (e) {}
+
+if (typeof globalThis !== "undefined") {
+  globalThis.__DINOU_RUNTIME__ = "node-bundle";
+}
+
+let storageInitialized = false;
+
+function initNetlifyStorage() {
+  if (!storageInitialized) {
+    if (!hasExplicitStorageAdapter()) {
+      setStorageAdapter(new MemoryStorage({ hydrateFromDisk: true }));
+    }
+    storageInitialized = true;
+  }
+}
+
+export default async function netlifyHandler(request, context) {
+  initNetlifyStorage();
+  const baseEnv =
+    typeof process !== "undefined" && process.env ? process.env : {};
+  const runtimeEnv =
+    typeof globalThis !== "undefined" &&
+    globalThis.Netlify &&
+    globalThis.Netlify.env &&
+    typeof globalThis.Netlify.env.toObject === "function"
+      ? { ...baseEnv, ...globalThis.Netlify.env.toObject() }
+      : baseEnv;
+  return rawHandleRequest(request, {
+    env: runtimeEnv,
+    ctx: context || null,
+    runtime: "node-bundle",
+    renderHtmlStream: renderHtml,
+  });
+}
+
+export const config = {
+  path: "/*",
+  preferStatic: true,
+};
+`;
+
+  const handlerEntryPath = path.join(nodeDir, "dist1-handler-entry.mjs");
+  const netlifyEntryPath = path.join(nodeDir, "netlify-function-entry.mjs");
+  fs.writeFileSync(handlerEntryPath, handlerEntryCode, "utf8");
+  fs.writeFileSync(netlifyEntryPath, netlifyEntryCode, "utf8");
+
+  const dist1ServerDir = path.resolve(projectRoot, ".dinou/dist1/server");
+  const netlifyFunctionsDir = path.resolve(
+    projectRoot,
+    ".dinou/netlify/functions"
+  );
+  fs.rmSync(dist1ServerDir, { recursive: true, force: true });
+  fs.rmSync(netlifyFunctionsDir, { recursive: true, force: true });
+  fs.mkdirSync(dist1ServerDir, { recursive: true });
+  fs.mkdirSync(netlifyFunctionsDir, { recursive: true });
+
+  const sharedPassCOptions = {
+    bundle: true,
+    format: "esm",
+    target: "node20",
+    platform: "node",
+    jsx: "automatic",
+    mainFields: ["module", "main"],
+    conditions: ["node", "worker", "browser"],
+    external: externalList,
+    plugins: [
+      passCConfigAliasPlugin,
+      serverTsconfigAliasesPlugin,
+      serverAssetPlugin,
+    ].filter(Boolean),
+    alias: commonAlias,
+    loader: commonLoader,
+    define: {
+      "process.env.NODE_ENV": '"production"',
+      "process.env.DINOU_RUNTIME": '"node-bundle"',
+      "process.env.DINOU_BUILD_TOOL": JSON.stringify(resolvedBuildTool),
+    },
+    logLevel: "warning",
+  };
+
+  const dist1HandlerOut = path.join(dist1ServerDir, "handler.js");
+  const dist1NetlifyOut = path.join(dist1ServerDir, "netlify.js");
+  const netlifySsrOut = path.join(netlifyFunctionsDir, "ssr.mjs");
+
+  await Promise.all([
+    esbuild.build({
+      ...sharedPassCOptions,
+      entryPoints: [handlerEntryPath],
+      outfile: dist1HandlerOut,
+      sourcemap: true,
+    }),
+    esbuild.build({
+      ...sharedPassCOptions,
+      entryPoints: [netlifyEntryPath],
+      outfile: dist1NetlifyOut,
+      sourcemap: true,
+    }),
+  ]);
+
+  fs.copyFileSync(dist1NetlifyOut, netlifySsrOut);
+
+  const esmPkgJson = JSON.stringify({ type: "module" }, null, 2);
+  fs.writeFileSync(path.join(dist1ServerDir, "package.json"), esmPkgJson);
+  fs.writeFileSync(path.join(netlifyFunctionsDir, "package.json"), esmPkgJson);
+
+  return {
+    dist1HandlerOut,
+    dist1NetlifyOut,
+    netlifySsrOut,
+  };
+}
+
+export default { bundleDualEngine, bundleServerAndNetlifyAdapters };

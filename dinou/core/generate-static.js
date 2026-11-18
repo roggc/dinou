@@ -18,19 +18,25 @@ async function generateStatic() {
   if (existsSync(distFolder2)) {
     rmSync(distFolder2, { recursive: true, force: true });
   }
+  mkdirSync(distFolder2, { recursive: true });
 
   const { updateBuildProgress, clearBuildProgress, isTTY } = await import(
     "../node/terminal-status.js"
   );
 
-  // 1. Compile or ensure Dual-Bundle engines (Pass A & Pass B)
+  // 1. Compile or ensure Dual-Bundle engines (Pass A & Pass B) + Server/Netlify AOT Adapters
   updateBuildProgress("[SSG] Compiling Dual-Engine for static generation...");
-  const { bundleDualEngine } = await import("../node/bundle-dual-engine.js");
-  const { rscEnginePath, ssrEnginePath } = await bundleDualEngine({
+  const {
+    bundleDualEngine,
+    bundleServerAndNetlifyAdapters,
+  } = await import("../node/bundle-dual-engine.js");
+  const engineResult = await bundleDualEngine({
     isDev: false,
     projectRoot: process.cwd(),
     outDir: ".dinou/node",
   });
+  const { rscEnginePath, ssrEnginePath } = engineResult;
+  await bundleServerAndNetlifyAdapters(engineResult);
 
   // 2. Initialize FileSystemStorage for writing .dinou/dist2
   // Guard against dinou.config.* `storage` (e.g. RedisStorage) overriding FileSystemStorage during SSG build

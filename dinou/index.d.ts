@@ -1,6 +1,6 @@
 // dinou/index.d.ts
 import { IncomingHttpHeaders } from "http";
-import type { StorageAdapter } from "./server";
+import type { StorageAdapter } from "./server.js";
 
 // ====================================================================
 // REQUEST PROPERTIES TYPES (REQ)

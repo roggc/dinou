@@ -7,7 +7,10 @@ import fs from "node:fs";
 import path from "node:path";
 import esbuild from "esbuild";
 import { fileURLToPath } from "node:url";
-import { bundleDualEngine } from "./bundle-dual-engine.js";
+import {
+  bundleDualEngine,
+  bundleServerAndNetlifyAdapters,
+} from "./bundle-dual-engine.js";
 import { loadEnvFiles } from "../core/env.js";
 import ensureVendorMode from "../core/ensure-vendor-mode.js";
 loadEnvFiles(process.cwd(), { mode: "production" });
@@ -28,6 +31,7 @@ try {
     projectRoot,
     outDir: ".dinou/node",
   });
+  await bundleServerAndNetlifyAdapters(engineResult);
 
   const {
     dinouDirSlash,
@@ -222,7 +226,7 @@ export async function startServer(port = PORT, host = process.env.HOST || undefi
   return new Promise((resolve, reject) => {
     server.on("error", reject);
     server.listen(port, host, () => {
-      console.log(\`🚀 Dinou (Node.js AOT Dual-Bundle) server running on http://localhost:\${port}\`);
+      console.log(\`🚀 Dinou (Node.js AOT Dual-Bundle) server running on http://\${host || "localhost"}:\${port}\`);
       resolve(server);
     });
   });
