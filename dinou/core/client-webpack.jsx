@@ -304,6 +304,17 @@ const buildStaticExportRscUrl = (rawRouteOrKey, fileName) => {
   return existingQuery ? `${baseRscPath}?${existingQuery}` : baseRscPath;
 };
 
+const executeRscRedirect = (redirectUrl) => {
+  if (!redirectUrl || typeof window === "undefined") return;
+  if (/^https?:\/\//i.test(redirectUrl) || !window.__DINOU_ROUTER_NAVIGATE__) {
+    window.location.href = redirectUrl;
+    return;
+  }
+  if (getCurrentRoute() !== redirectUrl) {
+    window.__DINOU_ROUTER_NAVIGATE__(redirectUrl, { replace: true });
+  }
+};
+
 const getPagePayload = (route, isPrefetch = false, version = 0) => {
   const url = route.split("::")[0];
   if (pageCache.has(url)) {
@@ -358,13 +369,12 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
       }).then((res) => {
         if (res.headers.has("x-rsc-redirect")) {
           const redirectUrl = res.headers.get("x-rsc-redirect");
+          const isCurrentTarget =
+            typeof window !== "undefined" &&
+            getCurrentRoute() === url.split("#")[0];
           pageCache.delete(url);
-          if (!isPrefetch) {
-            if (window.__DINOU_ROUTER_NAVIGATE__) {
-              window.__DINOU_ROUTER_NAVIGATE__(redirectUrl, { replace: true });
-            } else {
-              window.location.href = redirectUrl;
-            }
+          if (isCurrentTarget && redirectUrl) {
+            executeRscRedirect(redirectUrl);
           }
           return new Promise(() => {});
         }
@@ -450,6 +460,17 @@ const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
         cache: staticExport && !version ? "default" : "no-store",
       }).then(
         (res) => {
+          if (res.headers.has("x-rsc-redirect")) {
+            const redirectUrl = res.headers.get("x-rsc-redirect");
+            const isCurrentLayout =
+              typeof window !== "undefined" &&
+              getLayoutKey(window.location.pathname) === layoutKey;
+            layoutCache.delete(cacheKey);
+            if (isCurrentLayout && redirectUrl) {
+              executeRscRedirect(redirectUrl);
+            }
+            return new Promise(() => {});
+          }
           if (isStaticExportUnloading()) {
             return new Promise(() => {});
           }

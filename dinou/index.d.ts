@@ -95,7 +95,12 @@ export interface RequestContextStore {
     query: Query;
     cookies: Cookies;
     headers: Headers;
+    /** Normalized logical route pathname (e.g. `"/dashboard"` even on internal `/____rsc_*` SPA fetches). */
     path: string;
+    /** Raw wire HTTP URL pathname before RSC prefix normalization (e.g. `"/____rsc_page____/dashboard"`). */
+    rawPath?: string;
+    /** Whether the current HTTP request is an internal React Server Components wire fetch (`/____rsc_*`). */
+    isRscRequest?: boolean;
     method: "GET" | "POST" | string;
     env: DinouEnv;
     ctx?: any;
@@ -131,7 +136,7 @@ export interface RequestContextStore {
 export type NodeMiddleware = (
   req: import("node:http").IncomingMessage,
   res: import("node:http").ServerResponse,
-  next: () => void
+  next: (err?: any) => void
 ) => void | Promise<void>;
 
 export interface ServerHookContext {

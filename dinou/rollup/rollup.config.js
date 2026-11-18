@@ -31,7 +31,11 @@ import rollupMemoryPlugin from "./rollup-plugins/rollup-plugin-memory.js";
 import rollupSwcPlugin from "./rollup-plugins/rollup-plugin-swc.js";
 import { generateRouteTypes } from "../core/generate-route-types.js";
 import { rollupContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
-import { getDinouConfig } from "../core/load-dinou-config.js";
+import {
+  getDinouConfig,
+  prepareDist1ServerEntries,
+} from "../core/load-dinou-config.js";
+import { resolveSetupFiles } from "../core/resolve-setup-files.js";
 import {
   loadEnvFiles,
   getRollupPublicEnvReplacements,
@@ -67,6 +71,14 @@ export default async function () {
     getRollupPublicEnvReplacements({ mode: envMode });
   const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
   const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDevelopment;
+  if (!isDevelopment && shouldWriteToDisk) {
+    try {
+      fs.rmSync(path.resolve(process.cwd(), ".dinou/dist1"), {
+        recursive: true,
+        force: true,
+      });
+    } catch (e) {}
+  }
   const serverFiles = new Set();
   const dinouConfig = await getDinouConfig();
   const enableReactCompiler = dinouConfig?.reactCompiler !== false;
@@ -175,7 +187,7 @@ export default async function () {
                   ".dinou/node-dev/server-functions-manifest.json",
                   ".dinou/node-dev/manifest.json",
                 ]
-              : [".dinou/dist1/*"]),
+              : []),
           ],
           runOnce: true,
           hook: "buildStart",
@@ -347,10 +359,18 @@ export default async function () {
     return clientConfig;
   }
 
+  const setupFiles = resolveSetupFiles(process.cwd(), dinouConfig);
+  const { handlerEntry, netlifyEntry } = await prepareDist1ServerEntries({
+    projectRoot: process.cwd(),
+    setupFiles,
+    handlerPath: path.resolve(__dirname, "../core/handler.js"),
+    netlifyPath: path.resolve(__dirname, "../adapters/netlify.js"),
+  });
+
   const serverConfig = {
     input: {
-      handler: path.resolve(__dirname, "../core/handler.js"),
-      netlify: path.resolve(__dirname, "../adapters/netlify.js"),
+      handler: handlerEntry,
+      netlify: netlifyEntry,
     },
     output: {
       dir: path.resolve(process.cwd(), ".dinou/dist1/server"),
@@ -398,6 +418,12 @@ export default async function () {
       {
         name: "post-build-server",
         closeBundle() {
+          try {
+            fs.rmSync(path.resolve(process.cwd(), ".dinou/dist1/_entries"), {
+              recursive: true,
+              force: true,
+            });
+          } catch (e) {}
           const serverDir = path.resolve(process.cwd(), ".dinou/dist1/server");
           fs.mkdirSync(serverDir, { recursive: true });
           fs.writeFileSync(

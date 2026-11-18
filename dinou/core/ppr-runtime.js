@@ -884,8 +884,18 @@ async function handlePprResume({
   }
 
   const headers = new Headers(bridge.headers);
+  if (Array.isArray(bridge.cookies)) {
+    for (const c of bridge.cookies) {
+      headers.append("Set-Cookie", c);
+    }
+  }
   headers.set("Content-Type", "text/html; charset=utf-8");
-  headers.set("Cache-Control", "no-store, no-cache, must-revalidate, no-transform");
+  const existingCacheControl = headers.get("Cache-Control");
+  if (!existingCacheControl) {
+    headers.set("Cache-Control", "no-store, no-cache, must-revalidate, no-transform");
+  } else if (!/\bno-transform\b/i.test(existingCacheControl)) {
+    headers.set("Cache-Control", `${existingCacheControl}, no-transform`);
+  }
   if (!headers.has("Content-Encoding")) {
     headers.set("Content-Encoding", "identity");
   }
@@ -894,7 +904,9 @@ async function handlePprResume({
   }
 
   return new Response(readable, {
-    status: metadata?.status || 200,
+    status: bridge._explicitStatusSet
+      ? bridge.statusCode
+      : metadata?.status || 200,
     headers,
     encodeBody: "manual",
   });

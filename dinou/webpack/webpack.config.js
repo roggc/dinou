@@ -26,7 +26,11 @@ import {
   hasPublicStylesCss,
   warnPublicStylesCssCollision,
 } from "../core/copy-static-dirs.js";
-import { getDinouConfig } from "../core/load-dinou-config.js";
+import {
+  getDinouConfig,
+  prepareDist1ServerEntries,
+} from "../core/load-dinou-config.js";
+import { resolveSetupFiles } from "../core/resolve-setup-files.js";
 import {
   createWebpackTsconfigAliasesResolvePlugin,
   getWatchedTsconfigFiles,
@@ -166,6 +170,12 @@ export default async () => {
   function runPostBuild() {
     if (clientDone && serverDone && !ssgExecuted) {
       ssgExecuted = true;
+      try {
+        fs.rmSync(path.resolve(process.cwd(), ".dinou/dist1/_entries"), {
+          recursive: true,
+          force: true,
+        });
+      } catch (e) {}
       const serverDir = path.resolve(process.cwd(), ".dinou/dist1/server");
       fs.mkdirSync(serverDir, { recursive: true });
       fs.writeFileSync(
@@ -770,6 +780,14 @@ export default async () => {
     return clientConfig;
   }
 
+  const setupFiles = resolveSetupFiles(process.cwd(), dinouConfig);
+  const { handlerEntry, netlifyEntry } = await prepareDist1ServerEntries({
+    projectRoot: process.cwd(),
+    setupFiles,
+    handlerPath: path.resolve(__dirname, "../core/handler.js"),
+    netlifyPath: path.resolve(__dirname, "../adapters/netlify.js"),
+  });
+
   const serverConfig = {
     mode: "production",
     target: "node20",
@@ -777,8 +795,8 @@ export default async () => {
       outputModule: true,
     },
     entry: {
-      handler: path.resolve(__dirname, "../core/handler.js"),
-      netlify: path.resolve(__dirname, "../adapters/netlify.js"),
+      handler: handlerEntry,
+      netlify: netlifyEntry,
     },
     output: {
       path: path.resolve(process.cwd(), ".dinou/dist1/server"),

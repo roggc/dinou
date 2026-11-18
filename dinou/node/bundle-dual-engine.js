@@ -27,7 +27,10 @@ import {
   isSupportedClientModule,
   scanProjectDependenciesForClientComponents,
 } from "../core/scan-dependency-components.js";
-import { getDinouConfig } from "../core/load-dinou-config.js";
+import {
+  getDinouConfig,
+  findDinouConfigFile,
+} from "../core/load-dinou-config.js";
 import { resolveSetupFiles } from "../core/resolve-setup-files.js";
 import {
   loadEnvFiles,
@@ -49,6 +52,7 @@ export async function bundleDualEngine(options = {}) {
   fs.mkdirSync(nodeDir, { recursive: true });
 
   const dinouConfig = await getDinouConfig(projectRoot);
+  const configFile = findDinouConfigFile(projectRoot);
   const setupFiles = resolveSetupFiles(projectRoot, dinouConfig);
   if (setupFiles.length > 0) {
     console.log(`  🔌 [Dinou Setup] Active setup files (${setupFiles.length}):`, setupFiles.map((f) => path.relative(projectRoot, f)).join(", "));
@@ -345,11 +349,21 @@ export async function bundleDualEngine(options = {}) {
   if (!isWebpackBuild && Object.keys(parsedClientManifest).length > 0) {
     const imports = {};
     const moduleBasePath = pathToFileURL(projectRoot).href + "/";
+    const moduleBasePathLower = moduleBasePath.replace(
+      /^file:\/\/\/([a-zA-Z]):/,
+      (_, d) => `file:///${d.toLowerCase()}:`
+    );
+    const moduleBasePathUpper = moduleBasePath.replace(
+      /^file:\/\/\/([a-zA-Z]):/,
+      (_, d) => `file:///${d.toUpperCase()}:`
+    );
 
     for (const [key, val] of Object.entries(parsedClientManifest)) {
       let specifier = key;
-      if (specifier.startsWith(moduleBasePath)) {
-        specifier = specifier.slice(moduleBasePath.length);
+      if (specifier.startsWith(moduleBasePathUpper)) {
+        specifier = specifier.slice(moduleBasePathUpper.length);
+      } else if (specifier.startsWith(moduleBasePathLower)) {
+        specifier = specifier.slice(moduleBasePathLower.length);
       }
       const hashIdx = specifier.indexOf("#");
       if (hashIdx !== -1) {
@@ -688,9 +702,18 @@ globalThis.__DINOU_VFS__ = ${JSON.stringify(vfsSnapshot)};
   fs.writeFileSync(ssrClientManifestPath, ssrManifestCode, "utf8");
 
   // 6. Entry Files Generation
+  const aotConfigPrelude =
+    !isDev && configFile
+      ? `import * as __dinouConfigMod from ${JSON.stringify(configFile.replace(/\\/g, "/"))};
+const __resolvedDinouCfg = (__dinouConfigMod && __dinouConfigMod.default) ? __dinouConfigMod.default : (__dinouConfigMod || { plugins: [] });
+globalThis.__DINOU_AOT_CONFIG__ = __resolvedDinouCfg;
+globalThis.__DINOU_CONFIG__ = __resolvedDinouCfg;
+`
+      : "";
+
   const rscEntryContent = `// Auto-generated RSC Engine entry for Node.js (Dual-Bundle)
 import "./env-setup.mjs";
-import "./route-modules.mjs";
+${aotConfigPrelude}import "./route-modules.mjs";
 import * as edgeRenderer from "react-server-dom-webpack/server.edge";
 globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
 export { handleRequest } from "${dinouDirSlash}/core/handler.js";
@@ -741,6 +764,7 @@ export async function renderHtml(rscStream, options = {}) {
 
   const commonAlias = {
     "dinou/config": path.resolve(dinouDir, "core/config.js"),
+    "dinou/server": path.resolve(dinouDir, "server.js"),
     dinou: dinouDir,
   };
   const commonLoader = {
@@ -919,7 +943,7 @@ var __webpack_chunk_load__ = function(chunkId) {
     ? "webpack"
     : process.env.DINOU_BUILD_TOOL || "esbuild";
 
-  // Pass A: RSC Engine
+  // Pass A: RSC Engine (executes setupFiles once at Line 1 before Pass B & Pass C)
   await esbuild.build({
     entryPoints: [rscEntryPath],
     outfile: rscOutfile,
@@ -931,7 +955,7 @@ var __webpack_chunk_load__ = function(chunkId) {
     conditions: ["node", "worker", "react-server", "style"],
     external: externalList,
     banner,
-    inject: setupFiles,
+    inject: !isDev && setupFiles.length > 0 ? setupFiles : undefined,
     plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverTsconfigAliasesPlugin, clientReferencesPlugin, serverReferencesPlugin, serverCssModulesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
@@ -959,7 +983,6 @@ var __webpack_chunk_load__ = function(chunkId) {
     conditions: ["node", "worker", "browser", "style"],
     external: externalList,
     banner,
-    inject: setupFiles,
     plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverTsconfigAliasesPlugin, serverReferencesPluginSsr, serverCssModulesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
@@ -995,6 +1018,7 @@ var __webpack_chunk_load__ = function(chunkId) {
     serverTsconfigAliasesPlugin,
     isWebpackBuild,
     setupFiles,
+    configFile,
   };
 }
 

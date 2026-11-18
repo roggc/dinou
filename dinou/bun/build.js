@@ -26,7 +26,10 @@ import {
   isSupportedClientModule,
   scanProjectDependenciesForClientComponents,
 } from "../core/scan-dependency-components.js";
-import { getDinouConfig } from "../core/load-dinou-config.js";
+import {
+  getDinouConfig,
+  findDinouConfigFile,
+} from "../core/load-dinou-config.js";
 import { resolveSetupFiles } from "../core/resolve-setup-files.js";
 import {
   esbuildContextualDinouPlugin,
@@ -52,6 +55,7 @@ const bunDir = path.resolve(projectRoot, ".dinou/bun");
 fs.mkdirSync(bunDir, { recursive: true });
 
 const dinouConfig = await getDinouConfig(projectRoot);
+const configFile = findDinouConfigFile(projectRoot);
 const setupFiles = resolveSetupFiles(projectRoot, dinouConfig);
 if (setupFiles.length > 0) {
   console.log(`  🔌 [Dinou Setup] Active setup files (${setupFiles.length}): ${setupFiles.map((f) => path.basename(f)).join(", ")}`);
@@ -368,11 +372,21 @@ let importMapHtml = "";
 if (!isWebpackBuild && Object.keys(parsedClientManifest).length > 0) {
   const imports = {};
   const moduleBasePath = pathToFileURL(projectRoot).href + "/";
+  const moduleBasePathLower = moduleBasePath.replace(
+    /^file:\/\/\/([a-zA-Z]):/,
+    (_, d) => `file:///${d.toLowerCase()}:`
+  );
+  const moduleBasePathUpper = moduleBasePath.replace(
+    /^file:\/\/\/([a-zA-Z]):/,
+    (_, d) => `file:///${d.toUpperCase()}:`
+  );
 
   for (const [key, val] of Object.entries(parsedClientManifest)) {
     let specifier = key;
-    if (specifier.startsWith(moduleBasePath)) {
-      specifier = specifier.slice(moduleBasePath.length);
+    if (specifier.startsWith(moduleBasePathUpper)) {
+      specifier = specifier.slice(moduleBasePathUpper.length);
+    } else if (specifier.startsWith(moduleBasePathLower)) {
+      specifier = specifier.slice(moduleBasePathLower.length);
     }
     const hashIdx = specifier.indexOf("#");
     if (hashIdx !== -1) {
@@ -702,9 +716,16 @@ fs.writeFileSync(ssrClientManifestPath, ssrManifestCode, "utf8");
 // Entry Files Generation
 // ====================================================================
 // 1. RSC Engine Entry
+const aotConfigPrelude = configFile
+  ? `import * as __dinouConfigMod from ${JSON.stringify(configFile.replace(/\\/g, "/"))};
+const __resolvedDinouCfg = (__dinouConfigMod && __dinouConfigMod.default) ? __dinouConfigMod.default : (__dinouConfigMod || { plugins: [] });
+globalThis.__DINOU_AOT_CONFIG__ = __resolvedDinouCfg;
+globalThis.__DINOU_CONFIG__ = __resolvedDinouCfg;
+`
+  : "";
 const rscEntryContent = `// Auto-generated RSC Engine entry for Bun (Dual-Bundle)
 import "./env-setup.js";
-import "./route-modules.js";
+${aotConfigPrelude}import "./route-modules.js";
 import * as edgeRenderer from "react-server-dom-webpack/server.edge";
 globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
 export { handleRequest } from "${dinouDirSlash}/core/handler.js";
@@ -898,6 +919,7 @@ const externalList = [
 
 const commonAlias = {
   "dinou/config": path.resolve(dinouDir, "core/config.js"),
+  "dinou/server": path.resolve(dinouDir, "server.js"),
   dinou: dinouDir,
 };
 
@@ -1137,7 +1159,6 @@ try {
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
-    inject: setupFiles.length > 0 ? setupFiles : undefined,
     define: getEsbuildPublicEnvDefines({
       mode: "production",
       defineProcessEnvObject: true,
@@ -1168,9 +1189,9 @@ try {
     external: externalList,
     banner,
     plugins: [serverTsconfigAliasesPlugin, serverAssetPlugin],
-    inject: setupFiles.length > 0 ? setupFiles : undefined,
     alias: commonAlias,
     loader: commonLoader,
+    jsx: "automatic",
     define: {
       "process.env.NODE_ENV": '"production"',
       "process.env.DINOU_RUNTIME": '"bun-bundle"',

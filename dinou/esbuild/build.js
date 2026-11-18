@@ -10,7 +10,11 @@ import path from "node:path";
 import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-module.js";
 import { generateRouteTypes } from "../core/generate-route-types.js";
 import { esbuildContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
-import { getDinouConfig } from "../core/load-dinou-config.js";
+import {
+  getDinouConfig,
+  prepareDist1ServerEntries,
+} from "../core/load-dinou-config.js";
+import { resolveSetupFiles } from "../core/resolve-setup-files.js";
 import {
   createServerAssetPlugin,
   getAssetExtensionsInfo,
@@ -126,15 +130,23 @@ try {
 
   // 🚀 Server & Adapter Pre-bundling with react-server condition
   console.log("⚡ [esbuild] Pre-bundling server handler and adapters (conditions: ['react-server'])...");
+  const setupFiles = resolveSetupFiles(process.cwd(), dinouConfig);
+  const { handlerEntry, netlifyEntry } = await prepareDist1ServerEntries({
+    projectRoot: process.cwd(),
+    setupFiles,
+    handlerPath: path.resolve(__dirname, "../core/handler.js"),
+    netlifyPath: path.resolve(__dirname, "../adapters/netlify.js"),
+  });
   await esbuild.build({
     entryPoints: {
-      handler: path.resolve(__dirname, "../core/handler.js"),
-      netlify: path.resolve(__dirname, "../adapters/netlify.js"),
+      handler: handlerEntry,
+      netlify: netlifyEntry,
     },
     bundle: true,
     platform: "node",
     target: "node20",
     format: "esm",
+    jsx: "automatic",
     conditions: ["react-server", "node", "import", "style"],
     outdir: ".dinou/dist1/server",
     loader: { ".css": "empty" },
@@ -164,6 +176,10 @@ try {
       createServerAssetPlugin({ projectRoot: process.cwd(), dinouConfig }),
     ],
     sourcemap: true,
+  });
+  await fs.rm(path.resolve(process.cwd(), ".dinou/dist1/_entries"), {
+    recursive: true,
+    force: true,
   });
   await fs.writeFile(
     path.resolve(process.cwd(), ".dinou/dist1/server/package.json"),

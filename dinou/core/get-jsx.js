@@ -26,8 +26,12 @@ import {
 import { getContext } from "./request-context.js";
 import { createRequire } from "node:module";
 
-const require = createRequire(import.meta.url);
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
+let require = null;
+let currentDir = ".";
+try {
+  require = createRequire(import.meta.url);
+  currentDir = path.dirname(fileURLToPath(import.meta.url));
+} catch (e) {}
 
 function createDinouPageSlotElement() {
   let DinouPageSlot = RawDinouPageSlot;

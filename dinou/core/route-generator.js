@@ -36,7 +36,7 @@ function generateRouteModulesCode(projectRoot = process.cwd(), relativeImportBas
   const srcDir = path.resolve(projectRoot, "src");
   const files = collectSourceFiles(srcDir);
 
-  const configFilenames = ["dinou.config.js", "dinou.config.mjs", "dinou.config.cjs", "dinou.config.ts"];
+  const configFilenames = ["dinou.config.ts", "dinou.config.mjs", "dinou.config.js", "dinou.config.cjs"];
   let foundConfig = null;
   for (const cf of configFilenames) {
     if (fs.existsSync(path.resolve(projectRoot, cf))) {
@@ -89,7 +89,9 @@ function generateRouteModulesCode(projectRoot = process.cwd(), relativeImportBas
   lines.push("  };");
   if (foundConfig) {
     lines.push("  const resolvedConfig = (dinouConfigModule && dinouConfigModule.default) ? dinouConfigModule.default : dinouConfigModule;");
-    lines.push("  globalThis.__DINOU_CONFIG__ = resolvedConfig;");
+    lines.push("  if (!globalThis.__DINOU_DEV__ && (typeof process === 'undefined' || !process.env || process.env.DINOU_DEV !== 'true')) {");
+    lines.push("    globalThis.__DINOU_CONFIG__ = resolvedConfig;");
+    lines.push("  }");
   }
   lines.push("}");
   lines.push("");

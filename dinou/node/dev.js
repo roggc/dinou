@@ -38,8 +38,16 @@ import {
   printReadyBanner,
 } from "./terminal-status.js";
 import { resolveDevPorts } from "./port-selector.js";
-import { getDinouConfig } from "../core/load-dinou-config.js";
+import {
+  getDinouConfig,
+  clearDinouConfigCache,
+  isWatchedDinouConfigOrSetupFile,
+} from "../core/load-dinou-config.js";
 import { resolveSetupFiles } from "../core/resolve-setup-files.js";
+import {
+  runNodeMiddlewares,
+  applyConfigureServerPlugins,
+} from "../core/node-middleware-runner.js";
 import { generateRouteModulesCode, generateRouteTypes } from "../core/route-generator.js";
 import { discoverLayoutsFromFs } from "../core/discover-layouts.js";
 import { esbuildContextualDinouPlugin, isUnderscoreEscapedSrcPath } from "../core/resolve-contextual-dinou.js";
@@ -82,7 +90,13 @@ import {
 } from "../core/scan-dependency-components.js";
 
 // Resolve dev HTTP and HMR ports before initiating background compilation
-const { port: PORT, hmrPort: HMR_PORT } = await resolveDevPorts();
+const { port: PORT, hmrPort: HMR_PORT } =
+  process.env.DINOU_BUILD_DEV_ONLY === "true"
+    ? {
+        port: Number(process.env.PORT || 0),
+        hmrPort: Number(process.env.HMR_PORT || 0),
+      }
+    : await resolveDevPorts();
 
 const devStartTime = Date.now();
 const devTimings = {};
@@ -143,18 +157,45 @@ const dinouDir = fs.existsSync(path.resolve(projectRoot, "dinou"))
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dinouDirSlash = dinouDir.replace(/\\/g, "/");
 
+async function executeSetupFilesInDevProcess(files) {
+  if (!Array.isArray(files) || files.length === 0) return;
+  const setupOutDir = path.join(devDir, "setup-bundles");
+  fs.mkdirSync(setupOutDir, { recursive: true });
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    try {
+      const outPath = path.join(setupOutDir, `setup-${i}.mjs`);
+      await esbuild.build({
+        entryPoints: [f],
+        outfile: outPath,
+        bundle: true,
+        format: "esm",
+        platform: "node",
+        target: "node20",
+        packages: "external",
+        jsx: "automatic",
+        plugins: [
+          esbuildTsconfigAliasesPlugin({
+            projectRoot,
+            skipAssets: false,
+          }),
+        ],
+      });
+      await dynamicImportWithRetry(
+        `${pathToFileURL(outPath).href}?t=${Date.now()}-${i}`
+      );
+    } catch (e) {
+      console.error(`❌ [Dinou Dev] Error executing setupFile "${f}":`, e);
+    }
+  }
+}
+
 // Resolve and execute setupFiles immediately before any compilation
 const dinouConfig = await getDinouConfig();
 const setupFiles = resolveSetupFiles(projectRoot, dinouConfig);
 if (setupFiles.length > 0) {
   console.log(`  🔌 [Dinou Setup] Executing setup files (${setupFiles.length}):`, setupFiles.map((f) => path.relative(projectRoot, f)).join(", "));
-  for (const f of setupFiles) {
-    try {
-      await dynamicImportWithRetry(pathToFileURL(f).href);
-    } catch (e) {
-      console.error(`❌ [Dinou Dev] Error executing setupFile "${f}":`, e);
-    }
-  }
+  await executeSetupFilesInDevProcess(setupFiles);
 }
 
 function getFallbackChunkId(absPath) {
@@ -685,10 +726,20 @@ async function updateManifestsState(options = {}) {
   if (!isWebpackBuild && Object.keys(parsedClientManifest).length > 0) {
     const imports = {};
     const moduleBasePath = pathToFileURL(projectRoot).href + "/";
+    const moduleBasePathLower = moduleBasePath.replace(
+      /^file:\/\/\/([a-zA-Z]):/,
+      (_, d) => `file:///${d.toLowerCase()}:`
+    );
+    const moduleBasePathUpper = moduleBasePath.replace(
+      /^file:\/\/\/([a-zA-Z]):/,
+      (_, d) => `file:///${d.toUpperCase()}:`
+    );
     for (const [key, val] of Object.entries(parsedClientManifest)) {
       let specifier = key;
-      if (specifier.startsWith(moduleBasePath)) {
-        specifier = specifier.slice(moduleBasePath.length);
+      if (specifier.startsWith(moduleBasePathUpper)) {
+        specifier = specifier.slice(moduleBasePathUpper.length);
+      } else if (specifier.startsWith(moduleBasePathLower)) {
+        specifier = specifier.slice(moduleBasePathLower.length);
       }
       const hashIdx = specifier.indexOf("#");
       if (hashIdx !== -1) specifier = specifier.slice(0, hashIdx);
@@ -1370,6 +1421,7 @@ const externalList = [...nodeBuiltins, ...nodeBuiltins.map((b) => "node:" + b)];
 
 const commonAlias = {
   "dinou/config": path.resolve(dinouDir, "core/config.js"),
+  "dinou/server": path.resolve(dinouDir, "server.js"),
   dinou: dinouDir,
 };
 const commonLoader = {
@@ -1548,7 +1600,6 @@ async function createRscContext() {
     conditions: ["node", "worker", "react-server", "style"],
     external: externalList,
     banner,
-    inject: setupFiles,
     plugins: [
       esbuildContextualDinouPlugin({ projectRoot }),
       serverTsconfigAliasesPlugin,
@@ -1590,7 +1641,6 @@ async function createSsrContext() {
     conditions: ["node", "worker", "browser", "style"],
     external: externalList,
     banner,
-    inject: setupFiles,
     plugins: [
       esbuildContextualDinouPlugin({ projectRoot }),
       serverTsconfigAliasesPlugin,
@@ -2394,6 +2444,7 @@ async function triggerTsconfigReload(fullPath) {
       }
 
       await updateManifestsState({ forceRescan: true });
+      generateEntryFiles();
 
       await ctxA.dispose();
       ctxA = await createRscContext();
@@ -2446,10 +2497,114 @@ const envWatcher = chokidar.watch(projectRoot, {
   },
 });
 
+let configDebounce = null;
+let pendingConfigChangedPath = null;
+let activeConfigReloadPromise = null;
+
+async function triggerDinouConfigReload(fullPath) {
+  const prev = activeConfigReloadPromise;
+  const runPromise = (async () => {
+    if (prev) {
+      try {
+        await prev;
+      } catch (e) {}
+    }
+    try {
+      const cfgName = fullPath ? path.basename(fullPath) : "dinou.config";
+      clearDinouConfigCache(projectRoot);
+      const nextConfig = await getDinouConfig(projectRoot);
+      for (const k of Object.keys(dinouConfig)) {
+        delete dinouConfig[k];
+      }
+      if (nextConfig && typeof nextConfig === "object") {
+        Object.assign(dinouConfig, nextConfig);
+      }
+
+      const nextSetupFiles = resolveSetupFiles(projectRoot, dinouConfig);
+      setupFiles.length = 0;
+      setupFiles.push(...nextSetupFiles);
+      globalThis.__DINOU_CONFIG_RELOAD_SEQ__ =
+        Number(globalThis.__DINOU_CONFIG_RELOAD_SEQ__ || 0) + 1;
+      if (setupFiles.length > 0) {
+        await executeSetupFilesInDevProcess(setupFiles);
+      }
+
+      if (dinouConfig.storage) {
+        setStorageAdapter(dinouConfig.storage);
+      }
+
+      await applyServerPlugins(server);
+
+      try {
+        generateRouteTypes(projectRoot);
+      } catch (e) {}
+
+      try {
+        const dist2Dir = path.resolve(projectRoot, ".dinou/dist2");
+        if (fs.existsSync(dist2Dir)) {
+          fs.rmSync(dist2Dir, { recursive: true, force: true });
+        }
+      } catch (e) {}
+
+      logInfo(`Reloading configuration from ${cfgName}...`);
+      globalThis.__DINOU_DEV_BUNDLE_EPOCH__ =
+        Number(globalThis.__DINOU_DEV_BUNDLE_EPOCH__ || 0) + 1;
+      fileTransformCache.clear();
+
+      if (clientBundlerHandle?.refreshAliases) {
+        await clientBundlerHandle.refreshAliases();
+      } else if (clientBundlerHandle?.restart) {
+        await clientBundlerHandle.restart();
+      }
+
+      await updateManifestsState({ forceRescan: true });
+      generateEntryFiles();
+
+      await ctxA.dispose();
+      ctxA = await createRscContext();
+      await ctxA.rebuild();
+      engineVersion++;
+      rscModule = await dynamicImportWithRetry(
+        pathToFileURL(rscOutfile).href + "?v=" + engineVersion
+      );
+
+      await ctxB.dispose();
+      ctxB = await createSsrContext();
+      await syncSsrEngine();
+
+      logSuccess(`Reloaded configuration from ${cfgName}`);
+      clientBundlerHandle?.broadcast?.({ type: "reload" });
+    } catch (err) {
+      console.error("❌ [Dinou Dev] Failed to hot-reload dinou.config:", err);
+    } finally {
+      if (activeConfigReloadPromise === runPromise) {
+        activeConfigReloadPromise = null;
+      }
+    }
+  })();
+  activeConfigReloadPromise = runPromise;
+  return runPromise;
+}
+
+function scheduleDinouConfigReload(fullPath) {
+  pendingConfigChangedPath = fullPath;
+  if (configDebounce) clearTimeout(configDebounce);
+  configDebounce = setTimeout(() => {
+    configDebounce = null;
+    const changedPath = pendingConfigChangedPath;
+    pendingConfigChangedPath = null;
+    triggerDinouConfigReload(changedPath);
+  }, 50);
+}
+
 envWatcher.on("all", (event, fullPath) => {
   if (event === "addDir" || event === "unlinkDir") return;
   if (isRootTsconfigOrJsconfig(fullPath)) {
     scheduleTsconfigReload(fullPath);
+    return;
+  }
+  if (isWatchedDinouConfigOrSetupFile(fullPath, projectRoot)) {
+    scheduleDinouConfigReload(fullPath);
     return;
   }
   if (!isWatchedDotEnvFile(fullPath, projectRoot)) return;
@@ -2955,25 +3110,34 @@ async function startClientBundler(tool) {
 
 // Node.js Middlewares registered by plugins via configureServer
 const nodeMiddlewares = [];
+let baselineServerListeners = null;
 
 async function applyServerPlugins(serverInstance) {
   try {
-    const config = await getDinouConfig();
-    if (config.plugins && Array.isArray(config.plugins)) {
-      const serverContext = {
-        server: serverInstance,
-        isDev: true,
-        use(middleware) {
-          if (typeof middleware === "function") {
-            nodeMiddlewares.push(middleware);
+    if (!baselineServerListeners) {
+      baselineServerListeners = new Map();
+      for (const evt of serverInstance.eventNames()) {
+        baselineServerListeners.set(evt, new Set(serverInstance.listeners(evt)));
+      }
+    } else {
+      for (const evt of serverInstance.eventNames()) {
+        const baseSet = baselineServerListeners.get(evt);
+        for (const fn of serverInstance.listeners(evt)) {
+          if (!baseSet || !baseSet.has(fn)) {
+            serverInstance.removeListener(evt, fn);
           }
-        },
-      };
-      for (const plugin of config.plugins) {
-        if (typeof plugin.configureServer === "function") {
-          await plugin.configureServer(serverContext);
         }
       }
+    }
+    nodeMiddlewares.length = 0;
+    const config = await getDinouConfig(projectRoot);
+    if (config.plugins && Array.isArray(config.plugins)) {
+      await applyConfigureServerPlugins({
+        plugins: config.plugins,
+        server: serverInstance,
+        isDev: true,
+        middlewares: nodeMiddlewares,
+      });
     }
   } catch (err) {
     console.error("❌ [Dinou Dev] Error applying plugin configureServer hooks:", err);
@@ -2987,15 +3151,21 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (configDebounce) {
+      clearTimeout(configDebounce);
+      configDebounce = null;
+      const changedCfgPath = pendingConfigChangedPath;
+      pendingConfigChangedPath = null;
+      await triggerDinouConfigReload(changedCfgPath);
+    }
+    if (activeConfigReloadPromise) {
+      await activeConfigReloadPromise;
+    }
+
     if (nodeMiddlewares.length > 0) {
-      for (const mw of nodeMiddlewares) {
-        let continued = false;
-        await mw(req, res, () => {
-          continued = true;
-        });
-        if (!continued || res.writableEnded || res.headersSent) {
-          return;
-        }
+      const shouldContinue = await runNodeMiddlewares(nodeMiddlewares, req, res);
+      if (!shouldContinue || res.writableEnded || res.headersSent) {
+        return;
       }
     }
     if (clientBundlerPromise) {

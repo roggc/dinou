@@ -39,7 +39,12 @@ try {
     serverTsconfigAliasesPlugin,
     isWebpackBuild,
     setupFiles,
+    configFile,
   } = engineResult;
+
+  const nodeConfigImportLine = configFile
+    ? `import * as __dinouNodeConfigMod from ${JSON.stringify(configFile.replace(/\\/g, "/"))};\nconst __bundledDinouConfig = (__dinouNodeConfigMod && __dinouNodeConfigMod.default) ? __dinouNodeConfigMod.default : (__dinouNodeConfigMod || { plugins: [] });\nglobalThis.__DINOU_AOT_CONFIG__ = __bundledDinouConfig;\nglobalThis.__DINOU_CONFIG__ = __bundledDinouConfig;\n`
+    : `const __bundledDinouConfig = { plugins: [] };\n`;
 
   // Pass C: Node Orchestrator Entry
   const nodeEntryContent = `// Auto-generated main entry for Node.js (Dual-Bundle)
@@ -61,6 +66,10 @@ import {
   sendWebResponseToNode,
 } from "${dinouDirSlash}/core/http-adapter.js";
 import {
+  runNodeMiddlewares,
+  applyConfigureServerPlugins,
+} from "${dinouDirSlash}/core/node-middleware-runner.js";
+import {
   getStaticContentType,
   getStaticCacheControl,
   normalizePublicRequestPath,
@@ -68,6 +77,7 @@ import {
   resolveConfinedStaticFile,
 } from "${dinouDirSlash}/core/static-assets.js";
 import { loadEnvFiles } from "${dinouDirSlash}/core/env.js";
+${nodeConfigImportLine}
 
 const initialCwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
 loadEnvFiles(initialCwd, { mode: "production" });
@@ -179,14 +189,9 @@ export async function startServer(port = PORT, host = process.env.HOST || undefi
       }
 
       if (nodeMiddlewares.length > 0) {
-        for (const mw of nodeMiddlewares) {
-          let continued = false;
-          await mw(req, res, () => {
-            continued = true;
-          });
-          if (!continued || res.writableEnded || res.headersSent) {
-            return;
-          }
+        const shouldContinue = await runNodeMiddlewares(nodeMiddlewares, req, res);
+        if (!shouldContinue || res.writableEnded || res.headersSent) {
+          return;
         }
       }
 
@@ -205,27 +210,13 @@ export async function startServer(port = PORT, host = process.env.HOST || undefi
     }
   });
 
-  try {
-    const { getDinouConfig } = await import("${dinouDirSlash}/core/load-dinou-config.js");
-    const cfg = await getDinouConfig();
-    if (cfg.plugins && Array.isArray(cfg.plugins)) {
-      const serverContext = {
-        server,
-        isDev: false,
-        use(middleware) {
-          if (typeof middleware === "function") {
-            nodeMiddlewares.push(middleware);
-          }
-        },
-      };
-      for (const plugin of cfg.plugins) {
-        if (typeof plugin.configureServer === "function") {
-          await plugin.configureServer(serverContext);
-        }
-      }
-    }
-  } catch (err) {
-    console.error("❌ [Dinou Node Server] Error running configureServer plugins:", err);
+  if (__bundledDinouConfig && Array.isArray(__bundledDinouConfig.plugins)) {
+    await applyConfigureServerPlugins({
+      plugins: __bundledDinouConfig.plugins,
+      server,
+      isDev: false,
+      middlewares: nodeMiddlewares,
+    });
   }
 
   return new Promise((resolve, reject) => {
@@ -257,6 +248,24 @@ if (isMain) {
   const nodeEntryPath = path.join(nodeDir, "node-entry.mjs");
   fs.writeFileSync(nodeEntryPath, nodeEntryContent, "utf8");
 
+  const passCConfigAliasPlugin = configFile
+    ? {
+        name: "dinou-passc-config-alias",
+        setup(build) {
+          const normConfig = path.resolve(configFile).toLowerCase();
+          build.onResolve({ filter: /^dinou$/ }, (args) => {
+            if (
+              args.importer &&
+              path.resolve(args.importer).toLowerCase() === normConfig
+            ) {
+              return { path: path.resolve(dinouDirSlash, "core/config.js") };
+            }
+            return null;
+          });
+        },
+      }
+    : null;
+
   // Pass C: Final Node Orchestrator
   const finalOutfile = path.join(nodeDir, "server.mjs");
   console.log("  🚀 Bundling Pass C: Node Orchestrator (.dinou/node/server.mjs)...");
@@ -267,12 +276,16 @@ if (isMain) {
     format: "esm",
     target: "node20",
     platform: "node",
+    jsx: "automatic",
     mainFields: ["module", "main"],
     conditions: ["node", "worker", "browser"],
     external: [...externalList, "./rsc-engine.mjs", "./ssr-engine.mjs"],
     banner,
-    inject: setupFiles,
-    plugins: [serverTsconfigAliasesPlugin, serverAssetPlugin].filter(Boolean),
+    plugins: [
+      passCConfigAliasPlugin,
+      serverTsconfigAliasesPlugin,
+      serverAssetPlugin,
+    ].filter(Boolean),
     alias: commonAlias,
     loader: commonLoader,
     define: {

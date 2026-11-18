@@ -32,8 +32,12 @@ import {
 import { createRequire } from "node:module";
 import { fetchCloudflareDist2Asset } from "./static-assets.js";
 
-const require = createRequire(import.meta.url);
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
+let require = null;
+let currentDir = ".";
+try {
+  require = createRequire(import.meta.url);
+  currentDir = path.dirname(fileURLToPath(import.meta.url));
+} catch (e) {}
 
 const INFLIGHT_KEY = Symbol.for("dinou.slot.inflight.renders");
 if (!globalThis[INFLIGHT_KEY]) {
