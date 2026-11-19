@@ -237,7 +237,10 @@ export default async function () {
               enableReactCompiler && pluginReactCompiler,
               pluginSyntaxImportMeta,
             ].filter(Boolean),
-            exclude: /node_modules[\\/](?!dinou|react-refresh)/,
+            exclude: [
+              /node_modules[\\/](?!dinou|react-refresh)/,
+              /[\\/]dinou[\\/]compiled[\\/]/,
+            ],
           }),
       postcss({
         modules: {

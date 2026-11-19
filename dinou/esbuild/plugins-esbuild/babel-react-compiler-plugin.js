@@ -50,7 +50,7 @@ export default function babelReactCompilerPlugin({ serverFiles = null } = {}) {
 
         const absNorm = normalizeNormPath(args.path);
         // Skip Dinou's internal framework runtime (both in library and ejected mode)
-        if (absNorm.startsWith(dinouRootPrefix)) {
+        if (absNorm.startsWith(dinouRootPrefix) || relFromRoot.startsWith("dinou/")) {
           return null;
         }
         // Skip known "use server" modules so serverFunctionsPlugin handles them exclusively

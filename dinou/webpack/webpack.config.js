@@ -248,7 +248,11 @@ export default async () => {
         {
           test: /\.[jt]sx?$/,
           type: "javascript/auto",
-          exclude: [/[\\/]node_modules[\\/](?!dinou)/, ...outputDirs],
+          exclude: [
+            /[\\/]node_modules[\\/](?!dinou)/,
+            /[\\/]dinou[\\/]compiled[\\/]/,
+            ...outputDirs,
+          ],
           use: [
             isDevelopment
               ? {
@@ -692,7 +696,13 @@ export default async () => {
       },
       // 🎯 ADD THIS:
       alias: {
-        ...(isEjected ? { dinou: localDinouPath } : {}),
+        ...(isEjected
+          ? {
+              "dinou/config": path.join(localDinouPath, "core/config.js"),
+              "dinou/server": path.join(localDinouPath, "server.js"),
+              dinou: localDinouPath,
+            }
+          : {}),
       },
       fallback: {
         async_hooks: false,

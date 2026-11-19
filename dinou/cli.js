@@ -9,6 +9,7 @@ if (!ensureVendorMode()) {
 
 import { program } from "#commander";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -903,15 +904,89 @@ program
     }
   });
 
-// --- EJECT ---
+// --- EJECT / UNEJECT ---
 
 program
   .command("eject")
-  .description("Copy the framework to the root of the project")
-  .action(async () => {
+  .description("Copy the framework into ./dinou at the root of the project")
+  .option(
+    "-f, --force",
+    "Overwrite an existing ./dinou directory when running from node_modules"
+  )
+  .option(
+    "--skip-install",
+    "Skip running package manager install after updating package.json"
+  )
+  .action(async (opts) => {
+    const localDinouDir = path.resolve(projectRoot, "dinou");
+    const normCurrent = path
+      .resolve(dinouPath)
+      .replace(/\\/g, "/")
+      .toLowerCase();
+    const normTarget = localDinouDir.replace(/\\/g, "/").toLowerCase();
+
+    if (normCurrent === normTarget) {
+      console.log(
+        'ℹ️  [Dinou Eject] This project is already ejected in ./dinou. Skipping to prevent overwriting your local framework customizations. (Run "npm run uneject" to revert to node_modules/dinou.)'
+      );
+      return;
+    }
+
+    if (fs.existsSync(localDinouDir) && !opts.force) {
+      console.log(
+        'ℹ️  [Dinou Eject] Directory ./dinou already exists. Skipping to prevent overwriting local changes (pass --force from node_modules/dinou to overwrite, or run "npm run uneject" first).'
+      );
+      return;
+    }
+
+    let ejectMod;
+    try {
+      ejectMod = await import("../eject.js");
+    } catch (err) {
+      if (
+        err &&
+        (err.code === "ERR_MODULE_NOT_FOUND" ||
+          err.code === "MODULE_NOT_FOUND")
+      ) {
+        console.log(
+          'ℹ️  [Dinou Eject] This project is already running in Ejected Mode (./dinou). Skipping eject to protect local changes. (Run "npm run uneject" to revert to node_modules/dinou.)'
+        );
+        return;
+      }
+      throw err;
+    }
+
     console.log("Executing eject...");
-    const { eject } = await import("../eject.js");
-    eject();
+    ejectMod.eject({
+      force: Boolean(opts.force),
+      skipInstall: Boolean(opts.skipInstall),
+      projectRoot,
+    });
+  });
+
+program
+  .command("uneject [version]")
+  .description(
+    "Revert an ejected ./dinou directory back to the node_modules dinou package"
+  )
+  .option("-y, --yes", "Skip interactive confirmation prompt")
+  .option(
+    "--skip-install",
+    "Update package.json and remove ./dinou without running package manager install"
+  )
+  .option(
+    "--keep-dinou",
+    "Keep the local ./dinou directory on disk instead of deleting it"
+  )
+  .action(async (version, opts) => {
+    const { uneject } = await import("./core/uneject.js");
+    await uneject({
+      spec: version || "latest",
+      yes: Boolean(opts.yes),
+      skipInstall: Boolean(opts.skipInstall),
+      keepDinouDir: Boolean(opts.keepDinou),
+      projectRoot,
+    });
   });
 
 program.parse(process.argv);

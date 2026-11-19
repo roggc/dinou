@@ -8,6 +8,42 @@ const CONTEXTUAL_DINOU_FILTER = /^\.\.?[\\/](?:.*[\\/])?dinou(?:\.js)?(?:[?#].*)
 const UNDERSCORE_SEGMENT_HINT_RE = /(?:^|[\\/])_[^\\/]+(?:[\\/]|$)/;
 const ESBUILD_FORBIDDEN_IMPORT_FILTER = /^[^.\/\\]|(?:^|[\\/])_[^\\/]+(?:[\\/]|$)/;
 
+const EJECTED_DINOU_SUBPATHS = {
+  dinou: "index.js",
+  "dinou/server": "server.js",
+  "dinou/config": "core/config.js",
+  "dinou/adapters/node": "adapters/node.js",
+  "dinou/adapters/bun": "adapters/bun.js",
+  "dinou/adapters/deno": "adapters/deno.js",
+  "dinou/adapters/cloudflare": "adapters/cloudflare.js",
+  "dinou/adapters/netlify": "adapters/netlify.js",
+};
+
+/**
+ * When running in Ejected Mode (`<projectRoot>/dinou/index.js` exists),
+ * resolves bare `"dinou"` and official `"dinou/*"` subpaths directly to
+ * `<projectRoot>/dinou/...` so live edits inside `./dinou/` take effect
+ * immediately across Esbuild, Rollup, and Webpack even under `pnpm` or `yarn`
+ * (where `"file:./dinou"` copies a static snapshot into `node_modules/dinou`).
+ */
+export function resolveEjectedDinouSpecifier(
+  specifier,
+  projectRoot = process.cwd()
+) {
+  if (!specifier || typeof specifier !== "string") return null;
+  const cleanSpec = specifier.split("?")[0].split("#")[0];
+  const relTarget = EJECTED_DINOU_SUBPATHS[cleanSpec];
+  if (!relTarget) return null;
+
+  const ejectedRoot = path.resolve(projectRoot, "dinou");
+  if (!fs.existsSync(path.join(ejectedRoot, "index.js"))) {
+    return null;
+  }
+
+  const candidate = path.join(ejectedRoot, relTarget);
+  return fs.existsSync(candidate) ? candidate : null;
+}
+
 /**
  * Glob ignore patterns for `fast-glob` calls rooted at `src/`.
  * Excludes any directory prefixed with `_` (both top-level `src/_foo/**` and nested `src/docs/_foo/**`).
@@ -356,6 +392,13 @@ export function esbuildContextualDinouPlugin({
         if (forbidden) {
           return { errors: [{ text: forbidden }] };
         }
+        const ejectedResolved = resolveEjectedDinouSpecifier(
+          args.path,
+          projectRoot
+        );
+        if (ejectedResolved) {
+          return { path: ejectedResolved };
+        }
         return null;
       });
 
@@ -383,24 +426,32 @@ export function rollupContextualDinouPlugin({
   return {
     name: "dinou-contextual-module",
     resolveId(source, importer) {
-      if (!importer || importer.startsWith("\0")) return null;
-      const cleanImporter = importer.split("?")[0].split("#")[0];
-      const forbidden = checkForbiddenUnderscoreImport(
-        source,
-        cleanImporter,
-        projectRoot,
-        { importerIsFile: true }
-      );
-      if (forbidden) {
-        this.error(forbidden);
+      if (!source || source.startsWith("\0")) return null;
+      if (importer && !importer.startsWith("\0")) {
+        const cleanImporter = importer.split("?")[0].split("#")[0];
+        const forbidden = checkForbiddenUnderscoreImport(
+          source,
+          cleanImporter,
+          projectRoot,
+          { importerIsFile: true }
+        );
+        if (forbidden) {
+          this.error(forbidden);
+        }
+        if (CONTEXTUAL_DINOU_FILTER.test(source)) {
+          const resolved = resolveContextualDinouImport(
+            source,
+            path.dirname(cleanImporter),
+            projectRoot
+          );
+          if (resolved) return resolved;
+        }
       }
-      if (!CONTEXTUAL_DINOU_FILTER.test(source)) return null;
-      const resolved = resolveContextualDinouImport(
-        source,
-        path.dirname(cleanImporter),
-        projectRoot
-      );
-      return resolved || null;
+      const ejectedResolved = resolveEjectedDinouSpecifier(source, projectRoot);
+      if (ejectedResolved) {
+        return ejectedResolved;
+      }
+      return null;
     },
   };
 }
@@ -431,6 +482,14 @@ export function webpackContextualDinouPlugin({
               if (forbidden) {
                 return callback(new Error(forbidden));
               }
+              const ejectedResolved = resolveEjectedDinouSpecifier(
+                resolveData.request,
+                projectRoot
+              );
+              if (ejectedResolved) {
+                resolveData.request = ejectedResolved;
+                return callback();
+              }
               if (CONTEXTUAL_DINOU_FILTER.test(resolveData.request)) {
                 const resolved = resolveContextualDinouImport(
                   resolveData.request,
@@ -456,6 +515,7 @@ export default {
   createWebpackUnderscoreDirExclude,
   filterEscapedClientManifest,
   checkForbiddenUnderscoreImport,
+  resolveEjectedDinouSpecifier,
   resolveContextualDinouImport,
   esbuildContextualDinouPlugin,
   rollupContextualDinouPlugin,
