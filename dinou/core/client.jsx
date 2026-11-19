@@ -316,7 +316,7 @@ const executeRscRedirect = (redirectUrl) => {
 };
 
 const getPagePayload = (route, isPrefetch = false, version = 0) => {
-  const url = route.split("::")[0];
+  const url = route.split("::")[0].split("#")[0] || "/";
   if (pageCache.has(url)) {
     return pageCache.get(url);
   }
@@ -752,6 +752,15 @@ function Router() {
     }
     const finalPath = resolveUrl(href, window.location.pathname);
 
+    if (isExternalUrl(finalPath)) {
+      if (options.replace) {
+        window.location.replace(finalPath);
+      } else {
+        window.location.assign(finalPath);
+      }
+      return;
+    }
+
     // 🛡️ NAVIGATE PROTECTION: Hash Detection
     if (isHashChangeOnly(finalPath)) {
       if (options.replace) {
@@ -770,8 +779,10 @@ function Router() {
       return; // CRITICAL STOP
     }
 
+    const routeWithoutHash = finalPath.split("#")[0] || "/";
+
     if (options.fresh) {
-      pageCache.delete(finalPath);
+      pageCache.delete(routeWithoutHash);
     }
 
     // Normal RSC Navigation
@@ -788,7 +799,7 @@ function Router() {
     flushPendingSsrStreams();
     startTransition(() => {
       setIsPopState(false);
-      setRoute(finalPath);
+      setRoute(routeWithoutHash);
       if (options.fresh) {
         setVersion((v) => v + 1);
       }
@@ -831,11 +842,12 @@ function Router() {
     window.__DINOU_PREFETCH__ = (url) => {
       // 🛡️ PREFETCH PROTECTION: If it's a local hash, do nothing
       if (isHashChangeOnly(url)) return;
-      const lKey = getLayoutKey(url);
+      const cleanUrl = String(url || "/").split("#")[0] || "/";
+      const lKey = getLayoutKey(cleanUrl);
       if (lKey && !layoutCache.has(lKey)) {
         getLayoutPayload(lKey);
       }
-      getPagePayload(url, true);
+      getPagePayload(cleanUrl, true);
     };
 
     window.__DINOU_ROUTER_NAVIGATE__ = navigate;
@@ -867,7 +879,9 @@ function Router() {
       const anchor = e.target.closest("a");
       if (
         !anchor ||
-        anchor.target ||
+        (anchor.target && anchor.target !== "_self") ||
+        anchor.hasAttribute("download") ||
+        e.button !== 0 ||
         e.metaKey ||
         e.ctrlKey ||
         e.shiftKey ||

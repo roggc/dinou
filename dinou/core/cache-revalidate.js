@@ -301,6 +301,7 @@ function normalizeRevalidatePath(reqPath) {
 async function revalidatePage(reqPath, internalOptions = {}) {
   const cleanPath = normalizeRevalidatePath(reqPath);
   const onlyRefreshSlots = Boolean(internalOptions?.onlyRefreshSlots);
+  const onlyIfExpired = Boolean(internalOptions?.onlyIfExpired);
   return enqueueRevalidation(async () => {
     const storage = getStorageAdapter();
     const cleanPathKey = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
@@ -360,6 +361,24 @@ async function revalidatePage(reqPath, internalOptions = {}) {
     }
     if (currentMeta.status === undefined) {
       currentMeta.status = 200;
+    }
+
+    if (onlyIfExpired && !onlyRefreshSlots) {
+      const latestReval =
+        currentMeta.pageRevalidate !== undefined && currentMeta.pageRevalidate !== null
+          ? currentMeta.pageRevalidate
+          : currentMeta.revalidate;
+      const latestPageGenAt = Number(
+        currentMeta.pageGeneratedAt || currentMeta.generatedAt || 0
+      );
+      const stillExpired =
+        typeof latestReval === "number" &&
+        latestReval >= 1 &&
+        latestPageGenAt > 0 &&
+        Date.now() > latestPageGenAt + latestReval * 1000;
+      if (!stillExpired) {
+        return;
+      }
     }
 
     let activeLayoutRscText = "";
@@ -905,7 +924,8 @@ async function revalidatePath(reqPath, options) {
 async function revalidateLayout(reqPath, internalOptions = {}) {
   const targetPath = normalizeRevalidatePath(reqPath);
   const onlyRefreshSlots = Boolean(internalOptions?.onlyRefreshSlots);
-  const inFlightKey = `${targetPath}:${onlyRefreshSlots ? "slots" : "full"}`;
+  const onlyIfExpired = Boolean(internalOptions?.onlyIfExpired);
+  const inFlightKey = `${targetPath}:${onlyRefreshSlots ? "slots" : "full"}:${onlyIfExpired ? "ttl" : "force"}`;
 
   if (inflightLayoutRevalidations.has(inFlightKey)) {
     return inflightLayoutRevalidations.get(inFlightKey);
@@ -961,6 +981,21 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
         });
         currentMeta.ppr = Boolean(anyLayoutPpr);
       } catch (e) {}
+
+      if (onlyIfExpired && !onlyRefreshSlots) {
+        const latestLayoutReval = currentMeta.revalidate;
+        const latestLayoutGenAt = Number(
+          currentMeta.layoutGeneratedAt || currentMeta.generatedAt || 0
+        );
+        const stillExpired =
+          typeof latestLayoutReval === "number" &&
+          latestLayoutReval >= 1 &&
+          latestLayoutGenAt > 0 &&
+          Date.now() > latestLayoutGenAt + latestLayoutReval * 1000;
+        if (!stillExpired) {
+          return false;
+        }
+      }
 
       const prevGenTime = (currentMeta && currentMeta.generatedAt) || 0;
       const prevLayoutOwnGenTime =

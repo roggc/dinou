@@ -857,6 +857,7 @@ export async function fetch(req) {
                   "content-range": range.contentRange,
                   "accept-ranges": "bytes",
                   "cache-control": cacheControl,
+                  "content-disposition": "inline",
                 },
               });
             }
@@ -867,6 +868,7 @@ export async function fetch(req) {
                 "content-length": String(stat.size),
                 "accept-ranges": "bytes",
                 "cache-control": cacheControl,
+                "content-disposition": "inline",
               },
             });
           }

@@ -15,6 +15,7 @@ const useState =
   React.useState ||
   ((init) => [typeof init === "function" ? init() : init, () => {}]);
 const useEffect = React.useEffect || (() => {});
+const useMemo = React.useMemo || ((fn) => fn());
 const useSyncExternalStore =
   React.useSyncExternalStore || ((_sub, getSnap) => getSnap());
 const emptySubscribe = () => () => {};
@@ -62,50 +63,67 @@ export function useNavigationLoading() {
 export function useRouter() {
   const context = useContext(RouterContext);
 
-  // Guards for SSR (optional, but good practice)
-  if (!context) {
-    // On the server we return empty functions to not break the rendering
+  return useMemo(() => {
+    // Guards for SSR (optional, but good practice)
+    if (!context) {
+      // On the server we return empty functions to not break the rendering
+      return {
+        push: () => {},
+        replace: () => {},
+        back: () => {},
+        forward: () => {},
+        refresh: () => {},
+        refreshSlot: () => Promise.resolve(),
+      };
+    }
+
     return {
-      push: () => { },
-      replace: () => { },
-      back: () => { },
-      forward: () => { },
-      refresh: (options) => { },
-      refreshSlot: (slotId, options) => Promise.resolve(),
+      push: (href, options) => {
+        const { params, from, ...restOptions } = options || {};
+        const interpolated = interpolateRouteParams(href, params);
+        const target =
+          from && typeof window !== "undefined"
+            ? resolveUrl(interpolated, window.location.pathname, from)
+            : interpolated;
+        return context.navigate(target, restOptions);
+      },
+      replace: (href, options) => {
+        const { params, from, ...restOptions } = options || {};
+        const interpolated = interpolateRouteParams(href, params);
+        const target =
+          from && typeof window !== "undefined"
+            ? resolveUrl(interpolated, window.location.pathname, from)
+            : interpolated;
+        return context.navigate(target, { replace: true, ...restOptions });
+      },
+
+      /**
+       * Navigate back in the browser's history.
+       * Equivalent to clicking the browser's Back button.
+       */
+      back: () => context.back?.(),
+
+      /**
+       * Navigate forward in the browser's history.
+       */
+      forward: () => context.forward?.(),
+
+      /**
+       * Refresh the current route.
+       * Makes a new request to the server for the current URL, clearing the cache,
+       * and re-renders the server component without a full browser reload.
+       * Pass `{ layout: true }` to also invalidate and re-render the layout.
+       */
+      refresh: (options) => context.refresh?.(options),
+
+      /**
+       * Refresh a specific DinouCacheSlot without re-rendering the rest of the page.
+       * @param {string} slotId The ID or tag of the slot to refresh.
+       * @param {object} [options] Optional configuration ({ fresh?: boolean }).
+       */
+      refreshSlot: (slotId, options) => refreshSlot(slotId, options),
     };
-  }
-
-  return {
-    push: (href, options) => { const { params, from, ...restOptions } = options || {}; const interpolated = interpolateRouteParams(href, params); const target = from && typeof window !== "undefined" ? resolveUrl(interpolated, window.location.pathname, from) : interpolated; return context.navigate(target, restOptions); },
-    replace: (href, options) => { const { params, from, ...restOptions } = options || {}; const interpolated = interpolateRouteParams(href, params); const target = from && typeof window !== "undefined" ? resolveUrl(interpolated, window.location.pathname, from) : interpolated; return context.navigate(target, { replace: true, ...restOptions }); },
-
-
-    /**
-     * Navigate back in the browser's history.
-     * Equivalent to clicking the browser's Back button.
-     */
-    back: () => context.back(),
-
-    /**
-     * Navigate forward in the browser's history.
-     */
-    forward: () => context.forward(),
-
-    /**
-     * Refresh the current route.
-     * Makes a new request to the server for the current URL, clearing the cache,
-     * and re-renders the server component without a full browser reload.
-     * Pass `{ layout: true }` to also invalidate and re-render the layout.
-     */
-    refresh: (options) => context.refresh(options),
-
-    /**
-     * Refresh a specific DinouCacheSlot without re-rendering the rest of the page.
-     * @param {string} slotId The ID or tag of the slot to refresh.
-     * @param {object} [options] Optional configuration ({ fresh?: boolean }).
-     */
-    refreshSlot: (slotId, options) => refreshSlot(slotId, options),
-  };
+  }, [context]);
 }
 
 export function refreshSlot(slotId, options) {
@@ -225,7 +243,11 @@ export function useSearchParams() {
   const isStaticHydrating =
     isReactHydrating &&
     typeof window !== "undefined" &&
-    Boolean(window.__DINOU_USE_STATIC__ || window.__DINOU_PPR_RESUME__);
+    Boolean(
+      window.__DINOU_USE_STATIC__ ||
+        window.__DINOU_PPR_RESUME__ ||
+        window.__DINOU_STATIC_EXPORT__
+    );
 
   if (isStaticHydrating) {
     return new URLSearchParams();

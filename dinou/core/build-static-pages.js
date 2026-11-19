@@ -151,8 +151,9 @@ async function buildStaticPages(onProgress = null) {
           let revalidate, getStaticPaths;
           if (pageFunctionsPath) {
             const module = await importModule(pageFunctionsPath);
-            getStaticPaths = module.getStaticPaths || module.default?.getStaticPaths;
-            revalidate = module.revalidate || module.default?.revalidate;
+            const defMod = module.default?.default ? module.default.default : module.default;
+            getStaticPaths = module.getStaticPaths || defMod?.getStaticPaths;
+            revalidate = module.revalidate ?? defMod?.revalidate;
           }
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
@@ -296,8 +297,9 @@ async function buildStaticPages(onProgress = null) {
           let revalidate, getStaticPaths;
           if (pageFunctionsPath) {
             const module = await importModule(pageFunctionsPath);
-            getStaticPaths = module.getStaticPaths || module.default?.getStaticPaths;
-            revalidate = module.revalidate || module.default?.revalidate;
+            const defMod = module.default?.default ? module.default.default : module.default;
+            getStaticPaths = module.getStaticPaths || defMod?.getStaticPaths;
+            revalidate = module.revalidate ?? defMod?.revalidate;
           }
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
@@ -404,8 +406,9 @@ async function buildStaticPages(onProgress = null) {
           let revalidate, getStaticPaths;
           if (pageFunctionsPath) {
             const module = await importModule(pageFunctionsPath);
-            getStaticPaths = module.getStaticPaths || module.default?.getStaticPaths;
-            revalidate = module.revalidate || module.default?.revalidate;
+            const defMod = module.default?.default ? module.default.default : module.default;
+            getStaticPaths = module.getStaticPaths || defMod?.getStaticPaths;
+            revalidate = module.revalidate ?? defMod?.revalidate;
           }
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
@@ -533,13 +536,14 @@ async function buildStaticPages(onProgress = null) {
             const module = await importModule(pageFunctionsPath);
             const defMod = module.default?.default ? module.default.default : module.default;
             getStaticPaths = module.getStaticPaths || defMod?.getStaticPaths;
-            revalidate = module.revalidate || defMod?.revalidate;
+            revalidate = module.revalidate ?? defMod?.revalidate;
           }
           const lfPath = getLayoutFunctionsPath(dynamicPath);
           if (lfPath) {
             const lmod = await importModule(lfPath);
-            const lmodGetStaticPaths = lmod.getStaticPaths || lmod.default?.getStaticPaths;
-            const lmodRevalidate = lmod.revalidate || lmod.default?.revalidate;
+            const ldefMod = lmod.default?.default ? lmod.default.default : lmod.default;
+            const lmodGetStaticPaths = lmod.getStaticPaths || ldefMod?.getStaticPaths;
+            const lmodRevalidate = lmod.revalidate ?? ldefMod?.revalidate;
             if (!getStaticPaths && lmodGetStaticPaths) {
               getStaticPaths = lmodGetStaticPaths;
             }
@@ -660,7 +664,7 @@ async function buildStaticPages(onProgress = null) {
               const module = await importModule(pageFunctionsPath);
               const defMod = module.default?.default ? module.default.default : module.default;
               getStaticPaths = module.getStaticPaths || defMod?.getStaticPaths;
-              revalidate = module.revalidate || defMod?.revalidate;
+              revalidate = module.revalidate ?? defMod?.revalidate;
             }
             const isLocalPage =
               pagePath && path.dirname(pagePath) === dynamicPath;
@@ -782,7 +786,8 @@ async function buildStaticPages(onProgress = null) {
     if (pageFunctionsPath) {
       try {
         const module = await importModule(pageFunctionsPath);
-        revalidate = module.revalidate || module.default?.revalidate;
+        const defMod = module.default?.default ? module.default.default : module.default;
+        revalidate = module.revalidate ?? defMod?.revalidate;
       } catch (e) { }
     }
 
@@ -833,6 +838,7 @@ async function buildStaticPages(onProgress = null) {
       // ====================================================================
       // Although contract says it returns void, internally we save
       // the state in case you want to log errors (ex: a redirect in build time).
+      let mockContext;
       const mockRes = {
         _statusCode: 200,
         _headers: {},
@@ -875,6 +881,7 @@ async function buildStaticPages(onProgress = null) {
 
           this._statusCode = status;
           this._redirectUrl = url;
+          if (mockContext) mockContext._hasRedirected = true;
 
           // Log warning because a redirect in SSG is usually problematic
           if (process.env.DINOU_DEBUG) {
@@ -920,12 +927,13 @@ async function buildStaticPages(onProgress = null) {
       };
 
       // 3. FULL CONTEXT
-      const mockContext = {
+      mockContext = {
         req: mockReq,
         res: mockRes,
         env: unifiedEnv,
         ctx: null,
         _markDynamic: markAsDynamic,
+        _hasRedirected: false,
       };
 
       let revalidate;
@@ -965,7 +973,7 @@ async function buildStaticPages(onProgress = null) {
             const pageFunctionsModule = await importModule(pageFunctionsPath);
             const defMod = pageFunctionsModule.default?.default ? pageFunctionsModule.default.default : pageFunctionsModule.default;
             const getProps = pageFunctionsModule.getProps || defMod?.getProps;
-            revalidate = pageFunctionsModule.revalidate || defMod?.revalidate;
+            revalidate = pageFunctionsModule.revalidate ?? defMod?.revalidate;
             const rawTags = pageFunctionsModule.getCacheTags ?? defMod?.getCacheTags;
             if (typeof rawTags === "function") {
               try {
@@ -977,6 +985,9 @@ async function buildStaticPages(onProgress = null) {
               cacheTags = rawTags;
             }
             pageFunctionsProps = await getProps?.(params);
+            if (mockRes._redirectUrl || mockContext._hasRedirected) {
+              return null;
+            }
             props = { ...props, ...(pageFunctionsProps ?? {}) };
           }
 
@@ -1091,8 +1102,14 @@ async function buildStaticPages(onProgress = null) {
                     }
                   }
                   updatedSlots[slotName] = updatedSlotElement;
+                  if (mockRes._redirectUrl || mockContext._hasRedirected) {
+                    return null;
+                  }
                 }
                 const layoutProps = await getLayoutProps(layoutPath, dParams);
+                if (mockRes._redirectUrl || mockContext._hasRedirected) {
+                  return null;
+                }
                 let props = {
                   params: dParams,
                   ...updatedSlots,
@@ -1188,6 +1205,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
     // ====================================================================
     // Although the contract says it returns void, internally we save
     // the state in case you want to log errors (e.g., a redirect at build time).
+    let mockContext;
     const mockRes = {
       _statusCode: 200,
       _headers: {},
@@ -1230,6 +1248,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
 
         this._statusCode = status;
         this._redirectUrl = url;
+        if (mockContext) mockContext._hasRedirected = true;
 
         // We log a warning because a redirect in SSG is usually problematic
         if (process.env.DINOU_DEBUG) {
@@ -1272,10 +1291,11 @@ async function buildStaticPage(reqPath, isDynamic = null) {
     };
 
     // 3. COMPLETE CONTEXT
-    const mockContext = {
+    mockContext = {
       req: mockReq,
       res: mockRes,
       _markDynamic: markAsDynamic,
+      _hasRedirected: false,
     };
 
     let revalidate;
@@ -1323,9 +1343,12 @@ async function buildStaticPage(reqPath, isDynamic = null) {
           const pageFunctionsModule = await importModule(pageFunctionsPath);
           const defMod = pageFunctionsModule.default?.default ? pageFunctionsModule.default.default : pageFunctionsModule.default;
           const getProps = pageFunctionsModule.getProps || defMod?.getProps;
-          revalidate = pageFunctionsModule.revalidate || defMod?.revalidate;
-          if (isDynamic && (isDynamic.value = await isDynamicRoute(revalidate)))
-            return;
+          revalidate = pageFunctionsModule.revalidate ?? defMod?.revalidate;
+          if (await isDynamicRoute(revalidate)) {
+            markAsDynamic();
+            if (isDynamic) isDynamic.value = true;
+            return null;
+          }
           const rawTags = pageFunctionsModule.getCacheTags ?? defMod?.getCacheTags;
           if (typeof rawTags === "function") {
             try {
@@ -1337,6 +1360,9 @@ async function buildStaticPage(reqPath, isDynamic = null) {
             cacheTags = rawTags;
           }
           pageFunctionsProps = await getProps?.(dParams);
+          if (mockRes._redirectUrl || mockContext._hasRedirected) {
+            return null;
+          }
           props = { ...props, ...(pageFunctionsProps ?? {}) };
         }
 
@@ -1449,12 +1475,18 @@ async function buildStaticPage(reqPath, isDynamic = null) {
                   }
                 }
                 updatedSlots[slotName] = updatedSlotElement;
+                if (mockRes._redirectUrl || mockContext._hasRedirected) {
+                  return null;
+                }
               }
               let layoutProps = {
                 params: dParams,
                 ...updatedSlots,
               };
               const customLayoutProps = await getLayoutProps(layoutPath, dParams);
+              if (mockRes._redirectUrl || mockContext._hasRedirected) {
+                return null;
+              }
               layoutProps = {
                 ...layoutProps,
                 ...(customLayoutProps ?? {}),

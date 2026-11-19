@@ -445,7 +445,7 @@ export declare function ClientRedirect(props: ClientRedirectProps): ReactNode;
 /**
  * Universal redirect function for Server Components and Server Functions.
  * * It handles the logic intelligently based on the context:
- * 1. **Server-Side (Hard Navigation):** If headers haven't been sent, it performs a real HTTP 307 redirect (better for SEO and performance).
+ * 1. **Server-Side (Hard Navigation):** If headers haven't been sent, it performs a real HTTP 302 redirect (better for SEO and performance).
  * 2. **Client-Side / Streaming (Soft Navigation):** If the response stream has started or we are on the client, it returns a component that triggers a SPA navigation.
  * * @param destination - The path URL to redirect to (e.g., "/login").
  * @returns A React Node that handles the redirection.
@@ -1109,35 +1109,102 @@ export type ComputeRelativeTemplateSingle<
         : JoinSlash<[...ToDotDotSegments<RemFrom>, ...MapSegmentsToTemplate<RemTarget>]>
   : never;
 
+type DistributeRelativeCompletionsFromSegs<
+  FromSegs extends string[],
+  Targets extends string
+> = Targets extends any
+  ? ComputeRelativeCompletionSingle<FromSegs, SplitRouteSegments<Targets>>
+  : never;
+
 export type DistributeRelativeCompletions<
   FromPath extends string,
   Targets extends string
+> = SplitRouteSegments<FromPath> extends infer FromSegs extends string[]
+  ? DistributeRelativeCompletionsFromSegs<FromSegs, Targets>
+  : never;
+
+type DistributeAllRelativePatternsFromSegs<
+  FromSegs extends string[],
+  Targets extends string
 > = Targets extends any
-  ? ComputeRelativeCompletionSingle<
-      SplitRouteSegments<FromPath>,
-      SplitRouteSegments<Targets>
-    >
+  ? ComputeRelativeAllPatternsSingle<FromSegs, SplitRouteSegments<Targets>>
   : never;
 
 export type DistributeAllRelativePatterns<
   FromPath extends string,
   Targets extends string
+> = SplitRouteSegments<FromPath> extends infer FromSegs extends string[]
+  ? DistributeAllRelativePatternsFromSegs<FromSegs, Targets>
+  : never;
+
+type DistributeRelativeTemplatesFromSegs<
+  FromSegs extends string[],
+  Targets extends string
 > = Targets extends any
-  ? ComputeRelativeAllPatternsSingle<
-      SplitRouteSegments<FromPath>,
-      SplitRouteSegments<Targets>
-    >
+  ? ComputeRelativeTemplateSingle<FromSegs, SplitRouteSegments<Targets>>
   : never;
 
 export type DistributeRelativeTemplates<
   FromPath extends string,
   Targets extends string
-> = Targets extends any
-  ? ComputeRelativeTemplateSingle<
-      SplitRouteSegments<FromPath>,
-      SplitRouteSegments<Targets>
-    >
+> = SplitRouteSegments<FromPath> extends infer FromSegs extends string[]
+  ? DistributeRelativeTemplatesFromSegs<FromSegs, Targets>
   : never;
+
+type RelativeTargetRecord<
+  FromSegs extends string[],
+  TargetSegs extends string[]
+> = StripCommonPrefix<FromSegs, TargetSegs> extends [
+  infer RemFrom extends string[],
+  infer RemTarget extends string[]
+]
+  ? RemFrom extends []
+    ? RemTarget extends []
+      ? { c: "."; e: "./"; t: never }
+      : JoinSlash<RemTarget> extends infer J extends string
+        ? {
+            c: J | `./${J}`;
+            e: never;
+            t: HasDynamicSegment<RemTarget> extends true
+              ? JoinSlash<MapSegmentsToTemplate<RemTarget>> extends infer TJ extends string
+                ? TJ | `./${TJ}`
+                : never
+              : never;
+          }
+        : never
+    : HasVariableLengthSegment<RemFrom> extends true
+      ? never
+      : ToDotDotSegments<RemFrom> extends infer Dots extends string[]
+        ? RemTarget extends []
+          ? { c: JoinSlash<Dots>; e: never; t: never }
+          : JoinSlash<[...Dots, ...RemTarget]> extends infer J extends string
+            ? {
+                c: SharesFirstSegment<FromSegs, TargetSegs> extends true ? J : never;
+                e: SharesFirstSegment<FromSegs, TargetSegs> extends true ? never : J;
+                t: HasDynamicSegment<RemTarget> extends true
+                  ? JoinSlash<[...Dots, ...MapSegmentsToTemplate<RemTarget>]>
+                  : never;
+              }
+            : never
+        : never
+  : never;
+
+type DistributeRelativeRecords<
+  FromSegs extends string[],
+  Targets extends string
+> = Targets extends any
+  ? RelativeTargetRecord<FromSegs, SplitRouteSegments<Targets>>
+  : never;
+
+type PackRelativeTarget<
+  Rec extends { c: string; e: string; t: string },
+  C extends string = Rec["c"],
+  E extends string = Rec["e"],
+  T extends string = Rec["t"],
+  Base extends string = C | E | T
+> =
+  | C
+  | ((E | T | `${Base}?${string}` | `${Base}#${string}`) & Record<never, never>);
 
 export type DinouRelativeDynamicPattern<TFrom extends string> = Extract<
   DistributeAllRelativePatterns<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>,
@@ -1153,22 +1220,9 @@ export type DinouRelativeLinkTarget<TFrom extends string> =
     ? string
     : [string] extends [TFrom]
       ? string
-      : | DistributeRelativeCompletions<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>
-        | ((
-            | Exclude<
-                DistributeAllRelativePatterns<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>,
-                DistributeRelativeCompletions<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>
-              >
-            | DistributeRelativeTemplates<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>
-            | `${
-                | DistributeAllRelativePatterns<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>
-                | DistributeRelativeTemplates<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>
-              }?${string}`
-            | `${
-                | DistributeAllRelativePatterns<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>
-                | DistributeRelativeTemplates<CleanRoutePath<TFrom>, DinouEffectiveRoutePattern>
-              }#${string}`
-          ) & Record<never, never>);
+      : SplitRouteSegments<CleanRoutePath<TFrom>> extends infer FromSegs extends string[]
+        ? PackRelativeTarget<DistributeRelativeRecords<FromSegs, DinouEffectiveRoutePattern>>
+        : never;
 
 export type DinouLinkTargetForFrom<TFrom extends string | undefined> =
   [TFrom] extends [undefined]

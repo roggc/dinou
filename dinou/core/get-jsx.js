@@ -171,6 +171,9 @@ async function getJSX(
           const defaultExport = pageFunctionsModule.default?.default ? pageFunctionsModule.default.default : pageFunctionsModule.default;
           const getProps = pageFunctionsModule.getProps || defaultExport?.getProps;
           pageFunctionsProps = await getProps?.(dParams ?? {});
+          if (getContext()?._hasRedirected) {
+            return null;
+          }
           props = { ...props, ...(pageFunctionsProps ?? {}) };
         }
         const notFoundEffectivePpr =
@@ -268,6 +271,9 @@ async function getJSX(
           const getProps =
             pageFunctionsModule.getProps || defaultExport?.getProps;
           pageFunctionsProps = await getProps?.(dynamicParams);
+          if (getContext()?._hasRedirected) {
+            return null;
+          }
           props = { ...props, ...(pageFunctionsProps ?? {}) };
         }
 
@@ -286,6 +292,9 @@ async function getJSX(
     ) {
       jsx = await runInPageSegment(() => asyncRenderJSXToClientJSX(jsx));
       const ctx = getContext();
+      if (ctx?._hasRedirected) {
+        return jsx;
+      }
       if (ctx) {
         ctx._resolvedPageClientJsx = jsx;
       }
@@ -438,8 +447,14 @@ async function getJSX(
         } finally {
           updatedSlots[slotName] = updatedSlotElement;
         }
+        if (getContext()?._hasRedirected) {
+          return null;
+        }
       }
       const layoutProps = await getLayoutProps(layoutPath, dParams);
+      if (getContext()?._hasRedirected) {
+        return null;
+      }
       let props = { params: dParams, ...updatedSlots, ...(layoutProps ?? {}) };
       if (options?.skipLayoutProbe) {
         jsx = markLayoutRootElement(
@@ -454,6 +469,9 @@ async function getJSX(
             layoutEffectivePpr,
           );
           await runInLayoutSegment(() => asyncRenderJSXToClientJSX(testElement));
+          if (getContext()?._hasRedirected) {
+            return null;
+          }
           jsx = markLayoutRootElement(
             React.createElement(Layout, props, jsx),
             layoutEffectivePpr,
@@ -492,6 +510,9 @@ async function getJSX(
             () => asyncRenderJSXToClientJSX(testElement),
             layoutSegmentStore
           );
+          if (getContext()?._hasRedirected) {
+            return null;
+          }
           jsx = replaceLayoutChildrenPlaceholder(resolvedLayout, jsx, placeholder);
           if (layoutOnlyJsx && !layoutRenderFailed) {
             layoutOnlyJsx = replaceLayoutChildrenPlaceholder(resolvedLayout, layoutOnlyJsx, placeholder);

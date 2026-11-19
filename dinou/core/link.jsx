@@ -22,9 +22,20 @@ export function Link({
   const { push } = useRouter();
   const pathname = usePathname();
   const resolvedHref = resolveUrl(targetHref, pathname, from);
+  const isNonSelfTarget = Boolean(props.target && props.target !== "_self");
+  const isDownload = props.download !== undefined && props.download !== false;
 
   const handlePrefetch = () => {
-    if (!prefetch || !targetHref || fresh || isExternalUrl(targetHref)) return;
+    if (
+      !prefetch ||
+      !targetHref ||
+      fresh ||
+      isNonSelfTarget ||
+      isDownload ||
+      isExternalUrl(targetHref)
+    ) {
+      return;
+    }
     if (window.__DINOU_PREFETCH__) {
       window.__DINOU_PREFETCH__(resolvedHref);
     }
@@ -36,7 +47,18 @@ export function Link({
     }
 
     if (e.defaultPrevented) return;
-    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || isExternalUrl(targetHref)) return;
+    if (
+      e.button !== 0 ||
+      e.metaKey ||
+      e.ctrlKey ||
+      e.shiftKey ||
+      e.altKey ||
+      isNonSelfTarget ||
+      isDownload ||
+      isExternalUrl(targetHref)
+    ) {
+      return;
+    }
 
     e.preventDefault();
     if (targetHref) {

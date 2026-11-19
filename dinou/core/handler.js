@@ -162,6 +162,7 @@ function copyCustomContextProperties(source, target) {
         "platformContext",
         "_markDynamic",
         "_dynamicState",
+        "_hasRedirected",
         "_isStaticHtmlRender",
         "_isPprRuntimeResume",
       ].includes(key)
@@ -1294,6 +1295,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
           return;
         }
         hasRedirected = true;
+        if (context) context._hasRedirected = true;
         let url = args[0];
         if (args.length === 2) {
           url = args[1];
@@ -1309,6 +1311,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
     }
     if (methodName === "redirect") {
       hasRedirected = true;
+      if (context) context._hasRedirected = true;
       let url = args[0];
       let status = 302;
       if (args.length === 2) {
@@ -1356,6 +1359,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
     platformContext,
     _markDynamic: markDynamic,
     _dynamicState: dynamicState,
+    _hasRedirected: false,
   };
 
   if (
@@ -2092,6 +2096,7 @@ async function handleRequest(request, platformContext = {}) {
                 await revalidateLayout(entry.layoutRoutePath, {
                   onlyRefreshSlots:
                     !isLayoutTtlExpired && !isAncestorOwnNewer && isAncestorSlotOnlyNewer,
+                  onlyIfExpired: isLayoutTtlExpired && !(isLayoutReq && isAncestorNewer),
                 });
                 const lMetaKey = entry.cleanLayoutKey
                   ? `${entry.cleanLayoutKey}/layout.metadata.json`
@@ -2292,7 +2297,9 @@ async function handleRequest(request, platformContext = {}) {
                 (await readMetaFromStorage(storage, pMetaKey, pRscBaseKey, platformContext, request.url));
               if (pMeta) {
                 const pReval =
-                  pMeta.pageRevalidate !== undefined ? pMeta.pageRevalidate : pMeta.revalidate;
+                  pMeta.pageRevalidate !== undefined && pMeta.pageRevalidate !== null
+                    ? pMeta.pageRevalidate
+                    : pMeta.revalidate;
                 const pGen = pMeta.pageGeneratedAt || pMeta.generatedAt || 0;
                 if (typeof pReval === "number" && pReval >= 1 && pGen > 0 && Date.now() > pGen + pReval * 1000) {
                   isExpired = true;
@@ -2330,7 +2337,7 @@ async function handleRequest(request, platformContext = {}) {
                   regenerating.add(reqPath);
                   try {
                     const { revalidatePage } = await import("./cache-revalidate.js");
-                    await revalidatePage(cleanPath, {});
+                    await revalidatePage(cleanPath, { onlyIfExpired: true });
                   } finally {
                     regenerating.delete(reqPath);
                   }
@@ -2662,6 +2669,9 @@ async function handleRequest(request, platformContext = {}) {
         const manifest = getClientManifest();
         pipeRSC(jsx, bridge, manifest, platformContext);
       } catch (err) {
+        if (bridge.headers.has("x-rsc-redirect") || bridge.headers.has("Location")) {
+          return;
+        }
         console.error(`[Dinou] Error rendering RSC ${segment}:`, err);
         const serializedError = {
           message: isDevelopment
@@ -2984,6 +2994,7 @@ async function handleRequest(request, platformContext = {}) {
               await revalidateLayout(entry.layoutRoutePath, {
                 onlyRefreshSlots:
                   !isLayoutTtlExpired && !isAncestorOwnNewer && isAncestorSlotOnlyNewer,
+                onlyIfExpired: isLayoutTtlExpired && !isAncestorNewer,
               });
               const refreshedMeta = await readMetaFromStorage(
                 storage,
@@ -3115,7 +3126,7 @@ async function handleRequest(request, platformContext = {}) {
       const metadata = cachedItem.metadata || {};
       const { generatedAt } = metadata;
       const pageOwnRevalidate =
-        metadata.pageRevalidate !== undefined
+        metadata.pageRevalidate !== undefined && metadata.pageRevalidate !== null
           ? metadata.pageRevalidate
           : revalidate;
       const pageOwnGeneratedAt = metadata.pageGeneratedAt || generatedAt;
@@ -3124,17 +3135,38 @@ async function handleRequest(request, platformContext = {}) {
         pageOwnRevalidate >= 1 &&
         Date.now() > (pageOwnGeneratedAt || 0) + pageOwnRevalidate * 1000;
 
-      if (isExpired) {
+      if (isExpired && !regenerating.has(reqPath)) {
         // Trigger background revalidation on Edge!
+        regenerating.add(reqPath);
         const revalPromise = (async () => {
-          if (regenerating.has(reqPath)) return;
-          regenerating.add(reqPath);
           try {
             console.log(`[Edge ISR] Starting regeneration for ${reqPath}...`);
             if (metadata.ppr || isPprConfig || (platformContext && platformContext.renderHtmlStream)) {
               const { revalidatePage } = await import("./cache-revalidate.js");
-              await revalidatePage(reqPath);
+              await revalidatePage(reqPath, { onlyIfExpired: true });
               return;
+            }
+            const latestMeta = await readMetaFromStorage(
+              storage,
+              metaKey,
+              cleanPath ? `${cleanPath}/page.rsc` : "page.rsc",
+              platformContext,
+              request.url
+            );
+            if (latestMeta) {
+              const latestReval =
+                latestMeta.pageRevalidate !== undefined && latestMeta.pageRevalidate !== null
+                  ? latestMeta.pageRevalidate
+                  : pageOwnRevalidate;
+              const latestPageGen = Number(latestMeta.pageGeneratedAt || latestMeta.generatedAt || 0);
+              if (
+                typeof latestReval === "number" &&
+                latestReval >= 1 &&
+                latestPageGen > 0 &&
+                Date.now() <= latestPageGen + latestReval * 1000
+              ) {
+                return;
+              }
             }
             const revalBridge = new WebResponseBridge();
             const revalSimReq = simReq
