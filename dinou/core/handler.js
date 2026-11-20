@@ -612,12 +612,22 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
             staticPathsSet = new Set(
               paths.map((pathObj) => {
                 if (pathObj && typeof pathObj === "object" && !Array.isArray(pathObj)) {
-                  const sortedEntries = Object.entries(pathObj).sort((a, b) =>
-                    a[0].localeCompare(b[0])
-                  );
+                  const sortedEntries = Object.entries(pathObj)
+                    .sort((a, b) => a[0].localeCompare(b[0]))
+                    .map(([k, v]) => [
+                      k,
+                      Array.isArray(v)
+                        ? v.join(",")
+                        : v === undefined || v === null
+                        ? ""
+                        : String(v),
+                    ]);
                   return JSON.stringify(sortedEntries);
                 }
-                return String(pathObj);
+                if (Array.isArray(pathObj)) {
+                  return pathObj.join(",");
+                }
+                return pathObj === undefined || pathObj === null ? "" : String(pathObj);
               })
             );
           }
@@ -683,13 +693,21 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
         if (staticPathsSet) {
           const sortedQueryEntries = Object.entries(dynamicParams)
             .sort((a, b) => a[0].localeCompare(b[0]))
-            .map(([k, v]) => {
-              if (Array.isArray(v)) return [k, v.join(",")];
-              return [k, String(v)];
-            });
+            .map(([k, v]) => [
+              k,
+              Array.isArray(v)
+                ? v.join(",")
+                : v === undefined || v === null
+                ? ""
+                : String(v),
+            ]);
           const serializedQuery = JSON.stringify(sortedQueryEntries);
           const singleVal = Object.values(dynamicParams)[0];
-          const singleValStr = Array.isArray(singleVal) ? singleVal.join(",") : String(singleVal);
+          const singleValStr = Array.isArray(singleVal)
+            ? singleVal.join(",")
+            : singleVal === undefined || singleVal === null
+            ? ""
+            : String(singleVal);
           isPathAllowed = staticPathsSet.has(serializedQuery) || staticPathsSet.has(singleValStr);
         }
         if (!isPathAllowed) {
@@ -759,10 +777,21 @@ async function isLayoutSegmentBlocked(
     if (layoutConfig.staticPathsSet) {
       const sortedEntries = Object.entries(lParams)
         .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([k, v]) => (Array.isArray(v) ? [k, v.join(",")] : [k, String(v)]));
+        .map(([k, v]) => [
+          k,
+          Array.isArray(v)
+            ? v.join(",")
+            : v === undefined || v === null
+            ? ""
+            : String(v),
+        ]);
       const serialized = JSON.stringify(sortedEntries);
       const singleVal = Object.values(lParams)[0];
-      const singleValStr = Array.isArray(singleVal) ? singleVal.join(",") : String(singleVal);
+      const singleValStr = Array.isArray(singleVal)
+        ? singleVal.join(",")
+        : singleVal === undefined || singleVal === null
+        ? ""
+        : String(singleVal);
       isPathAllowed =
         layoutConfig.staticPathsSet.has(serialized) ||
         layoutConfig.staticPathsSet.has(singleValStr);
@@ -2002,12 +2031,56 @@ async function handleRequest(request, platformContext = {}) {
     let layoutConfig = null;
     let pageConfig = null;
     await requestStorage.run(rootContext, async () => {
-      if (isLayoutReq) {
+      // Authoritative perimeter validation (root-to-child layouts, then page) BEFORE any cached RSC hit
+      const perimeterLayoutChain = getActiveLayoutChain(reqSegments, queryObj, srcFolder, {
+        ignoreNoLayout: isLayoutReq,
+      });
+      if (perimeterLayoutChain.length > 0) {
+        for (let i = perimeterLayoutChain.length - 1; i >= 0; i--) {
+          const entry = perimeterLayoutChain[i];
+          const lCfg = await resolveLayoutFunctionsConfig(entry.layoutPath, entry.dParams);
+          if (i === 0 && isLayoutReq) {
+            layoutConfig = lCfg;
+          }
+          if (isLayoutReq && lCfg.isDynamic) {
+            dynamicState.value = true;
+          }
+          if (
+            await isLayoutSegmentBlocked(
+              entry.layoutPath,
+              entry.dParams,
+              lCfg,
+              entry.cleanLayoutKey,
+              reqPath,
+              isDevelopment,
+              Boolean(platformContext?.isSSG),
+            )
+          ) {
+            isPathBlocked = true;
+            break;
+          }
+        }
+      } else if (isLayoutReq && layoutPath) {
         layoutConfig = await resolveLayoutFunctionsConfig(layoutPath, layoutParams);
         if (layoutConfig.isDynamic) {
           dynamicState.value = true;
         }
-      } else if (isPageReq) {
+        if (
+          await isLayoutSegmentBlocked(
+            layoutPath,
+            layoutParams,
+            layoutConfig,
+            undefined,
+            reqPath,
+            isDevelopment,
+            Boolean(platformContext?.isSSG),
+          )
+        ) {
+          isPathBlocked = true;
+        }
+      }
+
+      if (!isLayoutReq && !isPathBlocked) {
         pageConfig = await resolvePageFunctionsConfig(
           pagePath,
           reqSegments,
@@ -2022,6 +2095,10 @@ async function handleRequest(request, platformContext = {}) {
         isPathBlocked = pageConfig.isPathBlocked;
       }
     });
+
+    if (isPathBlocked) {
+      return new Response("Not Found", { status: 404 });
+    }
 
     const nonBuildIdQueryKeys = Object.keys(queryObj);
     const hasQueryParams = nonBuildIdQueryKeys.length > 0;
@@ -2454,86 +2531,9 @@ async function handleRequest(request, platformContext = {}) {
       }
     }
 
-    if (isLayoutReq) {
-      const activeLayoutChainForRsc = getActiveLayoutChain(reqSegments, queryObj, srcFolder, {
-        ignoreNoLayout: true,
-      });
-      if (activeLayoutChainForRsc.length > 0) {
-        for (const entry of activeLayoutChainForRsc) {
-          const lConfig = await resolveLayoutFunctionsConfig(entry.layoutPath, entry.dParams);
-          if (
-            await isLayoutSegmentBlocked(
-              entry.layoutPath,
-              entry.dParams,
-              lConfig,
-              entry.cleanLayoutKey,
-              reqPath,
-              isDevelopment,
-              Boolean(platformContext?.isSSG),
-            )
-          ) {
-            isPathBlocked = true;
-            break;
-          }
-        }
-      } else if (layoutPath) {
-        if (!layoutConfig) {
-          layoutConfig = await resolveLayoutFunctionsConfig(layoutPath, layoutParams);
-        }
-        if (
-          await isLayoutSegmentBlocked(
-            layoutPath,
-            layoutParams,
-            layoutConfig,
-            undefined,
-            reqPath,
-            isDevelopment,
-            Boolean(platformContext?.isSSG),
-          )
-        ) {
-          isPathBlocked = true;
-        }
-      }
-      if (isPathBlocked) {
-        return new Response("Not Found", { status: 404 });
-      }
-    } else {
-      if (!pageConfig) {
-        pageConfig = await resolvePageFunctionsConfig(
-          pagePath,
-          reqSegments,
-          queryObj,
-          dynamicParams,
-          reqPath,
-          Boolean(platformContext?.isSSG),
-        );
-      }
-      isPathBlocked = pageConfig.isPathBlocked;
-      if (!isPathBlocked) {
-        const activeLayoutChainForPage = getActiveLayoutChain(reqSegments, queryObj, srcFolder, {
-          ignoreNoLayout: false,
-        });
-        for (const entry of activeLayoutChainForPage) {
-          const lConfig = await resolveLayoutFunctionsConfig(entry.layoutPath, entry.dParams);
-          if (
-            await isLayoutSegmentBlocked(
-              entry.layoutPath,
-              entry.dParams,
-              lConfig,
-              entry.cleanLayoutKey,
-              reqPath,
-              isDevelopment,
-              Boolean(platformContext?.isSSG),
-            )
-          ) {
-            isPathBlocked = true;
-            break;
-          }
-        }
-      }
-      if (isPathBlocked) {
-        return new Response("Not Found", { status: 404 });
-      }
+    // Perimeter checks (root-to-child layouts + page) already ran authoritatively above before cache lookup.
+    if (isPathBlocked) {
+      return new Response("Not Found", { status: 404 });
     }
 
     const rscDynamicState = isLayoutReq ? dynamicState : (isRoutePpr ? { value: false } : dynamicState);
@@ -2723,29 +2723,6 @@ async function handleRequest(request, platformContext = {}) {
     dynamicState.value = false;
   }
 
-  let {
-    isPathBlocked,
-    allowISGValue,
-    isDynamicConfig,
-    revalidate,
-    tags,
-    ppr: isPprConfig,
-    pagePpr: isPagePprConfig,
-  } = await requestStorage.run(rootContext, () =>
-    resolvePageFunctionsConfig(
-      pagePath,
-      reqSegments,
-      queryObj,
-      dynamicParams,
-      reqPath,
-      Boolean(platformContext?.isSSG),
-    )
-  );
-  let hasStaticDynamicConfig = Boolean(isDynamicConfig);
-  if (isDynamicConfig) {
-    dynamicState.value = true;
-  }
-
   const layouts = getFilePathAndDynamicParams(
     reqSegments,
     queryObj,
@@ -2759,19 +2736,25 @@ async function handleRequest(request, platformContext = {}) {
     true
   );
 
-  let combinedTags = Array.isArray(tags) ? [...tags] : [];
-  let combinedRevalidate = revalidate;
+  let isPathBlocked = false;
+  let allowISGValue = true;
+  let isDynamicConfig = false;
+  let revalidate = undefined;
+  let tags = [];
+  let isPprConfig = false;
+  let isPagePprConfig = false;
+  let hasStaticDynamicConfig = false;
+  let combinedTags = [];
+  let combinedRevalidate = undefined;
 
+  // 1. Evaluate ancestor layouts root-to-child FIRST so a parent layout perimeter guard
+  // (`validateParams` returning false or `allowISG: false`) halts before child layouts/pages run.
   const activeLayoutsForRoute = getActiveLayoutChain(reqSegments, queryObj, srcFolder);
   if (activeLayoutsForRoute.length > 0) {
     await requestStorage.run(rootContext, async () => {
-      for (const entry of activeLayoutsForRoute) {
+      for (let i = activeLayoutsForRoute.length - 1; i >= 0; i--) {
+        const entry = activeLayoutsForRoute[i];
         const layoutConfig = await resolveLayoutFunctionsConfig(entry.layoutPath, entry.dParams);
-
-        if (layoutConfig.isDynamic) {
-          dynamicState.value = true;
-          hasStaticDynamicConfig = true;
-        }
 
         if (
           await isLayoutSegmentBlocked(
@@ -2786,6 +2769,12 @@ async function handleRequest(request, platformContext = {}) {
         ) {
           isPathBlocked = true;
           allowISGValue = false;
+          break;
+        }
+
+        if (layoutConfig.isDynamic) {
+          dynamicState.value = true;
+          hasStaticDynamicConfig = true;
         }
 
         if (typeof layoutConfig.revalidate === "number" && layoutConfig.revalidate >= 0) {
@@ -2805,6 +2794,50 @@ async function handleRequest(request, platformContext = {}) {
         }
       }
     });
+  }
+
+  // 2. Evaluate page_functions only when no ancestor layout blocked the request
+  if (!isPathBlocked) {
+    const pageCfg = await requestStorage.run(rootContext, () =>
+      resolvePageFunctionsConfig(
+        pagePath,
+        reqSegments,
+        queryObj,
+        dynamicParams,
+        reqPath,
+        Boolean(platformContext?.isSSG),
+      )
+    );
+    isPathBlocked = pageCfg.isPathBlocked;
+    allowISGValue = pageCfg.allowISGValue;
+    isDynamicConfig = pageCfg.isDynamicConfig;
+    revalidate = pageCfg.revalidate;
+    tags = pageCfg.tags;
+    isPprConfig = pageCfg.ppr;
+    isPagePprConfig = pageCfg.pagePpr;
+
+    if (isDynamicConfig) {
+      dynamicState.value = true;
+      hasStaticDynamicConfig = true;
+    }
+
+    if (typeof revalidate === "number" && revalidate >= 0) {
+      if (typeof combinedRevalidate === "number") {
+        combinedRevalidate = Math.min(combinedRevalidate, revalidate);
+      } else {
+        combinedRevalidate = revalidate;
+      }
+    }
+
+    if (Array.isArray(tags)) {
+      const merged = [...tags];
+      for (const t of combinedTags) {
+        if (!merged.includes(t)) {
+          merged.push(t);
+        }
+      }
+      combinedTags = merged;
+    }
   }
 
   // Edge Runtime: ISR, ISG & Static Delivery via storageAdapter and env.ASSETS

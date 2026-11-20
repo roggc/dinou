@@ -155,9 +155,34 @@ async function buildStaticPages(onProgress = null) {
             getStaticPaths = module.getStaticPaths || defMod?.getStaticPaths;
             revalidate = module.revalidate ?? defMod?.revalidate;
           }
+          const lfPath = getLayoutFunctionsPath(dynamicPath);
+          if (lfPath) {
+            const lmod = await importModule(lfPath);
+            const ldefMod = lmod.default?.default ? lmod.default.default : lmod.default;
+            const lmodGetStaticPaths = lmod.getStaticPaths || ldefMod?.getStaticPaths;
+            const lmodRevalidate = lmod.revalidate ?? ldefMod?.revalidate;
+            if (!getStaticPaths && lmodGetStaticPaths) {
+              getStaticPaths = lmodGetStaticPaths;
+            }
+            if (revalidate === undefined && lmodRevalidate !== undefined) {
+              revalidate = lmodRevalidate;
+            }
+          }
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
-          if (isLocalPage && !(await isDynamicRoute(revalidate))) {
+          const [layoutPath] = getFilePathAndDynamicParams(
+            segments,
+            {},
+            dynamicPath,
+            "layout",
+            true,
+            true,
+            undefined,
+            segments.length,
+          );
+          const hasLocalLayout =
+            layoutPath && path.dirname(layoutPath) === dynamicPath;
+          if ((isLocalPage || hasLocalLayout) && !(await isDynamicRoute(revalidate))) {
             if (process.env.DINOU_DEBUG) {
               console.log(
                 `Found optional catch-all route: ${segments.join("/") ?? ""
@@ -224,10 +249,10 @@ async function buildStaticPages(onProgress = null) {
                   }
 
                   // 🛡️ 3. URL CLEANING
-                  // Remove undefineds for the physical URL
-                  const validSegmentsToAdd = flatSegments.filter(
-                    (s) => s !== undefined && s !== null && s !== "",
-                  );
+                  // Remove undefineds for the physical URL and coerce numeric segments to strings
+                  const validSegmentsToAdd = flatSegments
+                    .filter((s) => s !== undefined && s !== null && s !== "")
+                    .map((s) => String(s));
 
                   // 🛡️ 4. PARAMS PREPARATION & NORMALIZATION
                   const paramsToAdd = isObject
@@ -301,9 +326,34 @@ async function buildStaticPages(onProgress = null) {
             getStaticPaths = module.getStaticPaths || defMod?.getStaticPaths;
             revalidate = module.revalidate ?? defMod?.revalidate;
           }
+          const lfPath = getLayoutFunctionsPath(dynamicPath);
+          if (lfPath) {
+            const lmod = await importModule(lfPath);
+            const ldefMod = lmod.default?.default ? lmod.default.default : lmod.default;
+            const lmodGetStaticPaths = lmod.getStaticPaths || ldefMod?.getStaticPaths;
+            const lmodRevalidate = lmod.revalidate ?? ldefMod?.revalidate;
+            if (!getStaticPaths && lmodGetStaticPaths) {
+              getStaticPaths = lmodGetStaticPaths;
+            }
+            if (revalidate === undefined && lmodRevalidate !== undefined) {
+              revalidate = lmodRevalidate;
+            }
+          }
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
-          if (isLocalPage && !(await isDynamicRoute(revalidate))) {
+          const [layoutPath] = getFilePathAndDynamicParams(
+            segments,
+            {},
+            dynamicPath,
+            "layout",
+            true,
+            true,
+            undefined,
+            segments.length,
+          );
+          const hasLocalLayout =
+            layoutPath && path.dirname(layoutPath) === dynamicPath;
+          if ((isLocalPage || hasLocalLayout) && !(await isDynamicRoute(revalidate))) {
             if (process.env.DINOU_DEBUG) {
               console.log(
                 `Found catch-all route: ${segments.join("/") ?? ""
@@ -348,8 +398,11 @@ async function buildStaticPages(onProgress = null) {
                   }
 
                   // 🛡️ FIX 2: Segment filtering.
-                  // Flatten (.flat) to handle the catch-all array and filter undefineds from parents.
-                  const validSegmentsToAdd = segmentsToAdd.flat();
+                  // Flatten (.flat) to handle the catch-all array, filter empties, and coerce numbers to strings.
+                  const validSegmentsToAdd = segmentsToAdd
+                    .flat()
+                    .filter((s) => s !== undefined && s !== null && s !== "")
+                    .map((s) => String(s));
 
                   const paramsToAdd = isObject
                     ? pathItem
@@ -410,9 +463,34 @@ async function buildStaticPages(onProgress = null) {
             getStaticPaths = module.getStaticPaths || defMod?.getStaticPaths;
             revalidate = module.revalidate ?? defMod?.revalidate;
           }
+          const lfPath = getLayoutFunctionsPath(dynamicPath);
+          if (lfPath) {
+            const lmod = await importModule(lfPath);
+            const ldefMod = lmod.default?.default ? lmod.default.default : lmod.default;
+            const lmodGetStaticPaths = lmod.getStaticPaths || ldefMod?.getStaticPaths;
+            const lmodRevalidate = lmod.revalidate ?? ldefMod?.revalidate;
+            if (!getStaticPaths && lmodGetStaticPaths) {
+              getStaticPaths = lmodGetStaticPaths;
+            }
+            if (revalidate === undefined && lmodRevalidate !== undefined) {
+              revalidate = lmodRevalidate;
+            }
+          }
           const isLocalPage =
             pagePath && path.dirname(pagePath) === dynamicPath;
-          if (isLocalPage && !(await isDynamicRoute(revalidate))) {
+          const [layoutPath] = getFilePathAndDynamicParams(
+            segments,
+            {},
+            dynamicPath,
+            "layout",
+            true,
+            true,
+            undefined,
+            segments.length,
+          );
+          const hasLocalLayout =
+            layoutPath && path.dirname(layoutPath) === dynamicPath;
+          if ((isLocalPage || hasLocalLayout) && !(await isDynamicRoute(revalidate))) {
             if (process.env.DINOU_DEBUG) {
               console.log(
                 `Found optional dynamic route: ${segments.join("/") ?? ""
@@ -471,9 +549,9 @@ async function buildStaticPages(onProgress = null) {
                   }
 
                   // 🛡️ 3. URL CLEANING
-                  const validSegmentsToAdd = flatSegments.filter(
-                    (s) => s !== undefined && s !== null && s !== "",
-                  );
+                  const validSegmentsToAdd = flatSegments
+                    .filter((s) => s !== undefined && s !== null && s !== "")
+                    .map((s) => String(s));
 
                   // 🛡️ 4. PARAMS PREPARATION
                   // Here we DO NOT normalize to [], because it is a single parameter.
@@ -584,6 +662,26 @@ async function buildStaticPages(onProgress = null) {
                   let segmentsToAdd;
 
                   if (isObject) {
+                    let parentParamMismatch = false;
+                    for (const [boundKey, boundVal] of Object.entries(params)) {
+                      if (
+                        Object.prototype.hasOwnProperty.call(pathItem, boundKey) &&
+                        !currentStructure.includes(boundKey)
+                      ) {
+                        const normItem = Array.isArray(pathItem[boundKey])
+                          ? pathItem[boundKey].join(",")
+                          : String(pathItem[boundKey] ?? "");
+                        const normBound = Array.isArray(boundVal)
+                          ? boundVal.join(",")
+                          : String(boundVal ?? "");
+                        if (normItem !== normBound) {
+                          parentParamMismatch = true;
+                          break;
+                        }
+                      }
+                    }
+                    if (parentParamMismatch) continue;
+
                     let notValidRoute = false;
                     segmentsToAdd = currentStructure.map((key, i, arr) => {
                       const isObject = typeof key === "object" && key !== null;
@@ -606,7 +704,10 @@ async function buildStaticPages(onProgress = null) {
                     segmentsToAdd = [pathItem];
                   }
 
-                  const validSegmentsToAdd = segmentsToAdd.flat();
+                  const validSegmentsToAdd = segmentsToAdd
+                    .flat()
+                    .filter((s) => s !== undefined && s !== null && s !== "")
+                    .map((s) => String(s));
 
                   const paramsToAdd = isObject
                     ? pathItem
@@ -715,7 +816,8 @@ async function buildStaticPages(onProgress = null) {
 
                     const validSegmentsToAdd = segmentsToAdd
                       .flat()
-                      .filter((s) => s !== undefined && s !== null && s !== "");
+                      .filter((s) => s !== undefined && s !== null && s !== "")
+                      .map((s) => String(s));
 
                     const paramsToAdd = isObject
                       ? pathItem

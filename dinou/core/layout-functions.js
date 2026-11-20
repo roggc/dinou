@@ -131,10 +131,22 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
         staticPathsSet = new Set(
           paths.map((p) => {
             if (typeof p === "object" && p !== null && !Array.isArray(p)) {
-              const sorted = Object.entries(p).sort((a, b) => a[0].localeCompare(b[0]));
+              const sorted = Object.entries(p)
+                .sort((a, b) => a[0].localeCompare(b[0]))
+                .map(([k, v]) => [
+                  k,
+                  Array.isArray(v)
+                    ? v.join(",")
+                    : v === undefined || v === null
+                    ? ""
+                    : String(v),
+                ]);
               return JSON.stringify(sorted);
             }
-            return String(p);
+            if (Array.isArray(p)) {
+              return p.join(",");
+            }
+            return p === undefined || p === null ? "" : String(p);
           })
         );
       }

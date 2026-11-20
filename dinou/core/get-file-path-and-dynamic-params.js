@@ -312,7 +312,9 @@ function matchRouteTree(
     }
   }
 
-  const seg = reqSegments[index];
+  const rawSeg = reqSegments[index];
+  const seg =
+    rawSeg === undefined || rawSeg === null ? rawSeg : String(rawSeg);
   const isRouterSyntaxInSegment =
     seg &&
     ((seg.startsWith("(") && seg.endsWith(")")) ||
