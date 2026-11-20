@@ -172,7 +172,20 @@ function copyCustomContextProperties(source, target) {
   }
   if (source.req && target.req) {
     for (const key of Object.keys(source.req)) {
-      if (!["cookies", "headers", "query", "path", "url", "method", "env", "ctx"].includes(key)) {
+      if (
+        ![
+          "cookies",
+          "headers",
+          "query",
+          "path",
+          "rawPath",
+          "isRscRequest",
+          "url",
+          "method",
+          "env",
+          "ctx",
+        ].includes(key)
+      ) {
         target.req[key] = source.req[key];
       }
     }
@@ -1393,6 +1406,8 @@ function createServerFunctionContext(simReq, resBridge, platformContext = {}) {
       headers: { ...simReq.headers },
       query: { ...simReq.query },
       path: simReq.path,
+      rawPath: simReq.rawPath || simReq.path,
+      isRscRequest: false,
       method: simReq.method,
       env: unifiedEnv,
       ctx: platformContext.ctx || null,

@@ -76,6 +76,8 @@ function createFallbackServerContext() {
       cookies: {},
       headers: {},
       path: "/",
+      rawPath: "/",
+      isRscRequest: false,
       method: "GET",
       env: unifiedEnv,
       ctx: null,
@@ -92,7 +94,17 @@ function getContext() {
       "[Dinou] ❌ You are calling getContext() inside a Client Component running in the browser. This function is Server-Only. Pass the data as props from a Server Component instead."
     );
     return {
-      req: { query: {}, cookies: {}, headers: {}, path: "/", method: "GET", env: {}, ctx: null },
+      req: {
+        query: {},
+        cookies: {},
+        headers: {},
+        path: "/",
+        rawPath: "/",
+        isRscRequest: false,
+        method: "GET",
+        env: {},
+        ctx: null,
+      },
       res: noopResponseProxy,
       env: {},
       ctx: null,
