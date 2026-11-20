@@ -116,12 +116,12 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
       }
     }
     const defaultExport = mod.default?.default ? mod.default.default : mod.default;
+    const rawAllowISG =
+      mod.allowISG !== undefined ? mod.allowISG : defaultExport?.allowISG;
     const resolvedAllowISG =
-      typeof mod.allowISG === "function"
-        ? await mod.allowISG()
-        : typeof defaultExport?.allowISG === "function"
-        ? await defaultExport.allowISG()
-        : (mod.allowISG ?? defaultExport?.allowISG ?? defaultAllowISG);
+      typeof rawAllowISG === "function"
+        ? await rawAllowISG()
+        : (rawAllowISG ?? defaultAllowISG);
 
     const getStaticPathsFn = mod.getStaticPaths || defaultExport?.getStaticPaths;
     let staticPathsSet = null;
@@ -152,12 +152,12 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
       }
     }
 
+    const rawRevalidate =
+      mod.revalidate !== undefined ? mod.revalidate : defaultExport?.revalidate;
     const revalidateVal =
-      typeof mod.revalidate === "function"
-        ? await mod.revalidate()
-        : typeof defaultExport?.revalidate === "function"
-        ? await defaultExport.revalidate()
-        : (mod.revalidate ?? defaultExport?.revalidate);
+      typeof rawRevalidate === "function"
+        ? await rawRevalidate()
+        : rawRevalidate;
 
     const isDynamic = typeof revalidateVal === "number" && revalidateVal < 1;
 

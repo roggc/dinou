@@ -595,12 +595,14 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
 
       if (pageFunctionsModule) {
         const defaultExport = pageFunctionsModule.default?.default ? pageFunctionsModule.default.default : pageFunctionsModule.default;
+        const rawAllowISG =
+          pageFunctionsModule.allowISG !== undefined
+            ? pageFunctionsModule.allowISG
+            : defaultExport?.allowISG;
         const resolvedAllowISG =
-          typeof pageFunctionsModule.allowISG === "function"
-            ? await pageFunctionsModule.allowISG()
-            : typeof defaultExport?.allowISG === "function"
-            ? await defaultExport.allowISG()
-            : (pageFunctionsModule.allowISG ?? defaultExport?.allowISG ?? null);
+          typeof rawAllowISG === "function"
+            ? await rawAllowISG()
+            : (rawAllowISG ?? null);
 
         const getStaticPathsFn = pageFunctionsModule.getStaticPaths || defaultExport?.getStaticPaths;
         let staticPathsSet = null;
@@ -633,12 +635,14 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
           }
         }
 
+        const rawRevalidate =
+          pageFunctionsModule.revalidate !== undefined
+            ? pageFunctionsModule.revalidate
+            : defaultExport?.revalidate;
         let revalidateVal =
-          typeof pageFunctionsModule.revalidate === "function"
-            ? await pageFunctionsModule.revalidate()
-            : typeof defaultExport?.revalidate === "function"
-            ? await defaultExport.revalidate()
-            : (pageFunctionsModule.revalidate ?? defaultExport?.revalidate);
+          typeof rawRevalidate === "function"
+            ? await rawRevalidate()
+            : rawRevalidate;
 
         const isDynamic = typeof revalidateVal === "number" && revalidateVal < 1;
         const rawTags = pageFunctionsModule.getCacheTags ?? defaultExport?.getCacheTags;

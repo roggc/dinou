@@ -201,12 +201,14 @@ async function resolveRouteConfigForRevalidate(pagePath, reqSegments, existingMe
       const defaultExport = pfMod.default?.default
         ? pfMod.default.default
         : pfMod.default;
+      const rawRevalidate =
+        pfMod.revalidate !== undefined
+          ? pfMod.revalidate
+          : defaultExport?.revalidate;
       const pfRevalidate =
-        typeof pfMod.revalidate === "function"
-          ? await pfMod.revalidate()
-          : typeof defaultExport?.revalidate === "function"
-          ? await defaultExport.revalidate()
-          : pfMod.revalidate ?? defaultExport?.revalidate;
+        typeof rawRevalidate === "function"
+          ? await rawRevalidate()
+          : rawRevalidate;
       if (revalidate === undefined) {
         revalidate = pfRevalidate;
       }
