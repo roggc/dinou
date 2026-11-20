@@ -913,7 +913,25 @@ async function revalidatePath(reqPath, options) {
   // 1. Revalidate layout first if present for this segment (so revalidatePage composes with the fresh layout)
   const cachedLayout = await readEdgeStorageOrAsset(storage, layoutRscKey);
   const cachedLayoutMeta = await readEdgeStorageOrAsset(storage, layoutMetaKey);
-  if (cachedLayout || cachedLayoutMeta) {
+  let hasOwnLayoutFile = false;
+  if (!cachedLayout && !cachedLayoutMeta) {
+    try {
+      const reqSegments = cleanPath.split("/").filter(Boolean);
+      const srcFolder = path.resolve(process.cwd(), "src");
+      const [exactLayoutPath] = getFilePathAndDynamicParams(
+        reqSegments,
+        {},
+        srcFolder,
+        "layout",
+        true,
+        true,
+        undefined,
+        0
+      );
+      hasOwnLayoutFile = Boolean(exactLayoutPath);
+    } catch (e) {}
+  }
+  if (cachedLayout || cachedLayoutMeta || hasOwnLayoutFile) {
     await revalidateLayout(cleanPath);
   }
 
@@ -1263,7 +1281,13 @@ async function revalidateTag(tag, options) {
                 meta = JSON.parse(item.content);
               } catch (e) {}
             }
-            if (meta && Array.isArray(meta.tags) && meta.tags.includes(tag)) {
+            const slotIdMatch = key.match(/^slots\/([^/]+)\//);
+            const matchedSlotId = meta?.slotId || slotIdMatch?.[1];
+            const matchesSlotId = Boolean(matchedSlotId && matchedSlotId === tag);
+            const matchesSlotTag = Boolean(
+              meta && Array.isArray(meta.tags) && meta.tags.includes(tag)
+            );
+            if (matchesSlotId || matchesSlotTag) {
               targetSlotKeys.add(key);
               if (key.endsWith("/slot.metadata.json")) {
                 targetSlotKeys.add(key.slice(0, -"/slot.metadata.json".length) + "/slot.json");
@@ -1361,6 +1385,15 @@ async function revalidateTag(tag, options) {
     return;
   }
 
+  if (storage) {
+    if (typeof storage.markTagInvalidatedAsync === "function") {
+      await storage.markTagInvalidatedAsync(tag);
+    } else if (typeof storage.markTagInvalidated === "function") {
+      storage.markTagInvalidated(tag);
+    }
+  }
+  globalThis[Symbol.for("dinou.slot.recent.fresh")]?.clear?.();
+
   const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
   if (!existsSync(dist2Folder)) return;
 
@@ -1373,10 +1406,14 @@ async function revalidateTag(tag, options) {
     try {
       const content = await fs.readFile(fileOfMeta, "utf8");
       const metadata = JSON.parse(content);
+      const isSlotMeta = path.basename(fileOfMeta) === "slot.metadata.json";
+      const hasSlotIdMatch =
+        isSlotMeta &&
+        (metadata?.slotId === tag || path.basename(path.dirname(fileOfMeta)) === tag);
       const hasRouteTag = Boolean(metadata && Array.isArray(metadata.tags) && metadata.tags.includes(tag));
       const hasSlotTag = Boolean(metadata && Array.isArray(metadata.slotTags) && metadata.slotTags.includes(tag));
-      if (hasRouteTag || hasSlotTag) {
-        if (path.basename(fileOfMeta) === "slot.metadata.json") {
+      if (hasSlotIdMatch || hasRouteTag || hasSlotTag) {
+        if (isSlotMeta) {
           const slotFolder = path.dirname(fileOfMeta);
           console.log(`✅ [Revalidate] Invalidating cache slot directory: ${slotFolder}`);
           slotPromises.push(

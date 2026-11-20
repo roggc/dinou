@@ -289,7 +289,14 @@ class CloudflareKVStorage extends StorageAdapter {
     if (!this.kv) return false;
     const cleanKey = this._cleanKey(key);
     const val = await this.kv.get(cleanKey);
-    return val !== null;
+    if (val !== null) return true;
+    if (!cleanKey.includes(".")) {
+      const fallbackVal = await this.kv.get(
+        cleanKey ? `${cleanKey}/index.html` : "index.html"
+      );
+      return fallbackVal !== null;
+    }
+    return false;
   }
 
   async delete(key) {
@@ -315,9 +322,28 @@ class CloudflareKVStorage extends StorageAdapter {
     if (!this.kv || typeof this.kv.list !== "function") return [];
     try {
       const effectivePrefix = prefix === "dinou_cache" ? "" : prefix;
-      const options = effectivePrefix ? { prefix: effectivePrefix } : undefined;
-      const res = await this.kv.list(options);
-      return res && res.keys ? res.keys.map((k) => k.name) : [];
+      const results = [];
+      let cursor = undefined;
+      while (true) {
+        const options = {};
+        if (effectivePrefix) options.prefix = effectivePrefix;
+        if (cursor) options.cursor = cursor;
+        const res = await this.kv.list(
+          Object.keys(options).length > 0 ? options : undefined
+        );
+        if (res && Array.isArray(res.keys)) {
+          for (const k of res.keys) {
+            if (k && typeof k.name === "string") {
+              results.push(k.name);
+            }
+          }
+        }
+        if (!res || res.list_complete !== false || !res.cursor) {
+          break;
+        }
+        cursor = res.cursor;
+      }
+      return results;
     } catch (e) {
       return [];
     }
@@ -683,7 +709,10 @@ class DenoKVStorage extends StorageAdapter {
   }
 
   _cleanKey(key) {
-    return String(key).replace(/\\/g, "/").replace(/^\/+/, "");
+    return String(key || "")
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
   }
 
   async get(key) {
@@ -930,11 +959,14 @@ async function readDist2Fallback(storage, key, knownTags = []) {
           item.metadata?.generatedAt ||
           0
       );
+      const slotIdFromKey = writeKey.match(/^slots\/([^/]+)\//)?.[1];
       const combinedTags = new Set([
         ...(Array.isArray(item.metadata?.tags) ? item.metadata.tags : []),
         ...(!isShellJson && Array.isArray(item.metadata?.slotTags)
           ? item.metadata.slotTags
           : []),
+        ...(item.metadata?.slotId ? [item.metadata.slotId] : []),
+        ...(slotIdFromKey ? [slotIdFromKey] : []),
         ...(Array.isArray(knownTags) ? knownTags : []),
       ]);
       if (combinedTags.size > 0) {

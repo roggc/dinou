@@ -439,6 +439,11 @@ async function getSlotFromStorage(storage, storageKey, knownTags = []) {
     return null;
   }
 
+  const cleanKeyForSlotId = String(storageKey || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
+  const slotIdFromKey = cleanKeyForSlotId.match(/^slots\/([^/]+)\//)?.[1];
+
   try {
     const reqContext = getContext();
     const assets =
@@ -447,7 +452,7 @@ async function getSlotFromStorage(storage, storageKey, knownTags = []) {
       reqContext?.req?.env?.ASSETS ||
       (typeof globalThis !== "undefined" ? globalThis.__DINOU_ENV__?.ASSETS : null);
     if (assets && typeof assets.fetch === "function") {
-      const cleanKey = String(storageKey || "").replace(/^\/+/, "");
+      const cleanKey = cleanKeyForSlotId;
       const metaKey = cleanKey.endsWith("/slot.json")
         ? cleanKey.slice(0, -"/slot.json".length) + "/slot.metadata.json"
         : `${cleanKey}.metadata.json`;
@@ -468,6 +473,8 @@ async function getSlotFromStorage(storage, storageKey, knownTags = []) {
           const generatedAt = metadata?.generatedAt || 0;
           const combinedTags = new Set([
             ...(Array.isArray(metadata?.tags) ? metadata.tags : []),
+            ...(metadata?.slotId ? [metadata.slotId] : []),
+            ...(slotIdFromKey ? [slotIdFromKey] : []),
             ...(Array.isArray(knownTags) ? knownTags : []),
           ]);
           for (const t of combinedTags) {
@@ -489,7 +496,15 @@ async function getSlotFromStorage(storage, storageKey, knownTags = []) {
     }
   } catch (e) {}
 
-  const dist2Item = await readDist2Fallback(storage, storageKey, knownTags);
+  const fallbackKnownTags = slotIdFromKey
+    ? Array.from(
+        new Set([
+          ...(Array.isArray(knownTags) ? knownTags : []),
+          slotIdFromKey,
+        ])
+      )
+    : knownTags;
+  const dist2Item = await readDist2Fallback(storage, storageKey, fallbackKnownTags);
   if (dist2Item && dist2Item.content) {
     return dist2Item;
   }
@@ -682,11 +697,13 @@ async function DinouCacheSlot(props) {
     return await computeAnon();
   }
 
-  const allTags = Array.isArray(tags)
-    ? [...tags]
-    : tag
-    ? [tag]
-    : [];
+  const allTags = Array.from(
+    new Set(
+      [...(tag ? [tag] : []), ...(Array.isArray(tags) ? tags : [])].filter(
+        Boolean
+      )
+    )
+  );
   const slotTagsToCommit = Array.from(new Set([slotId, ...allTags].filter(Boolean)));
 
   const storageKey = `slots/${slotId}/slot.json`;
@@ -816,7 +833,7 @@ async function DinouCacheSlot(props) {
   }
 
   // 1. Check if cached in storage
-  let cached = await getSlotFromStorage(storage, storageKey, allTags);
+  let cached = await getSlotFromStorage(storage, storageKey, slotTagsToCommit);
 
   // During a PPR static shell build, if a slot is inside a <Suspense> boundary
   // and was only cached at runtime (not part of the static shell), do not short-circuit
@@ -1100,7 +1117,7 @@ async function getSlotJSX(slotId, options = {}) {
   }
 
   // 1. Check storage cache
-  let cached = await getSlotFromStorage(storage, storageKey);
+  let cached = await getSlotFromStorage(storage, storageKey, [targetId]);
 
   const regEntryInitial = slotRegistry.get(targetId);
   const now = Date.now();
@@ -1114,11 +1131,11 @@ async function getSlotJSX(slotId, options = {}) {
         ? meta.revalidate
         : undefined;
 
-    const isNoCache = revalidateSeconds === 0;
+    const isNoCache = typeof revalidateSeconds === "number" && revalidateSeconds < 1;
     const isExpired =
       isNoCache ||
       (typeof revalidateSeconds === "number" &&
-        revalidateSeconds > 0 &&
+        revalidateSeconds >= 1 &&
         now > generatedAt + revalidateSeconds * 1000);
 
     const serveStaleWhileRevalidate =
@@ -1276,6 +1293,9 @@ async function getSlotJSX(slotId, options = {}) {
       slotRenderGenerations.set(storageKey, renderGen);
       const isLatestGen = () => slotRenderGenerations.get(storageKey) === renderGen;
 
+      const isEntryNoCache =
+        typeof entry.revalidate === "number" && entry.revalidate < 1;
+
       const renderPromise = (async () => {
         const resolved = await entry.render();
         const serialized = serializeJSX(resolved);
@@ -1285,7 +1305,7 @@ async function getSlotJSX(slotId, options = {}) {
             serialized,
           });
         }
-        if (storage && entry.revalidate !== 0 && isLatestGen()) {
+        if (storage && !isEntryNoCache && isLatestGen()) {
           await storage.set(storageKey, serialized, {
             tags: entry.tags,
             revalidate: entry.revalidate,
@@ -1314,7 +1334,7 @@ async function getSlotJSX(slotId, options = {}) {
 
       if (
         storage &&
-        entry.revalidate !== 0 &&
+        !isEntryNoCache &&
         !options.skipHostRevalidate &&
         options.currentPath &&
         isLatestGen()
@@ -1390,7 +1410,7 @@ async function hasExpiredSlots(slotTags) {
     if (checkedIds.has(targetId)) continue;
     checkedIds.add(targetId);
     const storageKey = `slots/${targetId}/slot.json`;
-    const cached = await getSlotFromStorage(storage, storageKey);
+    const cached = await getSlotFromStorage(storage, storageKey, [targetId]);
     if (!cached || !cached.content) continue;
     const meta = cached.metadata || {};
     const regEntry = slotRegistry.get(targetId);
@@ -1402,7 +1422,7 @@ async function hasExpiredSlots(slotTags) {
         : undefined;
     if (
       typeof revalidateSeconds === "number" &&
-      revalidateSeconds > 0 &&
+      revalidateSeconds >= 1 &&
       now > (meta.generatedAt || 0) + revalidateSeconds * 1000
     ) {
       return true;

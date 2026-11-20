@@ -165,7 +165,7 @@ export interface DinouCacheSlotProps {
   id?: string;
   tag?: string;
   tags?: string[];
-  revalidate?: number;
+  revalidate?: number | false;
   children: ReactNode | (() => ReactNode | Promise<ReactNode>);
 }
 
