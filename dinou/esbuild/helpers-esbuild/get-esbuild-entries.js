@@ -1,15 +1,20 @@
 import { readFileSync } from "fs";
 import path from "node:path";
-import glob from "fast-glob";
+import globModule from "#fast-glob";
+
+const glob = globModule?.default || globModule;
 import { pathToFileURL } from "node:url";
 import parser from "#babel/parser";
 import traverse from "#babel/traverse";
 import crypto from "node:crypto";
 import {
-  regex as assetRegex,
-  globPattern as assetGlobPattern,
+  getAssetExtensionsInfo,
+  resolveAssetImport,
 } from "../../core/asset-extensions.js";
-import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
+import {
+  getAbsPathWithExt,
+  resolveStyleImportFromCode,
+} from "../../core/get-abs-path-with-ext.js";
 import normalizePath from "./normalize-path.js";
 import { useClientRegex, useServerRegex } from "../../constants.js";
 import { hasServerFunctions } from "../../core/transform-server-functions.js";
@@ -21,12 +26,18 @@ function hashFilePath(absPath) {
 
 export default async function getEsbuildEntries({
   srcDir = path.resolve("src"),
-  assetInclude = assetRegex,
+  assetInclude = null,
+  dinouConfig = null,
   manifest = {},
 } = {}) {
-  const detectedClientEntries = new Set();
-  const detectedCSSEntries = new Set();
-  const detectedAssetEntries = new Set();
+  const projectRoot = path.dirname(path.resolve(srcDir));
+  const extInfo = getAssetExtensionsInfo(dinouConfig, projectRoot);
+  const activeAssetInclude = assetInclude || extInfo.regex;
+  const activeAssetGlobPattern = extInfo.globPattern;
+
+  const clientEntryMap = new Map();
+  const cssEntryMap = new Map();
+  const assetEntryMap = new Map();
   const serverModules = new Set();
   const serverFunctions = new Set();
 
@@ -61,13 +72,41 @@ export default async function getEsbuildEntries({
     for (const nodePath of importNodes) {
       const source = nodePath.node.source.value;
 
-      // Resolve the import to absolute path (with extension) using your helper
-      const absImportPathWithExt = getAbsPathWithExt(source, {
-        parentURL: pathToFileURL(baseFilePath).href,
-      });
+      // Resolve local/aliased imports, bare stylesheet imports, or bare asset imports from node_modules
+      const absImportPathWithExt =
+        getAbsPathWithExt(source, {
+          parentURL: pathToFileURL(baseFilePath).href,
+          cwd: projectRoot,
+        }) ||
+        resolveStyleImportFromCode(source, baseFilePath, projectRoot) ||
+        resolveAssetImport(source, {
+          importer: baseFilePath,
+          projectRoot,
+          assetRegex: activeAssetInclude,
+        });
 
       if (!absImportPathWithExt) {
         // unresolved - skip
+        continue;
+      }
+
+      if (
+        absImportPathWithExt.endsWith(".css") ||
+        absImportPathWithExt.endsWith(".scss") ||
+        absImportPathWithExt.endsWith(".less")
+      ) {
+        csss.add(absImportPathWithExt);
+        continue;
+      }
+
+      if (activeAssetInclude.test(absImportPathWithExt)) {
+        assets.add(absImportPathWithExt);
+        continue;
+      }
+
+      // If it is a JSON file, add it to imports without parsing with Babel
+      if (absImportPathWithExt.endsWith(".json")) {
+        imports.add(absImportPathWithExt);
         continue;
       }
 
@@ -110,27 +149,6 @@ export default async function getEsbuildEntries({
         }
       }
 
-      // For non-client modules, process normally
-      if (
-        absImportPathWithExt.endsWith(".css") ||
-        absImportPathWithExt.endsWith(".scss") ||
-        absImportPathWithExt.endsWith(".less")
-      ) {
-        csss.add(absImportPathWithExt);
-        continue;
-      }
-
-      if (assetInclude.test(absImportPathWithExt)) {
-        assets.add(absImportPathWithExt);
-        continue;
-      }
-
-      // 🚨 THE SOLUTION: If it is a JSON file, add it but DO NOT parse it with Babel
-      if (absImportPathWithExt.endsWith(".json")) {
-        imports.add(absImportPathWithExt);
-        continue; // This prevents it from entering Babel recursion
-      }
-
       imports.add(absImportPathWithExt);
 
       // Process imports recursively for non-client modules
@@ -164,6 +182,8 @@ export default async function getEsbuildEntries({
     return (
       fileName.startsWith("page.") ||
       fileName.startsWith("layout.") ||
+      fileName.startsWith("error.") ||
+      fileName.startsWith("not_found.") ||
       fileName.startsWith("page_functions.") ||
       fileName.startsWith("layout_functions.")
     );
@@ -173,6 +193,7 @@ export default async function getEsbuildEntries({
   const files = await glob(["**/*.{js,jsx,ts,tsx}"], {
     cwd: srcDir,
     absolute: true,
+    ignore: ["_*/**", "**/_*/**"],
   });
 
   // Gather client modules and update manifest entries
@@ -189,7 +210,7 @@ export default async function getEsbuildEntries({
       const name = path.basename(absPath, path.extname(absPath));
 
       updateManifestForModule(absPath, code, true, manifest);
-      detectedClientEntries.add({
+      clientEntryMap.set(normalizedPath.toLowerCase(), {
         absPath: normalizedPath,
         name,
       });
@@ -207,18 +228,18 @@ export default async function getEsbuildEntries({
           absPath,
         );
 
-        if (csss.length > 0) {
-          detectedCSSEntries.add(
-            ...csss.map((cssPath) => ({
-              absPath: normalizePath(cssPath),
-              name: path.basename(cssPath, path.extname(cssPath)),
-            })),
-          );
+        for (const cssPath of csss) {
+          const normCss = normalizePath(cssPath);
+          cssEntryMap.set(normCss.toLowerCase(), {
+            absPath: normCss,
+            name: path.basename(cssPath, path.extname(cssPath)),
+          });
         }
 
         assets.forEach((assetPath) => {
-          detectedAssetEntries.add({
-            absPath: normalizePath(assetPath),
+          const normAsset = normalizePath(assetPath);
+          assetEntryMap.set(normAsset.toLowerCase(), {
+            absPath: normAsset,
             name: path.basename(assetPath, path.extname(assetPath)),
           });
         });
@@ -235,31 +256,23 @@ export default async function getEsbuildEntries({
     }
   } // end for files
 
-  const csss = await glob(["**/*.css"], {
+  const assets = await glob([activeAssetGlobPattern], {
     cwd: srcDir,
     absolute: true,
-  });
-  // console.log("detected css entries from glob:", csss);
-
-  for (const absPath of csss) {
-    detectedCSSEntries.add({
-      absPath: normalizePath(absPath),
-      name: path.basename(absPath, path.extname(absPath)),
-    });
-  }
-  // console.log("final detectedCSSEntries:", detectedCSSEntries);
-
-  const assets = await glob([assetGlobPattern], {
-    cwd: srcDir,
-    absolute: true,
+    ignore: ["_*/**", "**/_*/**"],
   });
 
   for (const absPath of assets) {
-    detectedAssetEntries.add({
-      absPath: normalizePath(absPath),
+    const normAsset = normalizePath(absPath);
+    assetEntryMap.set(normAsset.toLowerCase(), {
+      absPath: normAsset,
       name: path.basename(absPath, path.extname(absPath)),
     });
   }
+
+  const detectedClientEntries = new Set(clientEntryMap.values());
+  const detectedCSSEntries = new Set(cssEntryMap.values());
+  const detectedAssetEntries = new Set(assetEntryMap.values());
 
   for (const dCE of detectedClientEntries) {
     const hash = hashFilePath(dCE.absPath);

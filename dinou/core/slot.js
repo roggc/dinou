@@ -14,6 +14,34 @@ const createElement = React.createElement;
 const Suspense = React.Suspense;
 const Component = typeof React.Component === "function" ? React.Component : class {};
 
+export function flushPendingSsrStreams() {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.$RV === "function" &&
+    Array.isArray(window.$RB) &&
+    window.$RB.length > 0
+  ) {
+    try {
+      window.$RV(window.$RB);
+    } catch (e) {}
+  }
+}
+
+export function pruneOrphanedSsrStreams() {
+  if (typeof window === "undefined" || !Array.isArray(window.$RB)) return;
+  const rb = window.$RB;
+  for (let i = rb.length - 2; i >= 0; i -= 2) {
+    const boundaryTpl = rb[i];
+    const hiddenSlot = rb[i + 1];
+    if (!boundaryTpl || !boundaryTpl.parentNode) {
+      if (hiddenSlot && hiddenSlot.parentNode) {
+        hiddenSlot.parentNode.removeChild(hiddenSlot);
+      }
+      rb.splice(i, 2);
+    }
+  }
+}
+
 export const DinouPageContext =
   typeof globalThis !== "undefined" && globalThis.__DINOU_PAGE_CONTEXT__
     ? globalThis.__DINOU_PAGE_CONTEXT__
@@ -129,13 +157,16 @@ export function DefaultDevError({ error }) {
 
 function SlotErrorRenderer({ error, reset }) {
   const getErrorRSC = typeof globalThis !== "undefined" ? globalThis.__DINOU_GET_ERROR_RSC_PAYLOAD__ : null;
+  const isStaticExport =
+    typeof window !== "undefined" &&
+    Boolean(window.__DINOU_STATIC_EXPORT__ || window.__DINOU_STATIC_EXPORT_UNLOADING__);
   const errorPromise = useMemo(() => {
-    if (typeof getErrorRSC === "function") {
+    if (!isStaticExport && typeof getErrorRSC === "function") {
       const route = typeof window !== "undefined" ? window.location.pathname + window.location.search : "";
       return getErrorRSC(route, error);
     }
     return null;
-  }, [error]);
+  }, [error, isStaticExport]);
 
   if (!errorPromise) {
     return createElement(DefaultDevError, { error });
@@ -189,6 +220,7 @@ class SlotErrorBoundary extends Component {
   }
 
   componentDidCatch(error, errorInfo) {
+    if (typeof window !== "undefined" && window.__DINOU_STATIC_EXPORT_UNLOADING__) return;
     console.error("[Dinou] Page Error caught in Slot:", error, errorInfo);
   }
 
@@ -203,6 +235,9 @@ class SlotErrorBoundary extends Component {
 
   render() {
     if (this.state.hasError) {
+      if (typeof window !== "undefined" && window.__DINOU_STATIC_EXPORT_UNLOADING__) {
+        return null;
+      }
       const reset = () => this.setState({ hasError: false, error: null });
       return createElement(
         InnerErrorBoundary,
@@ -221,6 +256,7 @@ class SlotErrorBoundary extends Component {
 function PageConsumer({ pagePromise, pageElement }) {
   if (typeof useLayoutEffect === "function" && typeof window !== "undefined") {
     useLayoutEffect(() => {
+      pruneOrphanedSsrStreams();
       if (
         typeof document !== "undefined" &&
         document.body &&
@@ -384,9 +420,18 @@ export function DinouCacheSlotBoundary({ id, tags, children }) {
     }
   }
 
+  if (typeof useLayoutEffect === "function" && isBrowser) {
+    useLayoutEffect(() => {
+      if (override.content !== null) {
+        pruneOrphanedSsrStreams();
+      }
+    }, [override.content]);
+  }
+
   useEffect(() => {
     mountedClientSlots.add(id);
     const applyResolved = (resolved, baseRef = childrenRef.current) => {
+      flushPendingSsrStreams();
       slotOverrideCache.set(id, {
         baseChildren: baseRef,
         content: resolved,

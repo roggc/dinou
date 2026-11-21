@@ -1,11 +1,25 @@
-import { isPprBuildActive, isInsideOuterSuspenseOutsideSlot, markDynamicAccess } from "./ppr-context.js";
+import {
+  isPprBuildActive,
+  isInsideOuterSuspenseOutsideSlot,
+  markDynamicAccess,
+  isSlotDiscoveryActive,
+} from "./ppr-context.js";
 
 function triggerBailout(label, onBailout) {
   if (isPprBuildActive() && isInsideOuterSuspenseOutsideSlot()) {
     markDynamicAccess(label);
-  } else if (typeof onBailout === "function") {
+  } else if (!isSlotDiscoveryActive() && typeof onBailout === "function") {
     onBailout();
   }
+}
+
+export const BAILOUT_RAW_TARGET = Symbol.for("dinou.bailout.raw");
+
+export function unwrapBailoutProxy(value) {
+  if (value && (typeof value === "object" || typeof value === "function")) {
+    return value[BAILOUT_RAW_TARGET] || value;
+  }
+  return value;
 }
 
 /**
@@ -22,6 +36,9 @@ export function createBailoutProxy(target, label = "Context", onBailout) {
 
   return new Proxy(safeTarget, {
     get(t, prop, receiver) {
+      if (prop === BAILOUT_RAW_TARGET) {
+        return t;
+      }
       if (
         typeof prop === "symbol" ||
         prop === "inspect" ||
@@ -57,5 +74,7 @@ export function createBailoutProxy(target, label = "Context", onBailout) {
 }
 
 export default {
+  BAILOUT_RAW_TARGET,
+  unwrapBailoutProxy,
   createBailoutProxy,
 };

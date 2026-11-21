@@ -21,7 +21,13 @@ import { hydrateRoot } from "react-dom/client";
 import { RouterContext } from "./navigation.js";
 import { resolveUrl, isExternalUrl } from "./navigation-utils.js";
 import { createServerFunctionProxy } from "./server-function-proxy.js";
-import { DinouPageContext, DinouPageSlot, cleanErrorStack } from "./slot.js";
+import {
+  DinouPageContext,
+  DinouPageSlot,
+  cleanErrorStack,
+  flushPendingSsrStreams,
+  pruneOrphanedSsrStreams,
+} from "./slot.js";
 
 // ====================================================================
 // 1. GLOBAL STATE (Outside the component)
@@ -56,15 +62,97 @@ const scrollToCurrentHash = (rawHash = typeof window !== "undefined" ? window.lo
 // 2. PURE HELPERS
 // ====================================================================
 
+const safeDecodeSeg = (val) => {
+  try {
+    return val ? decodeURIComponent(val) : val;
+  } catch (e) {
+    return val;
+  }
+};
+
+const isRouterSyntaxSeg = (rawSeg) => {
+  const seg = safeDecodeSeg(rawSeg);
+  return Boolean(
+    seg &&
+      ((seg.startsWith("(") && seg.endsWith(")")) ||
+        (seg.startsWith("[") && seg.endsWith("]")) ||
+        seg.startsWith("@") ||
+        seg.startsWith("_"))
+  );
+};
+
+const matchRoutePattern = (pSegs, uSegs, pIdx = 0, uIdx = 0) => {
+  if (pIdx === pSegs.length) return uIdx === uSegs.length;
+  const p = pSegs[pIdx];
+  if (p.startsWith("[[...") && p.endsWith("]]")) {
+    if (pIdx === pSegs.length - 1) return uIdx <= uSegs.length;
+    for (let k = uIdx; k <= uSegs.length; k++) {
+      if (matchRoutePattern(pSegs, uSegs, pIdx + 1, k)) return true;
+    }
+    return false;
+  }
+  if (p.startsWith("[...") && p.endsWith("]")) {
+    if (uIdx >= uSegs.length) return false;
+    if (pIdx === pSegs.length - 1) return true;
+    for (let k = uIdx + 1; k <= uSegs.length; k++) {
+      if (matchRoutePattern(pSegs, uSegs, pIdx + 1, k)) return true;
+    }
+    return false;
+  }
+  if (p.startsWith("[[") && p.endsWith("]]")) {
+    if (
+      uIdx < uSegs.length &&
+      matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx + 1)
+    ) {
+      return true;
+    }
+    return matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx);
+  }
+  if (p.startsWith("[") && p.endsWith("]")) {
+    if (uIdx >= uSegs.length) return false;
+    return matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx + 1);
+  }
+  if (uIdx >= uSegs.length || isRouterSyntaxSeg(uSegs[uIdx])) {
+    return false;
+  }
+  if (uSegs[uIdx] !== p && safeDecodeSeg(uSegs[uIdx]) !== p) {
+    return false;
+  }
+  return matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx + 1);
+};
+
 // Helper to determine active layout folder for a pathname
 const getLayoutKey = (pathname) => {
   const rawLayouts = (typeof window !== "undefined" && window.__DINOU_LAYOUTS__) || ["", "docs"];
-  const layouts = rawLayouts.filter((l) => typeof l === "string" && !l.startsWith("!"));
+  const pageRules = rawLayouts.filter((l) => typeof l === "string" && l.startsWith("="));
+  const layouts = rawLayouts.filter(
+    (l) => typeof l === "string" && !l.startsWith("!") && !l.startsWith("=")
+  );
   const noLayouts = rawLayouts
     .filter((l) => typeof l === "string" && l.startsWith("!"))
     .map((l) => l.slice(1));
   const cleanPath0 = pathname.split("?")[0].split("#")[0];
   const segments0 = cleanPath0.split("/").filter(Boolean);
+
+  for (const rule of pageRules) {
+    const colonIdx = rule.lastIndexOf(":");
+    if (colonIdx === -1) continue;
+    const pattern = rule.slice(1, colonIdx);
+    const spec = rule.slice(colonIdx + 1);
+    const pSegs = pattern ? pattern.split("/").filter(Boolean) : [];
+    if (matchRoutePattern(pSegs, segments0)) {
+      if (spec === "-1") return null;
+      if (spec.startsWith("*-")) {
+        const trailing = Number(spec.slice(2)) || 0;
+        const take = Math.max(0, segments0.length - trailing);
+        return take === 0 ? "/" : "/" + segments0.slice(0, take).join("/");
+      }
+      const depth = Number(spec);
+      if (depth <= 0) return "/";
+      return "/" + segments0.slice(0, depth).join("/");
+    }
+  }
+
   const fullCandidate = segments0.join("/");
   if (
     noLayouts.includes(fullCandidate) ||
@@ -137,14 +225,118 @@ const isHashChangeOnly = (finalPath) => {
   );
 };
 
+const consumeInlineRscResponse = (kind) => {
+  if (typeof window === "undefined" || !window.__DINOU_INLINE_RSC__) {
+    return null;
+  }
+  const consumedFlag = `__DINOU_RSC_${kind}_CONSUMED__`;
+  if (window[consumedFlag]) {
+    return null;
+  }
+  window[consumedFlag] = true;
+
+  const arrName = `__DINOU_RSC_${kind}__`;
+  const doneName = `__DINOU_RSC_${kind}_DONE__`;
+  const pushFnName = `__DINOU_RSC_${kind}_PUSH__`;
+  const closeFnName = `__DINOU_RSC_${kind}_CLOSE__`;
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      let closed = false;
+      const existing = window[arrName];
+      if (Array.isArray(existing)) {
+        for (const chunk of existing) {
+          if (chunk) controller.enqueue(encoder.encode(chunk));
+        }
+        existing.length = 0;
+      }
+      if (window[doneName]) {
+        closed = true;
+        controller.close();
+        return;
+      }
+      window[pushFnName] = (chunk) => {
+        if (closed || !chunk) return;
+        try {
+          controller.enqueue(encoder.encode(chunk));
+        } catch (e) {}
+      };
+      window[closeFnName] = () => {
+        if (closed) return;
+        closed = true;
+        try {
+          controller.close();
+        } catch (e) {}
+      };
+      if (document.readyState === "complete" && !window[doneName]) {
+        setTimeout(() => {
+          if (!closed) {
+            closed = true;
+            try {
+              controller.close();
+            } catch (e) {}
+          }
+        }, 0);
+      }
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: { "Content-Type": "text/x-component" },
+  });
+};
+
+const isStaticExportMode = () =>
+  typeof window !== "undefined" && Boolean(window.__DINOU_STATIC_EXPORT__);
+
+const isStaticExportUnloading = () =>
+  typeof window !== "undefined" && Boolean(window.__DINOU_STATIC_EXPORT_UNLOADING__);
+
+const buildStaticExportRscUrl = (rawRouteOrKey, fileName) => {
+  const withoutHash = String(rawRouteOrKey || "/").split("#")[0];
+  const qIdx = withoutHash.indexOf("?");
+  const rawPathname = qIdx === -1 ? withoutHash : withoutHash.slice(0, qIdx);
+  const existingQuery = qIdx === -1 ? "" : withoutHash.slice(qIdx + 1);
+  const cleanPathname = rawPathname.replace(/\/+$/, "");
+  const baseRscPath = cleanPathname ? `${cleanPathname}/${fileName}` : `/${fileName}`;
+  return existingQuery ? `${baseRscPath}?${existingQuery}` : baseRscPath;
+};
+
+const executeRscRedirect = (redirectUrl) => {
+  if (!redirectUrl || typeof window === "undefined") return;
+  if (/^https?:\/\//i.test(redirectUrl) || !window.__DINOU_ROUTER_NAVIGATE__) {
+    window.location.href = redirectUrl;
+    return;
+  }
+  if (getCurrentRoute() !== redirectUrl) {
+    window.__DINOU_ROUTER_NAVIGATE__(redirectUrl, { replace: true });
+  }
+};
+
 const getPagePayload = (route, isPrefetch = false, version = 0) => {
-  const url = route.split("::")[0];
+  const url = route.split("::")[0].split("#")[0] || "/";
   if (pageCache.has(url)) {
     return pageCache.get(url);
   }
 
+  const staticExport = isStaticExportMode();
+  if (staticExport && isStaticExportUnloading()) {
+    const pendingPromise = createFromFetch(new Promise(() => {}), {
+      callServer: async (id, args) => {
+        const proxy = createServerFunctionProxy(id);
+        return proxy(...args);
+      },
+    });
+    pendingPromise.catch(() => {});
+    pageCache.set(url, pendingPromise);
+    return pendingPromise;
+  }
   let payloadUrl;
-  if (window.__DINOU_USE_OLD_RSC__ || window.__DINOU_USE_STATIC__) {
+  if (staticExport) {
+    payloadUrl = buildStaticExportRscUrl(url, "page.rsc");
+  } else if (window.__DINOU_USE_OLD_RSC__ || window.__DINOU_USE_STATIC__) {
     payloadUrl = window.__DINOU_USE_OLD_RSC__
       ? window.__DINOU_USE_STATIC__
         ? "/____rsc_page_old_static____" + url
@@ -160,7 +352,8 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
     !isPrefetch &&
     typeof document !== "undefined" &&
     (!document.body || document.body.getAttribute("data-hydrated") !== "true");
-  const buildId = isInitialHydration ? window.__DINOU_BUILD_ID__ : undefined;
+  const buildId =
+    staticExport || isInitialHydration ? window.__DINOU_BUILD_ID__ : undefined;
   if (buildId && !version) {
     payloadUrl += (payloadUrl.includes("?") ? "&" : "?") + "____build_id____=" + buildId;
   }
@@ -168,22 +361,46 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
     payloadUrl += (payloadUrl.includes("?") ? "&" : "?") + "____v____=" + version;
   }
 
-  const promise = createFromFetch(
-    fetch(payloadUrl).then((res) => {
-      if (res.headers.has("x-rsc-redirect")) {
-        const redirectUrl = res.headers.get("x-rsc-redirect");
-        pageCache.delete(url);
-        if (!isPrefetch) {
-          if (window.__DINOU_ROUTER_NAVIGATE__) {
-            window.__DINOU_ROUTER_NAVIGATE__(redirectUrl, { replace: true });
-          } else {
-            window.location.href = redirectUrl;
+  const inlineRes = isInitialHydration && !version ? consumeInlineRscResponse("P") : null;
+  const fetchPromise = inlineRes
+    ? Promise.resolve(inlineRes)
+    : fetch(payloadUrl, {
+        cache: staticExport && !version ? "default" : "no-store",
+      }).then((res) => {
+        if (res.headers.has("x-rsc-redirect")) {
+          const redirectUrl = res.headers.get("x-rsc-redirect");
+          const isCurrentTarget =
+            typeof window !== "undefined" &&
+            getCurrentRoute() === url.split("#")[0];
+          pageCache.delete(url);
+          if (isCurrentTarget && redirectUrl) {
+            executeRscRedirect(redirectUrl);
           }
+          return new Promise(() => {});
         }
-        return new Promise(() => {});
-      }
-      return res;
-    }),
+        if (
+          staticExport &&
+          (!res.ok ||
+            (res.headers.get("content-type") || "").toLowerCase().includes("text/html"))
+        ) {
+          if (!isPrefetch && !isInitialHydration) {
+            window.__DINOU_STATIC_EXPORT_UNLOADING__ = true;
+            window.location.replace(url);
+          } else {
+            pageCache.delete(url);
+          }
+          return new Promise(() => {});
+        }
+        return res;
+      }, (err) => {
+        if (isStaticExportUnloading()) {
+          return new Promise(() => {});
+        }
+        throw err;
+      });
+
+  const promise = createFromFetch(
+    fetchPromise,
     {
       callServer: async (id, args) => {
         const proxy = createServerFunctionProxy(id);
@@ -199,20 +416,34 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
 
 const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
   if (!layoutKey) return null;
-  const cacheKey = `${layoutKey}${searchPart}`;
+  const staticExport = isStaticExportMode();
+  const cacheKey = staticExport ? layoutKey : `${layoutKey}${searchPart}`;
   if (layoutCache.has(cacheKey)) {
     return layoutCache.get(cacheKey);
+  }
+  if (staticExport && isStaticExportUnloading()) {
+    const pendingPromise = createFromFetch(new Promise(() => {}), {
+      callServer: async (id, args) => {
+        const proxy = createServerFunctionProxy(id);
+        return proxy(...args);
+      },
+    });
+    pendingPromise.catch(() => {});
+    layoutCache.set(cacheKey, pendingPromise);
+    return pendingPromise;
   }
 
   const isInitialHydration =
     typeof document !== "undefined" &&
     (!document.body || document.body.getAttribute("data-hydrated") !== "true");
-  const buildId = isInitialHydration ? window.__DINOU_BUILD_ID__ : undefined;
+  const buildId =
+    staticExport || isInitialHydration ? window.__DINOU_BUILD_ID__ : undefined;
   const cleanKey = layoutKey === "/" ? "" : layoutKey;
-  let layoutUrl =
-    (window.__DINOU_USE_STATIC__
-      ? "/____rsc_layout_static____"
-      : "/____rsc_layout____") + cleanKey + searchPart;
+  let layoutUrl = staticExport
+    ? buildStaticExportRscUrl((cleanKey || "/") + searchPart, "layout.rsc")
+    : (window.__DINOU_USE_STATIC__
+        ? "/____rsc_layout_static____"
+        : "/____rsc_layout____") + cleanKey + searchPart;
 
   if (buildId && !version) {
     layoutUrl += (layoutUrl.includes("?") ? "&" : "?") + "____build_id____=" + buildId;
@@ -222,15 +453,51 @@ const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
     layoutUrl += (layoutUrl.includes("?") ? "&" : "?") + "____v____=" + version;
   }
 
+  const inlineRes = isInitialHydration && !version ? consumeInlineRscResponse("L") : null;
+  const fetchPromise = inlineRes
+    ? Promise.resolve(inlineRes)
+    : fetch(layoutUrl, {
+        cache: staticExport && !version ? "default" : "no-store",
+      }).then(
+        (res) => {
+          if (res.headers.has("x-rsc-redirect")) {
+            const redirectUrl = res.headers.get("x-rsc-redirect");
+            const isCurrentLayout =
+              typeof window !== "undefined" &&
+              getLayoutKey(window.location.pathname) === layoutKey;
+            layoutCache.delete(cacheKey);
+            if (isCurrentLayout && redirectUrl) {
+              executeRscRedirect(redirectUrl);
+            }
+            return new Promise(() => {});
+          }
+          if (isStaticExportUnloading()) {
+            return new Promise(() => {});
+          }
+          if (
+            staticExport &&
+            (!res.ok ||
+              (res.headers.get("content-type") || "").toLowerCase().includes("text/html"))
+          ) {
+            return new Promise(() => {});
+          }
+          if (!res.ok) {
+            console.warn(
+              `[Dinou Router] Layout ${layoutKey} fetch returned status ${res.status}`
+            );
+          }
+          return res;
+        },
+        (err) => {
+          if (isStaticExportUnloading()) {
+            return new Promise(() => {});
+          }
+          throw err;
+        }
+      );
+
   const promise = createFromFetch(
-    fetch(layoutUrl).then((res) => {
-      if (!res.ok) {
-        console.warn(
-          `[Dinou Router] Layout ${layoutKey} fetch returned status ${res.status}`
-        );
-      }
-      return res;
-    }),
+    fetchPromise,
     {
       callServer: async (id, args) => {
         const proxy = createServerFunctionProxy(id);
@@ -245,6 +512,9 @@ const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
 };
 
 const getErrorRSCPayload = (route, error) => {
+  if (isStaticExportMode() || isStaticExportUnloading()) {
+    return null;
+  }
   const url = route.split("::")[0];
   const cacheKey = `error::${url}::${error.message || String(error)}`;
   if (pageCache.has(cacheKey)) {
@@ -285,6 +555,7 @@ const getErrorRSCPayload = (route, error) => {
       }
     }
   );
+  promise.catch(() => {});
   pageCache.set(cacheKey, promise);
   return promise;
 };
@@ -313,6 +584,7 @@ const fetchSlotRSC = (slotId, options = {}) => {
 
 export const refreshSlot = (slotId, options) => {
   if (typeof window !== "undefined") {
+    flushPendingSsrStreams();
     const promises = [];
     window.dispatchEvent(
       new CustomEvent("dinou:refresh-slot", {
@@ -341,6 +613,7 @@ class ErrorBoundary extends Component {
   }
 
   componentDidCatch(error, errorInfo) {
+    if (isStaticExportUnloading()) return;
     console.error("[Dinou] ErrorBoundary caught error:", error, errorInfo);
     if (this.props.onError) {
       this.props.onError(error);
@@ -355,6 +628,9 @@ class ErrorBoundary extends Component {
 
   render() {
     if (this.state.hasError) {
+      if (isStaticExportUnloading()) {
+        return null;
+      }
       if (this.props.fallback) {
         return this.props.fallback(this.state.error);
       }
@@ -476,6 +752,15 @@ function Router() {
     }
     const finalPath = resolveUrl(href, window.location.pathname);
 
+    if (isExternalUrl(finalPath)) {
+      if (options.replace) {
+        window.location.replace(finalPath);
+      } else {
+        window.location.assign(finalPath);
+      }
+      return;
+    }
+
     // 🛡️ NAVIGATE PROTECTION: Hash Detection
     if (isHashChangeOnly(finalPath)) {
       if (options.replace) {
@@ -494,8 +779,10 @@ function Router() {
       return; // CRITICAL STOP
     }
 
+    const routeWithoutHash = finalPath.split("#")[0] || "/";
+
     if (options.fresh) {
-      pageCache.delete(finalPath);
+      pageCache.delete(routeWithoutHash);
     }
 
     // Normal RSC Navigation
@@ -509,9 +796,13 @@ function Router() {
       window.history.pushState(null, "", finalPath);
     }
 
+    flushPendingSsrStreams();
     startTransition(() => {
       setIsPopState(false);
-      setRoute(finalPath);
+      setRoute(routeWithoutHash);
+      if (options.fresh) {
+        setVersion((v) => v + 1);
+      }
       setNavError(null);
       setNavCount((c) => c + 1);
     });
@@ -535,6 +826,7 @@ function Router() {
       }
     }
 
+    flushPendingSsrStreams();
     startTransition(() => {
       setVersion((v) => v + 1);
       if (shouldRefreshLayout) {
@@ -550,17 +842,19 @@ function Router() {
     window.__DINOU_PREFETCH__ = (url) => {
       // 🛡️ PREFETCH PROTECTION: If it's a local hash, do nothing
       if (isHashChangeOnly(url)) return;
-      const lKey = getLayoutKey(url);
+      const cleanUrl = String(url || "/").split("#")[0] || "/";
+      const lKey = getLayoutKey(cleanUrl);
       if (lKey && !layoutCache.has(lKey)) {
         getLayoutPayload(lKey);
       }
-      getPagePayload(url, true);
+      getPagePayload(cleanUrl, true);
     };
 
     window.__DINOU_ROUTER_NAVIGATE__ = navigate;
     window.__DINOU_ROUTER_REFRESH__ = refresh;
 
     // Hydration
+    flushPendingSsrStreams();
     document.body.setAttribute("data-hydrated", "true");
 
     return () => {
@@ -585,7 +879,9 @@ function Router() {
       const anchor = e.target.closest("a");
       if (
         !anchor ||
-        anchor.target ||
+        (anchor.target && anchor.target !== "_self") ||
+        anchor.hasAttribute("download") ||
+        e.button !== 0 ||
         e.metaKey ||
         e.ctrlKey ||
         e.shiftKey ||
@@ -616,6 +912,7 @@ function Router() {
         window.__DINOU_ACTIVE_LAYOUT__ = null;
       }
       const target = getCurrentRoute();
+      flushPendingSsrStreams();
       startTransition(() => {
         setIsPopState(true);
         setRoute(target);
@@ -730,6 +1027,7 @@ function Router() {
   }, [route, version, navError]);
 
   useLayoutEffect(() => {
+    pruneOrphanedSsrStreams();
     if (
       typeof document !== "undefined" &&
       document.body &&
@@ -769,7 +1067,7 @@ function Router() {
     <RouterContext.Provider value={contextValue}>
       <ErrorBoundary
         resetKey={`${route}::${navCount}`}
-        onError={setNavError}
+        onError={isStaticExportMode() ? undefined : setNavError}
       >
         <DinouPageContext.Provider value={slotContextValue}>
           {navError
@@ -792,6 +1090,9 @@ const app = useStrictMode
   : routerElement;
 
 const onRecoverableError = (error) => {
+  if (isStaticExportUnloading()) {
+    return;
+  }
   // 🛡️ Filter benign ViewTransition aborts when document is hidden (e.g. background tab or HMR while in IDE)
   if (
     error?.name === "InvalidStateError" &&

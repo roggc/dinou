@@ -68,7 +68,27 @@ export function createServerFunctionProxy(id) {
         body,
       });
 
-      if (!res.ok) throw new Error("Server function failed");
+      if (!res.ok) {
+        let errorMessage = "Server function failed";
+        let errorDigest;
+        try {
+          const errContentType = res.headers.get("content-type") || "";
+          if (errContentType.includes("application/json")) {
+            const errData = await res.json();
+            if (errData && typeof errData.error === "string" && errData.error) {
+              errorMessage = errData.error;
+            }
+            if (errData && typeof errData.digest === "string") {
+              errorDigest = errData.digest;
+            }
+          }
+        } catch (_) {}
+        const err = new Error(errorMessage);
+        if (errorDigest !== undefined) {
+          err.digest = errorDigest;
+        }
+        throw err;
+      }
 
       // Check header first
       const redirectUrl = res.headers.get("X-Dinou-Redirect");
@@ -179,7 +199,12 @@ export function createServerFunctionProxy(id) {
           },
         });
 
-        return createFromFetch(Promise.resolve(new Response(readableStream)));
+        return createFromFetch(Promise.resolve(new Response(readableStream)), {
+          callServer: async (nextId, nextArgs) => {
+            const proxy = createServerFunctionProxy(nextId);
+            return proxy(...nextArgs);
+          },
+        });
       }
       return res.json();
     },

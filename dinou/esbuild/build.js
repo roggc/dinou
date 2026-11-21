@@ -1,3 +1,6 @@
+delete process.env.DINOU_DEV;
+process.env.NODE_ENV = "production";
+
 import esbuild from "esbuild";
 import fs from "node:fs/promises";
 import getConfigEsbuildProd from "./helpers-esbuild/get-config-esbuild-prod.js";
@@ -5,7 +8,13 @@ import getEsbuildEntries from "./helpers-esbuild/get-esbuild-entries.js";
 import { fileURLToPath } from "url";
 import path from "node:path";
 import { updateManifestForModule } from "./helpers-esbuild/update-manifest-for-module.js";
-import ensureVendorMode from "../core/ensure-vendor-mode.js";
+import { generateRouteTypes } from "../core/generate-route-types.js";
+import { getDinouConfig } from "../core/load-dinou-config.js";
+import { loadEnvFiles } from "../core/env.js";
+import ensureVendorMode, {
+  isUnvendorizedRequested,
+} from "../core/ensure-vendor-mode.js";
+loadEnvFiles(process.cwd(), { mode: "production" });
 if (!ensureVendorMode()) {
   await new Promise(() => {});
 }
@@ -15,8 +24,8 @@ const __dirname = path.dirname(__filename);
 
 const outdir = ".dinou/dist3";
 await fs.rm(outdir, { recursive: true, force: true });
-await fs.rm(".dinou/react_client_manifest", { recursive: true, force: true });
-await fs.rm(".dinou/server_functions_manifest", { recursive: true, force: true });
+await fs.rm(".dinou/dist1", { recursive: true, force: true });
+await fs.rm(".dinou/netlify", { recursive: true, force: true });
 
 const absPathToClientRedirect = path.resolve(
   __dirname,
@@ -37,17 +46,17 @@ const frameworkEntryPoints = {
     __dirname,
     "../core/server-function-proxy.js"
   ),
-  runtime: path.resolve(__dirname, "react-refresh/react-refresh-runtime.js"),
-  "react-refresh-entry": path.resolve(
-    __dirname,
-    "react-refresh/react-refresh-entry.js"
-  ),
   dinouClientRedirect: absPathToClientRedirect,
   dinouLink: absPathToLink,
   dinouSlot: absPathToSlot,
 };
 
 try {
+  const dinouConfig = await getDinouConfig();
+  const enableReactCompiler = dinouConfig?.reactCompiler !== false;
+  try {
+    generateRouteTypes(process.cwd());
+  } catch (e) {}
   const manifest = {};
 
   const [
@@ -55,7 +64,7 @@ try {
     detectedCSSEntries,
     detectedAssetEntries,
     serverFiles,
-  ] = await getEsbuildEntries({ manifest });
+  ] = await getEsbuildEntries({ manifest, dinouConfig });
 
   updateManifestForModule(
     absPathToClientRedirect,
@@ -86,16 +95,12 @@ try {
     {}
   );
 
-  const assetEntryPoints = [...detectedAssetEntries].reduce(
-    (acc, dAE) => ({ ...acc, [dAE.outfileName]: dAE.absPath }),
-    {}
-  );
+  const serverAssetPaths = [...detectedAssetEntries].map((dAE) => dAE.absPath);
 
   const entryPoints = {
     ...frameworkEntryPoints,
     ...componentEntryPoints,
     ...cssEntryPoints,
-    ...assetEntryPoints,
   };
 
   await esbuild.build(
@@ -104,47 +109,32 @@ try {
       manifest,
       outdir,
       serverFiles,
+      serverAssetPaths,
+      dinouConfig,
+      reactCompiler: enableReactCompiler,
     })
   );
 
-  // 🚀 Server & Adapter Pre-bundling with react-server condition
-  console.log("⚡ [esbuild] Pre-bundling server handler and adapters (conditions: ['react-server'])...");
-  await esbuild.build({
-    entryPoints: {
-      handler: path.resolve(__dirname, "../core/handler.js"),
-      netlify: path.resolve(__dirname, "../adapters/netlify.js"),
-    },
-    bundle: true,
-    platform: "node",
-    target: "node20",
-    format: "esm",
-    conditions: ["react-server", "node", "import"],
-    outdir: ".dinou/dist3/server",
-    external: [
-      "express",
-      "chokidar",
-      "dotenv",
-      "fsevents",
-      "@swc/core",
-      "@babel/core",
-      "esbuild",
-    ],
-    banner: {
-      js: "import { createRequire as ___createRequire } from 'node:module'; import { fileURLToPath as ___fileURLToPath } from 'node:url'; import ___path from 'node:path'; const require = ___createRequire(import.meta.url || ___path.resolve(process.cwd(), 'package.json')); const __filename = import.meta.url ? ___fileURLToPath(import.meta.url) : ___path.resolve(process.cwd(), 'index.js'); const __dirname = ___path.dirname(__filename); process.env.NODE_ENV = process.env.NODE_ENV || 'production';",
-    },
-    sourcemap: true,
-  });
-  await fs.writeFile(
-    path.resolve(process.cwd(), ".dinou/dist3/server/package.json"),
-    JSON.stringify({ type: "module" }, null, 2)
-  );
-
-  // 🏗️ Pre-render static pages (SSG) at build time
-  const { execSync } = await import("node:child_process");
-  execSync(`"${process.execPath}" --conditions=react-server "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
+  // 🏗️ Pre-render static pages (SSG) & compile Dual-Bundle Server/Netlify adapters
+  const { spawnSync } = await import("node:child_process");
+  const ssgArgs = [
+    "--conditions=react-server",
+    ...(isUnvendorizedRequested() ? ["--conditions=unvendorized"] : []),
+    path.resolve(__dirname, "../core/run-ssg.js"),
+  ];
+  const ssgRes = spawnSync(process.execPath, ssgArgs, {
     stdio: "inherit",
-    env: { ...process.env, NODE_ENV: "production" },
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      DINOU_BUILD_TOOL: "esbuild",
+    },
   });
+  if (ssgRes.status !== 0) {
+    throw new Error(
+      `[Dinou SSG] Static generation exited with code ${ssgRes.status ?? 1}`
+    );
+  }
 } catch (err) {
   console.error("Error in build:", err);
   process.exit(1);

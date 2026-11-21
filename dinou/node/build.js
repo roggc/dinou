@@ -7,8 +7,13 @@ import fs from "node:fs";
 import path from "node:path";
 import esbuild from "esbuild";
 import { fileURLToPath } from "node:url";
-import { bundleDualEngine } from "./bundle-dual-engine.js";
+import {
+  bundleDualEngine,
+  bundleServerAndNetlifyAdapters,
+} from "./bundle-dual-engine.js";
+import { loadEnvFiles } from "../core/env.js";
 import ensureVendorMode from "../core/ensure-vendor-mode.js";
+loadEnvFiles(process.cwd(), { mode: "production" });
 if (!ensureVendorMode()) {
   await new Promise(() => {});
 }
@@ -26,8 +31,24 @@ try {
     projectRoot,
     outDir: ".dinou/node",
   });
+  await bundleServerAndNetlifyAdapters(engineResult);
 
-  const { dinouDirSlash, externalList, banner, commonAlias, commonLoader, isWebpackBuild, setupFiles } = engineResult;
+  const {
+    dinouDirSlash,
+    externalList,
+    banner,
+    commonAlias,
+    commonLoader,
+    serverAssetPlugin,
+    serverTsconfigAliasesPlugin,
+    isWebpackBuild,
+    setupFiles,
+    configFile,
+  } = engineResult;
+
+  const nodeConfigImportLine = configFile
+    ? `import * as __dinouNodeConfigMod from ${JSON.stringify(configFile.replace(/\\/g, "/"))};\nconst __bundledDinouConfig = (__dinouNodeConfigMod && __dinouNodeConfigMod.default) ? __dinouNodeConfigMod.default : (__dinouNodeConfigMod || { plugins: [] });\nglobalThis.__DINOU_AOT_CONFIG__ = __bundledDinouConfig;\nglobalThis.__DINOU_CONFIG__ = __bundledDinouConfig;\n`
+    : `const __bundledDinouConfig = { plugins: [] };\n`;
 
   // Pass C: Node Orchestrator Entry
   const nodeEntryContent = `// Auto-generated main entry for Node.js (Dual-Bundle)
@@ -40,6 +61,7 @@ import { handleRequest } from "./rsc-engine.mjs";
 import { renderHtml } from "./ssr-engine.mjs";
 import {
   setStorageAdapter,
+  hasExplicitStorageAdapter,
   FileSystemStorage,
   MemoryStorage,
 } from "${dinouDirSlash}/core/storage-adapter.js";
@@ -47,6 +69,22 @@ import {
   nodeToWebRequest,
   sendWebResponseToNode,
 } from "${dinouDirSlash}/core/http-adapter.js";
+import {
+  runNodeMiddlewares,
+  applyConfigureServerPlugins,
+} from "${dinouDirSlash}/core/node-middleware-runner.js";
+import {
+  getStaticContentType,
+  getStaticCacheControl,
+  normalizePublicRequestPath,
+  parseHttpByteRange,
+  resolveConfinedStaticFile,
+} from "${dinouDirSlash}/core/static-assets.js";
+import { loadEnvFiles } from "${dinouDirSlash}/core/env.js";
+${nodeConfigImportLine}
+
+const initialCwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
+loadEnvFiles(initialCwd, { mode: "production" });
 
 if (typeof globalThis !== "undefined") {
   globalThis.__DINOU_RUNTIME__ = "node-bundle";
@@ -56,32 +94,18 @@ let storageInitialized = false;
 
 function initStorage() {
   if (!storageInitialized) {
-    try {
-      const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
-      const dist2Dir = path.resolve(cwd, ".dinou/dist2");
-      setStorageAdapter(new FileSystemStorage(dist2Dir));
-    } catch (e) {
-      setStorageAdapter(new MemoryStorage());
+    if (!hasExplicitStorageAdapter()) {
+      try {
+        const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
+        const dist2Dir = path.resolve(cwd, ".dinou/dist2");
+        setStorageAdapter(new FileSystemStorage(dist2Dir));
+      } catch (e) {
+        setStorageAdapter(new MemoryStorage());
+      }
     }
     storageInitialized = true;
   }
 }
-
-const MIME_TYPES = {
-  ".js": "application/javascript; charset=utf-8",
-  ".mjs": "application/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".json": "application/json",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".ico": "image/x-icon",
-  ".txt": "text/plain; charset=utf-8",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-};
 
 const cwd = typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : ".";
 const dist3Dir = path.resolve(cwd, ".dinou/dist3");
@@ -93,25 +117,61 @@ export async function fetch(req) {
   const pathname = url.pathname;
 
   // Static assets delivery (Zero-copy with Node streams)
-  if (pathname !== "/") {
-    const filePath = path.join(dist3Dir, pathname);
-    if (fs.existsSync(filePath)) {
-      try {
-        const stat = fs.statSync(filePath);
-        if (stat.isFile()) {
-          const nodeStream = fs.createReadStream(filePath);
-          const webStream = Readable.toWeb(nodeStream);
-          const ext = path.extname(filePath).toLowerCase();
-          const contentType = MIME_TYPES[ext] || "application/octet-stream";
-          return new Response(webStream, {
-            headers: {
-              "content-type": contentType,
-              "content-length": String(stat.size),
-              "cache-control": "public, max-age=31536000, immutable",
-            },
-          });
-        }
-      } catch (e) {}
+  if (req.method === "GET" || req.method === "HEAD") {
+    const cleanPath = normalizePublicRequestPath(pathname);
+    if (cleanPath) {
+      const filePath = resolveConfinedStaticFile(dist3Dir, cleanPath);
+      if (filePath && fs.existsSync(filePath)) {
+        try {
+          const stat = fs.statSync(filePath);
+          if (stat.isFile()) {
+            const contentType = getStaticContentType(cleanPath);
+            const cacheControl = getStaticCacheControl(cleanPath);
+            const rangeHeader = req.method === "GET" ? req.headers.get("range") : null;
+            const range = rangeHeader ? parseHttpByteRange(rangeHeader, stat.size) : null;
+
+            if (range && range.unsatisfiable) {
+              return new Response(null, {
+                status: 416,
+                headers: {
+                  "content-range": range.contentRange,
+                  "accept-ranges": "bytes",
+                },
+              });
+            }
+
+            if (range) {
+              const stream = fs.createReadStream(filePath, {
+                start: range.start,
+                end: range.end,
+              });
+              return new Response(Readable.toWeb(stream), {
+                status: 206,
+                headers: {
+                  "content-type": contentType,
+                  "content-length": String(range.length),
+                  "content-range": range.contentRange,
+                  "accept-ranges": "bytes",
+                  "cache-control": cacheControl,
+                },
+              });
+            }
+
+            const body =
+              req.method === "HEAD"
+                ? null
+                : Readable.toWeb(fs.createReadStream(filePath));
+            return new Response(body, {
+              headers: {
+                "content-type": contentType,
+                "content-length": String(stat.size),
+                "accept-ranges": "bytes",
+                "cache-control": cacheControl,
+              },
+            });
+          }
+        } catch (e) {}
+      }
     }
   }
 
@@ -133,14 +193,9 @@ export async function startServer(port = PORT, host = process.env.HOST || undefi
       }
 
       if (nodeMiddlewares.length > 0) {
-        for (const mw of nodeMiddlewares) {
-          let continued = false;
-          await mw(req, res, () => {
-            continued = true;
-          });
-          if (!continued || res.writableEnded || res.headersSent) {
-            return;
-          }
+        const shouldContinue = await runNodeMiddlewares(nodeMiddlewares, req, res);
+        if (!shouldContinue || res.writableEnded || res.headersSent) {
+          return;
         }
       }
 
@@ -159,33 +214,19 @@ export async function startServer(port = PORT, host = process.env.HOST || undefi
     }
   });
 
-  try {
-    const { getDinouConfig } = await import("${dinouDirSlash}/core/load-dinou-config.js");
-    const cfg = await getDinouConfig();
-    if (cfg.plugins && Array.isArray(cfg.plugins)) {
-      const serverContext = {
-        server,
-        isDev: false,
-        use(middleware) {
-          if (typeof middleware === "function") {
-            nodeMiddlewares.push(middleware);
-          }
-        },
-      };
-      for (const plugin of cfg.plugins) {
-        if (typeof plugin.configureServer === "function") {
-          await plugin.configureServer(serverContext);
-        }
-      }
-    }
-  } catch (err) {
-    console.error("❌ [Dinou Node Server] Error running configureServer plugins:", err);
+  if (__bundledDinouConfig && Array.isArray(__bundledDinouConfig.plugins)) {
+    await applyConfigureServerPlugins({
+      plugins: __bundledDinouConfig.plugins,
+      server,
+      isDev: false,
+      middlewares: nodeMiddlewares,
+    });
   }
 
   return new Promise((resolve, reject) => {
     server.on("error", reject);
     server.listen(port, host, () => {
-      console.log(\`🚀 Dinou (Node.js AOT Dual-Bundle) server running on http://localhost:\${port}\`);
+      console.log(\`🚀 Dinou (Node.js AOT Dual-Bundle) server running on http://\${host || "localhost"}:\${port}\`);
       resolve(server);
     });
   });
@@ -211,6 +252,24 @@ if (isMain) {
   const nodeEntryPath = path.join(nodeDir, "node-entry.mjs");
   fs.writeFileSync(nodeEntryPath, nodeEntryContent, "utf8");
 
+  const passCConfigAliasPlugin = configFile
+    ? {
+        name: "dinou-passc-config-alias",
+        setup(build) {
+          const normConfig = path.resolve(configFile).toLowerCase();
+          build.onResolve({ filter: /^dinou$/ }, (args) => {
+            if (
+              args.importer &&
+              path.resolve(args.importer).toLowerCase() === normConfig
+            ) {
+              return { path: path.resolve(dinouDirSlash, "core/config.js") };
+            }
+            return null;
+          });
+        },
+      }
+    : null;
+
   // Pass C: Final Node Orchestrator
   const finalOutfile = path.join(nodeDir, "server.mjs");
   console.log("  🚀 Bundling Pass C: Node Orchestrator (.dinou/node/server.mjs)...");
@@ -221,11 +280,16 @@ if (isMain) {
     format: "esm",
     target: "node20",
     platform: "node",
+    jsx: "automatic",
     mainFields: ["module", "main"],
     conditions: ["node", "worker", "browser"],
     external: [...externalList, "./rsc-engine.mjs", "./ssr-engine.mjs"],
     banner,
-    inject: setupFiles,
+    plugins: [
+      passCConfigAliasPlugin,
+      serverTsconfigAliasesPlugin,
+      serverAssetPlugin,
+    ].filter(Boolean),
     alias: commonAlias,
     loader: commonLoader,
     define: {

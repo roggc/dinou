@@ -6,23 +6,42 @@ import stableChunkNamesAndMapsPlugin from "../plugins-esbuild/stable-chunk-names
 import assetsPlugin from "../plugins-esbuild/assets-plugin.js";
 import skipMissingEntryPointsPlugin from "../plugins-esbuild/skip-missing-entry-points-plugin.js";
 import { swcRedirectPlugin } from "./swc-disk-cache.js";
+import { esbuildContextualDinouPlugin } from "../../core/resolve-contextual-dinou.js";
+import { copyStaticDirectoriesToOutdir } from "../../core/copy-static-dirs.js";
+import { getEsbuildPublicEnvDefines } from "../../core/env.js";
+import { getAssetExtensionsInfo } from "../../core/asset-extensions.js";
+import {
+  esbuildTsconfigAliasesPlugin,
+  getSanitizedEsbuildTsconfigRaw,
+} from "../../core/tsconfig-aliases.js";
 import fs from "node:fs";
-import path from "node:path";
 
 export default function getConfigEsbuild({
   entryPoints,
   outdir = ".dinou/public",
   manifest = {},
   changedIds,
+  cssModuleClassChanges,
   hmrEngine,
+  cssRefreshRef,
   serverFiles,
+  serverAssetPaths = [],
+  dinouConfig = null,
   onManifestUpdated,
   onBuildStart,
   onBuildEnd,
   hmrPort,
 }) {
+  const sharedCssModuleClassChanges = cssModuleClassChanges || new Set();
   let esbuildRebuildStart = 0;
   let plugins = [
+    esbuildContextualDinouPlugin({ projectRoot: process.cwd() }),
+    esbuildTsconfigAliasesPlugin({
+      projectRoot: process.cwd(),
+      getAssetRegex: () =>
+        getAssetExtensionsInfo(dinouConfig, process.cwd()).regex,
+      preferSwcMirror: true,
+    }),
     swcRedirectPlugin({ projectRoot: process.cwd() }),
     ...(onBuildStart
       ? [
@@ -41,12 +60,33 @@ export default function getConfigEsbuild({
         ]
       : []),
     skipMissingEntryPointsPlugin(),
-    cssProcessorPlugin({ outdir, hmrEngine }),
+    cssProcessorPlugin({
+      outdir,
+      hmrEngine,
+      changedIds,
+      cssRefreshRef,
+      cssModuleClassChanges: sharedCssModuleClassChanges,
+    }),
     serverFunctionsPlugin({ serverFiles }),
-    reactClientManifestPlugin({ manifest, onManifestUpdated }),
-    assetsPlugin({ changedIds }),
+    reactClientManifestPlugin({
+      manifest,
+      manifestPath: ".dinou/node-dev/react-client-manifest.json",
+      onManifestUpdated,
+    }),
+    assetsPlugin({
+      changedIds,
+      serverAssetPaths,
+      dinouConfig,
+      projectRoot: process.cwd(),
+    }),
     stableChunkNamesAndMapsPlugin({ changedIds }),
-    esmHmrPlugin({ entryNames: ["main", "error"], changedIds, hmrEngine, hmrPort }),
+    esmHmrPlugin({
+      entryNames: ["main", "error"],
+      changedIds,
+      cssModuleClassChanges: sharedCssModuleClassChanges,
+      hmrEngine,
+      hmrPort,
+    }),
     ...(onBuildEnd
       ? [
           {
@@ -65,61 +105,24 @@ export default function getConfigEsbuild({
   ];
 
   const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true";
-  const staticDir = fs.existsSync("public") ? "public" : (fs.existsSync("favicons") ? "favicons" : null);
-  if (staticDir && shouldWriteToDisk) {
+  if (fs.existsSync("public") && shouldWriteToDisk) {
     let staticCopied = false;
     plugins = [
+      ...plugins,
       {
         name: "copy-static-files-once",
         setup(build) {
           build.onEnd(() => {
             if (staticCopied) return;
             staticCopied = true;
-            try {
-              fs.cpSync(staticDir, outdir, { recursive: true, force: true });
-            } catch (e) {}
+            copyStaticDirectoriesToOutdir(process.cwd(), outdir);
           });
         },
       },
-      ...plugins,
     ];
   }
 
-  let userTsconfig = {};
-  if (fs.existsSync("tsconfig.json")) {
-    try {
-      const raw = fs.readFileSync("tsconfig.json", "utf8");
-      const clean = raw.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, "").replace(/,(\s*[}\]])/g, "$1");
-      userTsconfig = JSON.parse(clean);
-    } catch (e) {}
-  }
-  const compilerOptions = userTsconfig.compilerOptions || {};
-  const userPaths = compilerOptions.paths || {};
-
-  const paths = {};
-  for (const [alias, targets] of Object.entries(userPaths)) {
-    const list = Array.isArray(targets) ? targets : [targets];
-    const swcTargets = list.map((t) => {
-      const norm = t.replace(/^\.\//, "");
-      return `.dinou/swc/${norm}`;
-    });
-    paths[alias] = [...swcTargets, ...list];
-  }
-  if (!paths["@/*"]) {
-    paths["@/*"] = [".dinou/swc/src/*", "src/*"];
-  }
-  if (!paths["~/*"]) {
-    paths["~/*"] = [".dinou/swc/src/*", "src/*"];
-  }
-
-  const tsconfigRaw = {
-    ...userTsconfig,
-    compilerOptions: {
-      ...compilerOptions,
-      baseUrl: compilerOptions.baseUrl || ".",
-      paths,
-    },
-  };
+  const tsconfigRaw = getSanitizedEsbuildTsconfigRaw(process.cwd());
 
   const isDev = process.env.NODE_ENV !== "production";
 
@@ -138,13 +141,12 @@ export default function getConfigEsbuild({
     conditions: ["style"],
     metafile: true,
     logLevel: "warning",
-    define: {
-      "process.env.NODE_ENV": JSON.stringify("development"),
-    },
+    define: getEsbuildPublicEnvDefines({ mode: "development" }),
     external: [
       "/__SERVER_FUNCTION_PROXY__",
       "/serverFunctionProxy.js",
       "/__hmr_client__.js",
+      "/runtime.js",
       "/react-refresh-entry.js",
     ],
     plugins,

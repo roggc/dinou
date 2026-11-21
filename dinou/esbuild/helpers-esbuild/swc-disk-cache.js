@@ -1,11 +1,13 @@
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
-import glob from "fast-glob";
+import globModule from "#fast-glob";
+
+const glob = globModule?.default || globModule;
 import { transform } from "@swc/core";
 import { useClientRegex, useServerRegex } from "../../constants.js";
 import { hasServerFunctions, extractServerFunctions } from "../../core/transform-server-functions.js";
-import { extensions as assetExtensions } from "../../core/asset-extensions.js";
+import { getAssetExtensionsInfo } from "../../core/asset-extensions.js";
 
 function isServerFunctionsModule(raw, filename) {
   const trimmed = raw.trim();
@@ -19,9 +21,7 @@ function isServerFunctionsModule(raw, filename) {
 }
 
 const styleExtensions = ["css", "scss", "less", "sass"];
-const fontExtensions = ["woff", "woff2", "ttf", "eot", "otf"];
-const redirectExtensions = [...styleExtensions, ...assetExtensions, ...fontExtensions];
-const redirectFilter = new RegExp(`\\.(${redirectExtensions.join("|")})$`, "i");
+const redirectFilter = new RegExp(`\\.(${styleExtensions.join("|")})$`, "i");
 
 const normPath = (p) => {
   if (!p) return "";
@@ -71,9 +71,12 @@ export async function transformToDisk(srcPath, projectRoot = process.cwd()) {
     return null;
   }
 
+  let compiledCode = raw;
   try {
     const { code } = await transform(raw, {
       filename: normSrc,
+      configFile: false,
+      swcrc: false,
       sourceMaps: "inline",
       jsc: {
         parser: { syntax: "typescript", tsx: true, dynamicImport: true },
@@ -87,18 +90,27 @@ export async function transformToDisk(srcPath, projectRoot = process.cwd()) {
         },
       },
     });
-    await fs.mkdir(path.dirname(targetPath), { recursive: true });
-    await fs.writeFile(targetPath, code, "utf8");
-    return targetPath;
+    compiledCode = code;
   } catch (err) {
-    await fs.mkdir(path.dirname(targetPath), { recursive: true });
-    await fs.writeFile(targetPath, raw, "utf8");
-    return targetPath;
+    compiledCode = raw;
   }
+
+  const targetDir = path.dirname(targetPath);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await fs.mkdir(targetDir, { recursive: true });
+      await fs.writeFile(targetPath, compiledCode, "utf8");
+      break;
+    } catch (ioErr) {
+      if (attempt === 2) throw ioErr;
+      await new Promise((r) => setTimeout(r, 15));
+    }
+  }
+  return targetPath;
 }
 
 export async function syncAllSwcFiles(srcDir = path.resolve("src"), projectRoot = process.cwd()) {
-  const files = await glob(["**/*.{js,jsx,ts,tsx}"], { cwd: srcDir, absolute: true });
+  const files = await glob(["**/*.{js,jsx,ts,tsx}"], { cwd: srcDir, absolute: true, ignore: ["_*/**", "**/_*/**"] });
   const tasks = [];
 
   for (const f of files) {
@@ -161,14 +173,17 @@ export function swcRedirectPlugin({ projectRoot = process.cwd() } = {}) {
   return {
     name: "swc-disk-cache-redirect",
     setup(build) {
+      let activeAssetFilter = getAssetExtensionsInfo(null, projectRoot).resolveFilterRegex;
       build.onStart(() => {
+        activeAssetFilter = getAssetExtensionsInfo(null, projectRoot).resolveFilterRegex;
         resolveCache.clear();
         redirTime = 0;
         redirCalls = 0;
         redirHits = 0;
       });
 
-      // Redirect CSS, assets, and server functions / source files imported from inside .dinou/swc back to src/
+      // Redirect CSS and source files imported from inside .dinou/swc back to src/.
+      // Never intercept asset imports here so `assetsPlugin` handles them in the `dinou-asset` namespace.
       build.onResolve(
         { filter: /.*/ },
         (args) => {
@@ -177,10 +192,14 @@ export function swcRedirectPlugin({ projectRoot = process.cwd() } = {}) {
             return null;
           }
 
-          // Only process relative imports or assets
+          if (activeAssetFilter.test(args.path)) {
+            return null;
+          }
+
+          // Only process relative imports or stylesheets
           const isRelative = args.path.startsWith(".");
-          const isAsset = redirectFilter.test(args.path);
-          if (!isRelative && !isAsset) {
+          const isStyle = redirectFilter.test(args.path);
+          if (!isRelative && !isStyle) {
             return null;
           }
 

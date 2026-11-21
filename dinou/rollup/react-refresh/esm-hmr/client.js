@@ -161,7 +161,13 @@ socket.addEventListener("message", ({ data: _data }) => {
 
   if (data.type === "rsc-update") {
     if (typeof window !== "undefined" && typeof window.__DINOU_ROUTER_REFRESH__ === "function") {
-      window.__DINOU_ROUTER_REFRESH__();
+      const refreshLayout = Boolean(
+        data.layout ||
+          (data.path &&
+            (/(?:^|[\\/])layout\.[jt]sx?$/i.test(data.path) ||
+              /\.module\.css$/i.test(data.path)))
+      );
+      window.__DINOU_ROUTER_REFRESH__({ layout: refreshLayout });
       return;
     }
     reload();
@@ -173,16 +179,31 @@ socket.addEventListener("message", ({ data: _data }) => {
     (data.type === "update" && data.url && (data.url.endsWith(".css") || data.url.includes("styles.css")))
   ) {
     const targetUrl = data.url ? data.url.split("?")[0] : "";
-    const links = document.querySelectorAll('link[rel="stylesheet"]');
-    for (const link of links) {
-      const rawHref = link.getAttribute("href");
-      if (!rawHref) continue;
-      const cleanHref = rawHref.split("?")[0];
-      if (!targetUrl || cleanHref.endsWith(targetUrl) || targetUrl.endsWith(cleanHref) || cleanHref.includes("styles.css")) {
-        const nextUrl = new URL(link.href, window.location.origin);
-        nextUrl.searchParams.set("t", String(Date.now()));
-        link.href = nextUrl.href;
+    const applyStyleUpdate = () => {
+      const links = document.querySelectorAll('link[rel="stylesheet"]');
+      for (const link of links) {
+        const rawHref = link.getAttribute("href");
+        if (!rawHref) continue;
+        const cleanHref = rawHref.split("?")[0];
+        if (!targetUrl || cleanHref.endsWith(targetUrl) || targetUrl.endsWith(cleanHref) || cleanHref.includes("styles.css")) {
+          const nextUrl = new URL(link.href, window.location.origin);
+          nextUrl.searchParams.set("t", String(Date.now()));
+          link.href = nextUrl.href;
+        }
       }
+    };
+
+    if (typeof document !== "undefined" && document.body?.getAttribute("data-hydrated") === "true") {
+      applyStyleUpdate();
+    } else if (typeof window !== "undefined") {
+      let attempts = 0;
+      const waitHydration = setInterval(() => {
+        attempts++;
+        if (document.body?.getAttribute("data-hydrated") === "true" || attempts >= 60) {
+          clearInterval(waitHydration);
+          applyStyleUpdate();
+        }
+      }, 50);
     }
     return;
   }

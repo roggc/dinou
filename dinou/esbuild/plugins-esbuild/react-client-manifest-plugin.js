@@ -7,7 +7,7 @@ import parseExports from "../../core/parse-exports.js";
 import { useClientRegex } from "../../constants.js";
 
 export default function reactClientManifestPlugin({
-  manifestPath = ".dinou/react_client_manifest/react-client-manifest.json",
+  manifestPath = null,
   manifest = {},
   onManifestUpdated,
 } = {}) {
@@ -82,9 +82,15 @@ export default function reactClientManifestPlugin({
           }
 
           if (shouldWriteToDisk && manifestChanged) {
-            await fs.mkdir(path.dirname(manifestPath), { recursive: true });
+            const targetPath =
+              manifestPath ||
+              path.join(
+                isDev ? ".dinou/node-dev" : ".dinou/dist1",
+                "react-client-manifest.json"
+              );
+            await fs.mkdir(path.dirname(targetPath), { recursive: true });
             await fs.writeFile(
-              manifestPath,
+              targetPath,
               serialized,
               "utf8"
             );

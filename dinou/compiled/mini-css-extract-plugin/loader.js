@@ -9,11 +9,11 @@ import {
   __require,
   require_dist,
   require_utils
-} from "./chunk-YYEJWYXE.js";
+} from "./chunk-R6DP5ZYM.js";
 
-// ../node_modules/mini-css-extract-plugin/dist/loader-options.json
+// node_modules/mini-css-extract-plugin/dist/loader-options.json
 var require_loader_options = __commonJS({
-  "../node_modules/mini-css-extract-plugin/dist/loader-options.json"(exports, module) {
+  "node_modules/mini-css-extract-plugin/dist/loader-options.json"(exports, module) {
     module.exports = {
       title: "Mini CSS Extract Plugin Loader options",
       type: "object",
@@ -54,9 +54,9 @@ var require_loader_options = __commonJS({
   }
 });
 
-// ../node_modules/mini-css-extract-plugin/dist/loader.js
+// node_modules/mini-css-extract-plugin/dist/loader.js
 var require_loader = __commonJS({
-  "../node_modules/mini-css-extract-plugin/dist/loader.js"(exports, module) {
+  "node_modules/mini-css-extract-plugin/dist/loader.js"(exports, module) {
     var path = __require("path");
     var schema = require_loader_options();
     var {

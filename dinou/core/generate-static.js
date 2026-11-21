@@ -18,27 +18,37 @@ async function generateStatic() {
   if (existsSync(distFolder2)) {
     rmSync(distFolder2, { recursive: true, force: true });
   }
+  mkdirSync(distFolder2, { recursive: true });
 
   const { updateBuildProgress, clearBuildProgress, isTTY } = await import(
     "../node/terminal-status.js"
   );
 
-  // 1. Compile or ensure Dual-Bundle engines (Pass A & Pass B)
+  // 1. Compile or ensure Dual-Bundle engines (Pass A & Pass B) + Server/Netlify AOT Adapters
   updateBuildProgress("[SSG] Compiling Dual-Engine for static generation...");
-  const { bundleDualEngine } = await import("../node/bundle-dual-engine.js");
-  const { rscEnginePath, ssrEnginePath } = await bundleDualEngine({
+  const {
+    bundleDualEngine,
+    bundleServerAndNetlifyAdapters,
+  } = await import("../node/bundle-dual-engine.js");
+  const engineResult = await bundleDualEngine({
     isDev: false,
     projectRoot: process.cwd(),
     outDir: ".dinou/node",
   });
+  const { rscEnginePath, ssrEnginePath } = engineResult;
+  await bundleServerAndNetlifyAdapters(engineResult);
 
   // 2. Initialize FileSystemStorage for writing .dinou/dist2
+  // Guard against dinou.config.* `storage` (e.g. RedisStorage) overriding FileSystemStorage during SSG build
+  globalThis.__DINOU_IS_SSG_BUILD__ = true;
   const storage = new FileSystemStorage(distFolder2);
   setStorageAdapter(storage);
 
+  try {
   // 3. Load compiled engines
   const rscModule = await import(pathToFileURL(rscEnginePath).href);
   const ssrModule = await import(pathToFileURL(ssrEnginePath).href);
+  setStorageAdapter(storage);
 
   // 4. Discover static routes and layouts
   updateBuildProgress("[SSG] Discovering static routes and layouts...");
@@ -58,12 +68,21 @@ async function generateStatic() {
       ? rscModule.getStaticLayouts()
       : [];
 
-  // 4b. Pre-render all static layout segments (layout.rsc)
+  // 4b. Pre-render all static layout segments (layout.rsc) ancestor-first with monotonic timestamps
+  let lastSsgLayoutGen = 0;
   if (layouts.length > 0) {
     if (!isTTY) {
       console.log(`⚡ [SSG] Pre-rendering ${layouts.length} static layout(s)...`);
     }
-    for (const layoutInfo of layouts) {
+    const sortedLayouts = [...layouts].sort((a, b) => {
+      const cleanA = String(a?.routePath || "/").replace(/^\/+/, "").replace(/\/+$/, "");
+      const cleanB = String(b?.routePath || "/").replace(/^\/+/, "").replace(/\/+$/, "");
+      const depthA = cleanA ? cleanA.split("/").filter(Boolean).length : 0;
+      const depthB = cleanB ? cleanB.split("/").filter(Boolean).length : 0;
+      if (depthA !== depthB) return depthA - depthB;
+      return cleanA < cleanB ? -1 : cleanA > cleanB ? 1 : 0;
+    });
+    for (const layoutInfo of sortedLayouts) {
       const layoutReqPath = layoutInfo.routePath.startsWith("/")
         ? layoutInfo.routePath
         : "/" + layoutInfo.routePath;
@@ -84,9 +103,12 @@ async function generateStatic() {
             const cleanLayoutPath = layoutReqPath.replace(/^\/+/, "").replace(/\/+$/, "");
             const layoutRscKey = cleanLayoutPath ? `${cleanLayoutPath}/layout.rsc` : "layout.rsc";
 
+            const ssgLayoutGen = Math.max(Date.now(), lastSsgLayoutGen + 1);
+            lastSsgLayoutGen = ssgLayoutGen;
             let layoutMeta = {
               status: 200,
-              generatedAt: Date.now(),
+              generatedAt: ssgLayoutGen,
+              layoutGeneratedAt: ssgLayoutGen,
               revalidate: undefined,
               tags: [],
             };
@@ -121,8 +143,13 @@ async function generateStatic() {
               if (suspenseCountHeader !== null) {
                 layoutMeta.suspenseCount = Number(suspenseCountHeader) || 0;
               }
+              if (layoutRes.headers.get("x-dinou-ppr") === "true") {
+                layoutMeta.ppr = true;
+              }
               if (layoutRes.headers.get("x-dinou-dynamic") === "true") {
                 layoutMeta.dynamic = true;
+                layoutMeta.ppr = false;
+                delete layoutMeta.holes;
               }
             } catch (e) {}
 
@@ -152,6 +179,9 @@ async function generateStatic() {
           layoutErr
         );
       }
+    }
+    while (lastSsgLayoutGen > 0 && Date.now() <= lastSsgLayoutGen) {
+      await new Promise((r) => setTimeout(r, 1));
     }
   }
 
@@ -199,6 +229,9 @@ async function generateStatic() {
             await storage.set(shellHtmlKey, htmlItem.content, {
               ...(htmlItem.metadata || {}),
               ppr: true,
+              ...(routeMeta && typeof routeMeta.pagePpr === "boolean"
+                ? { pagePpr: routeMeta.pagePpr }
+                : {}),
               holes: effectiveHoles,
             });
           }
@@ -208,6 +241,9 @@ async function generateStatic() {
             metaObj = metaItem ? JSON.parse(metaItem.content || "{}") : {};
           } catch (e) {}
           metaObj.ppr = true;
+          if (routeMeta && typeof routeMeta.pagePpr === "boolean") {
+            metaObj.pagePpr = routeMeta.pagePpr;
+          }
           metaObj.holes =
             Array.isArray(metaObj.holes) && metaObj.holes.length > 0
               ? metaObj.holes
@@ -281,6 +317,9 @@ async function generateStatic() {
   console.log(
     `✓ [SSG] Pre-rendered ${renderedCount} page(s) and ${layouts.length} layout(s) to .dinou/dist2`
   );
+  } finally {
+    delete globalThis.__DINOU_IS_SSG_BUILD__;
+  }
 }
 
 export { generateStatic };

@@ -21,7 +21,7 @@ export function redirect(destination) {
     } catch (e) { }
 
     // 2. If we are on the server and headers have NOT been sent yet...
-    // We can do a real HTTP redirect (Status 307 or x-rsc-redirect).
+    // We can do a real HTTP redirect (Status 302 or x-rsc-redirect).
     // This is better for SEO and speed in Hard Navigation.
     if (ctx && ctx.res && typeof ctx.res.redirect === "function") {
       ctx.res.redirect(destination);

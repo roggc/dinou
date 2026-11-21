@@ -3,6 +3,7 @@ import { existsSync } from "./vfs.js";
 import importModule from "./import-module.js";
 import { resolveModulePpr } from "./resolve-module-ppr.js";
 import { getFilePathAndDynamicParams } from "./get-file-path-and-dynamic-params.js";
+import { getDinouConfig } from "./load-dinou-config.js";
 
 const LAYOUT_FUNCTIONS_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js", ".mjs"];
 const LAYOUT_FUNCTIONS_NAMES = ["layout_functions", "layout.functions"];
@@ -74,8 +75,14 @@ async function getLayoutProps(layoutPath, dParams = {}) {
  * @returns {Promise<object>}
  */
 async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
+  const globalCfg = await getDinouConfig();
+  const defaultAllowISG =
+    globalCfg?.allowISG !== undefined && globalCfg?.allowISG !== null
+      ? Boolean(globalCfg.allowISG)
+      : true;
+
   const defaultConfig = {
-    allowISG: true,
+    allowISG: defaultAllowISG,
     staticPathsSet: null,
     validateParams: null,
     isDynamic: false,
@@ -109,12 +116,12 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
       }
     }
     const defaultExport = mod.default?.default ? mod.default.default : mod.default;
+    const rawAllowISG =
+      mod.allowISG !== undefined ? mod.allowISG : defaultExport?.allowISG;
     const resolvedAllowISG =
-      typeof mod.allowISG === "function"
-        ? await mod.allowISG()
-        : typeof defaultExport?.allowISG === "function"
-        ? await defaultExport.allowISG()
-        : (mod.allowISG ?? defaultExport?.allowISG ?? true);
+      typeof rawAllowISG === "function"
+        ? await rawAllowISG()
+        : (rawAllowISG ?? defaultAllowISG);
 
     const getStaticPathsFn = mod.getStaticPaths || defaultExport?.getStaticPaths;
     let staticPathsSet = null;
@@ -124,21 +131,33 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
         staticPathsSet = new Set(
           paths.map((p) => {
             if (typeof p === "object" && p !== null && !Array.isArray(p)) {
-              const sorted = Object.entries(p).sort((a, b) => a[0].localeCompare(b[0]));
+              const sorted = Object.entries(p)
+                .sort((a, b) => a[0].localeCompare(b[0]))
+                .map(([k, v]) => [
+                  k,
+                  Array.isArray(v)
+                    ? v.join(",")
+                    : v === undefined || v === null
+                    ? ""
+                    : String(v),
+                ]);
               return JSON.stringify(sorted);
             }
-            return String(p);
+            if (Array.isArray(p)) {
+              return p.join(",");
+            }
+            return p === undefined || p === null ? "" : String(p);
           })
         );
       }
     }
 
+    const rawRevalidate =
+      mod.revalidate !== undefined ? mod.revalidate : defaultExport?.revalidate;
     const revalidateVal =
-      typeof mod.revalidate === "function"
-        ? await mod.revalidate()
-        : typeof defaultExport?.revalidate === "function"
-        ? await defaultExport.revalidate()
-        : (mod.revalidate ?? defaultExport?.revalidate);
+      typeof rawRevalidate === "function"
+        ? await rawRevalidate()
+        : rawRevalidate;
 
     const isDynamic = typeof revalidateVal === "number" && revalidateVal < 1;
 
@@ -275,15 +294,55 @@ function getActiveLayoutChain(
   return activeChain;
 }
 
+/**
+ * Resolves the effective PPR boolean for each active layout in the chain (from outermost to innermost).
+ * Each layout segment uses its own explicit `ppr` config in `layout_functions`, or falls back to
+ * the global default `ppr` from `dinou.config.js` (`false` if omitted). No parent-to-child inheritance.
+ */
+async function resolveLayoutChainPpr(
+  reqSegments,
+  queryObj = {},
+  srcFolder = path.resolve(process.cwd(), "src"),
+  options = {}
+) {
+  const globalCfg = await getDinouConfig();
+  const defaultPpr = Boolean(globalCfg?.ppr);
+  const activeChain = getActiveLayoutChain(reqSegments, queryObj, srcFolder, options);
+  const layoutPprMap = new Map();
+
+  for (let i = activeChain.length - 1; i >= 0; i--) {
+    const entry = activeChain[i];
+    const lConfig = await resolveLayoutFunctionsConfig(entry.layoutPath, entry.dParams);
+    const segmentPpr =
+      lConfig && lConfig.ppr !== null && lConfig.ppr !== undefined
+        ? Boolean(lConfig.ppr)
+        : defaultPpr;
+    entry.effectivePpr = segmentPpr;
+    layoutPprMap.set(entry.layoutPath, segmentPpr);
+    layoutPprMap.set(path.normalize(entry.layoutPath), segmentPpr);
+    layoutPprMap.set(entry.layoutPath.replace(/\\/g, "/"), segmentPpr);
+  }
+
+  const anyLayoutPpr = activeChain.some((entry) => Boolean(entry.effectivePpr));
+  return {
+    activeChain,
+    layoutPprMap,
+    defaultPpr,
+    anyLayoutPpr,
+  };
+}
+
 export {
   getLayoutFunctionsPath,
   getLayoutProps,
   resolveLayoutFunctionsConfig,
   getActiveLayoutChain,
+  resolveLayoutChainPpr,
 };
 export default {
   getLayoutFunctionsPath,
   getLayoutProps,
   resolveLayoutFunctionsConfig,
   getActiveLayoutChain,
+  resolveLayoutChainPpr,
 };

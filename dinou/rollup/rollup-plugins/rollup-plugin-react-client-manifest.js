@@ -1,16 +1,26 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import path, { dirname } from "node:path";
-import glob from "fast-glob";
+import globModule from "#fast-glob";
+
+const glob = globModule?.default || globModule;
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import parser from "#babel/parser";
 import _traverseRaw from "#babel/traverse";
-import { regex } from "../../core/asset-extensions.js";
-import createScopedName from "../../core/createScopedName.js";
-import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
+import {
+  getAssetExtensionsInfo,
+  getAssetInfo,
+  resolveAssetImport,
+} from "../../core/asset-extensions.js";
+import {
+  getAbsPathWithExt,
+  resolveStyleImportFromCode,
+} from "../../core/get-abs-path-with-ext.js";
+import { isTailwindStylesheetSource } from "../../core/postcss-pipeline.js";
 import { useClientRegex, useServerRegex } from "../../constants.js";
 import { hasServerFunctions } from "../../core/transform-server-functions.js";
 import parseExports from "../../core/parse-exports.js";
+import { isUnderscoreEscapedSrcPath } from "../../core/resolve-contextual-dinou.js";
 
 const require = createRequire(import.meta.url);
 let swc = null;
@@ -75,13 +85,18 @@ function getDefaultExportName(code) {
 
 function reactClientManifestPlugin({
   srcDir = path.resolve("src"),
-  manifestPath = ".dinou/react_client_manifest/react-client-manifest.json",
-  assetInclude = regex,
+  manifestPath = null,
+  assetInclude = null,
+  dinouConfig = null,
   serverFiles = new Set(),
 } = {}) {
+  const projectRoot = path.dirname(path.resolve(srcDir));
+  const activeAssetInclude =
+    assetInclude || getAssetExtensionsInfo(dinouConfig, projectRoot).regex;
   const manifest = {};
   const clientModules = new Set();
   const serverModules = new Set();
+  const knownServerAssets = new Set();
   let lastManifest = null;
 
 const urlToManifestKeys = new Map();
@@ -90,6 +105,13 @@ const defaultExportCache = new Map();
 function normalizeFsPath(p) {
   const resolved = path.resolve(p).replace(/\\/g, "/");
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function normalizeServerFilePath(p) {
+  const resolved = path.resolve(p).replace(/\\/g, "/");
+  return process.platform === "win32" && resolved[1] === ":"
+    ? resolved.charAt(0).toLowerCase() + resolved.slice(1)
+    : resolved;
 }
 
 function alignDrive(p) {
@@ -130,14 +152,21 @@ function normalizeFileUrl(p) {
 }
 
 function setManifestEntry(fileUrl, expName, entry) {
-  const keys = [expName === "default" ? fileUrl : `${fileUrl}#${expName}`];
+  const keys =
+    expName === "default"
+      ? [fileUrl, `${fileUrl}#default`]
+      : [`${fileUrl}#${expName}`];
   if (process.platform === "win32") {
     const winMatch = fileUrl.match(/^file:\/\/\/([a-zA-Z]):(\/.*)$/);
     if (winMatch) {
       const drive = winMatch[1];
       const altDrive = drive === drive.toLowerCase() ? drive.toUpperCase() : drive.toLowerCase();
       const altUrl = `file:///${altDrive}:${winMatch[2]}`;
-      keys.push(expName === "default" ? altUrl : `${altUrl}#${expName}`);
+      if (expName === "default") {
+        keys.push(altUrl, `${altUrl}#default`);
+      } else {
+        keys.push(`${altUrl}#${expName}`);
+      }
     }
   }
   const fileUrlLower = fileUrl.toLowerCase();
@@ -249,10 +278,18 @@ function setManifestEntry(fileUrl, expName, entry) {
     for (const source of importSources) {
       // console.log("source", source);
 
-      // Resolve the import
-      const absImportPathWithExt = getAbsPathWithExt(source, {
-        parentURL: pathToFileURL(baseFilePath).href,
-      });
+      // Resolve the import (including bare stylesheet or asset imports from node_modules)
+      const absImportPathWithExt =
+        getAbsPathWithExt(source, {
+          parentURL: pathToFileURL(baseFilePath).href,
+          cwd: projectRoot,
+        }) ||
+        resolveStyleImportFromCode(source, baseFilePath, projectRoot) ||
+        resolveAssetImport(source, {
+          importer: baseFilePath,
+          projectRoot,
+          assetRegex: activeAssetInclude,
+        });
       if (!absImportPathWithExt) {
         // console.warn(`[resolve failed] ${source} from ${baseFilePath}`);
         continue;
@@ -269,7 +306,7 @@ function setManifestEntry(fileUrl, expName, entry) {
       }
 
       // Check if it's an asset
-      if (assetInclude.test(absImportPathWithExt)) {
+      if (activeAssetInclude.test(absImportPathWithExt)) {
         assets.add(absImportPathWithExt);
         continue; // Don't recurse for assets
       }
@@ -292,10 +329,10 @@ function setManifestEntry(fileUrl, expName, entry) {
         }
 
         if (useServerRegex.test(importCode.trim())) {
-          serverFiles.add(normalizeFsPath(absImportPathWithExt));
+          serverFiles.add(normalizeServerFilePath(absImportPathWithExt));
           continue;
         } else if (hasServerFunctions(importCode)) {
-          serverFiles.add(normalizeFsPath(absImportPathWithExt));
+          serverFiles.add(normalizeServerFilePath(absImportPathWithExt));
         }
 
         const nested = await getImportsAndAssetsAndCsss(
@@ -327,20 +364,20 @@ function setManifestEntry(fileUrl, expName, entry) {
     return result;
   }
 
-  // New helper to emit a single asset (used in buildStart and watchChange)
+  // Helper to emit a single asset (used in buildStart and incremental watch rebuilds)
   function emitAsset(absAssetPath, pluginContext) {
-    const base = path.basename(absAssetPath, path.extname(absAssetPath));
-    const scoped = createScopedName(base, absAssetPath);
-    const ext = path.extname(absAssetPath);
-    const fileName = `assets/${scoped}${ext}`;
-    const emitted = globalThis.__DINOU_EMITTED_ASSETS__ || (globalThis.__DINOU_EMITTED_ASSETS__ = new Set());
-    if (emitted.has(fileName)) return;
-    emitted.add(fileName);
-    const source = readFileSync(absAssetPath);
+    if (!existsSync(absAssetPath)) return;
+    const info = getAssetInfo(absAssetPath, projectRoot, { includeBuffer: true });
+    if (!info.buffer) return;
+    const emitted =
+      globalThis.__DINOU_EMITTED_ASSETS__ ||
+      (globalThis.__DINOU_EMITTED_ASSETS__ = new Set());
+    if (emitted.has(info.fileName)) return;
+    emitted.add(info.fileName);
     pluginContext.emitFile({
       type: "asset",
-      fileName,
-      source,
+      fileName: info.fileName,
+      source: info.buffer,
     });
   }
 
@@ -349,6 +386,8 @@ function setManifestEntry(fileUrl, expName, entry) {
     return (
       fileName.startsWith("page.") ||
       fileName.startsWith("layout.") ||
+      fileName.startsWith("error.") ||
+      fileName.startsWith("not_found.") ||
       fileName.startsWith("page_functions.") ||
       fileName.startsWith("layout_functions.")
     );
@@ -358,6 +397,7 @@ function setManifestEntry(fileUrl, expName, entry) {
   const knownClientChunks = new Map();
   const knownCssChunks = new Map();
   let hasPendingCssChange = false;
+  let hasPendingSourceChange = false;
 
   return {
     name: "react-client-manifest",
@@ -374,21 +414,28 @@ function setManifestEntry(fileUrl, expName, entry) {
             name: entry.name,
           });
         }
-        if (hasPendingCssChange) {
-          for (const entry of knownCssChunks.values()) {
-            this.emitFile({
-              type: "chunk",
-              id: entry.id,
-              name: entry.name,
-            });
-          }
-          hasPendingCssChange = false;
+        for (const entry of knownCssChunks.values()) {
+          this.emitFile({
+            type: "chunk",
+            id: entry.id,
+            name: entry.name,
+          });
         }
+        for (const assetPath of Array.from(knownServerAssets)) {
+          if (!existsSync(assetPath)) {
+            knownServerAssets.delete(assetPath);
+            continue;
+          }
+          this.addWatchFile(assetPath);
+          emitAsset(assetPath, this);
+        }
+        hasPendingCssChange = false;
 
         // Quick scan for newly added client files in incremental builds
         try {
           const freshSrcFiles = await glob(["**/*.{js,jsx,ts,tsx}"], {
             cwd: srcDir,
+            ignore: ["_*/**", "**/_*/**"],
             absolute: true,
           });
           for (const absPath of freshSrcFiles) {
@@ -418,6 +465,7 @@ function setManifestEntry(fileUrl, expName, entry) {
 
       const srcFiles = await glob(["**/*.{js,jsx,ts,tsx}"], {
         cwd: srcDir,
+        ignore: ["_*/**", "**/_*/**"],
         absolute: true,
       });
 
@@ -476,7 +524,7 @@ function setManifestEntry(fileUrl, expName, entry) {
         } else if (isPageOrLayout(normAbs)) {
           serverModules.add(normKey);
           if (useServerRegex.test(code.trim()) || hasServerFunctions(code)) {
-            serverFiles.add(normKey);
+            serverFiles.add(normalizeServerFilePath(normAbs));
           }
           this.addWatchFile(normAbs);
           const { imports, assets, csss } = await getImportsAndAssetsAndCsss(
@@ -492,6 +540,7 @@ function setManifestEntry(fileUrl, expName, entry) {
           // Emit assets for server components (replicate dinouAssetPlugin logic)
           for (const assetPath of assets) {
             this.addWatchFile(assetPath);
+            knownServerAssets.add(assetPath);
             if (!emittedAssets.has(assetPath)) {
               emittedAssets.add(assetPath);
               emitAsset(assetPath, this);
@@ -542,6 +591,9 @@ function setManifestEntry(fileUrl, expName, entry) {
       }
     },
     async watchChange(id) {
+      if (isUnderscoreEscapedSrcPath(id, path.dirname(srcDir))) {
+        return;
+      }
       const lower = id.toLowerCase();
       if (lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less")) {
         hasPendingCssChange = true;
@@ -554,8 +606,10 @@ function setManifestEntry(fileUrl, expName, entry) {
         !lower.endsWith(".ts")
       )
         return;
+      hasPendingSourceChange = true;
       const normAbs = alignDrive(id);
       const normId = normalizeFsPath(normAbs);
+      const normServerFileId = normalizeServerFilePath(normAbs);
       if (!existsSync(normAbs)) {
         const fileUrl = normalizeFileUrl(normAbs);
         const fileUrlLower = fileUrl.toLowerCase();
@@ -566,7 +620,7 @@ function setManifestEntry(fileUrl, expName, entry) {
         }
         clientModules.delete(normId);
         serverModules.delete(normId);
-        serverFiles.delete(normId);
+        serverFiles.delete(normServerFileId);
         knownClientChunks.delete(normId);
         return;
       }
@@ -574,9 +628,9 @@ function setManifestEntry(fileUrl, expName, entry) {
       const isClientModule = useClientRegex.test(code.trim());
       const isServerModule = useServerRegex.test(code.trim()) || hasServerFunctions(code);
       if (isServerModule) {
-        serverFiles.add(normId);
+        serverFiles.add(normServerFileId);
       } else {
-        serverFiles.delete(normId);
+        serverFiles.delete(normServerFileId);
       }
 
       updateManifestForModule(normAbs, code, isClientModule);
@@ -607,6 +661,7 @@ function setManifestEntry(fileUrl, expName, entry) {
           }
           for (const assetPath of assets) {
             this.addWatchFile(assetPath);
+            knownServerAssets.add(assetPath);
           }
           for (const cssPath of csss) {
             this.addWatchFile(cssPath);
@@ -620,7 +675,22 @@ function setManifestEntry(fileUrl, expName, entry) {
         }
       }
     },
+    shouldTransformCachedModule({ id }) {
+      if (!hasPendingSourceChange || !id) return false;
+      const cleanId = id.split("?")[0];
+      if (!cleanId.toLowerCase().endsWith(".css")) return false;
+      try {
+        if (existsSync(cleanId)) {
+          const cssCode = readFileSync(cleanId, "utf8");
+          if (isTailwindStylesheetSource(cssCode)) {
+            return true;
+          }
+        }
+      } catch (e) {}
+      return false;
+    },
     generateBundle(outputOptions, bundle) {
+      hasPendingSourceChange = false;
       const normFsPathCache = new Map();
       function getNormFsPath(p) {
         let n = normFsPathCache.get(p);
@@ -720,11 +790,17 @@ function setManifestEntry(fileUrl, expName, entry) {
 
       const isDev = process.env.NODE_ENV !== "production" || process.env.DINOU_DEV === "true";
       const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDev;
+      const resolvedManifestPath =
+        manifestPath ||
+        path.join(
+          isDev ? ".dinou/node-dev" : ".dinou/dist1",
+          "react-client-manifest.json"
+        );
 
       let existingManifest = null;
-      if (shouldWriteToDisk && existsSync(manifestPath)) {
+      if (shouldWriteToDisk && existsSync(resolvedManifestPath)) {
         try {
-          existingManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+          existingManifest = JSON.parse(readFileSync(resolvedManifestPath, "utf8"));
         } catch (e) {}
       }
 
@@ -735,8 +811,8 @@ function setManifestEntry(fileUrl, expName, entry) {
           for (const k of Object.keys(manifest).sort()) {
             sortedManifest[k] = manifest[k];
           }
-          mkdirSync(dirname(manifestPath), { recursive: true });
-          writeFileSync(manifestPath, JSON.stringify(sortedManifest, null, 2));
+          mkdirSync(dirname(resolvedManifestPath), { recursive: true });
+          writeFileSync(resolvedManifestPath, JSON.stringify(sortedManifest, null, 2));
         }
         manifestUpdatedCallback?.();
       }

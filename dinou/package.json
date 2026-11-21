@@ -1,6 +1,6 @@
 {
   "name": "dinou-ejected",
-  "version": "9.3.0",
+  "version": "10.0.0",
   "type": "module",
   "main": "index.js",
   "bin": {
@@ -118,10 +118,6 @@
       "unvendorized": "@rollup/plugin-replace",
       "default": "./compiled/rollup-plugin-replace/index.js"
     },
-    "#rollup-plugin-copy": {
-      "unvendorized": "rollup-plugin-copy",
-      "default": "./compiled/rollup-plugin-copy/index.js"
-    },
     "#rollup-plugin-delete": {
       "unvendorized": "rollup-plugin-delete",
       "default": "./compiled/rollup-plugin-delete/index.js"
@@ -129,10 +125,6 @@
     "#rollup-plugin-postcss": {
       "unvendorized": "rollup-plugin-postcss",
       "default": "./compiled/rollup-plugin-postcss/index.js"
-    },
-    "#rollup-plugin-tsconfig-paths": {
-      "unvendorized": "rollup-plugin-tsconfig-paths",
-      "default": "./compiled/rollup-plugin-tsconfig-paths/index.js"
     },
     "#babel-loader": {
       "unvendorized": "babel-loader",
@@ -150,21 +142,9 @@
       "unvendorized": "copy-webpack-plugin",
       "default": "./compiled/copy-webpack-plugin/index.js"
     },
-    "#tsconfig-paths-webpack-plugin": {
-      "unvendorized": "tsconfig-paths-webpack-plugin",
-      "default": "./compiled/tsconfig-paths-webpack-plugin/index.js"
-    },
     "#commander": {
       "unvendorized": "commander",
       "default": "./compiled/commander/index.js"
-    },
-    "#dotenv": {
-      "unvendorized": "dotenv",
-      "default": "./compiled/dotenv/index.js"
-    },
-    "#cross-env": {
-      "unvendorized": "cross-env",
-      "default": "./compiled/cross-env/index.js"
     },
     "#ws": {
       "unvendorized": "ws",
@@ -174,23 +154,24 @@
       "unvendorized": "chokidar",
       "default": "./compiled/chokidar/index.js"
     },
-    "#esbuild-copy-static-files": {
-      "unvendorized": "esbuild-copy-static-files",
-      "default": "./compiled/esbuild-copy-static-files/index.js"
+    "#fast-glob": {
+      "unvendorized": "fast-glob",
+      "default": "./compiled/fast-glob/index.js"
     },
-    "#esbuild-plugins/tsconfig-paths": {
-      "unvendorized": "@esbuild-plugins/tsconfig-paths",
-      "default": "./compiled/esbuild-tsconfig-paths/index.js"
+    "#resolve": {
+      "unvendorized": "resolve",
+      "default": "./compiled/resolve/index.js"
     }
   },
   "dependencies": {
     "@babel/core": "7.29.7",
+    "@babel/generator": "7.29.8",
     "@babel/parser": "7.29.11",
     "@babel/plugin-syntax-import-meta": "7.10.4",
     "@babel/preset-react": "7.29.7",
     "@babel/preset-typescript": "7.29.7",
     "@babel/traverse": "7.29.10",
-    "@esbuild-plugins/tsconfig-paths": "0.1.2",
+    "@babel/types": "7.29.11",
     "@roggc/react-server-dom-esm": "19.3.1",
     "@rollup/plugin-babel": "6.1.0",
     "@rollup/plugin-commonjs": "28.0.9",
@@ -205,11 +186,9 @@
     "chokidar": "4.0.3",
     "commander": "14.0.3",
     "copy-webpack-plugin": "14.0.0",
-    "cross-env": "7.0.3",
     "css-loader": "7.1.5",
-    "dotenv": "16.6.1",
     "esbuild": "0.27.7",
-    "esbuild-copy-static-files": "0.1.0",
+    "fast-glob": "3.3.3",
     "generic-names": "4.0.0",
     "mini-css-extract-plugin": "2.10.2",
     "postcss": "8.5.31",
@@ -218,13 +197,11 @@
     "postcss-modules": "6.0.1",
     "react-refresh": "0.17.0",
     "react-server-dom-webpack": "19.3.1",
+    "resolve": "1.22.12",
     "rollup": "4.65.0",
-    "rollup-plugin-copy": "3.5.0",
     "rollup-plugin-delete": "3.0.2",
     "rollup-plugin-postcss": "4.0.2",
-    "rollup-plugin-tsconfig-paths": "1.5.2",
     "tailwindcss": "4.3.3",
-    "tsconfig-paths-webpack-plugin": "4.2.0",
     "webpack": "5.112.2",
     "webpack-cli": "6.0.1",
     "webpack-dev-server": "5.2.7",

@@ -1,42 +1,63 @@
-import "./helpers/patch-webpack-internals.js";
-import "dotenv/config";
+import { loadReactServerWebpackPlugin } from "./helpers/patch-webpack-internals.js";
+import {
+  loadEnvFiles,
+  getWebpackPublicEnvDefines,
+} from "../core/env.js";
+import { isUnvendorizedRequested } from "../core/ensure-vendor-mode.js";
 import path from "node:path";
 import fs from "node:fs";
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import ReactServerWebpackPlugin from "react-server-dom-webpack/plugin";
 import CopyWebpackPlugin from "#copy-webpack-plugin";
 import MiniCssExtractPlugin from "#mini-css-extract-plugin";
+import presetReactModule from "#babel/preset-react";
+import presetTypescriptModule from "#babel/preset-typescript";
+import pluginSyntaxImportMetaModule from "#babel/plugin-syntax-import-meta";
+import pluginReactCompilerModule from "#babel-plugin-react-compiler";
+import esbuild from "esbuild";
 import createScopedName from "../core/createScopedName.js";
-import TsconfigPathsPlugin from "#tsconfig-paths-webpack-plugin";
+import {
+  createBasePostCssPlugins,
+  getRegisteredCssUrlAssets,
+} from "../core/postcss-pipeline.js";
+import {
+  hasPublicStylesCss,
+  warnPublicStylesCssCollision,
+} from "../core/copy-static-dirs.js";
+import { getDinouConfig } from "../core/load-dinou-config.js";
+import {
+  createWebpackTsconfigAliasesResolvePlugin,
+  getWatchedTsconfigFiles,
+} from "../core/tsconfig-aliases.js";
 import manifestGeneratorPlugin from "./plugins/manifest-generator-plugin.js";
 import ServerFunctionsPlugin from "./plugins/server-functions-plugin.js";
 import WebpackMemoryPlugin from "./plugins/webpack-memory-plugin.js";
 import webpack from "webpack";
-import { regex } from "../core/asset-extensions.js";
+import {
+  getAssetExtensionsInfo,
+  getAssetFileName,
+  resolveAssetImport,
+} from "../core/asset-extensions.js";
 import getCSSEntries from "./helpers/get-webpack-entries.js";
 import {
   scanProjectDependenciesForClientComponents,
   scanProjectDependenciesForClientComponentsAsync,
 } from "../core/scan-dependency-components.js";
 import { useClientRegex } from "../constants.js";
+import { generateRouteTypes } from "../core/generate-route-types.js";
+import {
+  createWebpackUnderscoreDirExclude,
+  webpackContextualDinouPlugin,
+} from "../core/resolve-contextual-dinou.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const isDevelopment = process.env.NODE_ENV !== "production";
+loadEnvFiles(process.cwd(), {
+  mode: isDevelopment ? "development" : "production",
+});
 const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
-
-function getConfigFileIfExists() {
-  const tsconfigPath = path.resolve(process.cwd(), "tsconfig.json");
-  const jsconfigPath = path.resolve(process.cwd(), "jsconfig.json");
-
-  if (fs.existsSync(tsconfigPath)) return tsconfigPath;
-  if (fs.existsSync(jsconfigPath)) return jsconfigPath;
-
-  return null;
-}
-
-const configFile = getConfigFileIfExists();
 
 const localDinouPath = path.resolve(process.cwd(), "dinou");
 const isEjected = fs.existsSync(localDinouPath);
@@ -51,6 +72,8 @@ const projectRoot = process.cwd();
 
 const outputDirs = [
   path.resolve(projectRoot, ".dinou/public"),
+  path.resolve(projectRoot, ".dinou/node-dev"),
+  path.resolve(projectRoot, ".dinou/dist1"),
   path.resolve(projectRoot, ".dinou/dist3"),
   path.resolve(projectRoot, "out"),
   path.resolve(projectRoot, "dist"),
@@ -73,6 +96,17 @@ function cleanDir(dir) {
 }
 
 export default async () => {
+  const envMode = isDevelopment ? "development" : "production";
+  loadEnvFiles(process.cwd(), { mode: envMode });
+  const dinouConfig = await getDinouConfig();
+  const enableReactCompiler = dinouConfig?.reactCompiler !== false;
+  const { regex: activeAssetRegex } = getAssetExtensionsInfo(
+    dinouConfig,
+    process.cwd()
+  );
+  try {
+    generateRouteTypes(process.cwd());
+  } catch (e) {}
   const outputDir = path.resolve(process.cwd(), outputDirectory);
 
   const shouldWriteToDisk =
@@ -81,8 +115,45 @@ export default async () => {
   // 🔥 CLEAN HARD
   if (shouldWriteToDisk) {
     cleanDir(outputDir);
+    if (!isDevelopment) {
+      cleanDir(path.resolve(process.cwd(), ".dinou/dist1"));
+      cleanDir(path.resolve(process.cwd(), ".dinou/netlify"));
+    } else {
+      const nodeDevDir = path.resolve(process.cwd(), ".dinou/node-dev");
+      for (const stale of [
+        "react-client-manifest.json",
+        "react-ssr-manifest.json",
+        "server-functions-manifest.json",
+        "manifest.json",
+      ]) {
+        try {
+          fs.rmSync(path.join(nodeDevDir, stale), { force: true });
+        } catch (e) {}
+      }
+    }
   }
-  const [cssEntries, , serverFiles] = await getCSSEntries();
+  const [cssEntries, , serverFiles, serverAssetEntries] = await getCSSEntries({
+    assetInclude: activeAssetRegex,
+    dinouConfig,
+  });
+  const ReactServerWebpackPlugin = loadReactServerWebpackPlugin();
+  const dinouReq = createRequire(import.meta.url);
+  const projectReq = createRequire(path.resolve(process.cwd(), "package.json"));
+  const resolveLoader = (specifier) => {
+    try {
+      return dinouReq.resolve(specifier);
+    } catch {
+      return projectReq.resolve(specifier);
+    }
+  };
+  const babelLoaderPath = resolveLoader("#babel-loader");
+  const cssLoaderPath = resolveLoader("#css-loader");
+  const postcssLoaderPath = resolveLoader("postcss-loader");
+  const unwrapBabel = (mod) => mod?.default ?? mod;
+  const presetReact = unwrapBabel(presetReactModule);
+  const presetTypescript = unwrapBabel(presetTypescriptModule);
+  const pluginSyntaxImportMeta = unwrapBabel(pluginSyntaxImportMetaModule);
+  const pluginReactCompiler = unwrapBabel(pluginReactCompilerModule);
 
   const dependencyClientFiles = new Set();
   if (typeof scanProjectDependenciesForClientComponentsAsync === "function") {
@@ -99,23 +170,27 @@ export default async () => {
     );
   }
 
-  let clientDone = false;
-  let serverDone = false;
   let ssgExecuted = false;
 
   function runPostBuild() {
-    if (clientDone && serverDone && !ssgExecuted) {
+    if (!ssgExecuted) {
       ssgExecuted = true;
-      const serverDir = path.resolve(process.cwd(), ".dinou/dist3/server");
-      fs.mkdirSync(serverDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(serverDir, "package.json"),
-        JSON.stringify({ type: "module" }, null, 2)
-      );
-      execSync(`"${process.execPath}" --conditions=react-server "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
+      const ssgArgs = [
+        "--conditions=react-server",
+        ...(isUnvendorizedRequested() ? ["--conditions=unvendorized"] : []),
+        path.resolve(__dirname, "../core/run-ssg.js"),
+      ];
+      const ssgRes = spawnSync(process.execPath, ssgArgs, {
         stdio: "inherit",
-        env: { ...process.env, NODE_ENV: "production", DINOU_BUILD_TOOL: "webpack" },
+        env: {
+          ...process.env,
+          NODE_ENV: "production",
+          DINOU_BUILD_TOOL: "webpack",
+        },
       });
+      if (ssgRes.status !== 0) {
+        throw new Error(`[Dinou SSG] Static generation exited with code ${ssgRes.status ?? 1}`);
+      }
     }
   }
   const clientConfig = {
@@ -173,7 +248,11 @@ export default async () => {
         {
           test: /\.[jt]sx?$/,
           type: "javascript/auto",
-          exclude: [/[\\/]node_modules[\\/](?!dinou)/, ...outputDirs],
+          exclude: [
+            /[\\/]node_modules[\\/](?!dinou)/,
+            /[\\/]dinou[\\/]compiled[\\/]/,
+            ...outputDirs,
+          ],
           use: [
             isDevelopment
               ? {
@@ -183,15 +262,17 @@ export default async () => {
                   },
                 }
               : {
-                  loader: "babel-loader",
+                  loader: babelLoaderPath,
                   options: {
+                    configFile: false,
+                    babelrc: false,
                     presets: [
-                      ["@babel/preset-react", { runtime: "automatic" }],
-                      "@babel/preset-typescript",
+                      [presetReact, { runtime: "automatic" }],
+                      presetTypescript,
                     ],
                     plugins: [
-                      "babel-plugin-react-compiler",
-                      "@babel/plugin-syntax-import-meta",
+                      enableReactCompiler && pluginReactCompiler,
+                      pluginSyntaxImportMeta,
                     ].filter(Boolean),
                   },
                 },
@@ -216,8 +297,12 @@ export default async () => {
               },
             },
             {
-              loader: "css-loader",
+              loader: cssLoaderPath,
               options: {
+                url: {
+                  filter: (url) => !url.startsWith("/"),
+                },
+                import: false,
                 modules: {
                   getLocalIdent: (context, localIdentName, localName) => {
                     return createScopedName(localName, context.resourcePath);
@@ -226,7 +311,15 @@ export default async () => {
                 importLoaders: 1,
               },
             },
-            "postcss-loader",
+            {
+              loader: postcssLoaderPath,
+              options: {
+                postcssOptions: {
+                  config: false,
+                  plugins: createBasePostCssPlugins(),
+                },
+              },
+            },
           ],
         },
         {
@@ -234,40 +327,74 @@ export default async () => {
           exclude: /\.module\.css$/,
           use: [
             MiniCssExtractPlugin.loader,
-            "css-loader",
             {
-              loader: "postcss-loader",
+              loader: cssLoaderPath,
+              options: {
+                url: {
+                  filter: (url) => !url.startsWith("/"),
+                },
+                import: false,
+                importLoaders: 1,
+              },
+            },
+            {
+              loader: postcssLoaderPath,
               options: {
                 postcssOptions: {
-                  config: path.resolve(__dirname, "postcss.config.js"),
+                  config: false,
+                  plugins: createBasePostCssPlugins(),
                 },
               },
             },
           ],
         },
         {
-          test: regex,
+          test: activeAssetRegex,
           type: "asset/resource",
           generator: {
             filename: (pathData) => {
               const resourcePath =
-                pathData.module.resourceResolveData?.path ||
-                pathData.module.resource;
-
-              const base = path.basename(
-                resourcePath,
-                path.extname(resourcePath),
-              );
-              const scoped = createScopedName(base, resourcePath);
-
-              return `/assets/${scoped}[ext]`;
+                pathData.module?.resourceResolveData?.path ||
+                pathData.module?.resource ||
+                pathData.filename;
+              return getAssetFileName(resourcePath, process.cwd());
             },
-            publicPath: "",
+            publicPath: "/",
           },
         },
       ],
     },
     plugins: [
+      webpackContextualDinouPlugin({ projectRoot: process.cwd() }),
+      {
+        apply(compiler) {
+          compiler.hooks.normalModuleFactory.tap(
+            "DinouWebpackAssetAliasPlugin",
+            (nmf) => {
+              nmf.hooks.beforeResolve.tap(
+                "DinouWebpackAssetAliasPlugin",
+                (resolveData) => {
+                  if (!resolveData || !resolveData.request) return;
+                  const cleanReq = resolveData.request
+                    .split("?")[0]
+                    .split("#")[0];
+                  if (!activeAssetRegex.test(cleanReq)) return;
+                  const importer = resolveData.contextInfo?.issuer || "";
+                  const resolved = resolveAssetImport(resolveData.request, {
+                    importer,
+                    resolveDir: resolveData.context || process.cwd(),
+                    projectRoot: process.cwd(),
+                    assetRegex: activeAssetRegex,
+                  });
+                  if (resolved) {
+                    resolveData.request = resolved;
+                  }
+                }
+              );
+            }
+          );
+        },
+      },
       new ReactServerWebpackPlugin({
         isServer: false,
         clientReferences: [
@@ -275,6 +402,7 @@ export default async () => {
             directory: "./src",
             recursive: true,
             include: /\.(js|ts|jsx|tsx)$/,
+            exclude: createWebpackUnderscoreDirExclude(process.cwd()),
           },
           {
             directory: path.resolve(__dirname, "../core"),
@@ -284,6 +412,68 @@ export default async () => {
           ...Array.from(dependencyClientFiles),
         ],
       }),
+      {
+        apply(compiler) {
+          const pluginName = "DinouRelocateRscManifestsPlugin";
+          compiler.hooks.thisCompilation.tap(pluginName, (compilation) => {
+            const { Compilation } = compiler.webpack || webpack;
+            compilation.hooks.processAssets.tap(
+              {
+                name: pluginName,
+                stage: Compilation.PROCESS_ASSETS_STAGE_REPORT + 100,
+              },
+              () => {
+                const clientAsset = compilation.getAsset("react-client-manifest.json");
+                if (clientAsset) {
+                  const rawSource = clientAsset.source.source();
+                  const jsonText = Buffer.isBuffer(rawSource)
+                    ? rawSource.toString("utf8")
+                    : String(rawSource);
+                  if (typeof globalThis !== "undefined") {
+                    try {
+                      globalThis.__DINOU_RAW_CLIENT_MANIFEST__ = JSON.parse(jsonText);
+                    } catch (e) {}
+                  }
+                  if (shouldWriteToDisk) {
+                    const manifestDir = path.resolve(
+                      process.cwd(),
+                      isDevelopment ? ".dinou/node-dev" : ".dinou/dist1"
+                    );
+                    fs.mkdirSync(manifestDir, { recursive: true });
+                    fs.writeFileSync(
+                      path.join(manifestDir, "react-client-manifest.json"),
+                      jsonText,
+                      "utf8"
+                    );
+                  }
+                  compilation.deleteAsset("react-client-manifest.json");
+                }
+
+                const ssrAsset = compilation.getAsset("react-ssr-manifest.json");
+                if (ssrAsset) {
+                  if (shouldWriteToDisk) {
+                    const rawSsr = ssrAsset.source.source();
+                    const ssrText = Buffer.isBuffer(rawSsr)
+                      ? rawSsr.toString("utf8")
+                      : String(rawSsr);
+                    const manifestDir = path.resolve(
+                      process.cwd(),
+                      isDevelopment ? ".dinou/node-dev" : ".dinou/dist1"
+                    );
+                    fs.mkdirSync(manifestDir, { recursive: true });
+                    fs.writeFileSync(
+                      path.join(manifestDir, "react-ssr-manifest.json"),
+                      ssrText,
+                      "utf8"
+                    );
+                  }
+                  compilation.deleteAsset("react-ssr-manifest.json");
+                }
+              }
+            );
+          });
+        },
+      },
       isDevelopment && {
         apply(compiler) {
           compiler.hooks.thisCompilation.tap(
@@ -313,6 +503,11 @@ export default async () => {
             if (fs.existsSync(srcDir)) {
               compilation.contextDependencies.add(srcDir);
             }
+            for (const cfgPath of getWatchedTsconfigFiles(process.cwd())) {
+              if (fs.existsSync(cfgPath)) {
+                compilation.fileDependencies.add(cfgPath);
+              }
+            }
           });
         },
       },
@@ -322,11 +517,15 @@ export default async () => {
             from: "public",
             to: ".",
             noErrorOnMissing: true,
-          },
-          {
-            from: "favicons",
-            to: ".",
-            noErrorOnMissing: true,
+            globOptions: {
+              dot: true,
+              ignore: [
+                "**/.DS_Store",
+                "**/Thumbs.db",
+                "**/.env",
+                "**/.env.*",
+              ],
+            },
           },
         ],
       }),
@@ -345,39 +544,175 @@ export default async () => {
         manifest: manifestGeneratorPlugin.manifestData,
         serverFiles,
       }),
+      new webpack.DefinePlugin(
+        getWebpackPublicEnvDefines({
+          mode: envMode,
+          extra: isDevelopment
+            ? {
+                DINOU_HMR_PORT: String(
+                  process.env.HMR_PORT || Number(process.env.PORT || 3000) + 1
+                ),
+              }
+            : undefined,
+        })
+      ),
+      {
+        apply(compiler) {
+          const pluginName = "DinouCssAssetsAndMinifyPlugin";
+          const clearRegistry = () => {
+            getRegisteredCssUrlAssets().clear();
+            if (typeof globalThis !== "undefined") {
+              globalThis.__DINOU_HAS_COMPILED_STYLES__ = false;
+            }
+          };
+          compiler.hooks.run.tap(pluginName, clearRegistry);
+          compiler.hooks.watchRun.tap(pluginName, clearRegistry);
+
+          compiler.hooks.thisCompilation.tap(pluginName, (compilation) => {
+            compilation.hooks.processAssets.tap(
+              {
+                name: pluginName,
+                stage: webpack.Compilation.PROCESS_ASSETS_STAGE_ADDITIONS,
+              },
+              () => {
+                const stylesAsset = compilation.getAsset("styles.css");
+                const hasCompiledStyles = Boolean(
+                  stylesAsset && !stylesAsset.info?.copied
+                );
+                if (typeof globalThis !== "undefined") {
+                  globalThis.__DINOU_HAS_COMPILED_STYLES__ = hasCompiledStyles;
+                }
+                if (hasCompiledStyles) {
+                  if (hasPublicStylesCss(process.cwd())) {
+                    warnPublicStylesCssCollision(process.cwd());
+                  }
+                  for (const assetObj of compilation.getAssets()) {
+                    if (
+                      assetObj.info?.copied &&
+                      assetObj.name.toLowerCase() === "styles.css"
+                    ) {
+                      compilation.deleteAsset(assetObj.name);
+                    }
+                  }
+                }
+
+                for (const [
+                  assetFileName,
+                  absAssetPath,
+                ] of getRegisteredCssUrlAssets().entries()) {
+                  if (fs.existsSync(absAssetPath)) {
+                    compilation.fileDependencies.add(absAssetPath);
+                    if (
+                      !compilation.getAsset(assetFileName) &&
+                      !compilation.getAsset("/" + assetFileName)
+                    ) {
+                      try {
+                        const buf = fs.readFileSync(absAssetPath);
+                        compilation.emitAsset(
+                          assetFileName,
+                          new webpack.sources.RawSource(buf)
+                        );
+                      } catch (e) {}
+                    }
+                  }
+                }
+
+                if (serverAssetEntries && serverAssetEntries.size > 0) {
+                  for (const assetEntry of serverAssetEntries) {
+                    const absAssetPath = assetEntry.absPath;
+                    if (!absAssetPath || !fs.existsSync(absAssetPath)) continue;
+                    compilation.fileDependencies.add(absAssetPath);
+                    const assetFileName = getAssetFileName(
+                      absAssetPath,
+                      process.cwd()
+                    );
+                    if (
+                      !compilation.getAsset(assetFileName) &&
+                      !compilation.getAsset("/" + assetFileName)
+                    ) {
+                      try {
+                        const buf = fs.readFileSync(absAssetPath);
+                        compilation.emitAsset(
+                          assetFileName,
+                          new webpack.sources.RawSource(buf)
+                        );
+                      } catch (e) {}
+                    }
+                  }
+                }
+              }
+            );
+
+            if (!isDevelopment) {
+              compilation.hooks.processAssets.tap(
+                {
+                  name: `${pluginName}:minify`,
+                  stage: webpack.Compilation.PROCESS_ASSETS_STAGE_OPTIMIZE_SIZE,
+                },
+                () => {
+                  const cssAsset = compilation.getAsset("styles.css");
+                  if (!cssAsset || cssAsset.info?.copied) return;
+                  try {
+                    const raw = cssAsset.source.source();
+                    const rawCss = Buffer.isBuffer(raw)
+                      ? raw.toString("utf8")
+                      : String(raw || "");
+                    if (rawCss) {
+                      const minified = esbuild.transformSync(rawCss, {
+                        loader: "css",
+                        minify: true,
+                      }).code;
+                      compilation.updateAsset(
+                        "styles.css",
+                        new webpack.sources.RawSource(minified)
+                      );
+                    }
+                  } catch (e) {}
+                }
+              );
+            }
+          });
+        },
+      },
       isDevelopment && new WebpackMemoryPlugin(),
       !isDevelopment && {
         apply(compiler) {
-          compiler.hooks.done.tap("PostBuildClient", () => {
-            clientDone = true;
+          compiler.hooks.done.tap("PostBuildClient", (stats) => {
+            if (stats.hasErrors()) return;
             runPostBuild();
           });
         },
       },
     ].filter(Boolean),
     resolve: {
-      extensions: [".js", ".jsx", ".ts", ".tsx"],
+      conditionNames: ["style", "import", "module", "browser", "default"],
+      extensions: [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".json", ".css"],
       modules: ["src", "node_modules"],
       extensionAlias: {
         ".js": [".js", ".ts", ".tsx"],
         ".jsx": [".jsx", ".tsx"],
+        ".mjs": [".mjs", ".mts"],
+        ".cjs": [".cjs", ".cts"],
       },
       // 🎯 ADD THIS:
       alias: {
-        ...(isEjected ? { dinou: localDinouPath } : {}),
+        ...(isEjected
+          ? {
+              "dinou/config": path.join(localDinouPath, "core/config.js"),
+              "dinou/server": path.join(localDinouPath, "server.js"),
+              dinou: localDinouPath,
+            }
+          : {}),
       },
       fallback: {
         async_hooks: false,
         "node:async_hooks": false,
       },
-      plugins: configFile
-        ? [
-          new TsconfigPathsPlugin({
-            configFile,
-            extensions: [".js", ".jsx", ".ts", ".tsx"],
-          }),
-        ]
-        : [],
+      plugins: [
+        createWebpackTsconfigAliasesResolvePlugin({
+          projectRoot: process.cwd(),
+        }),
+      ],
     },
     optimization: {
       // 2. RUNTIME CHUNK: Vital for sharing module state between entry points
@@ -420,6 +755,8 @@ export default async () => {
         "**/.git/**",
         "**/.dinou/node-dev/**",
         "**/.dinou/dist2/**",
+        "**/.dinou/routes/**",
+        "**/.dinou/types/**",
         ...outputDirs.map((dir) => `${dir}/**`),
       ],
     },
@@ -454,66 +791,5 @@ export default async () => {
       : {}),
   };
 
-  if (isDevelopment) {
-    return clientConfig;
-  }
-
-  const serverConfig = {
-    mode: "production",
-    target: "node20",
-    experiments: {
-      outputModule: true,
-    },
-    entry: {
-      handler: path.resolve(__dirname, "../core/handler.js"),
-      netlify: path.resolve(__dirname, "../adapters/netlify.js"),
-    },
-    output: {
-      path: path.resolve(process.cwd(), outputDirectory, "server"),
-      filename: "[name].js",
-      library: {
-        type: "module",
-      },
-      chunkFormat: "module",
-    },
-    resolve: {
-      conditionNames: ["react-server", "node", "import", "require"],
-      extensions: [".js", ".jsx", ".ts", ".tsx"],
-      alias: {
-        ...(isEjected ? { dinou: localDinouPath } : {}),
-      },
-    },
-    externals: [
-      "express",
-      "chokidar",
-      "dotenv",
-      "fsevents",
-      "@swc/core",
-      "@babel/core",
-      "esbuild",
-    ],
-    module: {
-      exprContextCritical: false,
-    },
-    ignoreWarnings: [
-      /Critical dependency/,
-    ],
-    plugins: [
-      new webpack.BannerPlugin({
-        banner: "import { createRequire as ___createRequire } from 'node:module'; import { fileURLToPath as ___fileURLToPath } from 'node:url'; import ___path from 'node:path'; const require = ___createRequire(import.meta.url || ___path.resolve(process.cwd(), 'package.json')); globalThis.__dinou_require__ = require; const __filename = import.meta.url ? ___fileURLToPath(import.meta.url) : ___path.resolve(process.cwd(), 'index.js'); const __dirname = ___path.dirname(__filename); process.env.NODE_ENV = process.env.NODE_ENV || 'production';",
-        raw: true,
-        entryOnly: false,
-      }),
-      {
-        apply(compiler) {
-          compiler.hooks.done.tap("PostBuildServer", () => {
-            serverDone = true;
-            runPostBuild();
-          });
-        },
-      },
-    ],
-  };
-
-  return [clientConfig, serverConfig];
+  return clientConfig;
 };

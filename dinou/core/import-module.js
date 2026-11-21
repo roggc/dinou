@@ -54,6 +54,13 @@ async function importModule(modulePath) {
         return typeof loader === "function" ? await loader() : loader;
       }
     }
+    const lowerAlternates = new Set(alternateKeys.map((a) => a.toLowerCase()));
+    for (const regKey of Object.keys(registry)) {
+      if (lowerAlternates.has(regKey.toLowerCase())) {
+        const loader = registry[regKey];
+        return typeof loader === "function" ? await loader() : loader;
+      }
+    }
   }
 
   const absPath = path.isAbsolute(modulePath)

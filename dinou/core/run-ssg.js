@@ -4,6 +4,12 @@ process.env.NODE_ENV = "production";
 process.env.DINOU_RUNTIME = "node-bundle";
 
 import { fileURLToPath } from "node:url";
+import { loadEnvFiles } from "./env.js";
+import ensureVendorMode from "./ensure-vendor-mode.js";
+loadEnvFiles(process.cwd(), { mode: "production" });
+if (!ensureVendorMode()) {
+  await new Promise(() => {});
+}
 import generateStatic from "./generate-static.js";
 
 export async function runSSG() {

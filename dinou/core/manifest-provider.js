@@ -17,29 +17,19 @@ function isDevMode() {
   );
 }
 
-function getOutputFolder() {
-  return isDevMode() ? ".dinou/public" : ".dinou/dist3";
-}
-
 function getClientManifestPath() {
-  const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
-  const outputFolder = getOutputFolder();
   return path.resolve(
     process.cwd(),
-    isWebpack
-      ? `${outputFolder}/react-client-manifest.json`
-      : `.dinou/react_client_manifest/react-client-manifest.json`
+    isDevMode() ? ".dinou/node-dev" : ".dinou/dist1",
+    "react-client-manifest.json"
   );
 }
 
 function getServerFunctionsManifestPath() {
-  const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
-  const outputFolder = getOutputFolder();
   return path.resolve(
     process.cwd(),
-    isWebpack
-      ? `${outputFolder}/server-functions-manifest.json`
-      : `.dinou/server_functions_manifest/server-functions-manifest.json`
+    isDevMode() ? ".dinou/node-dev" : ".dinou/dist1",
+    "server-functions-manifest.json"
   );
 }
 

@@ -36,9 +36,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../node_modules/fast-glob/out/utils/array.js
+// node_modules/fast-glob/out/utils/array.js
 var require_array = __commonJS({
-  "../node_modules/fast-glob/out/utils/array.js"(exports) {
+  "node_modules/fast-glob/out/utils/array.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.splitWhen = exports.flatten = void 0;
@@ -63,9 +63,9 @@ var require_array = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/utils/errno.js
+// node_modules/fast-glob/out/utils/errno.js
 var require_errno = __commonJS({
-  "../node_modules/fast-glob/out/utils/errno.js"(exports) {
+  "node_modules/fast-glob/out/utils/errno.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.isEnoentCodeError = void 0;
@@ -76,9 +76,9 @@ var require_errno = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/utils/fs.js
+// node_modules/fast-glob/out/utils/fs.js
 var require_fs = __commonJS({
-  "../node_modules/fast-glob/out/utils/fs.js"(exports) {
+  "node_modules/fast-glob/out/utils/fs.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.createDirentFromStats = void 0;
@@ -101,9 +101,9 @@ var require_fs = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/utils/path.js
+// node_modules/fast-glob/out/utils/path.js
 var require_path = __commonJS({
-  "../node_modules/fast-glob/out/utils/path.js"(exports) {
+  "node_modules/fast-glob/out/utils/path.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.convertPosixPathToPattern = exports.convertWindowsPathToPattern = exports.convertPathToPattern = exports.escapePosixPath = exports.escapeWindowsPath = exports.escape = exports.removeLeadingDotSegment = exports.makeAbsolute = exports.unixify = void 0;
@@ -154,9 +154,9 @@ var require_path = __commonJS({
   }
 });
 
-// ../node_modules/is-extglob/index.js
+// node_modules/is-extglob/index.js
 var require_is_extglob = __commonJS({
-  "../node_modules/is-extglob/index.js"(exports, module) {
+  "node_modules/is-extglob/index.js"(exports, module) {
     module.exports = function isExtglob(str) {
       if (typeof str !== "string" || str === "") {
         return false;
@@ -171,9 +171,9 @@ var require_is_extglob = __commonJS({
   }
 });
 
-// ../node_modules/is-glob/index.js
+// node_modules/is-glob/index.js
 var require_is_glob = __commonJS({
-  "../node_modules/is-glob/index.js"(exports, module) {
+  "node_modules/is-glob/index.js"(exports, module) {
     var isExtglob = require_is_extglob();
     var chars = { "{": "}", "(": ")", "[": "]" };
     var strictCheck = function(str) {
@@ -302,9 +302,9 @@ var require_is_glob = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/node_modules/glob-parent/index.js
+// node_modules/fast-glob/node_modules/glob-parent/index.js
 var require_glob_parent = __commonJS({
-  "../node_modules/fast-glob/node_modules/glob-parent/index.js"(exports, module) {
+  "node_modules/fast-glob/node_modules/glob-parent/index.js"(exports, module) {
     "use strict";
     var isGlob2 = require_is_glob();
     var pathPosixDirname = __require("path").posix.dirname;
@@ -331,9 +331,9 @@ var require_glob_parent = __commonJS({
   }
 });
 
-// ../node_modules/braces/lib/utils.js
+// node_modules/braces/lib/utils.js
 var require_utils = __commonJS({
-  "../node_modules/braces/lib/utils.js"(exports) {
+  "node_modules/braces/lib/utils.js"(exports) {
     "use strict";
     exports.isInteger = (num) => {
       if (typeof num === "number") {
@@ -413,9 +413,9 @@ var require_utils = __commonJS({
   }
 });
 
-// ../node_modules/braces/lib/stringify.js
+// node_modules/braces/lib/stringify.js
 var require_stringify = __commonJS({
-  "../node_modules/braces/lib/stringify.js"(exports, module) {
+  "node_modules/braces/lib/stringify.js"(exports, module) {
     "use strict";
     var utils = require_utils();
     module.exports = (ast, options = {}) => {
@@ -444,9 +444,9 @@ var require_stringify = __commonJS({
   }
 });
 
-// ../node_modules/is-number/index.js
+// node_modules/is-number/index.js
 var require_is_number = __commonJS({
-  "../node_modules/is-number/index.js"(exports, module) {
+  "node_modules/is-number/index.js"(exports, module) {
     "use strict";
     module.exports = function(num) {
       if (typeof num === "number") {
@@ -460,9 +460,9 @@ var require_is_number = __commonJS({
   }
 });
 
-// ../node_modules/to-regex-range/index.js
+// node_modules/to-regex-range/index.js
 var require_to_regex_range = __commonJS({
-  "../node_modules/to-regex-range/index.js"(exports, module) {
+  "node_modules/to-regex-range/index.js"(exports, module) {
     "use strict";
     var isNumber = require_is_number();
     var toRegexRange = (min, max, options) => {
@@ -671,9 +671,9 @@ var require_to_regex_range = __commonJS({
   }
 });
 
-// ../node_modules/fill-range/index.js
+// node_modules/fill-range/index.js
 var require_fill_range = __commonJS({
-  "../node_modules/fill-range/index.js"(exports, module) {
+  "node_modules/fill-range/index.js"(exports, module) {
     "use strict";
     var util = __require("util");
     var toRegexRange = require_to_regex_range();
@@ -865,9 +865,9 @@ var require_fill_range = __commonJS({
   }
 });
 
-// ../node_modules/braces/lib/compile.js
+// node_modules/braces/lib/compile.js
 var require_compile = __commonJS({
-  "../node_modules/braces/lib/compile.js"(exports, module) {
+  "node_modules/braces/lib/compile.js"(exports, module) {
     "use strict";
     var fill = require_fill_range();
     var utils = require_utils();
@@ -917,9 +917,9 @@ var require_compile = __commonJS({
   }
 });
 
-// ../node_modules/braces/lib/expand.js
+// node_modules/braces/lib/expand.js
 var require_expand = __commonJS({
-  "../node_modules/braces/lib/expand.js"(exports, module) {
+  "node_modules/braces/lib/expand.js"(exports, module) {
     "use strict";
     var fill = require_fill_range();
     var stringify = require_stringify();
@@ -1011,9 +1011,9 @@ var require_expand = __commonJS({
   }
 });
 
-// ../node_modules/braces/lib/constants.js
+// node_modules/braces/lib/constants.js
 var require_constants = __commonJS({
-  "../node_modules/braces/lib/constants.js"(exports, module) {
+  "node_modules/braces/lib/constants.js"(exports, module) {
     "use strict";
     module.exports = {
       MAX_LENGTH: 1e4,
@@ -1112,9 +1112,9 @@ var require_constants = __commonJS({
   }
 });
 
-// ../node_modules/braces/lib/parse.js
+// node_modules/braces/lib/parse.js
 var require_parse = __commonJS({
-  "../node_modules/braces/lib/parse.js"(exports, module) {
+  "node_modules/braces/lib/parse.js"(exports, module) {
     "use strict";
     var stringify = require_stringify();
     var {
@@ -1350,9 +1350,9 @@ var require_parse = __commonJS({
   }
 });
 
-// ../node_modules/braces/index.js
+// node_modules/braces/index.js
 var require_braces = __commonJS({
-  "../node_modules/braces/index.js"(exports, module) {
+  "node_modules/braces/index.js"(exports, module) {
     "use strict";
     var stringify = require_stringify();
     var compile = require_compile();
@@ -1413,9 +1413,9 @@ var require_braces = __commonJS({
   }
 });
 
-// ../node_modules/micromatch/node_modules/picomatch/lib/constants.js
+// node_modules/micromatch/node_modules/picomatch/lib/constants.js
 var require_constants2 = __commonJS({
-  "../node_modules/micromatch/node_modules/picomatch/lib/constants.js"(exports, module) {
+  "node_modules/micromatch/node_modules/picomatch/lib/constants.js"(exports, module) {
     "use strict";
     var path5 = __require("path");
     var WIN_SLASH = "\\\\/";
@@ -1614,9 +1614,9 @@ var require_constants2 = __commonJS({
   }
 });
 
-// ../node_modules/micromatch/node_modules/picomatch/lib/utils.js
+// node_modules/micromatch/node_modules/picomatch/lib/utils.js
 var require_utils2 = __commonJS({
-  "../node_modules/micromatch/node_modules/picomatch/lib/utils.js"(exports) {
+  "node_modules/micromatch/node_modules/picomatch/lib/utils.js"(exports) {
     "use strict";
     var path5 = __require("path");
     var win32 = process.platform === "win32";
@@ -1675,9 +1675,9 @@ var require_utils2 = __commonJS({
   }
 });
 
-// ../node_modules/micromatch/node_modules/picomatch/lib/scan.js
+// node_modules/micromatch/node_modules/picomatch/lib/scan.js
 var require_scan = __commonJS({
-  "../node_modules/micromatch/node_modules/picomatch/lib/scan.js"(exports, module) {
+  "node_modules/micromatch/node_modules/picomatch/lib/scan.js"(exports, module) {
     "use strict";
     var utils = require_utils2();
     var {
@@ -2005,9 +2005,9 @@ var require_scan = __commonJS({
   }
 });
 
-// ../node_modules/micromatch/node_modules/picomatch/lib/parse.js
+// node_modules/micromatch/node_modules/picomatch/lib/parse.js
 var require_parse2 = __commonJS({
-  "../node_modules/micromatch/node_modules/picomatch/lib/parse.js"(exports, module) {
+  "node_modules/micromatch/node_modules/picomatch/lib/parse.js"(exports, module) {
     "use strict";
     var constants = require_constants2();
     var utils = require_utils2();
@@ -3007,9 +3007,9 @@ var require_parse2 = __commonJS({
   }
 });
 
-// ../node_modules/micromatch/node_modules/picomatch/lib/picomatch.js
+// node_modules/micromatch/node_modules/picomatch/lib/picomatch.js
 var require_picomatch = __commonJS({
-  "../node_modules/micromatch/node_modules/picomatch/lib/picomatch.js"(exports, module) {
+  "node_modules/micromatch/node_modules/picomatch/lib/picomatch.js"(exports, module) {
     "use strict";
     var path5 = __require("path");
     var scan = require_scan();
@@ -3148,17 +3148,17 @@ var require_picomatch = __commonJS({
   }
 });
 
-// ../node_modules/micromatch/node_modules/picomatch/index.js
+// node_modules/micromatch/node_modules/picomatch/index.js
 var require_picomatch2 = __commonJS({
-  "../node_modules/micromatch/node_modules/picomatch/index.js"(exports, module) {
+  "node_modules/micromatch/node_modules/picomatch/index.js"(exports, module) {
     "use strict";
     module.exports = require_picomatch();
   }
 });
 
-// ../node_modules/micromatch/index.js
+// node_modules/micromatch/index.js
 var require_micromatch = __commonJS({
-  "../node_modules/micromatch/index.js"(exports, module) {
+  "node_modules/micromatch/index.js"(exports, module) {
     "use strict";
     var util = __require("util");
     var braces = require_braces();
@@ -3317,9 +3317,9 @@ var require_micromatch = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/utils/pattern.js
+// node_modules/fast-glob/out/utils/pattern.js
 var require_pattern = __commonJS({
-  "../node_modules/fast-glob/out/utils/pattern.js"(exports) {
+  "node_modules/fast-glob/out/utils/pattern.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.isAbsolute = exports.partitionAbsoluteAndRelative = exports.removeDuplicateSlashes = exports.matchAny = exports.convertPatternsToRe = exports.makeRe = exports.getPatternParts = exports.expandBraceExpansion = exports.expandPatternsWithBraceExpansion = exports.isAffectDepthOfReadingPattern = exports.endsWithSlashGlobStar = exports.hasGlobStar = exports.getBaseDirectory = exports.isPatternRelatedToParentDirectory = exports.getPatternsOutsideCurrentDirectory = exports.getPatternsInsideCurrentDirectory = exports.getPositivePatterns = exports.getNegativePatterns = exports.isPositivePattern = exports.isNegativePattern = exports.convertToNegativePattern = exports.convertToPositivePattern = exports.isDynamicPattern = exports.isStaticPattern = void 0;
@@ -3482,9 +3482,9 @@ var require_pattern = __commonJS({
   }
 });
 
-// ../node_modules/merge2/index.js
+// node_modules/merge2/index.js
 var require_merge2 = __commonJS({
-  "../node_modules/merge2/index.js"(exports, module) {
+  "node_modules/merge2/index.js"(exports, module) {
     "use strict";
     var Stream = __require("stream");
     var PassThrough = Stream.PassThrough;
@@ -3601,9 +3601,9 @@ var require_merge2 = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/utils/stream.js
+// node_modules/fast-glob/out/utils/stream.js
 var require_stream = __commonJS({
-  "../node_modules/fast-glob/out/utils/stream.js"(exports) {
+  "node_modules/fast-glob/out/utils/stream.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.merge = void 0;
@@ -3624,9 +3624,9 @@ var require_stream = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/utils/string.js
+// node_modules/fast-glob/out/utils/string.js
 var require_string = __commonJS({
-  "../node_modules/fast-glob/out/utils/string.js"(exports) {
+  "node_modules/fast-glob/out/utils/string.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.isEmpty = exports.isString = void 0;
@@ -3641,9 +3641,9 @@ var require_string = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/utils/index.js
+// node_modules/fast-glob/out/utils/index.js
 var require_utils3 = __commonJS({
-  "../node_modules/fast-glob/out/utils/index.js"(exports) {
+  "node_modules/fast-glob/out/utils/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.string = exports.stream = exports.pattern = exports.path = exports.fs = exports.errno = exports.array = void 0;
@@ -3664,9 +3664,9 @@ var require_utils3 = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/managers/tasks.js
+// node_modules/fast-glob/out/managers/tasks.js
 var require_tasks = __commonJS({
-  "../node_modules/fast-glob/out/managers/tasks.js"(exports) {
+  "node_modules/fast-glob/out/managers/tasks.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.convertPatternGroupToTask = exports.convertPatternGroupsToTasks = exports.groupPatternsByBaseDirectory = exports.getNegativePatternsAsPositive = exports.getPositivePatterns = exports.convertPatternsToTasks = exports.generate = void 0;
@@ -3760,9 +3760,9 @@ var require_tasks = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.stat/out/providers/async.js
+// node_modules/@nodelib/fs.stat/out/providers/async.js
 var require_async = __commonJS({
-  "../node_modules/@nodelib/fs.stat/out/providers/async.js"(exports) {
+  "node_modules/@nodelib/fs.stat/out/providers/async.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.read = void 0;
@@ -3802,9 +3802,9 @@ var require_async = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.stat/out/providers/sync.js
+// node_modules/@nodelib/fs.stat/out/providers/sync.js
 var require_sync = __commonJS({
-  "../node_modules/@nodelib/fs.stat/out/providers/sync.js"(exports) {
+  "node_modules/@nodelib/fs.stat/out/providers/sync.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.read = void 0;
@@ -3830,9 +3830,9 @@ var require_sync = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.stat/out/adapters/fs.js
+// node_modules/@nodelib/fs.stat/out/adapters/fs.js
 var require_fs2 = __commonJS({
-  "../node_modules/@nodelib/fs.stat/out/adapters/fs.js"(exports) {
+  "node_modules/@nodelib/fs.stat/out/adapters/fs.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.createFileSystemAdapter = exports.FILE_SYSTEM_ADAPTER = void 0;
@@ -3853,9 +3853,9 @@ var require_fs2 = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.stat/out/settings.js
+// node_modules/@nodelib/fs.stat/out/settings.js
 var require_settings = __commonJS({
-  "../node_modules/@nodelib/fs.stat/out/settings.js"(exports) {
+  "node_modules/@nodelib/fs.stat/out/settings.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var fs4 = require_fs2();
@@ -3875,9 +3875,9 @@ var require_settings = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.stat/out/index.js
+// node_modules/@nodelib/fs.stat/out/index.js
 var require_out = __commonJS({
-  "../node_modules/@nodelib/fs.stat/out/index.js"(exports) {
+  "node_modules/@nodelib/fs.stat/out/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.statSync = exports.stat = exports.Settings = void 0;
@@ -3907,9 +3907,9 @@ var require_out = __commonJS({
   }
 });
 
-// ../node_modules/queue-microtask/index.js
+// node_modules/queue-microtask/index.js
 var require_queue_microtask = __commonJS({
-  "../node_modules/queue-microtask/index.js"(exports, module) {
+  "node_modules/queue-microtask/index.js"(exports, module) {
     var promise;
     module.exports = typeof queueMicrotask === "function" ? queueMicrotask.bind(typeof window !== "undefined" ? window : global) : (cb) => (promise || (promise = Promise.resolve())).then(cb).catch((err) => setTimeout(() => {
       throw err;
@@ -3917,9 +3917,9 @@ var require_queue_microtask = __commonJS({
   }
 });
 
-// ../node_modules/run-parallel/index.js
+// node_modules/run-parallel/index.js
 var require_run_parallel = __commonJS({
-  "../node_modules/run-parallel/index.js"(exports, module) {
+  "node_modules/run-parallel/index.js"(exports, module) {
     module.exports = runParallel;
     var queueMicrotask2 = require_queue_microtask();
     function runParallel(tasks, cb) {
@@ -3967,9 +3967,9 @@ var require_run_parallel = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.scandir/out/constants.js
+// node_modules/@nodelib/fs.scandir/out/constants.js
 var require_constants3 = __commonJS({
-  "../node_modules/@nodelib/fs.scandir/out/constants.js"(exports) {
+  "node_modules/@nodelib/fs.scandir/out/constants.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.IS_SUPPORT_READDIR_WITH_FILE_TYPES = void 0;
@@ -3987,9 +3987,9 @@ var require_constants3 = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.scandir/out/utils/fs.js
+// node_modules/@nodelib/fs.scandir/out/utils/fs.js
 var require_fs3 = __commonJS({
-  "../node_modules/@nodelib/fs.scandir/out/utils/fs.js"(exports) {
+  "node_modules/@nodelib/fs.scandir/out/utils/fs.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.createDirentFromStats = void 0;
@@ -4012,9 +4012,9 @@ var require_fs3 = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.scandir/out/utils/index.js
+// node_modules/@nodelib/fs.scandir/out/utils/index.js
 var require_utils4 = __commonJS({
-  "../node_modules/@nodelib/fs.scandir/out/utils/index.js"(exports) {
+  "node_modules/@nodelib/fs.scandir/out/utils/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.fs = void 0;
@@ -4023,9 +4023,9 @@ var require_utils4 = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.scandir/out/providers/common.js
+// node_modules/@nodelib/fs.scandir/out/providers/common.js
 var require_common = __commonJS({
-  "../node_modules/@nodelib/fs.scandir/out/providers/common.js"(exports) {
+  "node_modules/@nodelib/fs.scandir/out/providers/common.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.joinPathSegments = void 0;
@@ -4039,9 +4039,9 @@ var require_common = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.scandir/out/providers/async.js
+// node_modules/@nodelib/fs.scandir/out/providers/async.js
 var require_async2 = __commonJS({
-  "../node_modules/@nodelib/fs.scandir/out/providers/async.js"(exports) {
+  "node_modules/@nodelib/fs.scandir/out/providers/async.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.readdir = exports.readdirWithFileTypes = exports.read = void 0;
@@ -4149,9 +4149,9 @@ var require_async2 = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.scandir/out/providers/sync.js
+// node_modules/@nodelib/fs.scandir/out/providers/sync.js
 var require_sync2 = __commonJS({
-  "../node_modules/@nodelib/fs.scandir/out/providers/sync.js"(exports) {
+  "node_modules/@nodelib/fs.scandir/out/providers/sync.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.readdir = exports.readdirWithFileTypes = exports.read = void 0;
@@ -4208,9 +4208,9 @@ var require_sync2 = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.scandir/out/adapters/fs.js
+// node_modules/@nodelib/fs.scandir/out/adapters/fs.js
 var require_fs4 = __commonJS({
-  "../node_modules/@nodelib/fs.scandir/out/adapters/fs.js"(exports) {
+  "node_modules/@nodelib/fs.scandir/out/adapters/fs.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.createFileSystemAdapter = exports.FILE_SYSTEM_ADAPTER = void 0;
@@ -4233,9 +4233,9 @@ var require_fs4 = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.scandir/out/settings.js
+// node_modules/@nodelib/fs.scandir/out/settings.js
 var require_settings2 = __commonJS({
-  "../node_modules/@nodelib/fs.scandir/out/settings.js"(exports) {
+  "node_modules/@nodelib/fs.scandir/out/settings.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var path5 = __require("path");
@@ -4263,9 +4263,9 @@ var require_settings2 = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.scandir/out/index.js
+// node_modules/@nodelib/fs.scandir/out/index.js
 var require_out2 = __commonJS({
-  "../node_modules/@nodelib/fs.scandir/out/index.js"(exports) {
+  "node_modules/@nodelib/fs.scandir/out/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.Settings = exports.scandirSync = exports.scandir = void 0;
@@ -4295,9 +4295,9 @@ var require_out2 = __commonJS({
   }
 });
 
-// ../node_modules/reusify/reusify.js
+// node_modules/reusify/reusify.js
 var require_reusify = __commonJS({
-  "../node_modules/reusify/reusify.js"(exports, module) {
+  "node_modules/reusify/reusify.js"(exports, module) {
     "use strict";
     function reusify(Constructor) {
       var head = new Constructor();
@@ -4326,9 +4326,9 @@ var require_reusify = __commonJS({
   }
 });
 
-// ../node_modules/fastq/queue.js
+// node_modules/fastq/queue.js
 var require_queue = __commonJS({
-  "../node_modules/fastq/queue.js"(exports, module) {
+  "node_modules/fastq/queue.js"(exports, module) {
     "use strict";
     var reusify = require_reusify();
     function fastqueue(context, worker, _concurrency) {
@@ -4507,11 +4507,12 @@ var require_queue = __commonJS({
           current.value = null;
           current.callback = noop2;
           current.errorHandler = null;
+          current.next = null;
           if (errorHandler2) {
             errorHandler2(new Error("abort"), val);
           }
           callback.call(context2, new Error("abort"));
-          current.release(current);
+          cache.release(current);
           current = next;
         }
         self.drain = noop2;
@@ -4610,9 +4611,9 @@ var require_queue = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.walk/out/readers/common.js
+// node_modules/@nodelib/fs.walk/out/readers/common.js
 var require_common2 = __commonJS({
-  "../node_modules/@nodelib/fs.walk/out/readers/common.js"(exports) {
+  "node_modules/@nodelib/fs.walk/out/readers/common.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.joinPathSegments = exports.replacePathSegmentSeparator = exports.isAppliedFilter = exports.isFatalError = void 0;
@@ -4644,9 +4645,9 @@ var require_common2 = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.walk/out/readers/reader.js
+// node_modules/@nodelib/fs.walk/out/readers/reader.js
 var require_reader = __commonJS({
-  "../node_modules/@nodelib/fs.walk/out/readers/reader.js"(exports) {
+  "node_modules/@nodelib/fs.walk/out/readers/reader.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var common = require_common2();
@@ -4661,9 +4662,9 @@ var require_reader = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.walk/out/readers/async.js
+// node_modules/@nodelib/fs.walk/out/readers/async.js
 var require_async3 = __commonJS({
-  "../node_modules/@nodelib/fs.walk/out/readers/async.js"(exports) {
+  "node_modules/@nodelib/fs.walk/out/readers/async.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var events_1 = __require("events");
@@ -4764,9 +4765,9 @@ var require_async3 = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.walk/out/providers/async.js
+// node_modules/@nodelib/fs.walk/out/providers/async.js
 var require_async4 = __commonJS({
-  "../node_modules/@nodelib/fs.walk/out/providers/async.js"(exports) {
+  "node_modules/@nodelib/fs.walk/out/providers/async.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var async_1 = require_async3();
@@ -4800,9 +4801,9 @@ var require_async4 = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.walk/out/providers/stream.js
+// node_modules/@nodelib/fs.walk/out/providers/stream.js
 var require_stream2 = __commonJS({
-  "../node_modules/@nodelib/fs.walk/out/providers/stream.js"(exports) {
+  "node_modules/@nodelib/fs.walk/out/providers/stream.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var stream_1 = __require("stream");
@@ -4841,9 +4842,9 @@ var require_stream2 = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.walk/out/readers/sync.js
+// node_modules/@nodelib/fs.walk/out/readers/sync.js
 var require_sync3 = __commonJS({
-  "../node_modules/@nodelib/fs.walk/out/readers/sync.js"(exports) {
+  "node_modules/@nodelib/fs.walk/out/readers/sync.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var fsScandir = require_out2();
@@ -4905,9 +4906,9 @@ var require_sync3 = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.walk/out/providers/sync.js
+// node_modules/@nodelib/fs.walk/out/providers/sync.js
 var require_sync4 = __commonJS({
-  "../node_modules/@nodelib/fs.walk/out/providers/sync.js"(exports) {
+  "node_modules/@nodelib/fs.walk/out/providers/sync.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var sync_1 = require_sync3();
@@ -4925,9 +4926,9 @@ var require_sync4 = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.walk/out/settings.js
+// node_modules/@nodelib/fs.walk/out/settings.js
 var require_settings3 = __commonJS({
-  "../node_modules/@nodelib/fs.walk/out/settings.js"(exports) {
+  "node_modules/@nodelib/fs.walk/out/settings.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var path5 = __require("path");
@@ -4957,9 +4958,9 @@ var require_settings3 = __commonJS({
   }
 });
 
-// ../node_modules/@nodelib/fs.walk/out/index.js
+// node_modules/@nodelib/fs.walk/out/index.js
 var require_out3 = __commonJS({
-  "../node_modules/@nodelib/fs.walk/out/index.js"(exports) {
+  "node_modules/@nodelib/fs.walk/out/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.Settings = exports.walkStream = exports.walkSync = exports.walk = void 0;
@@ -4997,9 +4998,9 @@ var require_out3 = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/readers/reader.js
+// node_modules/fast-glob/out/readers/reader.js
 var require_reader2 = __commonJS({
-  "../node_modules/fast-glob/out/readers/reader.js"(exports) {
+  "node_modules/fast-glob/out/readers/reader.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var path5 = __require("path");
@@ -5036,9 +5037,9 @@ var require_reader2 = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/readers/stream.js
+// node_modules/fast-glob/out/readers/stream.js
 var require_stream3 = __commonJS({
-  "../node_modules/fast-glob/out/readers/stream.js"(exports) {
+  "node_modules/fast-glob/out/readers/stream.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var stream_1 = __require("stream");
@@ -5093,9 +5094,9 @@ var require_stream3 = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/readers/async.js
+// node_modules/fast-glob/out/readers/async.js
 var require_async5 = __commonJS({
-  "../node_modules/fast-glob/out/readers/async.js"(exports) {
+  "node_modules/fast-glob/out/readers/async.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var fsWalk = require_out3();
@@ -5132,9 +5133,9 @@ var require_async5 = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/providers/matchers/matcher.js
+// node_modules/fast-glob/out/providers/matchers/matcher.js
 var require_matcher = __commonJS({
-  "../node_modules/fast-glob/out/providers/matchers/matcher.js"(exports) {
+  "node_modules/fast-glob/out/providers/matchers/matcher.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var utils = require_utils3();
@@ -5183,9 +5184,9 @@ var require_matcher = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/providers/matchers/partial.js
+// node_modules/fast-glob/out/providers/matchers/partial.js
 var require_partial = __commonJS({
-  "../node_modules/fast-glob/out/providers/matchers/partial.js"(exports) {
+  "node_modules/fast-glob/out/providers/matchers/partial.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var matcher_1 = require_matcher();
@@ -5220,9 +5221,9 @@ var require_partial = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/providers/filters/deep.js
+// node_modules/fast-glob/out/providers/filters/deep.js
 var require_deep = __commonJS({
-  "../node_modules/fast-glob/out/providers/filters/deep.js"(exports) {
+  "node_modules/fast-glob/out/providers/filters/deep.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var utils = require_utils3();
@@ -5285,9 +5286,9 @@ var require_deep = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/providers/filters/entry.js
+// node_modules/fast-glob/out/providers/filters/entry.js
 var require_entry = __commonJS({
-  "../node_modules/fast-glob/out/providers/filters/entry.js"(exports) {
+  "node_modules/fast-glob/out/providers/filters/entry.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var utils = require_utils3();
@@ -5373,9 +5374,9 @@ var require_entry = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/providers/filters/error.js
+// node_modules/fast-glob/out/providers/filters/error.js
 var require_error = __commonJS({
-  "../node_modules/fast-glob/out/providers/filters/error.js"(exports) {
+  "node_modules/fast-glob/out/providers/filters/error.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var utils = require_utils3();
@@ -5394,9 +5395,9 @@ var require_error = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/providers/transformers/entry.js
+// node_modules/fast-glob/out/providers/transformers/entry.js
 var require_entry2 = __commonJS({
-  "../node_modules/fast-glob/out/providers/transformers/entry.js"(exports) {
+  "node_modules/fast-glob/out/providers/transformers/entry.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var utils = require_utils3();
@@ -5426,9 +5427,9 @@ var require_entry2 = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/providers/provider.js
+// node_modules/fast-glob/out/providers/provider.js
 var require_provider = __commonJS({
-  "../node_modules/fast-glob/out/providers/provider.js"(exports) {
+  "node_modules/fast-glob/out/providers/provider.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var path5 = __require("path");
@@ -5480,9 +5481,9 @@ var require_provider = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/providers/async.js
+// node_modules/fast-glob/out/providers/async.js
 var require_async6 = __commonJS({
-  "../node_modules/fast-glob/out/providers/async.js"(exports) {
+  "node_modules/fast-glob/out/providers/async.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var async_1 = require_async5();
@@ -5509,9 +5510,9 @@ var require_async6 = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/providers/stream.js
+// node_modules/fast-glob/out/providers/stream.js
 var require_stream4 = __commonJS({
-  "../node_modules/fast-glob/out/providers/stream.js"(exports) {
+  "node_modules/fast-glob/out/providers/stream.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var stream_1 = __require("stream");
@@ -5543,9 +5544,9 @@ var require_stream4 = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/readers/sync.js
+// node_modules/fast-glob/out/readers/sync.js
 var require_sync5 = __commonJS({
-  "../node_modules/fast-glob/out/readers/sync.js"(exports) {
+  "node_modules/fast-glob/out/readers/sync.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var fsStat = require_out();
@@ -5591,9 +5592,9 @@ var require_sync5 = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/providers/sync.js
+// node_modules/fast-glob/out/providers/sync.js
 var require_sync6 = __commonJS({
-  "../node_modules/fast-glob/out/providers/sync.js"(exports) {
+  "node_modules/fast-glob/out/providers/sync.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var sync_1 = require_sync5();
@@ -5620,9 +5621,9 @@ var require_sync6 = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/settings.js
+// node_modules/fast-glob/out/settings.js
 var require_settings4 = __commonJS({
-  "../node_modules/fast-glob/out/settings.js"(exports) {
+  "node_modules/fast-glob/out/settings.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.DEFAULT_FILE_SYSTEM_ADAPTER = void 0;
@@ -5680,9 +5681,9 @@ var require_settings4 = __commonJS({
   }
 });
 
-// ../node_modules/fast-glob/out/index.js
+// node_modules/fast-glob/out/index.js
 var require_out4 = __commonJS({
-  "../node_modules/fast-glob/out/index.js"(exports, module) {
+  "node_modules/fast-glob/out/index.js"(exports, module) {
     "use strict";
     var taskManager = require_tasks();
     var async_1 = require_async6();
@@ -5781,9 +5782,9 @@ var require_out4 = __commonJS({
   }
 });
 
-// ../node_modules/del/node_modules/ignore/index.js
+// node_modules/del/node_modules/ignore/index.js
 var require_ignore = __commonJS({
-  "../node_modules/del/node_modules/ignore/index.js"(exports, module) {
+  "node_modules/del/node_modules/ignore/index.js"(exports, module) {
     function makeArray(subject) {
       return Array.isArray(subject) ? subject : [subject];
     }
@@ -5791,13 +5792,15 @@ var require_ignore = __commonJS({
     var EMPTY = "";
     var SPACE = " ";
     var ESCAPE = "\\";
-    var REGEX_TEST_BLANK_LINE = /^\s+$/;
+    var REGEX_LITERAL_SPECIAL = /[.*+?()[\]{}^$|\\/]/;
+    var REGEX_TEST_BLANK_LINE = /^\uFEFF? *$/;
     var REGEX_INVALID_TRAILING_BACKSLASH = /(?:[^\\]|^)\\$/;
     var REGEX_REPLACE_LEADING_EXCAPED_EXCLAMATION = /^\\!/;
     var REGEX_REPLACE_LEADING_EXCAPED_HASH = /^\\#/;
     var REGEX_SPLITALL_CRLF = /\r?\n/g;
-    var REGEX_TEST_INVALID_PATH = /^\.{0,2}\/|^\.{1,2}$/;
-    var REGEX_TEST_TRAILING_SLASH = /\/$/;
+    var DOUBLE_SLASH = "//";
+    var SLASH_CODE = 47;
+    var DOT_CODE = 46;
     var SLASH = "/";
     var TMP_KEY_IGNORE = "node-ignore";
     if (typeof Symbol !== "undefined") {
@@ -5808,39 +5811,194 @@ var require_ignore = __commonJS({
       Object.defineProperty(object, key, { value });
       return value;
     };
-    var REGEX_REGEXP_RANGE = /([0-z])-([0-z])/g;
     var RETURN_FALSE = () => false;
-    var sanitizeRange = (range) => range.replace(
-      REGEX_REGEXP_RANGE,
-      (match, from, to) => from.charCodeAt(0) <= to.charCodeAt(0) ? match : EMPTY
-    );
     var cleanRangeBackSlash = (slashes) => {
       const { length } = slashes;
       return slashes.slice(0, length - length % 2);
     };
+    var POSIX_CLASSES = {
+      alnum: "0-9A-Za-z",
+      alpha: "A-Za-z",
+      blank: " \\t",
+      cntrl: "\\x00-\\x1f\\x7f",
+      digit: "0-9",
+      graph: "!-.0-~",
+      lower: "a-z",
+      print: " -.0-~",
+      punct: "!-.:-@\\[-`{-~",
+      // git's `sane-ctype.h` classifies \v and \f as control, not space,
+      //   unlike C's `isspace`
+      space: " \\t\\n\\r",
+      upper: "A-Z",
+      xdigit: "0-9A-Fa-f"
+    };
+    var CLASS_MEMBERS_TO_ESCAPE = "\\]^-[";
+    var escapeMember = (char) => CLASS_MEMBERS_TO_ESCAPE.indexOf(char) < 0 ? char : ESCAPE + char;
+    var NON_SLASH = "(?!\\/)";
+    var classSource = (negated, body) => {
+      if (negated) {
+        return `[^\\/${body}]`;
+      }
+      const source = `[${body}]`;
+      return new RegExp(source).test("/") ? NON_SLASH + source : source;
+    };
+    var scanBracket = (pattern, start) => {
+      const { length } = pattern;
+      let index = start + 1;
+      let negated = EMPTY;
+      const lead = pattern[index];
+      if (lead === "!" || lead === "^") {
+        negated = "^";
+        index++;
+      }
+      let body = EMPTY;
+      let prev = EMPTY;
+      for (; ; ) {
+        const char = pattern[index];
+        if (char === UNDEFINED) {
+          return null;
+        }
+        if (char === ESCAPE) {
+          const escaped = pattern[index + 1];
+          if (escaped === UNDEFINED) {
+            return null;
+          }
+          body += escapeMember(escaped);
+          prev = escaped;
+          index++;
+        } else if (char === "-" && prev && index + 1 < length && pattern[index + 1] !== "]") {
+          index++;
+          let to = pattern[index];
+          if (to === ESCAPE) {
+            to = pattern[index += 1];
+          }
+          if (prev <= to) {
+            body += `-${escapeMember(to)}`;
+          }
+          prev = EMPTY;
+        } else if (char === "[" && pattern[index + 1] === ":") {
+          const nameStart = index + 2;
+          let end = nameStart;
+          while (end < length && pattern[end] !== "]") {
+            end++;
+          }
+          if (end === length) {
+            return null;
+          }
+          if (end > nameStart && pattern[end - 1] === ":") {
+            const expanded = POSIX_CLASSES[pattern.slice(nameStart, end - 1)];
+            if (expanded === UNDEFINED) {
+              return null;
+            }
+            body += expanded;
+            prev = EMPTY;
+            index = end;
+          } else {
+            body += escapeMember("[");
+            prev = "[";
+            index = nameStart - 2;
+          }
+        } else {
+          body += escapeMember(char);
+          prev = char;
+        }
+        index++;
+        if (pattern[index] === "]") {
+          return {
+            end: index,
+            source: classSource(negated, body)
+          };
+        }
+      }
+    };
+    var NEVER_MATCH = "[]";
+    var PLACEHOLDER = "\0";
+    var REGEX_RESTORE_PLACEHOLDER = new RegExp(
+      `${PLACEHOLDER}(\\d+)${PLACEHOLDER}`,
+      "g"
+    );
+    var TRAILING_WILDCARD = "\uE000";
+    var extractBrackets = (pattern) => {
+      const sources = [];
+      const hold = (source) => `${PLACEHOLDER}${sources.push(source) - 1}${PLACEHOLDER}`;
+      const { length } = pattern;
+      let out = EMPTY;
+      let index = 0;
+      while (index < length) {
+        const char = pattern[index];
+        if (char === ESCAPE) {
+          const escaped = pattern[index + 1];
+          if (escaped === "*" || escaped === "[" || escaped === SPACE || escaped === ESCAPE) {
+            out += pattern.slice(index, index + 2);
+          } else {
+            out += hold(
+              REGEX_LITERAL_SPECIAL.test(escaped) ? ESCAPE + escaped : escaped
+            );
+          }
+          index += 2;
+        } else if (char === PLACEHOLDER) {
+          out += hold(`[${PLACEHOLDER}]`);
+          index++;
+        } else if (char === "[") {
+          const scanned = scanBracket(pattern, index);
+          if (scanned === null) {
+            out += hold(NEVER_MATCH);
+            index = length;
+          } else {
+            out += hold(scanned.source);
+            index = scanned.end + 1;
+          }
+        } else {
+          out += char;
+          index++;
+        }
+      }
+      return {
+        source: out,
+        sources
+      };
+    };
+    var DIRECT = null;
+    var REGEX_INNER_SLASH = /\/(?!$)/;
     var REPLACERS = [
       [
         // Remove BOM
         // TODO:
         // Other similar zero-width characters?
         /^\uFEFF/,
+        () => EMPTY,
+        "\uFEFF"
+      ],
+      [
+        // A trailing line terminator, left on when a whole file's contents are
+        //   added as one pattern rather than split into lines. git never sees one
+        //   -- it reads a `.gitignore` line by line -- so it is not part of the
+        //   pattern and is dropped here, apart from the trailing-space trimming,
+        //   which follows git in touching spaces and nothing else.
+        /[\r\n]+$/,
         () => EMPTY
       ],
       // > Trailing spaces are ignored unless they are quoted with backslash ("\")
       [
+        // Only spaces, never tabs or other whitespace: git trims a trailing run
+        //   of `' '` and nothing else (dir.c, `trim_trailing_spaces`, a single
+        //   `case ' '`), so a pattern ending in a tab keeps it as a literal.
         // (a\ ) -> (a )
         // (a  ) -> (a)
         // (a ) -> (a)
         // (a \ ) -> (a  )
-        /((?:\\\\)*?)(\\?\s+)$/,
+        /((?:\\\\)*?)(\\? +)$/,
         (_, m1, m2) => m1 + (m2.indexOf("\\") === 0 ? SPACE : EMPTY)
       ],
       // Replace (\ ) with ' '
+      // Only a space: an escaped tab or other whitespace is already a literal by
+      //   the time it reaches here, and a bare tab must be left as one, not turned
+      //   into a space.
       // (\ ) -> ' '
       // (\\ ) -> '\\ '
       // (\\\ ) -> '\\ '
       [
-        /(\\+?)\s/g,
+        /(\\+?) /g,
         (_, m1) => {
           const { length } = m1;
           return m1.slice(0, length - length % 2) + SPACE;
@@ -5869,7 +6027,8 @@ var require_ignore = __commonJS({
       [
         // > a question mark (?) matches a single character
         /(?!\\)\?/g,
-        () => "[^/]"
+        () => "[^/]",
+        "?"
       ],
       // leading slash
       [
@@ -5877,12 +6036,14 @@ var require_ignore = __commonJS({
         // > For example, "/*.c" matches "cat-file.c" but not "mozilla-sha1/sha1.c".
         // A leading slash matches the beginning of the pathname
         /^\//,
-        () => "^"
+        () => "^",
+        SLASH
       ],
       // replace special metacharacter slash after the leading slash
       [
         /\//g,
-        () => "\\/"
+        () => "\\/",
+        SLASH
       ],
       [
         // > A leading "**" followed by a slash means match in all directories.
@@ -5891,18 +6052,23 @@ var require_ignore = __commonJS({
         // > "**/foo/bar" matches file or directory "bar" anywhere that is directly
         // >   under directory "foo".
         // Notice that the '*'s have been replaced as '\\*'
-        /^\^*\\\*\\\*\\\//,
+        /^\^*(?:\\\*\\\*\\\/)+/,
         // '**/foo' <-> 'foo'
-        () => "^(?:.*\\/)?"
+        () => "^(?:.*\\/)?",
+        "*"
       ],
       // starting
       [
         // there will be no leading '/'
         //   (which has been replaced by section "leading slash")
         // If starts with '**', adding a '^' to the regular expression also works
-        /^(?=[^^])/,
-        function startingReplacer() {
-          return !/\/(?!$)/.test(this) ? "(?:^|\\/)" : "^";
+        DIRECT,
+        (source, pattern) => {
+          if (!source || source[0] === "^") {
+            return source;
+          }
+          const anchor = !REGEX_INNER_SLASH.test(pattern) ? "(?:^|\\/)" : "^";
+          return anchor + source;
         }
       ],
       // two globstars
@@ -5912,7 +6078,8 @@ var require_ignore = __commonJS({
         // Zero, one or several directories
         // should not use '*', or it will be replaced by the next replacer
         // Check if it is not the last `'/**'`
-        (_, index, str) => index + 6 < str.length ? "(?:\\/[^\\/]+)*" : "\\/.+"
+        (_, index, str) => index + 6 < str.length ? str.slice(index + 6) === "\\/" ? "(?:\\/[^\\/]+)+" : "(?:\\/[^\\/]+)*" : "\\/.+",
+        "*"
       ],
       // normal intermediate wildcards
       [
@@ -5927,32 +6094,56 @@ var require_ignore = __commonJS({
         (_, p1, p2) => {
           const unescaped = p2.replace(/\\\*/g, "[^\\/]*");
           return p1 + unescaped;
-        }
+        },
+        "*"
+      ],
+      // trailing wildcard, held apart from a literal star
+      [
+        // The step above leaves a trailing `*` alone, so a single `\*` is all that
+        //   can be left at the end here. Whether it is a wildcard or a literal
+        //   turns on the backslashes the user put in front of it: the escaper has
+        //   since doubled every one, so what stands here is those `2N` doubled
+        //   backslashes and then the star's own escape. An even number of the
+        //   original `N` leaves the star unescaped -- a wildcard -- and an odd
+        //   number escapes it -- a literal. This runs while the two are still
+        //   distinct, before the unescape steps below collapse the literal onto
+        //   the very `\*` a wildcard leaves behind.
+        /(^|[^\\])((?:\\\\)*)\\\*$/,
+        (match, p1, p2) => (
+          // `p2` holds the doubled user backslashes; half of them is `N`.
+          p2.length / 2 % 2 === 0 ? p1 + p2 + TRAILING_WILDCARD : match
+        ),
+        "*"
       ],
       [
         // unescape, revert step 3 except for back slash
         // For example, if a user escape a '\\*',
         // after step 3, the result will be '\\\\\\*'
         /\\\\\\(?=[$.|*+(){^])/g,
-        () => ESCAPE
+        () => ESCAPE,
+        ESCAPE + ESCAPE
       ],
       [
         // '\\\\' -> '\\'
         /\\\\/g,
-        () => ESCAPE
+        () => ESCAPE,
+        ESCAPE + ESCAPE
       ],
       [
-        // > The range notation, e.g. [a-zA-Z],
-        // > can be used to match one of the characters in a range.
+        // Every real bracket expression -- POSIX classes included -- has already
+        //   been held aside by `extractBrackets`, so the only `[` left in the
+        //   pattern is an escaped, literal one.
         // `\` is escaped by step 3
-        /(\\)?\[([^\]/]*?)(\\*)($|\])/g,
-        (match, leadEscape, range, endEscape, close) => leadEscape === ESCAPE ? `\\[${range}${cleanRangeBackSlash(endEscape)}${close}` : close === "]" ? endEscape.length % 2 === 0 ? `[${sanitizeRange(range)}${endEscape}]` : "[]" : "[]"
+        /\\\[([^\]/]*?)(\\*)($|\])/g,
+        // '\\[bar]' -> '\\\\[bar\\]'
+        (match, range, endEscape, close) => `\\[${range}${cleanRangeBackSlash(endEscape)}${close}`,
+        "["
       ],
       // ending
       [
         // 'js' will not match 'js.'
         // 'ab' will not match 'abc'
-        /(?:[^*])$/,
+        DIRECT,
         // WTF!
         // https://git-scm.com/docs/gitignore
         // changes in [2.22.1](https://git-scm.com/docs/gitignore/2.22.1)
@@ -5963,10 +6154,16 @@ var require_ignore = __commonJS({
         // 'js*' will not match 'a.js'
         // 'js/' will not match 'a.js'
         // 'js' will match 'a.js' and 'a.js/'
-        (match) => /\/$/.test(match) ? `${match}$` : `${match}(?=$|\\/$)`
+        (source) => {
+          const last = source[source.length - 1];
+          if (!last || last === TRAILING_WILDCARD) {
+            return source;
+          }
+          return last === SLASH ? `${source}$` : `${source}(?=$|\\/$)`;
+        }
       ]
     ];
-    var REGEX_REPLACE_TRAILING_WILDCARD = /(^|\\\/)?\\\*$/;
+    var REGEX_REPLACE_TRAILING_WILDCARD = /(^|\\\/)?\uE000$/;
     var MODE_IGNORE = "regex";
     var MODE_CHECK_IGNORE = "checkRegex";
     var UNDERSCORE = "_";
@@ -5980,10 +6177,146 @@ var require_ignore = __commonJS({
         return `${prefix}(?=$|\\/$)`;
       }
     };
-    var makeRegexPrefix = (pattern) => REPLACERS.reduce(
-      (prev, [matcher, replacer]) => prev.replace(matcher, replacer.bind(pattern)),
-      pattern
-    );
+    var WILDCARD = "[^\\/]*";
+    var separatorAfter = (run, at) => {
+      let separator = EMPTY;
+      for (let index = at + 1; index < run.length && !run[index].wildcard; index++) {
+        separator += run[index].single;
+      }
+      return separator;
+    };
+    var pinWildcards = (source) => {
+      if (source.indexOf(WILDCARD) < 0) {
+        return source;
+      }
+      const tokens = [];
+      const { length } = source;
+      let index = 0;
+      while (index < length) {
+        const char = source[index];
+        if (source.startsWith(WILDCARD, index)) {
+          tokens.push({ wildcard: true });
+          index += WILDCARD.length;
+        } else if (char === "[") {
+          let end = index + 1;
+          if (source[end] === "^") {
+            end++;
+          }
+          if (source[end] === "]") {
+            end++;
+          }
+          while (end < length && source[end] !== "]") {
+            end += source[end] === ESCAPE ? 2 : 1;
+          }
+          end++;
+          tokens.push({ single: source.slice(index, end) });
+          index = end;
+        } else if (char === ESCAPE) {
+          tokens.push({ single: source.slice(index, index + 2) });
+          index += 2;
+        } else if (char === "(") {
+          let depth = 0;
+          let end = index;
+          do {
+            if (source[end] === ESCAPE) {
+              end++;
+            } else if (source[end] === "(") {
+              depth++;
+            } else if (source[end] === ")") {
+              depth--;
+            }
+            end++;
+          } while (end < length && depth > 0);
+          if ("*+?".indexOf(source[end]) >= 0) {
+            end++;
+          }
+          tokens.push({ boundary: source.slice(index, end) });
+          index = end;
+        } else if (char === "^" || char === "$") {
+          tokens.push({ boundary: char });
+          index++;
+        } else {
+          tokens.push({ single: char });
+          index++;
+        }
+      }
+      let out = EMPTY;
+      let run = [];
+      const flush = () => {
+        let lastWildcard;
+        run.forEach((token, at) => {
+          if (token.wildcard) {
+            lastWildcard = at;
+          }
+        });
+        run.forEach((token, at) => {
+          if (!token.wildcard) {
+            out += token.single;
+            return;
+          }
+          out += at === lastWildcard ? WILDCARD : `(?:(?!${separatorAfter(run, at)})[^\\/])*`;
+        });
+        run = [];
+      };
+      tokens.forEach((token) => {
+        if (token.boundary === void 0) {
+          run.push(token);
+          return;
+        }
+        flush();
+        out += token.boundary;
+      });
+      flush();
+      return out;
+    };
+    var makeRegexPrefix = (pattern) => {
+      const { source, sources } = extractBrackets(pattern);
+      const replaced = REPLACERS.reduce(
+        // A pass whose matcher finds nothing hands back the very string it was
+        //   given, so asking first costs a search and saves a rewrite. Ten of the
+        //   fifteen passes never fire for a typical .gitignore line, and between
+        //   them they were 45% of this chain.
+        (prev, [matcher, replacer, required]) => {
+          if (matcher === DIRECT) {
+            return replacer(prev, pattern);
+          }
+          if (required !== UNDEFINED && prev.indexOf(required) < 0) {
+            return prev;
+          }
+          return matcher.test(prev) ? prev.replace(matcher, replacer.bind(pattern)) : prev;
+        },
+        source
+      );
+      return sources.length ? replaced.replace(
+        REGEX_RESTORE_PLACEHOLDER,
+        (match, index) => sources[index]
+      ) : replaced;
+    };
+    var matchesBasename = (body) => {
+      const index = body.indexOf(SLASH);
+      return index < 0 || index === body.length - 1;
+    };
+    var basenameOf = (path5) => {
+      const end = path5.length - 1;
+      const index = path5.lastIndexOf(
+        SLASH,
+        path5[end] === SLASH ? end - 1 : end
+      );
+      return index < 0 ? path5 : path5.slice(index + 1);
+    };
+    var parentOf = (path5) => {
+      if (path5.charCodeAt(0) === SLASH_CODE || path5.indexOf(DOUBLE_SLASH) >= 0) {
+        const slices = path5.split(SLASH).filter(Boolean);
+        slices.pop();
+        return slices.length ? slices.join(SLASH) + SLASH : EMPTY;
+      }
+      const end = path5.length - 1;
+      const cut = path5.lastIndexOf(
+        SLASH,
+        path5.charCodeAt(end) === SLASH_CODE ? end - 1 : end
+      );
+      return cut < 0 ? EMPTY : path5.slice(0, cut + 1);
+    };
     var isString = (subject) => typeof subject === "string";
     var checkPattern = (pattern) => pattern && isString(pattern) && !REGEX_TEST_BLANK_LINE.test(pattern) && !REGEX_INVALID_TRAILING_BACKSLASH.test(pattern) && pattern.indexOf("#") !== 0;
     var splitPattern = (pattern) => pattern.split(REGEX_SPLITALL_CRLF).filter(Boolean);
@@ -5995,6 +6328,14 @@ var require_ignore = __commonJS({
         define(this, "body", body);
         define(this, "ignoreCase", ignoreCase);
         define(this, "regexPrefix", prefix);
+      }
+      // Worked out on first use and kept behind an own property, the way `regex`
+      //   caches itself in `_regex`. Deciding it in the constructor instead would
+      //   add a fourth `defineProperty` to every rule ever built, which cost 4% of
+      //   every compile -- including the compiles of rules that are never matched
+      //   against anything.
+      get _basenameOnly() {
+        return define(this, "_basenameOnly", matchesBasename(this.body));
       }
       get regex() {
         const key = UNDERSCORE + MODE_IGNORE;
@@ -6011,11 +6352,11 @@ var require_ignore = __commonJS({
         return this._make(MODE_CHECK_IGNORE, key);
       }
       _make(mode, key) {
-        const str = this.regexPrefix.replace(
+        const str = pinWildcards(this.regexPrefix.replace(
           REGEX_REPLACE_TRAILING_WILDCARD,
           // It does not need to bind pattern
           TRAILING_WILD_CARD_REPLACERS[mode]
-        );
+        ));
         const regex = this.ignoreCase ? new RegExp(str, "i") : new RegExp(str);
         return define(this, key, regex);
       }
@@ -6045,10 +6386,12 @@ var require_ignore = __commonJS({
       constructor(ignoreCase) {
         this._ignoreCase = ignoreCase;
         this._rules = [];
+        this._basenameCount = 0;
       }
       _add(pattern) {
         if (pattern && pattern[KEY_IGNORE]) {
           this._rules = this._rules.concat(pattern._rules._rules);
+          this._basenameCount += pattern._rules._basenameCount;
           this._added = true;
           return;
         }
@@ -6061,6 +6404,9 @@ var require_ignore = __commonJS({
           const rule = createRule(pattern, this._ignoreCase);
           this._added = true;
           this._rules.push(rule);
+          if (matchesBasename(rule.body)) {
+            this._basenameCount++;
+          }
         }
       }
       // @param {Array<string> | string | Ignore} pattern
@@ -6082,19 +6428,22 @@ var require_ignore = __commonJS({
         let ignored = false;
         let unignored = false;
         let matchedRule;
-        this._rules.forEach((rule) => {
+        const rules = this._rules;
+        const { length } = rules;
+        const shortcut = this._basenameCount * 2 >= length;
+        const basename = shortcut ? basenameOf(path5) : path5;
+        for (let index = 0; index < length; index++) {
+          const rule = rules[index];
           const { negative } = rule;
-          if (unignored === negative && ignored !== unignored || negative && !ignored && !unignored && !checkUnignored) {
-            return;
+          const skip = unignored === negative && ignored !== unignored || negative && !ignored && !unignored && !checkUnignored;
+          if (!skip && rule[mode].test(
+            shortcut && rule._basenameOnly ? basename : path5
+          )) {
+            ignored = !negative;
+            unignored = negative;
+            matchedRule = negative ? UNDEFINED : rule;
           }
-          const matched = rule[mode].test(path5);
-          if (!matched) {
-            return;
-          }
-          ignored = !negative;
-          unignored = negative;
-          matchedRule = negative ? UNDEFINED : rule;
-        });
+        }
         const ret = {
           ignored,
           unignored
@@ -6127,7 +6476,26 @@ var require_ignore = __commonJS({
       }
       return true;
     };
-    var isNotRelative = (path5) => REGEX_TEST_INVALID_PATH.test(path5);
+    var isNotRelative = (path5) => {
+      const first = path5.charCodeAt(0);
+      if (first === SLASH_CODE) {
+        return true;
+      }
+      if (first !== DOT_CODE) {
+        return false;
+      }
+      if (path5.length === 1) {
+        return true;
+      }
+      const second = path5.charCodeAt(1);
+      if (second === SLASH_CODE) {
+        return true;
+      }
+      if (second !== DOT_CODE) {
+        return false;
+      }
+      return path5.length === 2 || path5.charCodeAt(2) === SLASH_CODE;
+    };
     checkPath.isNotRelative = isNotRelative;
     checkPath.convert = (p) => p;
     var Ignore = class {
@@ -6156,52 +6524,35 @@ var require_ignore = __commonJS({
         return this.add(pattern);
       }
       // @returns {TestResult}
-      _test(originalPath, cache, checkUnignored, slices) {
+      _test(originalPath, cache, checkUnignored) {
         const path5 = originalPath && checkPath.convert(originalPath);
         checkPath(
           path5,
           originalPath,
           this._strictPathCheck ? throwError : RETURN_FALSE
         );
-        return this._t(path5, cache, checkUnignored, slices);
+        return this._t(path5, cache, checkUnignored);
       }
       checkIgnore(path5) {
-        if (!REGEX_TEST_TRAILING_SLASH.test(path5)) {
+        if (path5.charCodeAt(path5.length - 1) !== SLASH_CODE) {
           return this.test(path5);
         }
-        const slices = path5.split(SLASH).filter(Boolean);
-        slices.pop();
-        if (slices.length) {
-          const parent = this._t(
-            slices.join(SLASH) + SLASH,
-            this._testCache,
-            true,
-            slices
-          );
+        const parentPath = parentOf(path5);
+        if (parentPath) {
+          const parent = this._t(parentPath, this._testCache, true);
           if (parent.ignored) {
             return parent;
           }
         }
         return this._rules.test(path5, false, MODE_CHECK_IGNORE);
       }
-      _t(path5, cache, checkUnignored, slices) {
+      _t(path5, cache, checkUnignored) {
         if (path5 in cache) {
           return cache[path5];
         }
-        if (!slices) {
-          slices = path5.split(SLASH).filter(Boolean);
-        }
-        slices.pop();
-        if (!slices.length) {
-          return cache[path5] = this._rules.test(path5, checkUnignored, MODE_IGNORE);
-        }
-        const parent = this._t(
-          slices.join(SLASH) + SLASH,
-          cache,
-          checkUnignored,
-          slices
-        );
-        return cache[path5] = parent.ignored ? parent : this._rules.test(path5, checkUnignored, MODE_IGNORE);
+        const parentPath = parentOf(path5);
+        const parent = parentPath ? this._t(parentPath, cache, checkUnignored) : UNDEFINED;
+        return cache[path5] = parent && parent.ignored ? parent : this._rules.test(path5, checkUnignored, MODE_IGNORE);
       }
       ignores(path5) {
         return this._test(path5, this._ignoreCache, false).ignored;
@@ -6238,17 +6589,17 @@ var require_ignore = __commonJS({
   }
 });
 
-// ../node_modules/del/index.js
+// node_modules/del/index.js
 import fsPromises3 from "node:fs/promises";
 import path4 from "node:path";
 import process5 from "node:process";
 
-// ../node_modules/del/node_modules/globby/index.js
+// node_modules/del/node_modules/globby/index.js
 import process3 from "node:process";
 import fs3 from "node:fs";
 import nodePath from "node:path";
 
-// ../node_modules/@sindresorhus/merge-streams/index.js
+// node_modules/@sindresorhus/merge-streams/index.js
 import { on, once } from "node:events";
 import { PassThrough as PassThroughStream } from "node:stream";
 import { finished } from "node:stream/promises";
@@ -6425,10 +6776,10 @@ var updateMaxListeners = (passThroughStream, increment) => {
 var PASSTHROUGH_LISTENERS_COUNT = 2;
 var PASSTHROUGH_LISTENERS_PER_STREAM = 1;
 
-// ../node_modules/del/node_modules/globby/index.js
+// node_modules/del/node_modules/globby/index.js
 var import_fast_glob2 = __toESM(require_out4(), 1);
 
-// ../node_modules/del/node_modules/path-type/index.js
+// node_modules/del/node_modules/path-type/index.js
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 async function isType(fsStatType, statsMethodName, filePath) {
@@ -6465,7 +6816,7 @@ var isFileSync = isTypeSync.bind(void 0, "statSync", "isFile");
 var isDirectorySync = isTypeSync.bind(void 0, "statSync", "isDirectory");
 var isSymlinkSync = isTypeSync.bind(void 0, "lstatSync", "isSymbolicLink");
 
-// ../node_modules/unicorn-magic/node.js
+// node_modules/unicorn-magic/node.js
 import { promisify } from "node:util";
 import { execFile as execFileCallback, execFileSync as execFileSyncOriginal } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -6475,7 +6826,7 @@ function toPath(urlOrPath) {
 }
 var TEN_MEGABYTES_IN_BYTES = 10 * 1024 * 1024;
 
-// ../node_modules/del/node_modules/globby/ignore.js
+// node_modules/del/node_modules/globby/ignore.js
 var import_fast_glob = __toESM(require_out4(), 1);
 var import_ignore = __toESM(require_ignore(), 1);
 import process2 from "node:process";
@@ -6483,7 +6834,7 @@ import fs2 from "node:fs";
 import fsPromises2 from "node:fs/promises";
 import path from "node:path";
 
-// ../node_modules/del/node_modules/slash/index.js
+// node_modules/del/node_modules/slash/index.js
 function slash(path5) {
   const isExtendedLengthPath = path5.startsWith("\\\\?\\");
   if (isExtendedLengthPath) {
@@ -6492,10 +6843,10 @@ function slash(path5) {
   return path5.replace(/\\/g, "/");
 }
 
-// ../node_modules/del/node_modules/globby/utilities.js
+// node_modules/del/node_modules/globby/utilities.js
 var isNegativePattern = (pattern) => pattern[0] === "!";
 
-// ../node_modules/del/node_modules/globby/ignore.js
+// node_modules/del/node_modules/globby/ignore.js
 var defaultIgnoredDirectories = [
   "**/node_modules",
   "**/flow-typed",
@@ -6570,7 +6921,7 @@ var isIgnoredByIgnoreFilesSync = (patterns, options) => {
   return getIsIgnoredPredicate(files, cwd);
 };
 
-// ../node_modules/del/node_modules/globby/index.js
+// node_modules/del/node_modules/globby/index.js
 var assertPatternsInput = (patterns) => {
   if (patterns.some((pattern) => typeof pattern !== "string")) {
     throw new TypeError("Patterns must be a string or an array of strings");
@@ -6760,10 +7111,10 @@ var generateGlobTasks = normalizeArguments(generateTasks);
 var generateGlobTasksSync = normalizeArgumentsSync(generateTasksSync);
 var { convertPathToPattern } = import_fast_glob2.default;
 
-// ../node_modules/del/index.js
+// node_modules/del/index.js
 var import_is_glob = __toESM(require_is_glob(), 1);
 
-// ../node_modules/is-path-cwd/index.js
+// node_modules/is-path-cwd/index.js
 import process4 from "node:process";
 import path2 from "node:path";
 function isPathCwd(path_) {
@@ -6776,7 +7127,7 @@ function isPathCwd(path_) {
   return path_ === cwd;
 }
 
-// ../node_modules/is-path-inside/index.js
+// node_modules/is-path-inside/index.js
 import path3 from "node:path";
 function isPathInside(childPath, parentPath) {
   const relation = path3.relative(parentPath, childPath);
@@ -6785,7 +7136,7 @@ function isPathInside(childPath, parentPath) {
   );
 }
 
-// ../node_modules/p-map/index.js
+// node_modules/p-map/index.js
 async function pMap(iterable, mapper, {
   concurrency = Number.POSITIVE_INFINITY,
   stopOnError = true,
@@ -6809,7 +7160,7 @@ async function pMap(iterable, mapper, {
     let isIterableDone = false;
     let resolvingCount = 0;
     let currentIndex = 0;
-    const iterator = iterable[Symbol.iterator] === void 0 ? iterable[Symbol.asyncIterator]() : iterable[Symbol.iterator]();
+    const iterator = iterable[Symbol.asyncIterator] === void 0 ? iterable[Symbol.iterator]() : iterable[Symbol.asyncIterator]();
     const signalListener = () => {
       reject(signal.reason);
     };
@@ -6821,14 +7172,21 @@ async function pMap(iterable, mapper, {
       cleanup();
     };
     const reject = (reason) => {
+      if (isResolved) {
+        return;
+      }
       isRejected = true;
       isResolved = true;
       reject_(reason);
       cleanup();
+      if (!isIterableDone) {
+        closeIterator(iterator);
+      }
     };
     if (signal) {
       if (signal.aborted) {
         reject(signal.reason);
+        return;
       }
       signal.addEventListener("abort", signalListener, { once: true });
     }
@@ -6836,7 +7194,7 @@ async function pMap(iterable, mapper, {
       if (isResolved) {
         return;
       }
-      const nextItem = await iterator.next();
+      const nextItem = isIterableDone ? { done: true } : await iterator.next();
       const index = currentIndex;
       currentIndex++;
       if (nextItem.done) {
@@ -6874,20 +7232,18 @@ async function pMap(iterable, mapper, {
             skippedIndexesMap.set(index, value);
           }
           result[index] = value;
-          resolvingCount--;
-          await next();
         } catch (error) {
           if (stopOnError) {
             reject(error);
-          } else {
-            errors.push(error);
-            resolvingCount--;
-            try {
-              await next();
-            } catch (error2) {
-              reject(error2);
-            }
+            return;
           }
+          errors.push(error);
+        }
+        resolvingCount--;
+        try {
+          await next();
+        } catch (error) {
+          reject(error);
         }
       })();
     };
@@ -6907,8 +7263,14 @@ async function pMap(iterable, mapper, {
   });
 }
 var pMapSkip = /* @__PURE__ */ Symbol("skip");
+async function closeIterator(iterator) {
+  try {
+    await iterator.return?.();
+  } catch {
+  }
+}
 
-// ../node_modules/presentable-error/index.js
+// node_modules/presentable-error/index.js
 var { toString } = Object.prototype;
 var PresentableError = class _PresentableError extends Error {
   constructor(message, { cause } = {}) {
@@ -6928,7 +7290,7 @@ var PresentableError = class _PresentableError extends Error {
   }
 };
 
-// ../node_modules/del/index.js
+// node_modules/del/index.js
 function safeCheck(file, cwd) {
   if (isPathCwd(file)) {
     throw new PresentableError("Cannot delete the current working directory. Can be overridden with the `force` option.");
@@ -6989,7 +7351,7 @@ async function deleteAsync(patterns, { force, dryRun, cwd = process5.cwd(), onPr
   return removedFiles;
 }
 
-// ../node_modules/rollup-plugin-delete/dist/index.mjs
+// node_modules/rollup-plugin-delete/dist/index.mjs
 function del(options = {}) {
   const { hook = "buildStart", runOnce = false, targets = [], verbose = false, ...delOptions } = options;
   let deleted = false;

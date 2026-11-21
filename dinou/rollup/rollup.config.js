@@ -1,12 +1,22 @@
 import path from "node:path";
 import fs from "node:fs";
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { isUnvendorizedRequested } from "../core/ensure-vendor-mode.js";
+import esbuild from "esbuild";
 import postcss from "#rollup-plugin-postcss";
+import {
+  createBasePostCssPlugins,
+  getRegisteredCssUrlAssets,
+} from "../core/postcss-pipeline.js";
 import babelModule from "#rollup/plugin-babel";
 import resolveModule from "#rollup/plugin-node-resolve";
 import commonjs from "#rollup/plugin-commonjs";
-import copy from "#rollup-plugin-copy";
+import {
+  copyStaticDirectoriesToOutdir,
+  hasPublicStylesCss,
+  warnPublicStylesCssCollision,
+} from "../core/copy-static-dirs.js";
 import reactClientManifest from "./rollup-plugins/rollup-plugin-react-client-manifest.js";
 import createScopedName from "../core/createScopedName.js";
 import replace from "#rollup/plugin-replace";
@@ -14,13 +24,29 @@ import json from "#rollup/plugin-json";
 import reactRefreshWrapModules from "./react-refresh/react-refresh-wrap-modules.js";
 import { esmHmrPlugin } from "./react-refresh/rollup-plugin-esm-hmr.js";
 import dinouAssetPlugin from "./rollup-plugins/dinou-asset-plugin.js";
-import tsconfigPaths from "#rollup-plugin-tsconfig-paths";
+import { rollupTsconfigAliasesPlugin } from "../core/tsconfig-aliases.js";
 import serverFunctionsPlugin from "./rollup-plugins/rollup-plugin-server-functions.js";
-import { regex } from "../core/asset-extensions.js";
+import { getAssetExtensionsInfo } from "../core/asset-extensions.js";
 import manifestGeneratorPlugin from "./rollup-plugins/manifest-generator-plugin.js";
 import rollupMemoryPlugin from "./rollup-plugins/rollup-plugin-memory.js";
 import rollupSwcPlugin from "./rollup-plugins/rollup-plugin-swc.js";
+import { generateRouteTypes } from "../core/generate-route-types.js";
+import { rollupContextualDinouPlugin } from "../core/resolve-contextual-dinou.js";
+import { getDinouConfig } from "../core/load-dinou-config.js";
+import {
+  loadEnvFiles,
+  getRollupPublicEnvReplacements,
+} from "../core/env.js";
+import presetReactModule from "#babel/preset-react";
+import presetTypescriptModule from "#babel/preset-typescript";
+import pluginSyntaxImportMetaModule from "#babel/plugin-syntax-import-meta";
+import pluginReactCompilerModule from "#babel-plugin-react-compiler";
 
+const unwrapBabel = (mod) => mod?.default ?? mod;
+const presetReact = unwrapBabel(presetReactModule);
+const presetTypescript = unwrapBabel(presetTypescriptModule);
+const pluginSyntaxImportMeta = unwrapBabel(pluginSyntaxImportMetaModule);
+const pluginReactCompiler = unwrapBabel(pluginReactCompilerModule);
 const babel = babelModule?.default || babelModule;
 const resolve = resolveModule?.default || resolveModule;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -36,10 +62,36 @@ console.log(
 
 export default async function () {
   const isDevelopment = process.env.NODE_ENV !== "production";
+  const envMode = isDevelopment ? "development" : "production";
+  loadEnvFiles(process.cwd(), { mode: envMode });
+  const { exactValues: rollupExactEnv, objectValues: rollupObjectEnv } =
+    getRollupPublicEnvReplacements({ mode: envMode });
   const outputDirectory = isDevelopment ? ".dinou/public" : ".dinou/dist3";
   const shouldWriteToDisk = process.env.DINOU_WRITE_TO_DISK === "true" || !isDevelopment;
+  if (!isDevelopment && shouldWriteToDisk) {
+    try {
+      fs.rmSync(path.resolve(process.cwd(), ".dinou/dist1"), {
+        recursive: true,
+        force: true,
+      });
+      fs.rmSync(path.resolve(process.cwd(), ".dinou/netlify"), {
+        recursive: true,
+        force: true,
+      });
+    } catch (e) {}
+  }
   const serverFiles = new Set();
-  const del = (await import("rollup-plugin-delete")).default;
+  const dinouConfig = await getDinouConfig();
+  const enableReactCompiler = dinouConfig?.reactCompiler !== false;
+  const { regex: activeAssetRegex } = getAssetExtensionsInfo(
+    dinouConfig,
+    process.cwd()
+  );
+  try {
+    generateRouteTypes(process.cwd());
+  } catch (e) {}
+  const delModule = await import("#rollup-plugin-delete");
+  const del = delModule?.default || delModule;
   const clientConfig = {
     input: isDevelopment
       ? {
@@ -120,6 +172,7 @@ export default async function () {
     perf: isDevelopment,
     treeshake: isDevelopment ? false : true,
     external: [
+      "/runtime.js",
       "/refresh.js",
       "/__hmr_client__.js",
       "/__SERVER_FUNCTION_PROXY__",
@@ -129,45 +182,65 @@ export default async function () {
         del({
           targets: [
             `${outputDirectory}/*`,
-            ".dinou/react_client_manifest/*",
-            ".dinou/server_functions_manifest/*",
+            ...(isDevelopment
+              ? [
+                  ".dinou/node-dev/react-client-manifest.json",
+                  ".dinou/node-dev/server-functions-manifest.json",
+                  ".dinou/node-dev/manifest.json",
+                ]
+              : []),
           ],
           runOnce: true,
           hook: "buildStart",
         }),
-      tsconfigPaths(),
+      rollupContextualDinouPlugin({ projectRoot: process.cwd() }),
+      dinouAssetPlugin({
+        include: activeAssetRegex,
+        dinouConfig,
+        projectRoot: process.cwd(),
+      }),
+      rollupTsconfigAliasesPlugin({
+        projectRoot: process.cwd(),
+        assetRegex: activeAssetRegex,
+      }),
       replace({
         preventAssignment: true,
-        "process.env.NODE_ENV": JSON.stringify(
-          isDevelopment ? "development" : "production",
-        ),
+        values: rollupExactEnv,
+      }),
+      replace({
+        preventAssignment: true,
+        delimiters: ["(?<!\\.)\\b", "\\b"],
+        values: rollupObjectEnv,
       }),
       json(),
       resolve({
-        extensions: [".js", ".jsx", ".ts", ".tsx"],
+        extensions: [".mjs", ".js", ".jsx", ".ts", ".tsx", ".cjs", ".json", ".css"],
+        exportConditions: ["style"],
         browser: true,
         preferBuiltins: false,
       }),
       commonjs({
         include: isEjected ? [/node_modules/, /dinou/] : /node_modules/,
       }),
-      dinouAssetPlugin({
-        include: regex,
-      }),
       isDevelopment
         ? rollupSwcPlugin()
         : babel({
             babelHelpers: "bundled",
+            configFile: false,
+            babelrc: false,
             extensions: [".js", ".jsx", ".ts", ".tsx"],
             presets: [
-              ["@babel/preset-react", { runtime: "automatic" }],
-              "@babel/preset-typescript",
+              [presetReact, { runtime: "automatic" }],
+              presetTypescript,
             ],
             plugins: [
-              "babel-plugin-react-compiler",
-              "@babel/plugin-syntax-import-meta",
+              enableReactCompiler && pluginReactCompiler,
+              pluginSyntaxImportMeta,
             ].filter(Boolean),
-            exclude: /node_modules[\\/](?!dinou|react-refresh)/,
+            exclude: [
+              /node_modules[\\/](?!dinou|react-refresh)/,
+              /[\\/]dinou[\\/]compiled[\\/]/,
+            ],
           }),
       postcss({
         modules: {
@@ -176,29 +249,68 @@ export default async function () {
         },
         extract: "styles.css",
         minimize: !isDevelopment,
-        config: {
-          path: path.resolve(__dirname, "postcss.config.js"),
-        },
+        plugins: createBasePostCssPlugins(),
+        config: false,
       }),
-      shouldWriteToDisk &&
-        copy({
-          targets: [
-            fs.existsSync("public") && {
-              src: "public/*",
-              dest: outputDirectory,
-            },
-            fs.existsSync("favicons") && {
-              src: "favicons/*",
-              dest: outputDirectory,
-            },
-          ].filter(Boolean),
-          flatten: true,
-        }),
+      {
+        name: "dinou-rollup-css-assets-and-minify",
+        buildStart() {
+          getRegisteredCssUrlAssets().clear();
+          if (typeof globalThis !== "undefined") {
+            globalThis.__DINOU_HAS_COMPILED_STYLES__ = false;
+          }
+        },
+        generateBundle(_options, bundle) {
+          const hasCompiledStyles = Boolean(bundle["styles.css"]);
+          if (typeof globalThis !== "undefined") {
+            globalThis.__DINOU_HAS_COMPILED_STYLES__ = hasCompiledStyles;
+            if (!hasCompiledStyles && globalThis.__DINOU_MEM_FILES__) {
+              globalThis.__DINOU_MEM_FILES__.delete("styles.css");
+              globalThis.__DINOU_MEM_FILES__.delete("/styles.css");
+            }
+          }
+          if (hasCompiledStyles && hasPublicStylesCss(process.cwd())) {
+            warnPublicStylesCssCollision(process.cwd());
+          }
+          for (const [assetFileName, absAssetPath] of getRegisteredCssUrlAssets().entries()) {
+            if (!bundle[assetFileName] && fs.existsSync(absAssetPath)) {
+              try {
+                this.emitFile({
+                  type: "asset",
+                  fileName: assetFileName,
+                  source: fs.readFileSync(absAssetPath),
+                });
+              } catch (e) {}
+            }
+          }
+          if (!isDevelopment && bundle["styles.css"]?.type === "asset") {
+            try {
+              const rawCss = Buffer.isBuffer(bundle["styles.css"].source)
+                ? bundle["styles.css"].source.toString("utf8")
+                : String(bundle["styles.css"].source || "");
+              if (rawCss) {
+                bundle["styles.css"].source = esbuild.transformSync(rawCss, {
+                  loader: "css",
+                  minify: true,
+                }).code;
+              }
+            } catch (e) {}
+          }
+        },
+      },
+      shouldWriteToDisk && {
+        name: "dinou-copy-static",
+        writeBundle() {
+          copyStaticDirectoriesToOutdir(process.cwd(), outputDirectory);
+        },
+      },
       reactClientManifest({
         manifestPath: path.join(
-          ".dinou/react_client_manifest",
+          isDevelopment ? ".dinou/node-dev" : ".dinou/dist1",
           "react-client-manifest.json",
         ),
+        assetInclude: activeAssetRegex,
+        dinouConfig,
         serverFiles,
       }),
       isDevelopment && reactRefreshWrapModules(),
@@ -206,6 +318,29 @@ export default async function () {
       !isDevelopment && manifestGeneratorPlugin(),
       serverFunctionsPlugin({ serverFiles }),
       isDevelopment && rollupMemoryPlugin(),
+      !isDevelopment && {
+        name: "post-build-ssg",
+        closeBundle() {
+          const ssgArgs = [
+            "--conditions=react-server",
+            ...(isUnvendorizedRequested() ? ["--conditions=unvendorized"] : []),
+            path.resolve(__dirname, "../core/run-ssg.js"),
+          ];
+          const ssgRes = spawnSync(process.execPath, ssgArgs, {
+            stdio: "inherit",
+            env: {
+              ...process.env,
+              NODE_ENV: "production",
+              DINOU_BUILD_TOOL: "rollup",
+            },
+          });
+          if (ssgRes.status !== 0) {
+            throw new Error(
+              `[Dinou SSG] Static generation exited with code ${ssgRes.status ?? 1}`
+            );
+          }
+        },
+      },
     ].filter(Boolean),
     watch: {
       buildDelay: 100,
@@ -247,67 +382,5 @@ export default async function () {
     },
   };
 
-  if (isDevelopment) {
-    return clientConfig;
-  }
-
-  const serverConfig = {
-    input: {
-      handler: path.resolve(__dirname, "../core/handler.js"),
-      netlify: path.resolve(__dirname, "../adapters/netlify.js"),
-    },
-    output: {
-      dir: path.resolve(outputDirectory, "server"),
-      format: "esm",
-      entryFileNames: "[name].js",
-      chunkFileNames: "[name]-[hash].js",
-      sourcemap: true,
-      banner: "import { createRequire as ___createRequire } from 'node:module'; import { fileURLToPath as ___fileURLToPath } from 'node:url'; import ___path from 'node:path'; const require = ___createRequire(import.meta.url || ___path.resolve(process.cwd(), 'package.json')); globalThis.__dinou_require__ = require; const __filename = import.meta.url ? ___fileURLToPath(import.meta.url) : ___path.resolve(process.cwd(), 'index.js'); const __dirname = ___path.dirname(__filename); process.env.NODE_ENV = process.env.NODE_ENV || 'production';",
-    },
-    external: [
-      "express",
-      "chokidar",
-      "dotenv",
-      "fsevents",
-      "@swc/core",
-      "@babel/core",
-      "esbuild",
-    ],
-    plugins: [
-      replace({
-        preventAssignment: true,
-        "process.env.NODE_ENV": JSON.stringify("production"),
-      }),
-      json(),
-      resolve({
-        exportConditions: ["react-server", "node", "import"],
-        preferBuiltins: true,
-        browser: false,
-      }),
-      commonjs({
-        ignoreDynamicRequires: true,
-      }),
-      {
-        name: "post-build-server",
-        closeBundle() {
-          fs.writeFileSync(
-            path.resolve(process.cwd(), ".dinou/dist3/server/package.json"),
-            JSON.stringify({ type: "module" }, null, 2)
-          );
-          execSync(`"${process.execPath}" --conditions=react-server "${path.resolve(__dirname, "../core/run-ssg.js")}"`, {
-            stdio: "inherit",
-            env: { ...process.env, NODE_ENV: "production" },
-          });
-        },
-      },
-    ],
-    onwarn(warning, warn) {
-      if (warning.code === "CIRCULAR_DEPENDENCY" || warning.code === "EVAL") {
-        return;
-      }
-      warn(warning);
-    },
-  };
-
-  return [clientConfig, serverConfig];
+  return clientConfig;
 };

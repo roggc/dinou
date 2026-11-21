@@ -9,6 +9,7 @@ class StorageAdapter {
   constructor() {
     this._deletedKeys = new Set();
     this._invalidatedTags = new Map();
+    this.hydrateFromDisk = true;
   }
 
   markTagInvalidated(tag) {
@@ -17,14 +18,22 @@ class StorageAdapter {
     }
   }
 
+  async markTagInvalidatedAsync(tag) {
+    this.markTagInvalidated(tag);
+  }
+
   getTagInvalidatedAt(tag) {
     return tag ? this._invalidatedTags.get(String(tag)) || 0 : 0;
   }
 
+  async getTagInvalidatedAtAsync(tag) {
+    return this.getTagInvalidatedAt(tag);
+  }
+
   _normalizeTrackKey(key) {
     return String(key || "")
-      .replace(/^\/+/, "")
       .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
       .replace(/\/+$/, "");
   }
 
@@ -38,6 +47,11 @@ class StorageAdapter {
     } else if (!k.includes(".")) {
       this._deletedKeys.add(k ? `${k}/index.html` : "index.html");
     }
+    if (k.endsWith("/slot.json")) {
+      this._deletedKeys.add(k.slice(0, -10) + "/slot.metadata.json");
+    } else if (k.endsWith("/slot.metadata.json")) {
+      this._deletedKeys.add(k.slice(0, -19) + "/slot.json");
+    }
   }
 
   _unmarkDeleted(key) {
@@ -50,11 +64,20 @@ class StorageAdapter {
     } else if (!k.includes(".")) {
       this._deletedKeys.delete(k ? `${k}/index.html` : "index.html");
     }
+    if (k.endsWith("/slot.json")) {
+      this._deletedKeys.delete(k.slice(0, -10) + "/slot.metadata.json");
+    } else if (k.endsWith("/slot.metadata.json")) {
+      this._deletedKeys.delete(k.slice(0, -19) + "/slot.json");
+    }
   }
 
   isDeleted(key) {
     const k = this._normalizeTrackKey(key);
     return this._deletedKeys.has(k);
+  }
+
+  async isKeyDeleted(key) {
+    return this.isDeleted(key);
   }
 
   async get(key) {
@@ -83,8 +106,8 @@ class FileSystemStorage extends StorageAdapter {
 
   _resolve(key) {
     let cleanKey = String(key || "")
-      .replace(/^\/+/, "")
       .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
       .replace(/\/+$/, "");
     if (!cleanKey) {
       return path.join(this.baseDir, "index.html");
@@ -118,7 +141,10 @@ class FileSystemStorage extends StorageAdapter {
 
     // Check companion metadata if available
     let metadata = null;
-    const isLayoutKey = cleanKey.includes("layout.rsc") || cleanKey.includes("layout.metadata.json");
+    const isLayoutKey =
+      cleanKey.includes("layout.rsc") ||
+      cleanKey.includes("layout.metadata.json") ||
+      cleanKey.includes("shell.layout.json");
     const normSlotKey = cleanKey.replace(/^\/+/, "");
     const isSlotKey = normSlotKey.startsWith("slots/") || normSlotKey.endsWith("/slot.json") || normSlotKey.endsWith("/slot.metadata.json");
     const metaFileName = isLayoutKey
@@ -151,7 +177,10 @@ class FileSystemStorage extends StorageAdapter {
     const cleanKey = String(key || "").replace(/\\/g, "/");
     const isMetaJson = cleanKey.endsWith("metadata.json") || path.basename(targetPath).endsWith("metadata.json");
     if (metadata && !isMetaJson) {
-      const isLayoutKey = cleanKey.includes("layout.rsc") || cleanKey.includes("layout.metadata.json");
+      const isLayoutKey =
+        cleanKey.includes("layout.rsc") ||
+        cleanKey.includes("layout.metadata.json") ||
+        cleanKey.includes("shell.layout.json");
       const normSlotKey = cleanKey.replace(/^\/+/, "");
       const isSlotKey = normSlotKey.startsWith("slots/") || normSlotKey.endsWith("/slot.json") || normSlotKey.endsWith("/slot.metadata.json");
       const metaFileName = isLayoutKey
@@ -195,7 +224,9 @@ class FileSystemStorage extends StorageAdapter {
     const effectivePrefix = prefix === "dinou_cache" ? "" : prefix;
     const results = [];
     const walk = (dir, rel = "") => {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      const entries = fs
+        .readdirSync(dir, { withFileTypes: true })
+        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
       for (const entry of entries) {
         const entryRel = rel ? `${rel}/${entry.name}` : entry.name;
         if (entry.isDirectory()) {
@@ -223,7 +254,7 @@ class CloudflareKVStorage extends StorageAdapter {
   }
 
   _cleanKey(key) {
-    return String(key).replace(/^\/+/, "").replace(/\\/g, "/").replace(/\/+$/, "");
+    return String(key).replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
   }
 
   async get(key) {
@@ -258,7 +289,14 @@ class CloudflareKVStorage extends StorageAdapter {
     if (!this.kv) return false;
     const cleanKey = this._cleanKey(key);
     const val = await this.kv.get(cleanKey);
-    return val !== null;
+    if (val !== null) return true;
+    if (!cleanKey.includes(".")) {
+      const fallbackVal = await this.kv.get(
+        cleanKey ? `${cleanKey}/index.html` : "index.html"
+      );
+      return fallbackVal !== null;
+    }
+    return false;
   }
 
   async delete(key) {
@@ -284,9 +322,28 @@ class CloudflareKVStorage extends StorageAdapter {
     if (!this.kv || typeof this.kv.list !== "function") return [];
     try {
       const effectivePrefix = prefix === "dinou_cache" ? "" : prefix;
-      const options = effectivePrefix ? { prefix: effectivePrefix } : undefined;
-      const res = await this.kv.list(options);
-      return res && res.keys ? res.keys.map((k) => k.name) : [];
+      const results = [];
+      let cursor = undefined;
+      while (true) {
+        const options = {};
+        if (effectivePrefix) options.prefix = effectivePrefix;
+        if (cursor) options.cursor = cursor;
+        const res = await this.kv.list(
+          Object.keys(options).length > 0 ? options : undefined
+        );
+        if (res && Array.isArray(res.keys)) {
+          for (const k of res.keys) {
+            if (k && typeof k.name === "string") {
+              results.push(k.name);
+            }
+          }
+        }
+        if (!res || res.list_complete !== false || !res.cursor) {
+          break;
+        }
+        cursor = res.cursor;
+      }
+      return results;
     } catch (e) {
       return [];
     }
@@ -297,13 +354,14 @@ class CloudflareKVStorage extends StorageAdapter {
  * In-memory storage adapter.
  */
 class MemoryStorage extends StorageAdapter {
-  constructor() {
+  constructor(options = {}) {
     super();
     this.store = new Map();
+    this.hydrateFromDisk = Boolean(options && options.hydrateFromDisk);
   }
 
   _cleanKey(key) {
-    return String(key).replace(/^\/+/, "").replace(/\\/g, "/").replace(/\/+$/, "");
+    return String(key || "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
   }
 
   async get(key) {
@@ -360,22 +418,114 @@ class MemoryStorage extends StorageAdapter {
 
 /**
  * Redis storage adapter for multi-server / clustered deployments.
- * Shares ISR / ISG cache across multiple Node instances.
+ * Shares ISR / ISG cache and invalidation tombstones across multiple Node/Bun instances.
  */
 class RedisStorage extends StorageAdapter {
-  constructor(redisClient, prefix = "dinou:cache:") {
+  constructor(redisClient, prefixOrOptions = "dinou:cache:") {
     super();
     this.redis = redisClient;
-    this.prefix = prefix;
+    this.prefix =
+      typeof prefixOrOptions === "string"
+        ? prefixOrOptions
+        : prefixOrOptions && typeof prefixOrOptions.prefix === "string"
+        ? prefixOrOptions.prefix
+        : "dinou:cache:";
+    if (
+      prefixOrOptions &&
+      typeof prefixOrOptions === "object" &&
+      typeof prefixOrOptions.hydrateFromDisk === "boolean"
+    ) {
+      this.hydrateFromDisk = prefixOrOptions.hydrateFromDisk;
+    }
   }
 
-  _k(key) {
-    return this.prefix + key.replace(/^\/+/, "").replace(/\\/g, "/");
+  _cleanKey(key) {
+    return String(key || "")
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
   }
 
-  async get(key) {
-    if (!this.redis) return null;
-    const raw = await this.redis.get(this._k(key));
+  _k(cleanKey) {
+    return this.prefix + cleanKey;
+  }
+
+  _tombstoneKey(cleanKey) {
+    return `${this.prefix}__tombstone__:${cleanKey}`;
+  }
+
+  _tagInvKey(tag) {
+    return `${this.prefix}__tag_inv__:${String(tag)}`;
+  }
+
+  _companionKeys(cleanKey) {
+    const companions = [];
+    if (cleanKey.endsWith("/index.html")) {
+      companions.push(cleanKey.slice(0, -11));
+    } else if (cleanKey === "index.html") {
+      companions.push("");
+    } else if (!cleanKey.includes(".")) {
+      companions.push(cleanKey ? `${cleanKey}/index.html` : "index.html");
+    }
+    if (cleanKey.endsWith("/slot.json")) {
+      companions.push(cleanKey.slice(0, -10) + "/slot.metadata.json");
+    } else if (cleanKey.endsWith("/slot.metadata.json")) {
+      companions.push(cleanKey.slice(0, -19) + "/slot.json");
+    }
+    return companions;
+  }
+
+  markTagInvalidated(tag) {
+    super.markTagInvalidated(tag);
+    if (tag && this.redis && typeof this.redis.set === "function") {
+      const ts = String(this.getTagInvalidatedAt(tag) || Date.now());
+      Promise.resolve(this.redis.set(this._tagInvKey(tag), ts)).catch(() => {});
+    }
+  }
+
+  async markTagInvalidatedAsync(tag) {
+    super.markTagInvalidated(tag);
+    if (tag && this.redis && typeof this.redis.set === "function") {
+      const ts = String(this.getTagInvalidatedAt(tag) || Date.now());
+      try {
+        await this.redis.set(this._tagInvKey(tag), ts);
+      } catch (e) {}
+    }
+  }
+
+  async getTagInvalidatedAtAsync(tag) {
+    const localTs = this.getTagInvalidatedAt(tag);
+    if (!tag || !this.redis || typeof this.redis.get !== "function") {
+      return localTs;
+    }
+    try {
+      const remoteRaw = await this.redis.get(this._tagInvKey(tag));
+      const remoteTs = remoteRaw ? Number(remoteRaw) || 0 : 0;
+      return Math.max(localTs, remoteTs);
+    } catch (e) {
+      return localTs;
+    }
+  }
+
+  async isKeyDeleted(key) {
+    if (this.isDeleted(key)) return true;
+    if (!this.redis) return false;
+    const cleanKey = this._cleanKey(key);
+    try {
+      if (typeof this.redis.exists === "function") {
+        const ex = await this.redis.exists(this._tombstoneKey(cleanKey));
+        return Boolean(ex && Number(ex) > 0);
+      }
+      if (typeof this.redis.get === "function") {
+        const val = await this.redis.get(this._tombstoneKey(cleanKey));
+        return val !== null && val !== undefined;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  async _readRaw(cleanKey) {
+    const raw = await this.redis.get(this._k(cleanKey));
     if (!raw) return null;
     try {
       return JSON.parse(raw);
@@ -384,22 +534,150 @@ class RedisStorage extends StorageAdapter {
     }
   }
 
+  async get(key) {
+    if (!this.redis) return null;
+    const cleanKey = this._cleanKey(key);
+    let item = await this._readRaw(cleanKey);
+    if (!item && !cleanKey.includes(".")) {
+      item = await this._readRaw(cleanKey ? `${cleanKey}/index.html` : "index.html");
+    }
+    return item;
+  }
+
   async set(key, content, metadata = null) {
     this._unmarkDeleted(key);
     if (!this.redis) return;
+    const cleanKey = this._cleanKey(key);
     const value = JSON.stringify({ content, metadata });
-    await this.redis.set(this._k(key), value);
+    await this.redis.set(this._k(cleanKey), value);
+    const tombstonesToClear = [this._tombstoneKey(cleanKey)];
+    if (cleanKey.endsWith("/index.html")) {
+      const folderKey = cleanKey.slice(0, -11);
+      await this.redis.set(this._k(folderKey), value);
+      tombstonesToClear.push(this._tombstoneKey(folderKey));
+    } else if (cleanKey === "index.html") {
+      await this.redis.set(this._k(""), value);
+      tombstonesToClear.push(this._tombstoneKey(""));
+    } else if (!cleanKey.includes(".")) {
+      tombstonesToClear.push(
+        this._tombstoneKey(cleanKey ? `${cleanKey}/index.html` : "index.html")
+      );
+    }
+    if (cleanKey.endsWith("/slot.json")) {
+      tombstonesToClear.push(this._tombstoneKey(cleanKey.slice(0, -10) + "/slot.metadata.json"));
+    } else if (cleanKey.endsWith("/slot.metadata.json")) {
+      tombstonesToClear.push(this._tombstoneKey(cleanKey.slice(0, -19) + "/slot.json"));
+    }
+    if (typeof this.redis.del === "function") {
+      await Promise.all(
+        tombstonesToClear.map((tk) => Promise.resolve(this.redis.del(tk)).catch(() => {}))
+      );
+    }
   }
 
   async has(key) {
     if (!this.redis) return false;
-    return (await this.redis.exists(this._k(key))) === 1;
+    const cleanKey = this._cleanKey(key);
+    const existsDirect = await this.redis.exists(this._k(cleanKey));
+    if (existsDirect && Number(existsDirect) > 0) return true;
+    if (!cleanKey.includes(".")) {
+      const fallback = cleanKey ? `${cleanKey}/index.html` : "index.html";
+      const existsFallback = await this.redis.exists(this._k(fallback));
+      return Boolean(existsFallback && Number(existsFallback) > 0);
+    }
+    return false;
   }
 
   async delete(key) {
     this._markDeleted(key);
     if (!this.redis) return;
-    await this.redis.del(this._k(key));
+    const cleanKey = this._cleanKey(key);
+    const targets = [cleanKey, ...this._companionKeys(cleanKey)];
+    await Promise.all(
+      targets.map(async (tk) => {
+        try {
+          await this.redis.del(this._k(tk));
+        } catch (e) {}
+        try {
+          if (typeof this.redis.set === "function") {
+            await this.redis.set(this._tombstoneKey(tk), String(Date.now()));
+          }
+        } catch (e) {}
+      })
+    );
+  }
+
+  async keys(prefix = "") {
+    if (!this.redis) return [];
+    const normPrefix =
+      !prefix || prefix === "dinou_cache"
+        ? ""
+        : String(prefix).replace(/\\/g, "/").replace(/^\/+/, "");
+    const matchPattern = `${this.prefix}${normPrefix}*`;
+    const rawKeys = [];
+
+    try {
+      if (typeof this.redis.scanIterator === "function") {
+        for await (const item of this.redis.scanIterator({
+          MATCH: matchPattern,
+          COUNT: 100,
+        })) {
+          if (Array.isArray(item)) rawKeys.push(...item);
+          else if (typeof item === "string") rawKeys.push(item);
+        }
+      } else if (typeof this.redis.scanStream === "function") {
+        for await (const batch of this.redis.scanStream({
+          match: matchPattern,
+          count: 100,
+        })) {
+          if (Array.isArray(batch)) rawKeys.push(...batch);
+          else if (typeof batch === "string") rawKeys.push(batch);
+        }
+      } else if (typeof this.redis.keys === "function") {
+        const list = await this.redis.keys(matchPattern);
+        if (Array.isArray(list)) rawKeys.push(...list);
+      } else if (typeof this.redis.scan === "function") {
+        let cursor = "0";
+        do {
+          let scanRes;
+          try {
+            scanRes = await this.redis.scan(cursor, "MATCH", matchPattern, "COUNT", 100);
+          } catch (e) {
+            scanRes = await this.redis.scan(Number(cursor) || 0, {
+              MATCH: matchPattern,
+              COUNT: 100,
+            });
+          }
+          if (Array.isArray(scanRes)) {
+            cursor = String(scanRes[0]);
+            if (Array.isArray(scanRes[1])) rawKeys.push(...scanRes[1]);
+          } else if (scanRes && typeof scanRes === "object") {
+            cursor = String(scanRes.cursor);
+            if (Array.isArray(scanRes.keys)) rawKeys.push(...scanRes.keys);
+          } else {
+            break;
+          }
+        } while (cursor !== "0");
+      }
+    } catch (e) {
+      return [];
+    }
+
+    const result = new Set();
+    for (const fullKey of rawKeys) {
+      if (typeof fullKey !== "string" || !fullKey.startsWith(this.prefix)) continue;
+      const stripped = fullKey.slice(this.prefix.length);
+      if (
+        stripped.startsWith("__tombstone__:") ||
+        stripped.startsWith("__tag_inv__:")
+      ) {
+        continue;
+      }
+      if (!normPrefix || stripped.startsWith(normPrefix)) {
+        result.add(stripped);
+      }
+    }
+    return Array.from(result);
   }
 }
 
@@ -431,7 +709,10 @@ class DenoKVStorage extends StorageAdapter {
   }
 
   _cleanKey(key) {
-    return String(key).replace(/^\/+/, "").replace(/\\/g, "/");
+    return String(key || "")
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
   }
 
   async get(key) {
@@ -616,6 +897,149 @@ function setStorageAdapter(adapter) {
   globalThis[DINOU_STORAGE_KEY] = adapter;
 }
 
+function hasExplicitStorageAdapter() {
+  return Boolean(globalThis[DINOU_STORAGE_KEY]);
+}
+
+/**
+ * Hydrates a missing build-time static artifact from local `.dinou/dist2` into
+ * non-FileSystem distributed/KV adapters (such as RedisStorage or DenoKVStorage)
+ * when `storage.hydrateFromDisk !== false` and the key has not been deleted/invalidated.
+ */
+async function readDist2Fallback(storage, key, knownTags = []) {
+  if (!storage || !key || storage.baseDir || storage.hydrateFromDisk === false) {
+    return null;
+  }
+  try {
+    const isDeleted =
+      typeof storage.isKeyDeleted === "function"
+        ? await storage.isKeyDeleted(key)
+        : typeof storage.isDeleted === "function" && storage.isDeleted(key);
+    if (isDeleted) {
+      return null;
+    }
+
+    const cwd =
+      typeof process !== "undefined" && typeof process.cwd === "function"
+        ? process.cwd()
+        : typeof Deno !== "undefined" && typeof Deno.cwd === "function"
+          ? Deno.cwd()
+          : null;
+    if (!cwd) return null;
+
+    const dist2Dir = path.resolve(cwd, ".dinou/dist2");
+    if (!fs.existsSync(dist2Dir)) return null;
+
+    const dist2Fs = new FileSystemStorage(dist2Dir);
+    const resolvedPath = path.resolve(dist2Fs._resolve(key));
+    if (
+      resolvedPath !== dist2Dir &&
+      !resolvedPath.startsWith(dist2Dir + path.sep)
+    ) {
+      return null;
+    }
+
+    const item = await dist2Fs.get(key);
+    if (!item || !item.content) return null;
+
+    const normKey = String(key || "")
+      .replace(/^\/+/, "")
+      .replace(/\\/g, "/")
+      .replace(/\/+$/, "");
+    const writeKey = normKey || "index.html";
+    const isMetaFile = writeKey.endsWith("metadata.json");
+    const isShellJson =
+      writeKey.endsWith("shell.page.json") ||
+      writeKey.endsWith("shell.layout.json");
+
+    if (!isMetaFile) {
+      const generatedAt = Number(
+        (writeKey.endsWith("shell.page.json") && item.metadata?.pageGeneratedAt) ||
+          (writeKey.endsWith("shell.layout.json") && item.metadata?.layoutGeneratedAt) ||
+          item.metadata?.generatedAt ||
+          0
+      );
+      const slotIdFromKey = writeKey.match(/^slots\/([^/]+)\//)?.[1];
+      const combinedTags = new Set([
+        ...(Array.isArray(item.metadata?.tags) ? item.metadata.tags : []),
+        ...(!isShellJson && Array.isArray(item.metadata?.slotTags)
+          ? item.metadata.slotTags
+          : []),
+        ...(item.metadata?.slotId ? [item.metadata.slotId] : []),
+        ...(slotIdFromKey ? [slotIdFromKey] : []),
+        ...(Array.isArray(knownTags) ? knownTags : []),
+      ]);
+      if (combinedTags.size > 0) {
+        for (const t of combinedTags) {
+          if (!t) continue;
+          const invAt =
+            typeof storage.getTagInvalidatedAtAsync === "function"
+              ? await storage.getTagInvalidatedAtAsync(t)
+              : typeof storage.getTagInvalidatedAt === "function"
+              ? storage.getTagInvalidatedAt(t)
+              : 0;
+          if (invAt > 0 && invAt >= generatedAt) {
+            return null;
+          }
+        }
+      }
+    }
+
+    try {
+      const shouldPassMetadata =
+        !isMetaFile &&
+        (writeKey === "index.html" ||
+          writeKey.endsWith("/index.html") ||
+          writeKey.endsWith("shell.html") ||
+          writeKey.endsWith("layout.rsc") ||
+          writeKey.endsWith("/slot.json"));
+      await storage.set(
+        writeKey,
+        item.content,
+        shouldPassMetadata ? item.metadata || null : null
+      );
+      if (
+        item.metadata &&
+        typeof item.metadata === "object" &&
+        !isMetaFile
+      ) {
+        const isLayoutKey =
+          writeKey.endsWith("layout.rsc") ||
+          writeKey.endsWith("shell.layout.json");
+        const isSlotKey =
+          writeKey.startsWith("slots/") || writeKey.endsWith("/slot.json");
+        const dirPrefix = writeKey.includes("/")
+          ? writeKey.slice(0, writeKey.lastIndexOf("/"))
+          : "";
+        const metaFileName = isLayoutKey
+          ? "layout.metadata.json"
+          : isSlotKey
+          ? "slot.metadata.json"
+          : "metadata.json";
+        const companionMetaKey = dirPrefix
+          ? `${dirPrefix}/${metaFileName}`
+          : metaFileName;
+        const metaDeleted =
+          typeof storage.isKeyDeleted === "function"
+            ? await storage.isKeyDeleted(companionMetaKey)
+            : typeof storage.isDeleted === "function" &&
+              storage.isDeleted(companionMetaKey);
+        const alreadyHasMeta =
+          typeof storage.has === "function"
+            ? await storage.has(companionMetaKey)
+            : false;
+        if (!metaDeleted && !alreadyHasMeta) {
+          await storage.set(companionMetaKey, JSON.stringify(item.metadata));
+        }
+      }
+    } catch (e) {}
+
+    return item;
+  } catch (e) {
+    return null;
+  }
+}
+
 export {
   StorageAdapter,
   FileSystemStorage,
@@ -625,6 +1049,8 @@ export {
   RedisStorage,
   getStorageAdapter,
   setStorageAdapter,
+  hasExplicitStorageAdapter,
+  readDist2Fallback,
 };
 export default {
   StorageAdapter,
@@ -635,4 +1061,6 @@ export default {
   RedisStorage,
   getStorageAdapter,
   setStorageAdapter,
+  hasExplicitStorageAdapter,
+  readDist2Fallback,
 };

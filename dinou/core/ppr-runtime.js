@@ -4,11 +4,16 @@
 // streams dynamic Suspense holes as they resolve over the same HTTP connection.
 // Designed for the Dual-Bundle architecture (Pass A: RSC, Pass B: SSR).
 
+import path from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import React from "react";
 import { renderRSCStream } from "./rsc-renderer.js";
 import { getClientManifest } from "./manifest-provider.js";
 import { requestStorage, setCurrentContext } from "./request-context.js";
 import getJSX from "./get-jsx.js";
+import { getStorageAdapter, readDist2Fallback } from "./storage-adapter.js";
+import { deserializeJSX } from "./cache-slot.js";
+import { getActiveLayoutChain } from "./layout-functions.js";
 import {
   asyncRenderJSXToClientJSX,
   invokeWithServerHooksDispatcher,
@@ -18,6 +23,145 @@ import {
   runInRuntimeStaticSuspense,
   runInRuntimeDynamicHole,
 } from "./ppr-context.js";
+import { fetchCloudflareDist2Asset } from "./static-assets.js";
+
+function safeJsonForInlineScript(str) {
+  return JSON.stringify(str)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function formatRscPushScript(kind, chunkStr) {
+  const arrName = `__DINOU_RSC_${kind}__`;
+  const pushFn = `__DINOU_RSC_${kind}_PUSH__`;
+  const encoded = safeJsonForInlineScript(chunkStr);
+  return `<script>(self.${arrName}=self.${arrName}||[]).push(${encoded});if(self.${pushFn})self.${pushFn}(${encoded});</script>`;
+}
+
+function formatRscDoneScript(kind) {
+  const doneName = `__DINOU_RSC_${kind}_DONE__`;
+  const closeFn = `__DINOU_RSC_${kind}_CLOSE__`;
+  return `<script>self.${doneName}=true;if(self.${closeFn})self.${closeFn}();</script>`;
+}
+
+async function readShellJsonFromStorage(storage, key, platformContext, reqUrl) {
+  if (!key) return null;
+  if (storage) {
+    try {
+      const item = await storage.get(key);
+      if (item && typeof item.content === "string" && item.content.trim().startsWith("{")) {
+        return item.content;
+      }
+    } catch (e) {}
+  }
+  const isDeleted =
+    storage &&
+    (typeof storage.isKeyDeleted === "function"
+      ? await storage.isKeyDeleted(key)
+      : typeof storage.isDeleted === "function" && storage.isDeleted(key));
+  if (isDeleted) {
+    return null;
+  }
+  if (platformContext?.env?.ASSETS && reqUrl) {
+    try {
+      const assetRes = await fetchCloudflareDist2Asset(
+        platformContext.env.ASSETS,
+        key,
+        reqUrl
+      );
+      if (assetRes && assetRes.status === 200) {
+        const txt = await assetRes.text();
+        if (txt && txt.trim().startsWith("{")) {
+          if (storage) {
+            try {
+              await storage.set(key, txt);
+            } catch (e) {}
+          }
+          return txt;
+        }
+      }
+    } catch (e) {}
+  }
+  if (storage) {
+    const dist2Item = await readDist2Fallback(storage, key);
+    if (
+      dist2Item &&
+      typeof dist2Item.content === "string" &&
+      dist2Item.content.trim().startsWith("{")
+    ) {
+      return dist2Item.content;
+    }
+  } else {
+    try {
+      const diskPath = path.resolve(process.cwd(), ".dinou/dist2", key);
+      if (existsSync(diskPath)) {
+        const txt = readFileSync(diskPath, "utf8");
+        if (txt && txt.trim().startsWith("{")) {
+          return txt;
+        }
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
+function replaceHolesWithMap(node, liveHolesMap) {
+  if (
+    !node ||
+    typeof node !== "object" ||
+    node instanceof Promise ||
+    node.$$typeof === Symbol.for("react.client.reference") ||
+    typeof node.then === "function"
+  ) {
+    return node;
+  }
+  if (Array.isArray(node)) {
+    return node.map((item) => replaceHolesWithMap(item, liveHolesMap));
+  }
+  if (node.$$typeof === Symbol.for("react.transitional.element")) {
+    const holeId = node.props && node.props["data-ppr-hole"];
+    if (typeof holeId === "string" && liveHolesMap.has(holeId)) {
+      return liveHolesMap.get(holeId);
+    }
+    if (node.props && typeof node.props === "object") {
+      let changed = false;
+      const newProps = { ...node.props };
+      for (const [k, v] of Object.entries(node.props)) {
+        if (v && typeof v === "object") {
+          const updated = replaceHolesWithMap(v, liveHolesMap);
+          if (updated !== v) {
+            newProps[k] = updated;
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
+        if (node.key != null) newProps.key = node.key;
+        const children = newProps.children;
+        if (Array.isArray(children)) {
+          delete newProps.children;
+          return React.createElement(node.type, newProps, ...children);
+        }
+        return React.createElement(node.type, newProps);
+      }
+    }
+    return node;
+  }
+  let changed = false;
+  const clone = { ...node };
+  for (const [k, v] of Object.entries(node)) {
+    if (v && typeof v === "object") {
+      const updated = replaceHolesWithMap(v, liveHolesMap);
+      if (updated !== v) {
+        clone[k] = updated;
+        changed = true;
+      }
+    }
+  }
+  return changed ? clone : node;
+}
 
 async function PprDynamicHoleBoundary({ holeId, children }) {
   return await runInRuntimeDynamicHole(
@@ -58,7 +202,7 @@ async function spliceDynamicHolesIntoShell(
   const knownHoleIds = new Set();
   const staticParentHoleIds = new Set();
   function collectKnownHoles(node) {
-    if (!node || typeof node !== "object") return;
+    if (!node || typeof node !== "object" || node instanceof Promise || node.$$typeof === Symbol.for("react.client.reference") || typeof node.then === "function") return;
     if (Array.isArray(node)) {
       for (const item of node) collectKnownHoles(item);
       return;
@@ -95,32 +239,52 @@ async function spliceDynamicHolesIntoShell(
   let holeIndex = Number(startHoleIndex) || 0;
   const liveHolesMap = new Map();
 
-  async function traverseProps(props) {
+  async function traverseProps(props, inClientProps = false) {
     if (!props || typeof props !== "object") return;
     for (const [, value] of Object.entries(props)) {
-      if (value && typeof value === "object") {
-        await traverse(value);
+      if (liveHolesMap.size >= knownHoleIds.size) return;
+      if (value && (typeof value === "object" || typeof value === "function")) {
+        await traverse(value, inClientProps);
       }
     }
   }
 
-  async function traverse(current) {
+  async function traverse(current, inClientProps = false) {
     if (!current || liveHolesMap.size >= knownHoleIds.size) return;
     if (Array.isArray(current)) {
       for (const item of current) {
         if (liveHolesMap.size >= knownHoleIds.size) return;
-        await traverse(item);
+        await traverse(item, inClientProps);
       }
-      return;
-    }
-    if (typeof current !== "object" || current instanceof Promise) {
       return;
     }
     if (
       isClientComponentRef(current?.type) ||
       current?.$$typeof === Symbol.for("react.client.reference")
     ) {
-      await traverseProps(current?.props);
+      await traverseProps(current?.props, true);
+      return;
+    }
+    if (
+      current instanceof Promise ||
+      ((typeof current === "object" || typeof current === "function") &&
+        typeof current?.then === "function")
+    ) {
+      if (inClientProps) {
+        return;
+      }
+      try {
+        const resolved = await current;
+        await traverse(resolved, false);
+      } catch (err) {
+        if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
+          return;
+        }
+        console.error("[Dinou PPR] Error awaiting JSX promise in hole splice:", err);
+      }
+      return;
+    }
+    if (typeof current !== "object") {
       return;
     }
     if (typeof current?.type === "function") {
@@ -128,7 +292,7 @@ async function spliceDynamicHolesIntoShell(
         const evaluated = await invokeWithServerHooksDispatcher(() =>
           current.type(current.props || {})
         );
-        await traverse(evaluated);
+        await traverse(evaluated, false);
       } catch (err) {
         if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
           return;
@@ -143,14 +307,14 @@ async function spliceDynamicHolesIntoShell(
       current.type.$$typeof === Symbol.for("react.forward_ref")
     ) {
       if (isClientComponentRef(current.type)) {
-        await traverseProps(current.props);
+        await traverseProps(current.props, true);
         return;
       }
       try {
         const rendered = await invokeWithServerHooksDispatcher(() =>
           current.type.render(current.props || {}, current.ref)
         );
-        await traverse(rendered);
+        await traverse(rendered, false);
       } catch (err) {
         if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
           return;
@@ -165,7 +329,7 @@ async function spliceDynamicHolesIntoShell(
       current.type.$$typeof === Symbol.for("react.memo")
     ) {
       if (isClientComponentRef(current.type)) {
-        await traverseProps(current.props);
+        await traverseProps(current.props, true);
         return;
       }
       try {
@@ -185,7 +349,7 @@ async function spliceDynamicHolesIntoShell(
             innerComp.render(current.props || {}, current.ref)
           );
         }
-        await traverse(rendered);
+        await traverse(rendered, false);
       } catch (err) {
         if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
           return;
@@ -220,72 +384,24 @@ async function spliceDynamicHolesIntoShell(
         : runInRuntimeStaticSuspense;
       await runStaticScope(async () => {
         if (current.props?.children) {
-          await traverse(current.props.children);
+          await traverse(current.props.children, false);
         }
         if (current.props?.fallback) {
-          await traverse(current.props.fallback);
+          await traverse(current.props.fallback, false);
         }
       });
       return;
     }
     if (current?.$$typeof === Symbol.for("react.transitional.element")) {
-      await traverseProps(current.props);
+      await traverseProps(current.props, false);
     } else {
-      await traverseProps(current);
+      await traverseProps(current, inClientProps);
     }
   }
 
   await traverse(livePageNode);
 
-  function replaceHoles(node) {
-    if (!node || typeof node !== "object") return node;
-    if (Array.isArray(node)) {
-      return node.map((item) => replaceHoles(item));
-    }
-    if (node.$$typeof === Symbol.for("react.transitional.element")) {
-      const holeId = node.props && node.props["data-ppr-hole"];
-      if (typeof holeId === "string" && liveHolesMap.has(holeId)) {
-        return liveHolesMap.get(holeId);
-      }
-      if (node.props && typeof node.props === "object") {
-        let changed = false;
-        const newProps = { ...node.props };
-        for (const [k, v] of Object.entries(node.props)) {
-          if (v && typeof v === "object") {
-            const updated = replaceHoles(v);
-            if (updated !== v) {
-              newProps[k] = updated;
-              changed = true;
-            }
-          }
-        }
-        if (changed) {
-          if (node.key != null) newProps.key = node.key;
-          const children = newProps.children;
-          if (Array.isArray(children)) {
-            delete newProps.children;
-            return React.createElement(node.type, newProps, ...children);
-          }
-          return React.createElement(node.type, newProps);
-        }
-      }
-      return node;
-    }
-    let changed = false;
-    const clone = { ...node };
-    for (const [k, v] of Object.entries(node)) {
-      if (v && typeof v === "object") {
-        const updated = replaceHoles(v);
-        if (updated !== v) {
-          clone[k] = updated;
-          changed = true;
-        }
-      }
-    }
-    return changed ? clone : node;
-  }
-
-  return replaceHoles(cachedShellTree);
+  return replaceHolesWithMap(cachedShellTree, liveHolesMap);
 }
 
 /**
@@ -306,7 +422,8 @@ async function streamDynamicHoles(
   encoder,
   platformContext,
   isDevelopment = false,
-  staticParentHoles = null
+  staticParentHoles = null,
+  resolvedHolesOut = null
 ) {
   let holeIndex = 0;
   const holePromises = [];
@@ -321,29 +438,25 @@ async function streamDynamicHoles(
 
   const clientManifest = getClientManifest();
 
-  async function traverseProps(props) {
+  async function traverseProps(props, inClientProps = false) {
     if (!props || typeof props !== "object") return;
     for (const [, value] of Object.entries(props)) {
       if (hasExplicitHoles && holePromises.length >= knownHoleIds.size) return;
-      if (value && typeof value === "object") {
-        await traverse(value);
+      if (value && (typeof value === "object" || typeof value === "function")) {
+        await traverse(value, inClientProps);
       }
     }
   }
 
-  async function traverse(current) {
+  async function traverse(current, inClientProps = false) {
     if (!current || (hasExplicitHoles && holePromises.length >= knownHoleIds.size)) return;
 
     // Handle Arrays (children)
     if (Array.isArray(current)) {
       for (const item of current) {
         if (hasExplicitHoles && holePromises.length >= knownHoleIds.size) return;
-        await traverse(item);
+        await traverse(item, inClientProps);
       }
-      return;
-    }
-
-    if (typeof current !== "object" || current instanceof Promise) {
       return;
     }
 
@@ -352,7 +465,31 @@ async function streamDynamicHoles(
       isClientComponentRef(current?.type) ||
       current?.$$typeof === Symbol.for("react.client.reference")
     ) {
-      await traverseProps(current?.props);
+      await traverseProps(current?.props, true);
+      return;
+    }
+
+    if (
+      current instanceof Promise ||
+      ((typeof current === "object" || typeof current === "function") &&
+        typeof current?.then === "function")
+    ) {
+      if (inClientProps) {
+        return;
+      }
+      try {
+        const resolved = await current;
+        await traverse(resolved, false);
+      } catch (err) {
+        if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
+          return;
+        }
+        console.error("[Dinou PPR] Error awaiting JSX promise in hole traversal:", err);
+      }
+      return;
+    }
+
+    if (typeof current !== "object") {
       return;
     }
 
@@ -362,7 +499,7 @@ async function streamDynamicHoles(
         const evaluated = await invokeWithServerHooksDispatcher(() =>
           current.type(current.props || {})
         );
-        await traverse(evaluated);
+        await traverse(evaluated, false);
       } catch (err) {
         if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
           return;
@@ -379,14 +516,14 @@ async function streamDynamicHoles(
       current.type.$$typeof === Symbol.for("react.forward_ref")
     ) {
       if (isClientComponentRef(current.type)) {
-        await traverseProps(current.props);
+        await traverseProps(current.props, true);
         return;
       }
       try {
         const rendered = await invokeWithServerHooksDispatcher(() =>
           current.type.render(current.props || {}, current.ref)
         );
-        await traverse(rendered);
+        await traverse(rendered, false);
       } catch (err) {
         if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
           return;
@@ -403,7 +540,7 @@ async function streamDynamicHoles(
       current.type.$$typeof === Symbol.for("react.memo")
     ) {
       if (isClientComponentRef(current.type)) {
-        await traverseProps(current.props);
+        await traverseProps(current.props, true);
         return;
       }
       try {
@@ -423,7 +560,7 @@ async function streamDynamicHoles(
             innerComp.render(current.props || {}, current.ref)
           );
         }
-        await traverse(rendered);
+        await traverse(rendered, false);
       } catch (err) {
         if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
           return;
@@ -449,21 +586,37 @@ async function streamDynamicHoles(
 
       if (shouldStream) {
         const children = current.props?.children;
+        const suspenseProps = current.props || {};
+        const suspenseKey = current.key;
         const promise = runInRuntimeDynamicHole(() => (async () => {
           try {
             let html = "";
+            const resolvedChildren = await asyncRenderJSXToClientJSX(children);
+            if (resolvedHolesOut && typeof resolvedHolesOut.set === "function") {
+              resolvedHolesOut.set(
+                currentHoleId,
+                React.createElement(
+                  React.Suspense,
+                  {
+                    ...suspenseProps,
+                    ...(suspenseKey != null ? { key: suspenseKey } : {}),
+                    children: resolvedChildren,
+                  }
+                )
+              );
+            }
             if (platformContext && platformContext.renderHtmlStream) {
-              const resolvedChildren = await asyncRenderJSXToClientJSX(children);
               const rscStream = renderRSCStream(resolvedChildren, clientManifest, { runtime: "edge" });
               const htmlStream = await platformContext.renderHtmlStream(rscStream, {
-                bootstrapModules: [],
+                bootstrapModules: [], importMapHtml: "",
               });
               html = await new Response(htmlStream).text();
             }
 
-            const chunk = `\n<template id="ppr-content-${currentHoleId}">${html}</template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${currentBoundaryIndex}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){if(c.content){t.replaceWith(c.content);}else{t.replaceWith.apply(t,Array.from(c.childNodes));}}}finally{c.remove();}})();</script>\n`;
+            const chunk = `\n<template id="ppr-content-${currentHoleId}"><!--$-->${html}<!--/$--></template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${currentBoundaryIndex}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){if(c.content){t.replaceWith(c.content);}else{t.replaceWith.apply(t,Array.from(c.childNodes));}}}finally{c.remove();}})();</script>\n`;
             await writer.write(encoder.encode(chunk));
           } catch (holeErr) {
+            if (resolvedHolesOut) resolvedHolesOut._hadError = true;
             console.error(`[Dinou PPR] Error resolving dynamic hole ${currentHoleId}:`, holeErr);
             const rawErrMsg = isDevelopment
               ? (holeErr?.message || "Unknown dynamic error")
@@ -486,10 +639,10 @@ async function streamDynamicHoles(
           : runInRuntimeStaticSuspense;
       await runStaticScope(async () => {
         if (current.props?.children) {
-          await traverse(current.props.children);
+          await traverse(current.props.children, false);
         }
         if (current.props?.fallback) {
-          await traverse(current.props.fallback);
+          await traverse(current.props.fallback, false);
         }
       });
       return;
@@ -497,9 +650,9 @@ async function streamDynamicHoles(
 
     // Traverse host element / Fragment props or plain props object
     if (current?.$$typeof === Symbol.for("react.transitional.element")) {
-      await traverseProps(current.props);
+      await traverseProps(current.props, false);
     } else {
-      await traverseProps(current);
+      await traverseProps(current, inClientProps);
     }
   }
 
@@ -544,11 +697,28 @@ async function handlePprResume({
         `<script>window.__DINOU_USE_STATIC__ = false; window.__DINOU_PPR__ = true;</script></head>`
       );
     }
+    if (!shellHtml.includes("window.__DINOU_PPR_RESUME__")) {
+      if (/window\.__DINOU_PPR__\s*=\s*true;?/.test(shellHtml)) {
+        shellHtml = shellHtml.replace(
+          /window\.__DINOU_PPR__\s*=\s*true;?/,
+          "window.__DINOU_PPR__ = true; window.__DINOU_PPR_RESUME__ = true;"
+        );
+      } else if (shellHtml.includes("</head>")) {
+        shellHtml = shellHtml.replace(
+          "</head>",
+          `<script>window.__DINOU_PPR_RESUME__ = true;</script></head>`
+        );
+      } else {
+        shellHtml = `<script>window.__DINOU_PPR_RESUME__ = true;</script>${shellHtml}`;
+      }
+    }
   }
 
   // Separate shell into prelude (up to </body>) and postlude
   const lowerHtml = shellHtml.toLowerCase();
-  const bodyCloseIndex = lowerHtml.lastIndexOf("</body>");
+  const mainScriptMatch = typeof shellHtml === "string" ? shellHtml.match(/<script\b[^>]*\bsrc="\/(?:runtime|main)[^"]*"[^>]*><\/script>/i) : null;
+  const rawBodyCloseIndex = lowerHtml.lastIndexOf("</body>");
+  const bodyCloseIndex = mainScriptMatch && typeof mainScriptMatch.index === "number" && (rawBodyCloseIndex === -1 || mainScriptMatch.index < rawBodyCloseIndex) ? mainScriptMatch.index : rawBodyCloseIndex;
   let shellPrelude =
     bodyCloseIndex !== -1 ? shellHtml.slice(0, bodyCloseIndex) : shellHtml;
   let shellPostlude =
@@ -564,6 +734,32 @@ async function handlePprResume({
       // 1. Immediately flush static shell prelude (0ms TTFB)
       await writer.write(encoder.encode(shellPrelude));
 
+      const storage = getStorageAdapter();
+      const cleanRel = (reqPath || "").replace(/^\/+/, "").replace(/\/+$/, "");
+      const reqSegments = cleanRel ? cleanRel.split("/").filter(Boolean) : [];
+      const srcFolder = path.resolve(process.cwd(), "src");
+      let activeChain = [];
+      try {
+        activeChain = getActiveLayoutChain(reqSegments, queryObj || {}, srcFolder);
+      } catch (e) {}
+      const hasActiveLayout = activeChain.length > 0;
+      const leafLayoutKey = hasActiveLayout ? activeChain[0].cleanLayoutKey : null;
+      const shellPageKey = cleanRel ? `${cleanRel}/shell.page.json` : "shell.page.json";
+      const shellLayoutKey = hasActiveLayout
+        ? leafLayoutKey
+          ? `${leafLayoutKey}/shell.layout.json`
+          : "shell.layout.json"
+        : null;
+      const reqOriginUrl = simReq?.url
+        ? `http://${simReq.headers?.host || "localhost:3000"}${simReq.url}`
+        : null;
+      const [pageShellJson, layoutShellJson] = await Promise.all([
+        readShellJsonFromStorage(storage, shellPageKey, platformContext, reqOriginUrl),
+        hasActiveLayout
+          ? readShellJsonFromStorage(storage, shellLayoutKey, platformContext, reqOriginUrl)
+          : Promise.resolve(null),
+      ]);
+
       let holes = Array.isArray(metadata?.holes) ? metadata.holes : null;
       if ((!holes || holes.length === 0) && typeof shellPrelude === "string") {
         const extracted = [
@@ -572,10 +768,6 @@ async function handlePprResume({
         if (extracted.length > 0 || Array.isArray(metadata?.holes)) {
           holes = extracted;
         }
-      }
-
-      if (Array.isArray(holes) && holes.length === 0) {
-        return;
       }
 
       const dynamicState = { value: true };
@@ -588,37 +780,90 @@ async function handlePprResume({
         setCurrentContext(context);
       }
 
+      const resolvedHolesMap = new Map();
+
       await requestStorage.run(context, async () => {
-        const isNotFound = { value: false };
-        const jsx = await getJSX(
-          reqPath,
-          queryObj,
-          isNotFound,
-          isDevelopment,
-          false,
-          { skipLayoutProbe: true }
-        );
+        if (!Array.isArray(holes) || holes.length > 0) {
+          const isNotFound = { value: false };
+          const jsx = await getJSX(
+            reqPath,
+            queryObj,
+            isNotFound,
+            isDevelopment,
+            false,
+            { skipLayoutProbe: true }
+          );
 
-        const staticParentHoles =
-          typeof shellPrelude === "string"
-            ? new Set(
-                [
-                  ...shellPrelude.matchAll(
-                    /data-ppr-static-parent="(ppr-hole-\d+)"/g
-                  ),
-                ].map((m) => m[1])
-              )
-            : null;
+          const staticParentHoles =
+            typeof shellPrelude === "string"
+              ? new Set(
+                  [
+                    ...shellPrelude.matchAll(
+                      /data-ppr-static-parent="(ppr-hole-\d+)"/g
+                    ),
+                  ].map((m) => m[1])
+                )
+              : null;
 
-        await streamDynamicHoles(
-          jsx,
-          holes,
-          writer,
-          encoder,
-          platformContext,
-          isDevelopment,
-          staticParentHoles
-        );
+          await streamDynamicHoles(
+            jsx,
+            holes,
+            writer,
+            encoder,
+            platformContext,
+            isDevelopment,
+            staticParentHoles,
+            resolvedHolesMap
+          );
+        }
+
+        if (
+          !resolvedHolesMap._hadError &&
+          pageShellJson &&
+          (!hasActiveLayout || layoutShellJson)
+        ) {
+          try {
+            const clientManifest = getClientManifest();
+            const cachedPageTree = deserializeJSX(pageShellJson);
+            const splicedPageTree = replaceHolesWithMap(cachedPageTree, resolvedHolesMap);
+            const pageRscStream = renderRSCStream(splicedPageTree, clientManifest, {
+              runtime: "edge",
+            });
+            let layoutRscPromise = Promise.resolve("");
+            if (hasActiveLayout && layoutShellJson) {
+              const cachedLayoutTree = deserializeJSX(layoutShellJson);
+              const splicedLayoutTree = replaceHolesWithMap(
+                cachedLayoutTree,
+                resolvedHolesMap
+              );
+              const layoutRscStream = renderRSCStream(
+                splicedLayoutTree,
+                clientManifest,
+                { runtime: "edge" }
+              );
+              layoutRscPromise = new Response(layoutRscStream).text();
+            }
+            const [layoutRscText, pageRscText] = await Promise.all([
+              layoutRscPromise,
+              new Response(pageRscStream).text(),
+            ]);
+            if (pageRscText && (!hasActiveLayout || layoutRscText)) {
+              let rscScripts =
+                "\n<script>window.__DINOU_INLINE_RSC__=true;window.__DINOU_RSC_P__=window.__DINOU_RSC_P__||[];window.__DINOU_RSC_L__=window.__DINOU_RSC_L__||[];</script>";
+              if (hasActiveLayout && layoutRscText) {
+                rscScripts +=
+                  formatRscPushScript("L", layoutRscText) + formatRscDoneScript("L");
+              }
+              rscScripts +=
+                formatRscPushScript("P", pageRscText) + formatRscDoneScript("P") + "\n";
+              await writer.write(encoder.encode(rscScripts));
+            }
+          } catch (inlineRscErr) {
+            if (process.env.DINOU_DEBUG) {
+              console.warn("[Dinou PPR] Inline RSC emission error:", inlineRscErr);
+            }
+          }
+        }
       });
     } catch (streamErr) {
       console.error("[Dinou PPR] Runtime streaming resume error:", streamErr);
@@ -639,12 +884,31 @@ async function handlePprResume({
   }
 
   const headers = new Headers(bridge.headers);
+  if (Array.isArray(bridge.cookies)) {
+    for (const c of bridge.cookies) {
+      headers.append("Set-Cookie", c);
+    }
+  }
   headers.set("Content-Type", "text/html; charset=utf-8");
-  headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  const existingCacheControl = headers.get("Cache-Control");
+  if (!existingCacheControl) {
+    headers.set("Cache-Control", "no-store, no-cache, must-revalidate, no-transform");
+  } else if (!/\bno-transform\b/i.test(existingCacheControl)) {
+    headers.set("Cache-Control", `${existingCacheControl}, no-transform`);
+  }
+  if (!headers.has("Content-Encoding")) {
+    headers.set("Content-Encoding", "identity");
+  }
+  if (!headers.has("X-Accel-Buffering")) {
+    headers.set("X-Accel-Buffering", "no");
+  }
 
   return new Response(readable, {
-    status: metadata?.status || 200,
+    status: bridge._explicitStatusSet
+      ? bridge.statusCode
+      : metadata?.status || 200,
     headers,
+    encodeBody: "manual",
   });
 }
 

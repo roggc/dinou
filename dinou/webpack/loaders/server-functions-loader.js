@@ -12,7 +12,7 @@ export default function (source) {
     return source;
   }
 
-  const norm = path.resolve(this.resourcePath).replace(/\\/g, "/").toLowerCase();
+  const norm = normalizePathCase(path.resolve(this.resourcePath)).replace(/\\/g, "/");
 
   const isModuleLevel = useServerRegex.test(trimmed);
   const hasBodyUseServer = !isModuleLevel && hasServerFunctions(source);

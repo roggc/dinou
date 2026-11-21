@@ -10,6 +10,8 @@ const changedIds = new Set();
 const pendingUpdateUrls = new Set();
 let needsFullReload = false;
 let hasPendingCssUpdate = false;
+let lastStylesCssContent = null;
+const lastChunkCodeByFile = new Map();
 
 function normalizePath(p) {
   return path.resolve(p).replace(/\\/g, "/").toLowerCase();
@@ -20,6 +22,8 @@ let activeHmrEngine = null;
 
 function esmHmrPlugin() {
   let hmrEngine = activeHmrEngine;
+  lastChunkCodeByFile.clear();
+  lastStylesCssContent = null;
 
   return {
     name: "esm-hmr",
@@ -68,7 +72,7 @@ function esmHmrPlugin() {
       // Inject client HMR runtime if it's the entry
       if (isClientEntry && !code.includes("/__hmr_client__.js")) {
         return {
-          code: `import { createHotContext } from "/__hmr_client__.js";window.__hotContext = createHotContext;\n` + code,
+          code: `import "/runtime.js";import { createHotContext } from "/__hmr_client__.js";window.__hotContext = createHotContext;\n` + code,
           map: null,
         };
       }
@@ -97,14 +101,52 @@ function esmHmrPlugin() {
         source: clientSource,
       });
 
+      const stylesAsset = bundle["styles.css"];
+      if (stylesAsset && stylesAsset.type === "asset") {
+        const nextCss = Buffer.isBuffer(stylesAsset.source)
+          ? stylesAsset.source.toString("utf8")
+          : String(stylesAsset.source || "");
+        if (lastStylesCssContent !== null && nextCss !== lastStylesCssContent) {
+          hasPendingCssUpdate = true;
+        }
+        lastStylesCssContent = nextCss;
+      }
+
+      const isInitialBundle = lastChunkCodeByFile.size === 0;
+      if (isInitialBundle) {
+        for (const [fileName, chunkInfo] of Object.entries(bundle)) {
+          if (!fileName.endsWith(".css") && chunkInfo.type === "chunk") {
+            lastChunkCodeByFile.set(fileName, chunkInfo.code);
+          }
+        }
+      }
+
       if (changedIds.size > 0) {
-        hasPendingCssUpdate = Array.from(changedIds).some((id) => {
-          const lower = id.toLowerCase();
-          return lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less");
-        });
+        if (
+          Array.from(changedIds).some((id) => {
+            const lower = id.toLowerCase();
+            return (
+              lower.endsWith(".css") ||
+              lower.endsWith(".scss") ||
+              lower.endsWith(".less")
+            );
+          })
+        ) {
+          hasPendingCssUpdate = true;
+        }
 
         for (const [fileName, chunkInfo] of Object.entries(bundle)) {
           if (fileName.endsWith(".css") || chunkInfo.type !== "chunk") {
+            continue;
+          }
+
+          const prevChunkCode = lastChunkCodeByFile.get(fileName);
+          lastChunkCodeByFile.set(fileName, chunkInfo.code);
+          if (
+            !isInitialBundle &&
+            prevChunkCode !== undefined &&
+            prevChunkCode === chunkInfo.code
+          ) {
             continue;
           }
 
@@ -150,8 +192,12 @@ function esmHmrPlugin() {
           }
 
           if (isChangedByJs) {
-            const urlId = "/" + fileName;
-            pendingUpdateUrls.add(urlId);
+            if (chunkInfo.code && chunkInfo.code.includes("import.meta.hot")) {
+              const urlId = "/" + fileName;
+              pendingUpdateUrls.add(urlId);
+            } else {
+              needsFullReload = true;
+            }
           }
         }
       }

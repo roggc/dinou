@@ -30,9 +30,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../node_modules/picomatch/lib/constants.js
+// node_modules/picomatch/lib/constants.js
 var require_constants = __commonJS({
-  "../node_modules/picomatch/lib/constants.js"(exports, module) {
+  "node_modules/picomatch/lib/constants.js"(exports, module) {
     "use strict";
     var WIN_SLASH = "\\\\/";
     var WIN_NO_SLASH = `[^${WIN_SLASH}]`;
@@ -232,9 +232,9 @@ var require_constants = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/lib/utils.js
+// node_modules/picomatch/lib/utils.js
 var require_utils = __commonJS({
-  "../node_modules/picomatch/lib/utils.js"(exports) {
+  "node_modules/picomatch/lib/utils.js"(exports) {
     "use strict";
     var {
       REGEX_BACKSLASH,
@@ -296,9 +296,9 @@ var require_utils = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/lib/scan.js
+// node_modules/picomatch/lib/scan.js
 var require_scan = __commonJS({
-  "../node_modules/picomatch/lib/scan.js"(exports, module) {
+  "node_modules/picomatch/lib/scan.js"(exports, module) {
     "use strict";
     var utils = require_utils();
     var {
@@ -634,9 +634,9 @@ var require_scan = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/lib/parse.js
+// node_modules/picomatch/lib/parse.js
 var require_parse = __commonJS({
-  "../node_modules/picomatch/lib/parse.js"(exports, module) {
+  "node_modules/picomatch/lib/parse.js"(exports, module) {
     "use strict";
     var constants = require_constants();
     var utils = require_utils();
@@ -1649,9 +1649,9 @@ var require_parse = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/lib/picomatch.js
+// node_modules/picomatch/lib/picomatch.js
 var require_picomatch = __commonJS({
-  "../node_modules/picomatch/lib/picomatch.js"(exports, module) {
+  "node_modules/picomatch/lib/picomatch.js"(exports, module) {
     "use strict";
     var scan = require_scan();
     var parse = require_parse();
@@ -1789,9 +1789,9 @@ var require_picomatch = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/index.js
+// node_modules/picomatch/index.js
 var require_picomatch2 = __commonJS({
-  "../node_modules/picomatch/index.js"(exports, module) {
+  "node_modules/picomatch/index.js"(exports, module) {
     "use strict";
     var pico = require_picomatch();
     var utils = require_utils();
@@ -1806,7 +1806,7 @@ var require_picomatch2 = __commonJS({
   }
 });
 
-// ../node_modules/@rollup/pluginutils/dist/es/index.js
+// node_modules/@rollup/pluginutils/dist/es/index.js
 import { extname, win32, posix, isAbsolute, resolve } from "path";
 var import_picomatch = __toESM(require_picomatch2(), 1);
 function isArray(arg) {
@@ -1942,6 +1942,7 @@ function isWellFormedString(input) {
     return input.isWellFormed();
   return !new RegExp("\\p{Surrogate}", "u").test(input);
 }
+var identifierNameRE = /^[$_\p{ID_Start}][$\u200c\u200d\p{ID_Continue}]*$/u;
 var dataToEsm = function dataToEsm2(data, options = {}) {
   var _a, _b;
   const t = options.compact ? "" : "indent" in options ? options.indent : "	";
@@ -1973,10 +1974,13 @@ var dataToEsm = function dataToEsm2(data, options = {}) {
       namedExportCode += `export ${declarationType} ${key}${_}=${_}${serialize(value, options.compact ? null : t, "")};${n}`;
     } else {
       defaultExportRows.push(`${stringify(key)}:${_}${serialize(value, options.compact ? null : t, "")}`);
-      if (options.includeArbitraryNames && isWellFormedString(key)) {
-        const variableName = `${arbitraryNamePrefix}${arbitraryNameExportRows.length}`;
-        namedExportCode += `${declarationType} ${variableName}${_}=${_}${serialize(value, options.compact ? null : t, "")};${n}`;
-        arbitraryNameExportRows.push(`${variableName} as ${JSON.stringify(key)}`);
+      if (key !== "default") {
+        const isIdentifierName = identifierNameRE.test(key);
+        if (isIdentifierName || options.includeArbitraryNames && isWellFormedString(key)) {
+          const variableName = `${arbitraryNamePrefix}${arbitraryNameExportRows.length}`;
+          namedExportCode += `${declarationType} ${variableName}${_}=${_}${serialize(value, options.compact ? null : t, "")};${n}`;
+          arbitraryNameExportRows.push(`${variableName} as ${isIdentifierName ? key : JSON.stringify(key)}`);
+        }
       }
     }
   }
@@ -1985,7 +1989,7 @@ var dataToEsm = function dataToEsm2(data, options = {}) {
   return `${namedExportCode}${arbitraryExportCode}${defaultExportCode}`;
 };
 
-// ../node_modules/@rollup/plugin-json/dist/es/index.js
+// node_modules/@rollup/plugin-json/dist/es/index.js
 function json(options) {
   if (options === void 0) options = {};
   var filter = createFilter(options.include, options.exclude);

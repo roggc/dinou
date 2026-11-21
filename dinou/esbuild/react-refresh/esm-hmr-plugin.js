@@ -64,10 +64,28 @@ async function saveSwcCache() {
 export default function esmHmrPlugin({
   entryNames = ["main", "error"],
   changedIds,
+  cssModuleClassChanges,
   hmrEngine,
   hmrPort,
 } = {}) {
-  const port = hmrPort || Number(process.env.HMR_PORT || (Number(process.env.PORT || 3000) + 1));
+  const port =
+    hmrPort !== undefined
+      ? hmrPort
+      : Number(process.env.HMR_PORT || Number(process.env.PORT || 3000) + 1);
+
+  const isPureCssStyleUpdate = (lowerPath) => {
+    if (
+      !lowerPath.endsWith(".css") &&
+      !lowerPath.endsWith(".scss") &&
+      !lowerPath.endsWith(".less")
+    ) {
+      return false;
+    }
+    if (!lowerPath.endsWith(".module.css")) {
+      return true;
+    }
+    return !cssModuleClassChanges?.has(lowerPath);
+  };
 
   return {
     name: "esm-hmr",
@@ -83,7 +101,7 @@ export default function esmHmrPlugin({
       const entryAbsPaths = [];
       const entryOutputNames = [];
 
-      if (!serverStarted) {
+      if (!serverStarted && !hmrEngine?.value) {
         const server = createServer();
         server.on("error", (err) => {
           if (err.code === "EADDRINUSE") {
@@ -202,6 +220,15 @@ export default function esmHmrPlugin({
           const outfile_basename = path.basename(outfile);
           const urlId = "/" + outfile_basename;
           const safeId = JSON.stringify(urlId);
+          if (outfile_basename === "main.js") {
+            const mainSource = new TextDecoder().decode(outputFile.contents);
+            if (!/^\s*import\s+["']\/runtime\.js["'];/.test(mainSource)) {
+              outputFile.contents = new TextEncoder().encode(
+                `import "/runtime.js";\n${mainSource}`
+              );
+            }
+            continue;
+          }
           const frameworkEntries = new Set([
             "main.js",
             "serverFunctionProxy.js",
@@ -238,13 +265,16 @@ export default function esmHmrPlugin({
           }
           const wrappedCode = `
           const RefreshRuntime = window.__reactRefreshRuntime;
+          const actualRuntime = RefreshRuntime?.default || RefreshRuntime;
           let prevRefreshReg = window.$RefreshReg$;
           let prevRefreshSig = window.$RefreshSig$;
           window.$RefreshReg$ = (type, id) => {
             const fullId = (id && id.includes('#')) ? id : (${safeId} + '#' + id);
-            RefreshRuntime.register(type, fullId);
+            actualRuntime?.register(type, fullId);
           };
-          window.$RefreshSig$ = RefreshRuntime?.createSignatureFunctionForTransform;
+          window.$RefreshSig$ = actualRuntime?.createSignatureFunctionForTransform
+            ? actualRuntime.createSignatureFunctionForTransform.bind(actualRuntime)
+            : (prevRefreshSig || (() => (type) => type));
           if (!import.meta.hot) import.meta.hot = window.__hotContext?.(${safeId});
           // --- original code ---
           ${source}
@@ -252,7 +282,7 @@ export default function esmHmrPlugin({
           if (import.meta.hot) {
             import.meta.hot.accept(({module}) => {
               if (window.__isReactRefreshBoundary && window.__isReactRefreshBoundary(module)) {
-                window.__debouncePerformReactRefresh();
+                window.__debouncePerformReactRefresh?.();
               } else {
                 // Fallback: full reload if it is not a boundary
                 import.meta.hot.invalidate();
@@ -279,6 +309,7 @@ export default function esmHmrPlugin({
         if (isInitialBuild) {
           isInitialBuild = false;
           changedIds?.clear();
+          cssModuleClassChanges?.clear();
           return;
         }
 
@@ -286,19 +317,20 @@ export default function esmHmrPlugin({
           return;
         }
 
-        if (changedIds.size === 0) return;
+        if (changedIds.size === 0) {
+          cssModuleClassChanges?.clear();
+          return;
+        }
 
-        // If only CSS files were modified, styles are updated via style-update in cssProcessorPlugin.
+        // If only CSS files (or CSS Modules whose exported class names did not change)
+        // were modified, styles are updated via style-update in cssProcessorPlugin.
         // Do NOT trigger full reload or JS component updates.
-        const isCssOnly = Array.from(changedIds).every((id) => {
-          const lower = id.toLowerCase();
-          return (
-            (lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less")) &&
-            !lower.endsWith(".module.css")
-          );
-        });
+        const isCssOnly = Array.from(changedIds).every((id) =>
+          isPureCssStyleUpdate(id.toLowerCase())
+        );
         if (isCssOnly) {
           changedIds.clear();
+          cssModuleClassChanges?.clear();
           return;
         }
 
@@ -330,10 +362,7 @@ export default function esmHmrPlugin({
             const cleanPath = stripNamespace(modulePath);
             const norm = normKey(cleanPath);
             const lower = norm.toLowerCase();
-            if (
-              (lower.endsWith(".css") || lower.endsWith(".scss") || lower.endsWith(".less")) &&
-              !lower.endsWith(".module.css")
-            ) {
+            if (isPureCssStyleUpdate(lower)) {
               return false;
             }
             return changedIds.has(norm);
@@ -379,6 +408,7 @@ export default function esmHmrPlugin({
         }
         saveSwcCache().catch(() => {});
         changedIds.clear();
+        cssModuleClassChanges?.clear();
         globalThis.__DINOU_BROADCAST_TIME__ = Date.now() - tBroadcast0;
       });
     },

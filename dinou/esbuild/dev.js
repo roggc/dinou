@@ -16,11 +16,15 @@ import {
   transformToDisk,
   getMirrorPath,
 } from "./helpers-esbuild/swc-disk-cache.js";
+import { generateRouteTypes } from "../core/generate-route-types.js";
+import { getDinouConfig } from "../core/load-dinou-config.js";
+import { loadEnvFiles } from "../core/env.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export async function startEsbuildDev(options = {}) {
+  loadEnvFiles(process.cwd(), { mode: "development" });
   const onRebuilt = options.onRebuilt || (() => {});
   const onBuildStart = options.onBuildStart || (() => {});
   const onBuildEnd = options.onBuildEnd || (() => {});
@@ -33,8 +37,13 @@ export async function startEsbuildDev(options = {}) {
     delete globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__;
   }
   await fs.rm(outdir, { recursive: true, force: true });
-  await fs.rm(".dinou/react_client_manifest", { recursive: true, force: true });
-  await fs.rm(".dinou/server_functions_manifest", { recursive: true, force: true });
+  for (const stale of [
+    "react-client-manifest.json",
+    "server-functions-manifest.json",
+    "manifest.json",
+  ]) {
+    await fs.rm(path.join(".dinou/node-dev", stale), { force: true });
+  }
 
   let currentCtx = null; // Track the active esbuild context
   let activeBuildResolve = null;
@@ -71,23 +80,30 @@ export async function startEsbuildDev(options = {}) {
 
   const changedIds = new Set();
   const hmrEngine = { value: null };
+  const cssRefreshRef = { refresh: null };
 
   let manifest = {};
   let entryPoints = {};
   let cssEntryPoints = {};
+  let serverAssetPaths = [];
+  let activeDinouConfig = null;
   let allComponentEntries = {};
   let activeComponentEntries = new Map();
   let pathToOutfile = new Map();
   let outfileNameToPath = new Map();
 
   async function updateEntriesAndComponents() {
+    activeDinouConfig = await getDinouConfig();
+    try {
+      generateRouteTypes(process.cwd());
+    } catch (e) {}
     manifest = {};
     const [
       esbuildEntries,
       detectedCSSEntries,
       detectedAssetEntries,
       serverFiles,
-    ] = await getEsbuildEntries({ manifest });
+    ] = await getEsbuildEntries({ manifest, dinouConfig: activeDinouConfig });
 
     updateManifestForModule(
       absPathToClientRedirect,
@@ -126,10 +142,7 @@ export async function startEsbuildDev(options = {}) {
       {}
     );
 
-    const assetEntryPoints = [...detectedAssetEntries].reduce(
-      (acc, dAE) => ({ ...acc, [dAE.outfileName]: dAE.absPath }),
-      {}
-    );
+    serverAssetPaths = [...detectedAssetEntries].map((dAE) => dAE.absPath);
 
     allComponentEntries = componentEntryPoints;
     for (const [outName, absP] of Object.entries(componentEntryPoints)) {
@@ -169,7 +182,10 @@ export async function startEsbuildDev(options = {}) {
           manifest,
           changedIds,
           hmrEngine,
+          cssRefreshRef,
           serverFiles: currentServerFiles,
+          serverAssetPaths,
+          dinouConfig: activeDinouConfig,
           hmrPort: options.hmrPort,
           onManifestUpdated: async () => {
             await onRebuilt();
@@ -288,6 +304,16 @@ export async function startEsbuildDev(options = {}) {
         }
       }
       return Promise.resolve();
+    },
+    refreshStyles: async () => {
+      if (typeof cssRefreshRef.refresh === "function") {
+        try {
+          return await cssRefreshRef.refresh();
+        } catch (err) {
+          console.error("❌ [Esbuild Dev] CSS refresh error:", err);
+        }
+      }
+      return false;
     },
     restart: async () => {
       console.log("⚡ [Esbuild Dev] Recreating client bundle due to directive change...");

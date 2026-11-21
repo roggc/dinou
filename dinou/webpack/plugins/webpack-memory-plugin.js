@@ -29,33 +29,46 @@ class WebpackMemoryPlugin {
           }
         }
 
+        if (typeof globalThis !== "undefined" && globalThis.__DINOU_MEM_FILES__) {
+          const stylesInfo = compilation.getAsset("styles.css")?.info;
+          if (!assets["styles.css"] || stylesInfo?.copied) {
+            globalThis.__DINOU_MEM_FILES__.delete("styles.css");
+            globalThis.__DINOU_MEM_FILES__.delete("/styles.css");
+          }
+        }
+
         for (const [filename, asset] of Object.entries(assets)) {
           if (!asset) continue;
+          if (compilation.getAsset(filename)?.info?.copied) {
+            continue;
+          }
 
           const normKey = filename.replace(/\\/g, "/");
           const cleanKey = normKey.replace(/^\/+/, "");
           const raw = typeof asset.source === "function" ? asset.source() : asset;
           const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw || "");
 
+          if (cleanKey === "react-client-manifest.json") {
+            try {
+              globalThis.__DINOU_RAW_CLIENT_MANIFEST__ = JSON.parse(buf.toString("utf8"));
+            } catch (e) {}
+            continue;
+          }
+          if (cleanKey === "server-functions-manifest.json") {
+            try {
+              globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__ = JSON.parse(buf.toString("utf8"));
+            } catch (e) {}
+            continue;
+          }
+          if (cleanKey === "react-ssr-manifest.json") {
+            continue;
+          }
+
           if (typeof globalThis !== "undefined" && globalThis.__DINOU_MEM_FILES__) {
             globalThis.__DINOU_MEM_FILES__.set(cleanKey, buf);
             globalThis.__DINOU_MEM_FILES__.set("/" + cleanKey, buf);
             const base = path.basename(cleanKey);
             globalThis.__DINOU_MEM_FILES__.set(base, buf);
-          }
-
-          if (cleanKey === "react-client-manifest.json") {
-            try {
-              globalThis.__DINOU_RAW_CLIENT_MANIFEST__ = JSON.parse(buf.toString("utf8"));
-            } catch (e) {}
-          } else if (cleanKey === "server-functions-manifest.json") {
-            try {
-              globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__ = JSON.parse(buf.toString("utf8"));
-            } catch (e) {}
-          } else if (cleanKey === "manifest.json") {
-            try {
-              globalThis.__DINOU_RAW_ASSET_MANIFEST__ = JSON.parse(buf.toString("utf8"));
-            } catch (e) {}
           }
         }
       });

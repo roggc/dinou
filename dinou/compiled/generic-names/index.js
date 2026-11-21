@@ -15,9 +15,9 @@ var __commonJS = (cb, mod) => function __require2() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
 
-// ../node_modules/loader-utils/lib/hash/wasm-hash.js
+// node_modules/loader-utils/lib/hash/wasm-hash.js
 var require_wasm_hash = __commonJS({
-  "../node_modules/loader-utils/lib/hash/wasm-hash.js"(exports, module) {
+  "node_modules/loader-utils/lib/hash/wasm-hash.js"(exports, module) {
     "use strict";
     var MAX_SHORT_STRING = Math.floor((65536 - 64) / 4) & ~3;
     var WasmHash = class {
@@ -177,9 +177,9 @@ var require_wasm_hash = __commonJS({
   }
 });
 
-// ../node_modules/loader-utils/lib/hash/xxhash64.js
+// node_modules/loader-utils/lib/hash/xxhash64.js
 var require_xxhash64 = __commonJS({
-  "../node_modules/loader-utils/lib/hash/xxhash64.js"(exports, module) {
+  "node_modules/loader-utils/lib/hash/xxhash64.js"(exports, module) {
     "use strict";
     var create = require_wasm_hash();
     var xxhash64 = new WebAssembly.Module(
@@ -193,9 +193,9 @@ var require_xxhash64 = __commonJS({
   }
 });
 
-// ../node_modules/loader-utils/lib/hash/BatchedHash.js
+// node_modules/loader-utils/lib/hash/BatchedHash.js
 var require_BatchedHash = __commonJS({
-  "../node_modules/loader-utils/lib/hash/BatchedHash.js"(exports, module) {
+  "node_modules/loader-utils/lib/hash/BatchedHash.js"(exports, module) {
     var MAX_SHORT_STRING = require_wasm_hash().MAX_SHORT_STRING;
     var BatchedHash = class {
       constructor(hash) {
@@ -247,9 +247,9 @@ var require_BatchedHash = __commonJS({
   }
 });
 
-// ../node_modules/loader-utils/lib/hash/md4.js
+// node_modules/loader-utils/lib/hash/md4.js
 var require_md4 = __commonJS({
-  "../node_modules/loader-utils/lib/hash/md4.js"(exports, module) {
+  "node_modules/loader-utils/lib/hash/md4.js"(exports, module) {
     "use strict";
     var create = require_wasm_hash();
     var md4 = new WebAssembly.Module(
@@ -263,9 +263,9 @@ var require_md4 = __commonJS({
   }
 });
 
-// ../node_modules/loader-utils/lib/hash/BulkUpdateDecorator.js
+// node_modules/loader-utils/lib/hash/BulkUpdateDecorator.js
 var require_BulkUpdateDecorator = __commonJS({
-  "../node_modules/loader-utils/lib/hash/BulkUpdateDecorator.js"(exports, module) {
+  "node_modules/loader-utils/lib/hash/BulkUpdateDecorator.js"(exports, module) {
     var BULK_SIZE = 2e3;
     var digestCaches = {};
     var BulkUpdateDecorator = class {
@@ -346,9 +346,9 @@ var require_BulkUpdateDecorator = __commonJS({
   }
 });
 
-// ../node_modules/loader-utils/lib/getHashDigest.js
+// node_modules/loader-utils/lib/getHashDigest.js
 var require_getHashDigest = __commonJS({
-  "../node_modules/loader-utils/lib/getHashDigest.js"(exports, module) {
+  "node_modules/loader-utils/lib/getHashDigest.js"(exports, module) {
     "use strict";
     var baseEncodeTables = {
       26: "abcdefghijklmnopqrstuvwxyz",
@@ -446,9 +446,9 @@ var require_getHashDigest = __commonJS({
   }
 });
 
-// ../node_modules/loader-utils/lib/interpolateName.js
+// node_modules/loader-utils/lib/interpolateName.js
 var require_interpolateName = __commonJS({
-  "../node_modules/loader-utils/lib/interpolateName.js"(exports, module) {
+  "node_modules/loader-utils/lib/interpolateName.js"(exports, module) {
     "use strict";
     var path = __require("path");
     var getHashDigest = require_getHashDigest();
@@ -528,9 +528,9 @@ var require_interpolateName = __commonJS({
   }
 });
 
-// ../node_modules/generic-names/index.js
+// node_modules/generic-names/index.js
 var require_generic_names = __commonJS({
-  "../node_modules/generic-names/index.js"(exports, module) {
+  "node_modules/generic-names/index.js"(exports, module) {
     var interpolateName = require_interpolateName();
     var path = __require("path");
     module.exports = function createGenerator(pattern, options) {

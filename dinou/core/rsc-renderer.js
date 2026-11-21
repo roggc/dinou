@@ -5,7 +5,10 @@ import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { ensureServerHooksPatched } from "./render-jsx-to-client-jsx.js";
 
-const require = createRequire(import.meta.url);
+let require = null;
+try {
+  require = createRequire(import.meta.url);
+} catch (e) {}
 
 const isWebpack = process.env.DINOU_BUILD_TOOL === "webpack";
 

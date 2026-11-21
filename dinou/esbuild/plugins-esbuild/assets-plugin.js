@@ -1,12 +1,10 @@
-import fs from "node:fs/promises";
+import fs from "node:fs";
 import path from "node:path";
-import createScopedName from "../../core/createScopedName.js";
-import { regex } from "../../core/asset-extensions.js";
-import { getAbsPathWithExt } from "../../core/get-abs-path-with-ext.js";
-import { pathToFileURL } from "node:url";
-import stripNamespace from "../helpers-esbuild/strip-namespace.js";
-
-const escapeRegExp = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+import {
+  getAssetExtensionsInfo,
+  getAssetInfo,
+  resolveAssetImport,
+} from "../../core/asset-extensions.js";
 
 const normKey = (p) => {
   if (!p) return "";
@@ -17,9 +15,41 @@ const normKey = (p) => {
   return s;
 };
 
-export default function assetsPlugin({ include = regex, changedIds } = {}) {
-  let isInitial = true;
-  let cachedRenames = new Map();
+export default function assetsPlugin({
+  include = null,
+  dinouConfig = null,
+  projectRoot = process.cwd(),
+  serverAssetPaths = [],
+  changedIds,
+} = {}) {
+  const rootDir = path.resolve(projectRoot || process.cwd());
+  const emittedAssetsBySource = new Map();
+
+  function recordEmittedAsset(absSourcePath) {
+    if (!absSourcePath || !fs.existsSync(absSourcePath)) return null;
+    const info = getAssetInfo(absSourcePath, rootDir, { includeBuffer: true });
+    if (!info.buffer) return info;
+
+    const sourceKey = normKey(absSourcePath);
+    const prev = emittedAssetsBySource.get(sourceKey);
+    if (
+      prev &&
+      prev.fileName !== info.fileName &&
+      typeof globalThis !== "undefined" &&
+      globalThis.__DINOU_MEM_FILES__
+    ) {
+      globalThis.__DINOU_MEM_FILES__.delete(prev.fileName);
+      globalThis.__DINOU_MEM_FILES__.delete("/" + prev.fileName);
+      globalThis.__DINOU_MEM_FILES__.delete(path.basename(prev.fileName));
+    }
+
+    emittedAssetsBySource.set(sourceKey, {
+      sourcePath: path.resolve(absSourcePath),
+      fileName: info.fileName,
+      contents: info.buffer,
+    });
+    return info;
+  }
 
   return {
     name: "assets-plugin",
@@ -31,17 +61,29 @@ export default function assetsPlugin({ include = regex, changedIds } = {}) {
 
       build.initialOptions.assetNames = "assets/[name]-[hash]";
 
-      // Handle asset loading with different namespaces
-      build.onResolve({ filter: include }, async (args) => {
+      const extInfo = getAssetExtensionsInfo(dinouConfig, rootDir);
+      const cleanRegex = include || extInfo.regex;
+      const filterRegex = include
+        ? new RegExp(
+            include.source.replace(/\\\$$|\$$/, "(?:[?#].*)?$"),
+            include.flags.includes("i") ? "i" : `${include.flags}i`
+          )
+        : extInfo.resolveFilterRegex;
+
+      build.onResolve({ filter: filterRegex }, async (args) => {
         if (args.pluginData?.inAssetPlugin) return null;
-        let resolvedAlias =
+
+        let resolvedPath =
           args.kind === "entry-point"
-            ? args.path
-            : getAbsPathWithExt(args.path, {
-                parentURL: pathToFileURL(args.importer).href,
+            ? path.resolve(rootDir, args.path)
+            : resolveAssetImport(args.path, {
+                importer: args.importer,
+                resolveDir: args.resolveDir,
+                projectRoot: rootDir,
+                assetRegex: cleanRegex,
               });
 
-        if (!resolvedAlias) {
+        if (!resolvedPath) {
           try {
             const res = await build.resolve(args.path, {
               resolveDir: args.resolveDir,
@@ -49,266 +91,86 @@ export default function assetsPlugin({ include = regex, changedIds } = {}) {
               pluginData: { inAssetPlugin: true },
             });
             if (res && res.path) {
-              resolvedAlias = res.path;
+              resolvedPath = res.path;
             }
           } catch (e) {}
         }
 
-        if (!resolvedAlias) return null;
+        if (!resolvedPath) return null;
 
         if (args.kind === "entry-point") {
           return {
-            path: resolvedAlias,
+            path: resolvedPath,
             namespace: "dinou-asset-entry",
           };
         }
 
         return {
-          path: resolvedAlias,
+          path: resolvedPath,
           namespace: "dinou-asset",
         };
       });
 
-      // Cache asset file buffers in memory
-      const assetCache = new Map();
-      const emittedAssets = new Map();
-
-      // Loader for normal assets
-      build.onLoad({ filter: /.*/, namespace: "dinou-asset" }, async (args) => {
-        let contents = assetCache.get(args.path);
-        if (!contents) {
-          contents = await fs.readFile(args.path);
-          assetCache.set(args.path, contents);
-        }
-        const ext = path.extname(args.path);
-        const base = path.basename(args.path, ext);
-        const scoped = createScopedName(base, args.path);
-        const assetUrl = `/assets/${scoped}${ext}`;
-        const newLocal = `assets/${scoped}${ext}`;
-
-        emittedAssets.set(newLocal, {
-          path: path.join(outdir, newLocal),
-          contents,
-          get text() {
-            return new TextDecoder().decode(this.contents);
-          },
-        });
-
+      const loadAssetModule = async (args) => {
+        const info = recordEmittedAsset(args.path);
+        const publicUrl =
+          info?.publicUrl || getAssetInfo(args.path, rootDir).publicUrl;
         return {
-          contents: `export default "${assetUrl}";`,
+          contents: `export default ${JSON.stringify(publicUrl)};`,
           loader: "js",
           watchFiles: [args.path],
         };
-      });
+      };
 
-      // Loader for asset entry points
+      build.onLoad({ filter: /.*/, namespace: "dinou-asset" }, loadAssetModule);
       build.onLoad(
         { filter: /.*/, namespace: "dinou-asset-entry" },
-        async (args) => {
-          let contents = assetCache.get(args.path);
-          if (!contents) {
-            contents = await fs.readFile(args.path);
-            assetCache.set(args.path, contents);
-          }
-          return { contents, loader: "file", watchFiles: [args.path] };
-        }
+        loadAssetModule
       );
 
       build.onEnd(async (result) => {
         const tAssets0 = Date.now();
         try {
-          if (!result.metafile || !result.outputFiles?.length) return;
+          if (!result || !Array.isArray(result.outputFiles)) return;
 
-          const normalizeRel = (p) => p.replace(/\\/g, "/");
-          const isIncremental = !isInitial && changedIds && changedIds.size > 0;
-          const hasAssetChanged = isIncremental && Array.from(changedIds).some((id) => include.test(id));
-
-          // Ensure JS-loaded assets are included in output files
-          for (const asset of emittedAssets.values()) {
-            if (!result.outputFiles.some((f) => f.path === asset.path)) {
-              result.outputFiles.push(asset);
+          if (Array.isArray(serverAssetPaths) && serverAssetPaths.length > 0) {
+            for (const serverAssetPath of serverAssetPaths) {
+              recordEmittedAsset(serverAssetPath);
             }
           }
 
-          let renames = cachedRenames;
-
-          // Only re-scan all asset outputs on initial build or if an asset file actually changed
-          if (isInitial || hasAssetChanged) {
-            renames = new Map();
-            const processedSourceFiles = new Set();
-
-            // First pass: normal assets (individual files)
-            for (const [oldRelPath, info] of Object.entries(
-              result.metafile.outputs
-            )) {
-              if (info.entryPoint || Object.keys(info.inputs).length !== 1)
-                continue;
-
-              const inputPath = Object.keys(info.inputs)[0];
-              const sourceFile = inputPath
-                .replace(/^dinou-asset:/, "")
-                .replace(/^dinou-asset-entry:/, "");
-              if (!include.test(sourceFile)) continue;
-
-              const ext = path.extname(sourceFile);
-              if (!oldRelPath.endsWith(ext)) continue;
-              const base = path.basename(sourceFile, ext);
-              const scoped = createScopedName(base, sourceFile);
-              const newLocal = `assets/${scoped}${ext}`;
-              const oldLocal = normalizeRel(path.relative(outdir, oldRelPath));
-
-              renames.set(oldLocal, newLocal);
-              processedSourceFiles.add(sourceFile);
-            }
-
-            // Pre-index outputFiles for O(1) lookup
-            const outputFilesByRelPath = new Map();
-            for (const f of result.outputFiles) {
-              outputFilesByRelPath.set(normalizeRel(path.relative(process.cwd(), f.path)), f);
-            }
-
-            // Second pass: find assets that are inside chunks
-            for (const [outputPath, info] of Object.entries(
-              result.metafile.outputs
-            )) {
-              if (!outputPath.endsWith(".js") || info.entryPoint) continue;
-
-              for (const inputPath of Object.keys(info.inputs)) {
-                if (!inputPath.startsWith("dinou-asset:")) continue;
-
-                const sourceFile = inputPath.replace(/^dinou-asset:/, "");
-                if (
-                  !include.test(sourceFile) ||
-                  processedSourceFiles.has(sourceFile)
-                )
-                  continue;
-
-                try {
-                  const ext = path.extname(sourceFile);
-                  const base = path.basename(sourceFile, ext);
-                  const scoped = createScopedName(base, sourceFile);
-                  const newLocal = `assets/${scoped}${ext}`;
-
-                  const assetContent = await fs.readFile(sourceFile);
-
-                  const newOutputFile = {
-                    path: path.join(outdir, newLocal),
-                    contents: assetContent,
-                    get text() {
-                      return new TextDecoder().decode(this.contents);
-                    },
-                  };
-
-                  result.outputFiles.push(newOutputFile);
-                  processedSourceFiles.add(sourceFile);
-
-                  const chunkFile = outputFilesByRelPath.get(outputPath);
-
-                  if (chunkFile) {
-                    let chunkContent = new TextDecoder().decode(chunkFile.contents);
-                    const assetComment = `// ${inputPath}`;
-                    const commentIndex = chunkContent.indexOf(assetComment);
-
-                    if (commentIndex !== -1) {
-                      const nextLineStart = chunkContent.indexOf("\n", commentIndex) + 1;
-                      const nextLineEnd = chunkContent.indexOf("\n", nextLineStart);
-                      const assignmentLine = chunkContent.substring(nextLineStart, nextLineEnd);
-                      const varMatch = assignmentLine.match(/var (\w+)_default = "([^"]+)"/);
-
-                      if (varMatch) {
-                        const varName = varMatch[1];
-                        const newAssignmentLine = `var ${varName}_default = "/${newLocal}";`;
-                        chunkContent =
-                          chunkContent.substring(0, nextLineStart) +
-                          newAssignmentLine +
-                          chunkContent.substring(nextLineEnd);
-                      }
-                    } else {
-                      const assetName = path.basename(sourceFile);
-                      const escapedAssetName = escapeRegExp(assetName);
-                      const pattern = new RegExp(
-                        `(var \\w+_default = ")([^"]*${escapedAssetName}[^"]*)(";)`,
-                        "g"
-                      );
-
-                      if (pattern.test(chunkContent)) {
-                        chunkContent = chunkContent.replace(
-                          pattern,
-                          `$1/${newLocal}$3`
-                        );
-                      }
-                    }
-
-                    chunkFile.contents = new TextEncoder().encode(chunkContent);
-                  }
-                } catch (error) {
-                  console.error(
-                    `Error extracting asset ${sourceFile} from chunk:`,
-                    error
-                  );
-                }
+          if (changedIds && changedIds.size > 0) {
+            for (const changedPath of changedIds) {
+              if (cleanRegex.test(changedPath) && fs.existsSync(changedPath)) {
+                recordEmittedAsset(changedPath);
               }
-            }
-
-            cachedRenames = renames;
-          }
-
-          if (renames.size === 0) return;
-
-          // Update references in JS/CSS files:
-          // On incremental rebuild, only process output files belonging to changed modules!
-          for (const file of result.outputFiles) {
-            const relPath = normalizeRel(path.relative(process.cwd(), file.path));
-            if (!relPath.endsWith(".js") && !relPath.endsWith(".css")) continue;
-
-            if (isIncremental && !hasAssetChanged) {
-              const outputInfo = result.metafile.outputs[relPath];
-              const inputFiles = Object.keys(outputInfo?.inputs || {});
-              const touchesChanged = inputFiles.some((m) => {
-                const clean = stripNamespace(m);
-                return changedIds.has(normKey(clean));
-              });
-              if (!touchesChanged) continue;
-            }
-
-            let content = new TextDecoder().decode(file.contents);
-            let modified = false;
-            for (const [oldLocal, newLocal] of renames) {
-              if (!content.includes(oldLocal)) continue;
-              const patterns = [
-                [`"./${escapeRegExp(oldLocal)}"`, `"/${newLocal}"`],
-                [`"${escapeRegExp(oldLocal)}"`, `"${newLocal}"`],
-                [`'./${escapeRegExp(oldLocal)}'`, `'/${newLocal}'`],
-                [`'${escapeRegExp(oldLocal)}'`, `'${newLocal}'`],
-              ];
-
-              for (const [oldPattern, newPattern] of patterns) {
-                const reg = new RegExp(oldPattern, "g");
-                if (reg.test(content)) {
-                  content = content.replace(reg, newPattern);
-                  modified = true;
-                }
-              }
-            }
-            if (modified) {
-              file.contents = new TextEncoder().encode(content);
             }
           }
 
-          // Update paths in outputFiles
-          if (!isIncremental) {
-            for (const file of result.outputFiles) {
-              const relPath = normalizeRel(path.relative(process.cwd(), file.path));
-              const oldLocal = normalizeRel(path.relative(outdir, relPath));
-              const newLocal = renames.get(oldLocal);
+          const existingDestKeys = new Set(
+            result.outputFiles.map((f) => normKey(f.path))
+          );
 
-              if (newLocal) {
-                file.path = path.join(outdir, newLocal);
-              }
+          for (const [sourceKey, asset] of emittedAssetsBySource.entries()) {
+            if (!fs.existsSync(asset.sourcePath)) {
+              emittedAssetsBySource.delete(sourceKey);
+              continue;
             }
+            const destPath = path.resolve(outdir, asset.fileName);
+            const destKey = normKey(destPath);
+            if (existingDestKeys.has(destKey)) continue;
+            existingDestKeys.add(destKey);
+
+            const contents = asset.contents;
+            result.outputFiles.push({
+              path: destPath,
+              contents,
+              get text() {
+                return new TextDecoder().decode(this.contents);
+              },
+            });
           }
         } finally {
-          isInitial = false;
           globalThis.__DINOU_ASSETS_TIME__ = Date.now() - tAssets0;
         }
       });

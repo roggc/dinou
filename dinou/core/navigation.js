@@ -1,6 +1,7 @@
 // dinou/core/navigation.js
 "use client";
 import React from "react";
+import { interpolateRouteParams, resolveUrl } from "./navigation-utils.js";
 
 // Defensive mocks
 const createContext =
@@ -10,6 +11,14 @@ const createContext =
     _currentValue: defaultValue,
   }));
 const useContext = React.useContext || (() => null);
+const useState =
+  React.useState ||
+  ((init) => [typeof init === "function" ? init() : init, () => {}]);
+const useEffect = React.useEffect || (() => {});
+const useMemo = React.useMemo || ((fn) => fn());
+const useSyncExternalStore =
+  React.useSyncExternalStore || ((_sub, getSnap) => getSnap());
+const emptySubscribe = () => () => {};
 
 // 🔄 CHANGE: Now default value is a compatible object
 export const RouterContext = createContext({
@@ -54,50 +63,67 @@ export function useNavigationLoading() {
 export function useRouter() {
   const context = useContext(RouterContext);
 
-  // Guards for SSR (optional, but good practice)
-  if (!context) {
-    // On the server we return empty functions to not break the rendering
+  return useMemo(() => {
+    // Guards for SSR (optional, but good practice)
+    if (!context) {
+      // On the server we return empty functions to not break the rendering
+      return {
+        push: () => {},
+        replace: () => {},
+        back: () => {},
+        forward: () => {},
+        refresh: () => {},
+        refreshSlot: () => Promise.resolve(),
+      };
+    }
+
     return {
-      push: () => { },
-      replace: () => { },
-      back: () => { },
-      forward: () => { },
-      refresh: (options) => { },
-      refreshSlot: (slotId, options) => Promise.resolve(),
+      push: (href, options) => {
+        const { params, from, ...restOptions } = options || {};
+        const interpolated = interpolateRouteParams(href, params);
+        const target =
+          from && typeof window !== "undefined"
+            ? resolveUrl(interpolated, window.location.pathname, from)
+            : interpolated;
+        return context.navigate(target, restOptions);
+      },
+      replace: (href, options) => {
+        const { params, from, ...restOptions } = options || {};
+        const interpolated = interpolateRouteParams(href, params);
+        const target =
+          from && typeof window !== "undefined"
+            ? resolveUrl(interpolated, window.location.pathname, from)
+            : interpolated;
+        return context.navigate(target, { replace: true, ...restOptions });
+      },
+
+      /**
+       * Navigate back in the browser's history.
+       * Equivalent to clicking the browser's Back button.
+       */
+      back: () => context.back?.(),
+
+      /**
+       * Navigate forward in the browser's history.
+       */
+      forward: () => context.forward?.(),
+
+      /**
+       * Refresh the current route.
+       * Makes a new request to the server for the current URL, clearing the cache,
+       * and re-renders the server component without a full browser reload.
+       * Pass `{ layout: true }` to also invalidate and re-render the layout.
+       */
+      refresh: (options) => context.refresh?.(options),
+
+      /**
+       * Refresh a specific DinouCacheSlot without re-rendering the rest of the page.
+       * @param {string} slotId The ID or tag of the slot to refresh.
+       * @param {object} [options] Optional configuration ({ fresh?: boolean }).
+       */
+      refreshSlot: (slotId, options) => refreshSlot(slotId, options),
     };
-  }
-
-  return {
-    push: (href, options) => context.navigate(href, options),
-    replace: (href, options) =>
-      context.navigate(href, { replace: true, ...options }),
-
-    /**
-     * Navigate back in the browser's history.
-     * Equivalent to clicking the browser's Back button.
-     */
-    back: () => context.back(),
-
-    /**
-     * Navigate forward in the browser's history.
-     */
-    forward: () => context.forward(),
-
-    /**
-     * Refresh the current route.
-     * Makes a new request to the server for the current URL, clearing the cache,
-     * and re-renders the server component without a full browser reload.
-     * Pass `{ layout: true }` to also invalidate and re-render the layout.
-     */
-    refresh: (options) => context.refresh(options),
-
-    /**
-     * Refresh a specific DinouCacheSlot without re-rendering the rest of the page.
-     * @param {string} slotId The ID or tag of the slot to refresh.
-     * @param {object} [options] Optional configuration ({ fresh?: boolean }).
-     */
-    refreshSlot: (slotId, options) => refreshSlot(slotId, options),
-  };
+  }, [context]);
 }
 
 export function refreshSlot(slotId, options) {
@@ -117,6 +143,21 @@ export function refreshSlot(slotId, options) {
 }
 
 const DINOU_CONTEXT_KEY = Symbol.for("dinou.request.context.storage");
+const BAILOUT_RAW_TARGET = Symbol.for("dinou.bailout.raw");
+
+function queryObjectToURLSearchParams(query) {
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, val]) => {
+    if (Array.isArray(val)) {
+      val.forEach((v) => {
+        if (v !== undefined && v !== null) params.append(key, String(v));
+      });
+    } else if (val !== undefined && val !== null) {
+      params.append(key, String(val));
+    }
+  });
+  return params;
+}
 
 export function usePathname() {
   // 🟢 1. SERVER LOGIC (SSR)
@@ -153,21 +194,64 @@ export function useSearchParams() {
   if (typeof window === "undefined") {
     try {
       const storage = globalThis[DINOU_CONTEXT_KEY];
-      const ctx = storage && typeof storage.getStore === "function" ? storage.getStore() : null;
-      if (ctx && ctx.req && ctx.req.query) {
-        const params = new URLSearchParams();
-        Object.entries(ctx.req.query).forEach(([key, val]) => {
-          if (Array.isArray(val)) val.forEach((v) => params.append(key, v));
-          else if (val) params.append(key, val);
-        });
-        return params;
+      const ctx =
+        (storage && typeof storage.getStore === "function"
+          ? storage.getStore()
+          : null) || globalThis[Symbol.for("dinou.request.context.current")];
+      const clientH =
+        React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE?.H;
+      const isClientSsrRender =
+        typeof React.useState === "function" &&
+        Boolean(clientH) &&
+        !clientH._dinouIsServerHooksDispatcher;
+      if (isClientSsrRender) {
+        if (!ctx || ctx._isPprRuntimeResume || ctx._isStaticHtmlRender) {
+          return new URLSearchParams();
+        }
+        const rawQuery =
+          ctx.req && ctx.req.query
+            ? ctx.req.query[BAILOUT_RAW_TARGET] || ctx.req.query
+            : null;
+        if (rawQuery) {
+          return queryObjectToURLSearchParams(rawQuery);
+        }
+        return new URLSearchParams();
       }
-    } catch (e) { }
+      if (ctx && ctx.req && ctx.req.query) {
+        return queryObjectToURLSearchParams(ctx.req.query);
+      }
+    } catch (e) {
+      if (
+        e &&
+        (e.$$typeof === Symbol.for("dinou.ppr.postpone") ||
+          e.$$typeof === Symbol.for("react.postpone") ||
+          e.$$typeof === Symbol.for("dinou.ppr.skipStatic"))
+      ) {
+        throw e;
+      }
+    }
     return new URLSearchParams();
   }
 
   // 🔵 2. CLIENT LOGIC
   const context = useContext(RouterContext);
+  const isReactHydrating = useSyncExternalStore(
+    emptySubscribe,
+    () => false,
+    () => true
+  );
+  const isStaticHydrating =
+    isReactHydrating &&
+    typeof window !== "undefined" &&
+    Boolean(
+      window.__DINOU_USE_STATIC__ ||
+        window.__DINOU_PPR_RESUME__ ||
+        window.__DINOU_STATIC_EXPORT__
+    );
+
+  if (isStaticHydrating) {
+    return new URLSearchParams();
+  }
 
   // ⚠️ CRITICAL CHANGE: We extract .url
   const fullRoute = typeof context === "string" ? context : context?.url;

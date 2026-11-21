@@ -16,7 +16,10 @@ import {
   registerHole,
   markDynamicAccess,
   isPageRootElement,
+  getPageRootPpr,
   isLayoutRootElement,
+  getLayoutRootPpr,
+  runWithSegmentPpr,
   isLayoutChildrenPlaceholder,
   runInPageSegment,
   runInLayoutSegment,
@@ -28,10 +31,20 @@ import {
   isSlotDiscoveryActive,
 } from "./ppr-context.js";
 import { getContext } from "./request-context.js";
+import { unwrapBailoutProxy } from "./bailout-proxy.js";
 
 const REACT_MEMO_CACHE_SENTINEL = Symbol.for("react.memo_cache_sentinel");
 const REACT_CONTEXT_TYPE = Symbol.for("react.context");
 const CLIENT_REFERENCE_TAG = Symbol.for("react.client.reference");
+const SERVER_HOOKS_IMPL_KEY = Symbol.for("dinou.server.hooks.impl");
+const HOLE_BOUNDARY_PROMISE_CACHE_KEY = Symbol.for(
+  "dinou.hole.boundary.promise.cache"
+);
+const REVAL_QUEUE_STORAGE_KEY = Symbol.for("dinou.reval.queue.storage");
+
+function isRevalidationActive() {
+  return Boolean(globalThis[REVAL_QUEUE_STORAGE_KEY]?.getStore());
+}
 
 let fallbackRenderSeq = 0;
 
@@ -204,6 +217,14 @@ const DinouServerHooksDispatcher = {
     return unsupportedRefresh;
   },
   useEffectEvent: unsupportedHook,
+  _dinouIsServerHooksDispatcher: true,
+};
+if (typeof globalThis !== "undefined") {
+  globalThis[SERVER_HOOKS_IMPL_KEY] = {
+    useServerId,
+    snapshotActiveIdCounts,
+    restoreActiveIdCounts,
+  };
 };
 
 function getCallerComponentSite() {
@@ -227,7 +248,12 @@ function getCallerComponentSite() {
 }
 
 function patchDispatcherObject(dispatcher, internals) {
-  if (!dispatcher || typeof dispatcher !== "object" || dispatcher === DinouServerHooksDispatcher) {
+  if (
+    !dispatcher ||
+    typeof dispatcher !== "object" ||
+    dispatcher === DinouServerHooksDispatcher ||
+    dispatcher._dinouIsServerHooksDispatcher
+  ) {
     return;
   }
   if (dispatcher._dinouWrappedDispatcher) {
@@ -242,9 +268,14 @@ function patchDispatcherObject(dispatcher, internals) {
       const owner = internals?.A?.getOwner?.() || getCallerComponentSite();
       if (owner !== activeOwnerKey || !activeIdSnap) {
         activeOwnerKey = owner;
-        activeIdSnap = snapshotActiveIdCounts();
+        activeIdSnap = (
+          globalThis[SERVER_HOOKS_IMPL_KEY]?.snapshotActiveIdCounts ||
+          snapshotActiveIdCounts
+        )();
       }
-      return useServerId();
+      return (
+        globalThis[SERVER_HOOKS_IMPL_KEY]?.useServerId || useServerId
+      )();
     };
     if (origUse && origUse !== useServerUsable) {
       dispatcher.use = function dinouPatchedUse(usable) {
@@ -253,7 +284,10 @@ function patchDispatcherObject(dispatcher, internals) {
           return origUse.call(this, usable);
         } catch (err) {
           if (activeIdSnap && (!owner || !activeOwnerKey || owner === activeOwnerKey)) {
-            restoreActiveIdCounts(activeIdSnap);
+            (
+              globalThis[SERVER_HOOKS_IMPL_KEY]?.restoreActiveIdCounts ||
+              restoreActiveIdCounts
+            )(activeIdSnap);
           }
           activeIdSnap = null;
           activeOwnerKey = null;
@@ -304,22 +338,23 @@ function getReactInternalsList() {
     const s = mod.__SERVER_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
     const c = mod.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
     if (s && typeof s === "object" && "H" in s) {
+      s._dinouIsServerInternals = true;
       patchInternalsDispatcherSetter(s);
       set.add(s);
     }
     if (c && typeof c === "object" && "H" in c) {
-      patchInternalsDispatcherSetter(c);
+      // Do not install setter on __CLIENT_INTERNALS__ (used by react-dom/server SSR)
       set.add(c);
     }
   };
   addFromModule(React);
   try {
-    const req = createRequire(import.meta.url);
+    const createReq = createRequire; const req = createReq(import.meta.url); const reactPkgPath = req.resolve("react/package.json"); const reactDir = reactPkgPath.slice(0, reactPkgPath.length - "package.json".length);
     try {
-      addFromModule(req("react/index.js"));
+      addFromModule(req(reactDir + "index.js"));
     } catch (_) {}
     try {
-      addFromModule(req("react/react.react-server.js"));
+      addFromModule(req(reactDir + "react.react-server.js"));
     } catch (_) {}
   } catch (_) {}
   _cachedReactInternalsList = Array.from(set);
@@ -329,7 +364,7 @@ function getReactInternalsList() {
 function ensureServerHooksPatched() {
   const list = getReactInternalsList();
   for (const internals of list) {
-    patchInternalsDispatcherSetter(internals);
+    if (internals._dinouIsServerInternals) patchInternalsDispatcherSetter(internals);
   }
 }
 
@@ -354,12 +389,12 @@ function isThenable(val) {
   return (
     val !== null &&
     (typeof val === "object" || typeof val === "function") &&
-    typeof val.then === "function"
+    val.$$typeof !== CLIENT_REFERENCE_TAG && !isClientComponent(val) && typeof val.then === "function"
   );
 }
 
 function isCacheSlotComponent(fn) {
-  if (!fn) return false;
+  if (!fn || fn.$$typeof === CLIENT_REFERENCE_TAG || isClientComponent(fn)) return false;
   return Boolean(fn.$$dinouCacheSlot || fn.name === "DinouCacheSlot");
 }
 
@@ -483,7 +518,14 @@ function replaceLayoutChildrenPlaceholder(node, replacement, placeholder) {
     }
     return node;
   }
-  if (node instanceof Promise) return node;
+  if (
+    node instanceof Promise ||
+    isThenable(node) ||
+    node.$$typeof === CLIENT_REFERENCE_TAG ||
+    isClientComponent(node)
+  ) {
+    return node;
+  }
   let changed = false;
   const clone = { ...node };
   for (const [k, v] of Object.entries(node)) {
@@ -510,38 +552,102 @@ function isClientComponent(type) {
   );
 }
 
-async function DinouSuspenseHoleBoundary({ holeId, children }) {
-  return await runInRuntimeDynamicHole(
+if (!globalThis[HOLE_BOUNDARY_PROMISE_CACHE_KEY]) {
+  globalThis[HOLE_BOUNDARY_PROMISE_CACHE_KEY] = new WeakMap();
+}
+const holeBoundaryPromiseCache = globalThis[HOLE_BOUNDARY_PROMISE_CACHE_KEY];
+async function DinouSuspenseHoleBoundary(props) {
+  if (props && typeof props === "object" && holeBoundaryPromiseCache.has(props)) {
+    return await holeBoundaryPromiseCache.get(props);
+  }
+  const { holeId, children } = props || {};
+  const promise = runInRuntimeDynamicHole(
     () => asyncRenderJSXToClientJSX(children),
     holeId
   );
+  if (props && typeof props === "object") {
+    holeBoundaryPromiseCache.set(props, promise);
+  }
+  return await promise;
+}
+DinouSuspenseHoleBoundary.$$dinouDeferredSuspenseStream = true;
+
+function attachSilentRejectionHandler(node) {
+  if (!node) return;
+  if (isThenable(node)) {
+    try {
+      node.then(null, () => {});
+    } catch (_) {}
+    return;
+  }
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      attachSilentRejectionHandler(item);
+    }
+  }
 }
 
-async function asyncRenderJSXToClientJSX(jsx, key = null) {
+function handlePprThenableAccess(thenable) {
+  if (
+    isPprBuildActive() &&
+    isInsideOuterSuspenseOutsideSlot() &&
+    !isSlotDiscoveryActive() &&
+    !isNoDynamicActive()
+  ) {
+    try {
+      thenable.then(null, () => {});
+    } catch (_) {}
+    markDynamicAccess("async-suspense");
+  }
+}
+
+async function asyncRenderJSXToClientJSX(
+  jsx,
+  key = null,
+  insideClientProps = false
+) {
   if (isPageRootElement(jsx)) {
-    return await runInPageSegment(async () => {
-      const resolved = await asyncRenderJSXToClientJSXInner(jsx, key);
-      const ctx = getContext();
-      if (ctx && getPprStore()) {
-        ctx._resolvedPageClientJsx = resolved;
-      }
-      return resolved;
-    });
+    const pagePpr = getPageRootPpr(jsx);
+    return await runWithSegmentPpr(pagePpr, () =>
+      runInPageSegment(async () => {
+        const resolved = await asyncRenderJSXToClientJSXInner(
+          jsx,
+          key,
+          insideClientProps
+        );
+        const ctx = getContext();
+        if (ctx) {
+          ctx._resolvedPageClientJsx = resolved;
+        }
+        return resolved;
+      })
+    );
   }
   if (isLayoutRootElement(jsx)) {
-    return await runInLayoutSegment(async () => {
-      return await asyncRenderJSXToClientJSXInner(jsx, key);
-    });
+    const layoutPpr = getLayoutRootPpr(jsx);
+    return await runWithSegmentPpr(layoutPpr, () =>
+      runInLayoutSegment(async () => {
+        return await asyncRenderJSXToClientJSXInner(
+          jsx,
+          key,
+          insideClientProps
+        );
+      })
+    );
   }
-  return await asyncRenderJSXToClientJSXInner(jsx, key);
+  return await asyncRenderJSXToClientJSXInner(jsx, key, insideClientProps);
 }
 
-async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
+async function asyncRenderJSXToClientJSXInner(
+  jsx,
+  key = null,
+  insideClientProps = false
+) {
   if (
     typeof jsx === "string" ||
     typeof jsx === "number" ||
     typeof jsx === "boolean" ||
-    typeof jsx === "function" ||
+    (typeof jsx === "function" && !isThenable(jsx)) ||
     typeof jsx === "undefined" ||
     jsx === null
   ) {
@@ -549,9 +655,29 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
   } else if (Array.isArray(jsx)) {
     const results = [];
     for (const child of jsx) {
-      results.push(await asyncRenderJSXToClientJSX(child, child?.key ?? null));
+      if (isThenable(child)) {
+        handlePprThenableAccess(child);
+        if (insideClientProps) {
+          results.push(child);
+          continue;
+        }
+      }
+      results.push(
+        await asyncRenderJSXToClientJSX(
+          child,
+          child?.key ?? null,
+          insideClientProps
+        )
+      );
     }
     return results;
+  } else if (isThenable(jsx)) {
+    handlePprThenableAccess(jsx);
+    if (insideClientProps) {
+      return jsx;
+    }
+    const resolved = await jsx;
+    return await asyncRenderJSXToClientJSX(resolved, key, false);
   } else if (typeof jsx === "symbol") {
     if (jsx === Symbol.for("react.fragment")) {
       // Handle Fragment as an empty props object
@@ -560,7 +686,11 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
     console.error("Unsupported symbol:", String(jsx));
     throw new Error(`Unsupported symbol: ${String(jsx)}`);
   } else if (typeof jsx === "object") {
-    if (isLayoutChildrenPlaceholder(jsx)) {
+    if (
+      isLayoutChildrenPlaceholder(jsx) ||
+      jsx.$$typeof === CLIENT_REFERENCE_TAG ||
+      isClientComponent(jsx)
+    ) {
       return jsx;
     }
     if (jsx.$$typeof === Symbol.for("react.transitional.element")) {
@@ -627,16 +757,28 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
           return await runInSuspense(async () => {
             return cloneWithDevProps(
               jsx,
-              await asyncRenderJSXToClientJSX(jsx.props),
+              await asyncRenderJSXToClientJSX(jsx.props, null, false),
               key ?? jsx.key
             );
           });
         }
+        const reqCtx = getContext();
+        const rawQuery = unwrapBailoutProxy(reqCtx?.req?.query);
+        const shouldStreamDynamicSuspense =
+          !isPprBuildActive() &&
+          !getPprStore() &&
+          !getActiveRuntimeDynamicHoleStore() &&
+          !reqCtx?.platformContext?.isSSG &&
+          !reqCtx?._isStaticHtmlRender &&
+          !reqCtx?._isPprRuntimeResume &&
+          !isRevalidationActive() &&
+          !isSlotDiscoveryActive() &&
+          (Boolean(reqCtx?._dynamicState?.value) ||
+            Object.keys(rawQuery || {}).length > 0 ||
+            process.env.DINOU_DEV === "true" ||
+            process.env.NODE_ENV !== "production");
         const shouldEagerlyResolveSuspense =
-          Boolean(getPprStore()) ||
-          Boolean(getActiveRuntimeDynamicHoleStore()) ||
-          Boolean(getContext()?.platformContext?.isSSG) ||
-          process.env.NODE_ENV === "production" ||
+          !shouldStreamDynamicSuspense ||
           containsCacheSlot(jsx.props?.children);
         if (shouldEagerlyResolveSuspense) {
           return await runInSuspense(async (holeId) => {
@@ -656,9 +798,14 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
             );
           });
         }
-        if (jsx.props?.children?.type === DinouSuspenseHoleBoundary) {
+        if (
+          jsx.props?.children?.type === DinouSuspenseHoleBoundary ||
+          (!isClientComponent(jsx.props?.children?.type) &&
+            jsx.props?.children?.type?.$$dinouDeferredSuspenseStream)
+        ) {
           return jsx;
         }
+        attachSilentRejectionHandler(jsx.props?.children);
         return await runInSuspense(async (holeId) => {
           const renderedFallback = await asyncRenderJSXToClientJSX(jsx.props?.fallback);
           return cloneWithDevProps(
@@ -681,7 +828,7 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
       ) {
         return cloneWithDevProps(
           jsx,
-          await asyncRenderJSXToClientJSX(jsx.props),
+          await asyncRenderJSXToClientJSX(jsx.props, null, false),
           key ?? jsx.key
         );
       } else if (typeof jsx.type === "function") {
@@ -698,7 +845,7 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
           }
           return cloneWithDevProps(
             jsx,
-            await asyncRenderJSXToClientJSX(props),
+            await asyncRenderJSXToClientJSX(props, null, true),
             key ?? jsx.key,
             Component
           );
@@ -709,7 +856,11 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
           const returnedJsx = await invokeServerComponentInPpr(Component, () =>
             Component(props)
           );
-          return await asyncRenderJSXToClientJSX(returnedJsx, key ?? jsx.key);
+          return await asyncRenderJSXToClientJSX(
+            returnedJsx,
+            key ?? jsx.key,
+            false
+          );
         }
       } else if (
         typeof jsx.type === "object" &&
@@ -719,7 +870,7 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
         if (isClientComponent(jsx.type)) {
           return cloneWithDevProps(
             jsx,
-            await asyncRenderJSXToClientJSX(jsx.props),
+            await asyncRenderJSXToClientJSX(jsx.props, null, true),
             key ?? jsx.key,
             jsx.type
           );
@@ -728,7 +879,11 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
             jsx.type.render,
             () => jsx.type.render(jsx.props, jsx.ref)
           );
-          return await asyncRenderJSXToClientJSX(returnedJsx, key ?? jsx.key);
+          return await asyncRenderJSXToClientJSX(
+            returnedJsx,
+            key ?? jsx.key,
+            false
+          );
         }
       } else if (
         typeof jsx.type === "object" &&
@@ -738,7 +893,7 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
         if (isClientComponent(jsx.type)) {
           return cloneWithDevProps(
             jsx,
-            await asyncRenderJSXToClientJSX(jsx.props),
+            await asyncRenderJSXToClientJSX(jsx.props, null, true),
             key ?? jsx.key,
             jsx.type
           );
@@ -748,12 +903,17 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
             const returnedJsx = await invokeServerComponentInPpr(innerComp, () =>
               innerComp(jsx.props)
             );
-            return await asyncRenderJSXToClientJSX(returnedJsx, key ?? jsx.key);
+            return await asyncRenderJSXToClientJSX(
+              returnedJsx,
+              key ?? jsx.key,
+              false
+            );
           }
           if (typeof innerComp === "object" && innerComp !== null) {
             return await asyncRenderJSXToClientJSX(
               cloneWithDevProps(jsx, jsx.props, key ?? jsx.key, innerComp),
-              key ?? jsx.key
+              key ?? jsx.key,
+              false
             );
           }
           return null;
@@ -762,13 +922,21 @@ async function asyncRenderJSXToClientJSXInner(jsx, key = null) {
         console.error("Unsupported JSX type:", jsx.type);
         throw new Error("Unsupported JSX type");
       }
-    } else if (jsx instanceof Promise) {
-      return jsx;
     } else {
       // Process object props (e.g., { className: "foo" })
       const entries = [];
       for (const [propName, value] of Object.entries(jsx)) {
-        entries.push([propName, await asyncRenderJSXToClientJSX(value)]);
+        if (isThenable(value)) {
+          handlePprThenableAccess(value);
+          if (insideClientProps) {
+            entries.push([propName, value]);
+            continue;
+          }
+        }
+        entries.push([
+          propName,
+          await asyncRenderJSXToClientJSX(value, null, insideClientProps),
+        ]);
       }
       return Object.fromEntries(entries);
     }

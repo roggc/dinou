@@ -21,15 +21,24 @@ function normalizeKey(p) {
   return s;
 }
 
+function sortByName(entries) {
+  return [...entries].sort((a, b) => {
+    const na = typeof a === "string" ? a : a.name;
+    const nb = typeof b === "string" ? b : b.name;
+    return na < nb ? -1 : na > nb ? 1 : 0;
+  });
+}
+
 export function buildVfs(dir, baseDir = dir) {
   const vfs = getVfs();
   if (!fs.existsSync(dir)) return;
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const entries = sortByName(fs.readdirSync(dir, { withFileTypes: true }));
   const children = [];
 
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     const isDirectory = entry.isDirectory();
+    if (isDirectory && entry.name.startsWith("_")) continue;
     children.push({
       name: entry.name,
       isDirectory
@@ -125,7 +134,7 @@ export function readdirSync(dirPath, options) {
   try {
     if (typeof fs.readdirSync === "function") {
       const res = fs.readdirSync(dirPath, options);
-      if (res) return res;
+      if (res) return Array.isArray(res) ? sortByName(res) : res;
     }
   } catch (e) {}
   return [];

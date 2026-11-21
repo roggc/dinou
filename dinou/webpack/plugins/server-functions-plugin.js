@@ -4,6 +4,7 @@ import manifestGeneratorPlugin from "./manifest-generator-plugin.js";
 import parseExports from "../../core/parse-exports.js";
 import { useServerRegex } from "../../constants.js";
 import { extractServerFunctions, hasServerFunctions } from "../../core/transform-server-functions.js";
+import { normalizePathCase } from "../../core/path-utils.js";
 
 class WebpackServerFunctionsPluginSimple {
   constructor(options = {}) {
@@ -51,15 +52,23 @@ class WebpackServerFunctionsPluginSimple {
             }
 
             if (this.serverFiles && this.serverFiles.size > 0) {
+              const normalizedCwd = normalizePathCase(process.cwd());
+              const existingPathsLower = new Set(
+                Object.keys(serverFunctionsManifest).map((k) => k.toLowerCase())
+              );
               for (const filePath of this.serverFiles) {
-                const rel = path.relative(process.cwd(), filePath).replace(/\\/g, "/");
-                if (!serverFunctionsManifest[rel]) {
+                const rel = path
+                  .relative(normalizedCwd, normalizePathCase(path.resolve(filePath)))
+                  .replace(/\\/g, "/");
+                const relLower = rel.toLowerCase();
+                if (!existingPathsLower.has(relLower)) {
                   try {
                     const fileCode = fs.readFileSync(filePath, "utf8");
                     if (useServerRegex.test(fileCode.trim())) {
                       const exports = parseExports(fileCode);
                       if (exports && exports.length > 0) {
                         serverFunctionsManifest[rel] = exports;
+                        existingPathsLower.add(relLower);
                         serverFunctionPaths.add(
                           path.resolve(process.cwd(), rel).replace(/\\/g, "/").toLowerCase()
                         );
@@ -68,6 +77,7 @@ class WebpackServerFunctionsPluginSimple {
                       const actions = extractServerFunctions(fileCode, filePath);
                       if (actions && actions.length > 0) {
                         serverFunctionsManifest[rel] = actions;
+                        existingPathsLower.add(relLower);
                         serverFunctionPaths.add(
                           path.resolve(process.cwd(), rel).replace(/\\/g, "/").toLowerCase()
                         );
@@ -78,16 +88,33 @@ class WebpackServerFunctionsPluginSimple {
               }
             }
 
-            // 2. Generate final manifest
-            const manifestContent = JSON.stringify(
-              serverFunctionsManifest,
-              null,
-              2
-            );
-            compilation.emitAsset(
-              "server-functions-manifest.json",
-              new sources.RawSource(manifestContent)
-            );
+            // 2. Persist final server functions manifest outside public static webroot
+            if (typeof globalThis !== "undefined") {
+              globalThis.__DINOU_RAW_SERVER_FUNCTIONS_MANIFEST__ = {
+                ...serverFunctionsManifest,
+              };
+            }
+
+            const isDev =
+              process.env.NODE_ENV !== "production" ||
+              process.env.DINOU_DEV === "true";
+            const shouldWriteToDisk =
+              process.env.DINOU_WRITE_TO_DISK === "false"
+                ? false
+                : process.env.DINOU_WRITE_TO_DISK === "true" || !isDev;
+
+            if (shouldWriteToDisk) {
+              const sfDir = path.resolve(
+                process.cwd(),
+                isDev ? ".dinou/node-dev" : ".dinou/dist1"
+              );
+              fs.mkdirSync(sfDir, { recursive: true });
+              fs.writeFileSync(
+                path.join(sfDir, "server-functions-manifest.json"),
+                JSON.stringify(serverFunctionsManifest, null, 2),
+                "utf8"
+              );
+            }
 
             // 3. If no server functions exist in this compilation, do not touch any assets
             if (serverFunctionPaths.size === 0) {

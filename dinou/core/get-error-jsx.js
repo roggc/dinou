@@ -227,7 +227,7 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false, options
         for (const [slotName, slotValue] of Object.entries(slots)) {
           let updatedSlotElement;
           const slotFilePath = slotValue?.slotPath || slotValue?.props?.__modulePath;
-          const slotParams = slotValue?.slotParams || slotValue?.props?.params || {};
+          const slotParams = slotValue?.slotParams || slotValue?.props?.params || dParams || {};
           try {
             let elementToRender;
             if (slotValue && slotValue.slotPath) {
@@ -263,7 +263,8 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false, options
                   true, // withExtension
                   true, // finalDestination
                   undefined, // lastFound
-                  reqSegments.length // TRICK: We force index at the end so that it searches for direct file
+                  reqSegments.length, // TRICK: We force index at the end so that it searches for direct file
+                  slotParams
                 );
 
               if (slotErrorPath) {
@@ -271,9 +272,7 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false, options
                 const SlotError = slotErrorModule.default ?? slotErrorModule;
 
                 const serializedError = {
-                  message: isDevelopment
-                    ? (e.message || "Unknown Error")
-                    : "An error occurred in the Server Components render",
+                  message: e.message || "Unknown Error",
                   name: e.name,
                   stack: isDevelopment ? e.stack : undefined,
                 };

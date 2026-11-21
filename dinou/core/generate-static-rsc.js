@@ -35,6 +35,7 @@ async function generateStaticRSC(reqPath, options = {}) {
   );
 
   // 👇 2. MOCK RES (Complete and Robust Version)
+  let mockContext;
   const mockRes = {
     _statusCode: 200,
     _headers: {},
@@ -70,6 +71,7 @@ async function generateStaticRSC(reqPath, options = {}) {
 
       this._statusCode = status;
       this._redirectUrl = url;
+      if (mockContext) mockContext._hasRedirected = true;
 
       console.warn(
         `⚠️ [ISR] Redirect detected during RSC generation of ${reqPath} -> ${url} (${status})`
@@ -77,7 +79,7 @@ async function generateStaticRSC(reqPath, options = {}) {
     },
   };
 
-  const mockContext = {
+  mockContext = {
     req: {
       query: {},
       cookies: {},
@@ -90,16 +92,13 @@ async function generateStaticRSC(reqPath, options = {}) {
       method: "GET",
     },
     res: mockRes,
+    _hasRedirected: false,
   };
 
   try {
     const manifest = JSON.parse(
       fs.readFileSync(
-        path.resolve(
-          isWebpack
-            ? ".dinou/dist3/react-client-manifest.json"
-            : ".dinou/react_client_manifest/react-client-manifest.json"
-        ),
+        path.resolve(".dinou/dist1/react-client-manifest.json"),
         "utf8"
       )
     );

@@ -36,9 +36,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../node_modules/picomatch/lib/constants.js
+// node_modules/picomatch/lib/constants.js
 var require_constants = __commonJS({
-  "../node_modules/picomatch/lib/constants.js"(exports, module) {
+  "node_modules/picomatch/lib/constants.js"(exports, module) {
     "use strict";
     var WIN_SLASH = "\\\\/";
     var WIN_NO_SLASH = `[^${WIN_SLASH}]`;
@@ -238,9 +238,9 @@ var require_constants = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/lib/utils.js
+// node_modules/picomatch/lib/utils.js
 var require_utils = __commonJS({
-  "../node_modules/picomatch/lib/utils.js"(exports) {
+  "node_modules/picomatch/lib/utils.js"(exports) {
     "use strict";
     var {
       REGEX_BACKSLASH,
@@ -302,9 +302,9 @@ var require_utils = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/lib/scan.js
+// node_modules/picomatch/lib/scan.js
 var require_scan = __commonJS({
-  "../node_modules/picomatch/lib/scan.js"(exports, module) {
+  "node_modules/picomatch/lib/scan.js"(exports, module) {
     "use strict";
     var utils = require_utils();
     var {
@@ -640,9 +640,9 @@ var require_scan = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/lib/parse.js
+// node_modules/picomatch/lib/parse.js
 var require_parse = __commonJS({
-  "../node_modules/picomatch/lib/parse.js"(exports, module) {
+  "node_modules/picomatch/lib/parse.js"(exports, module) {
     "use strict";
     var constants = require_constants();
     var utils = require_utils();
@@ -1655,9 +1655,9 @@ var require_parse = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/lib/picomatch.js
+// node_modules/picomatch/lib/picomatch.js
 var require_picomatch = __commonJS({
-  "../node_modules/picomatch/lib/picomatch.js"(exports, module) {
+  "node_modules/picomatch/lib/picomatch.js"(exports, module) {
     "use strict";
     var scan = require_scan();
     var parse = require_parse();
@@ -1795,9 +1795,9 @@ var require_picomatch = __commonJS({
   }
 });
 
-// ../node_modules/picomatch/index.js
+// node_modules/picomatch/index.js
 var require_picomatch2 = __commonJS({
-  "../node_modules/picomatch/index.js"(exports, module) {
+  "node_modules/picomatch/index.js"(exports, module) {
     "use strict";
     var pico = require_picomatch();
     var utils = require_utils();
@@ -1812,9 +1812,9 @@ var require_picomatch2 = __commonJS({
   }
 });
 
-// ../node_modules/commondir/index.js
+// node_modules/commondir/index.js
 var require_commondir = __commonJS({
-  "../node_modules/commondir/index.js"(exports, module) {
+  "node_modules/commondir/index.js"(exports, module) {
     var path = __require("path");
     module.exports = function(basedir, relfiles) {
       if (relfiles) {
@@ -1837,9 +1837,9 @@ var require_commondir = __commonJS({
   }
 });
 
-// ../node_modules/is-reference/dist/is-reference.js
+// node_modules/is-reference/dist/is-reference.js
 var require_is_reference = __commonJS({
-  "../node_modules/is-reference/dist/is-reference.js"(exports, module) {
+  "node_modules/is-reference/dist/is-reference.js"(exports, module) {
     (function(global, factory) {
       typeof exports === "object" && typeof module !== "undefined" ? module.exports = factory() : typeof define === "function" && define.amd ? define(factory) : (global = global || self, global.isReference = factory());
     })(exports, (function() {
@@ -1885,13 +1885,13 @@ var require_is_reference = __commonJS({
   }
 });
 
-// ../node_modules/@rollup/plugin-commonjs/dist/es/index.js
+// node_modules/@rollup/plugin-commonjs/dist/es/index.js
 import { basename as basename2, extname as extname2, dirname as dirname2, relative as relative2, resolve as resolve3, join, sep as sep2 } from "path";
 
-// ../node_modules/@rollup/pluginutils/dist/es/index.js
+// node_modules/@rollup/pluginutils/dist/es/index.js
 import { extname, win32, posix, isAbsolute, resolve } from "path";
 
-// ../node_modules/estree-walker/dist/esm/estree-walker.js
+// node_modules/estree-walker/dist/esm/estree-walker.js
 var WalkerBase = class {
   constructor() {
     this.should_skip = false;
@@ -2022,7 +2022,7 @@ function walk(ast, { enter, leave }) {
   return instance.visit(ast, null);
 }
 
-// ../node_modules/@rollup/pluginutils/dist/es/index.js
+// node_modules/@rollup/pluginutils/dist/es/index.js
 var import_picomatch = __toESM(require_picomatch2(), 1);
 var extractors = {
   ArrayPattern(names, param) {
@@ -2222,11 +2222,11 @@ var makeLegalIdentifier = function makeLegalIdentifier2(str) {
 };
 var hasStringIsWellFormed = "isWellFormed" in String.prototype;
 
-// ../node_modules/@rollup/plugin-commonjs/dist/es/index.js
+// node_modules/@rollup/plugin-commonjs/dist/es/index.js
 var import_commondir = __toESM(require_commondir(), 1);
 import { existsSync, readFileSync, statSync } from "fs";
 
-// ../node_modules/fdir/dist/index.mjs
+// node_modules/fdir/dist/index.mjs
 import { createRequire } from "module";
 import { basename, dirname, normalize, relative, resolve as resolve2, sep } from "path";
 import * as nativeFs from "fs";
@@ -2735,7 +2735,7 @@ var Builder = class {
   }
 };
 
-// ../node_modules/@jridgewell/sourcemap-codec/dist/sourcemap-codec.mjs
+// node_modules/@jridgewell/sourcemap-codec/dist/sourcemap-codec.mjs
 var comma = ",".charCodeAt(0);
 var semicolon = ";".charCodeAt(0);
 var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -2746,16 +2746,16 @@ for (let i = 0; i < chars.length; i++) {
   intToChar[i] = c;
   charToInt[c] = i;
 }
-function encodeInteger(builder, num, relative3) {
-  let delta = num - relative3;
-  delta = delta < 0 ? -delta << 1 | 1 : delta << 1;
+function encodeInteger(builder, num) {
   do {
-    let clamped = delta & 31;
-    delta >>>= 5;
-    if (delta > 0) clamped |= 32;
+    let clamped = num & 31;
+    num >>>= 5;
+    if (num > 0) clamped |= 32;
     builder.write(intToChar[clamped]);
-  } while (delta > 0);
-  return num;
+  } while (num > 0);
+}
+function encodeSign(num) {
+  return num < 0 ? -num << 1 | 1 : num << 1;
 }
 var bufLength = 1024 * 16;
 var td = typeof TextDecoder !== "undefined" ? /* @__PURE__ */ new TextDecoder() : typeof Buffer !== "undefined" ? {
@@ -2805,19 +2805,24 @@ function encode(decoded) {
     for (let j = 0; j < line.length; j++) {
       const segment = line[j];
       if (j > 0) writer.write(comma);
-      genColumn = encodeInteger(writer, segment[0], genColumn);
+      encodeInteger(writer, encodeSign(segment[0] - genColumn));
+      genColumn = segment[0];
       if (segment.length === 1) continue;
-      sourcesIndex = encodeInteger(writer, segment[1], sourcesIndex);
-      sourceLine = encodeInteger(writer, segment[2], sourceLine);
-      sourceColumn = encodeInteger(writer, segment[3], sourceColumn);
+      encodeInteger(writer, encodeSign(segment[1] - sourcesIndex));
+      encodeInteger(writer, encodeSign(segment[2] - sourceLine));
+      encodeInteger(writer, encodeSign(segment[3] - sourceColumn));
+      sourcesIndex = segment[1];
+      sourceLine = segment[2];
+      sourceColumn = segment[3];
       if (segment.length === 4) continue;
-      namesIndex = encodeInteger(writer, segment[4], namesIndex);
+      encodeInteger(writer, encodeSign(segment[4] - namesIndex));
+      namesIndex = segment[4];
     }
   }
   return writer.flush();
 }
 
-// ../node_modules/magic-string/dist/magic-string.es.mjs
+// node_modules/magic-string/dist/magic-string.es.mjs
 var BitSet = class _BitSet {
   constructor(arg) {
     this.bits = arg instanceof _BitSet ? arg.bits.slice() : [];
@@ -3808,7 +3813,7 @@ var MagicString = class _MagicString {
   }
 };
 
-// ../node_modules/@rollup/plugin-commonjs/dist/es/index.js
+// node_modules/@rollup/plugin-commonjs/dist/es/index.js
 var import_is_reference = __toESM(require_is_reference(), 1);
 var version = "28.0.9";
 var peerDependencies = {

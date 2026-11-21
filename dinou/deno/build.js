@@ -16,21 +16,46 @@ if (!ensureVendorMode()) {
 import { generateRouteModulesCode, generateRouteTypes } from "../core/route-generator.js";
 import parseExports from "../core/parse-exports.js";
 import { useClientRegex, useServerRegex } from "../constants.js";
-import { transformServerFunctions, hasServerFunctions } from "../core/transform-server-functions.js";
+import {
+  transformServerFunctions,
+  hasServerFunctions,
+  buildSsrServerReferenceModule,
+  generateSsrServerManifestStubs,
+} from "../core/transform-server-functions.js";
 import {
   isSupportedClientModule,
   scanProjectDependenciesForClientComponents,
 } from "../core/scan-dependency-components.js";
-import { getDinouConfig } from "../core/load-dinou-config.js";
+import {
+  getDinouConfig,
+  findDinouConfigFile,
+} from "../core/load-dinou-config.js";
 import { resolveSetupFiles } from "../core/resolve-setup-files.js";
+import {
+  esbuildContextualDinouPlugin,
+  filterEscapedClientManifest,
+} from "../core/resolve-contextual-dinou.js";
+import { discoverLayoutsFromFs, sortEntriesByName } from "../core/discover-layouts.js";
+import { createServerCssModulesPlugin } from "../core/server-css-modules-plugin.js";
+import {
+  createServerAssetPlugin,
+  getAssetExtensionsInfo,
+} from "../core/asset-extensions.js";
+import { esbuildTsconfigAliasesPlugin } from "../core/tsconfig-aliases.js";
+import {
+  loadEnvFiles,
+  getEsbuildPublicEnvDefines,
+} from "../core/env.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const projectRoot = process.cwd();
+loadEnvFiles(projectRoot, { mode: "production" });
 const denoDir = path.resolve(projectRoot, ".dinou/deno");
 fs.mkdirSync(denoDir, { recursive: true });
 
 const dinouConfig = await getDinouConfig(projectRoot);
+const configFile = findDinouConfigFile(projectRoot);
 const setupFiles = resolveSetupFiles(projectRoot, dinouConfig);
 if (setupFiles.length > 0) {
   console.log(`  🔌 [Dinou Setup] Active setup files (${setupFiles.length}): ${setupFiles.map((f) => path.basename(f)).join(", ")}`);
@@ -64,65 +89,30 @@ for (const r of candidateDinouRoots) {
   candidateSlotPaths.add(path.resolve(r, "core/slot.js"));
 }
 
-function copyRecursive(src, dest) {
-  if (!fs.existsSync(src)) return 0;
-  let count = 0;
-  const entries = fs.readdirSync(src, { withFileTypes: true });
-  for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    if (entry.isDirectory()) {
-      fs.mkdirSync(destPath, { recursive: true });
-      count += copyRecursive(srcPath, destPath);
-    } else {
-      fs.mkdirSync(path.dirname(destPath), { recursive: true });
-      fs.copyFileSync(srcPath, destPath);
-      count++;
-    }
-  }
-  return count;
-}
-
 const isWebpackBuild = process.env.DINOU_BUILD_TOOL === "webpack";
 const bundlerName = isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild");
 
-const dist2Dir = path.resolve(projectRoot, ".dinou/dist2");
-const dist3Dir = path.resolve(projectRoot, ".dinou/dist3");
 console.log(`\n🦖 Dinou (Deno • ${bundlerName})`);
-if (fs.existsSync(dist2Dir)) {
-  const copiedCount = copyRecursive(dist2Dir, dist3Dir);
-  console.log(`  📄 Synchronized ${copiedCount} pre-rendered static route(s) to .dinou/dist3`);
-}
 console.log("  ⚡ Generating route modules & manifests...");
 const routeModulesCode = generateRouteModulesCode(projectRoot, "../..");
 const routeModulesPath = path.join(denoDir, "route-modules.js");
 fs.writeFileSync(routeModulesPath, routeModulesCode, "utf8");
 
-function findManifest(filename, fallbackFolder) {
-  const candidates = isWebpackBuild
-    ? [
-        path.resolve(projectRoot, ".dinou/dist3", filename),
-        path.resolve(projectRoot, ".dinou/public", filename),
-        path.resolve(projectRoot, ".dinou", fallbackFolder, filename),
-      ]
-    : [
-        path.resolve(projectRoot, ".dinou", fallbackFolder, filename),
-        path.resolve(projectRoot, ".dinou/dist3", filename),
-        path.resolve(projectRoot, ".dinou/public", filename),
-      ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c;
-  }
-  return null;
+function findManifest(filename, folder) {
+  const candidate = path.resolve(projectRoot, ".dinou", folder, filename);
+  return fs.existsSync(candidate) ? candidate : null;
 }
 
-const clientManifestPath = findManifest("react-client-manifest.json", "react_client_manifest");
-const sfManifestPath = findManifest("server-functions-manifest.json", "server_functions_manifest");
+const clientManifestPath = findManifest("react-client-manifest.json", "dist1");
+const sfManifestPath = findManifest("server-functions-manifest.json", "dist1");
 
 let parsedClientManifest = {};
 if (clientManifestPath && fs.existsSync(clientManifestPath)) {
   try {
-    parsedClientManifest = JSON.parse(fs.readFileSync(clientManifestPath, "utf8"));
+    parsedClientManifest = filterEscapedClientManifest(
+      JSON.parse(fs.readFileSync(clientManifestPath, "utf8")),
+      projectRoot
+    );
   } catch (e) {}
 }
 
@@ -150,7 +140,7 @@ function findClientComponents() {
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        walk(full);
+        if (!entry.name.startsWith("_")) walk(full);
       } else if (/\.[jt]sx?$/.test(entry.name)) {
         try {
           const content = fs.readFileSync(full, "utf8");
@@ -371,7 +361,7 @@ if (sfManifestPath && fs.existsSync(sfManifestPath)) {
   manifestInlines += `\nglobalThis.__DINOU_SERVER_FUNCTIONS_MANIFEST__ = {};\n`;
 }
 
-const assetManifestPath = findManifest("manifest.json", "dist3");
+const assetManifestPath = findManifest("manifest.json", "dist1");
 if (assetManifestPath && fs.existsSync(assetManifestPath)) {
   const content = fs.readFileSync(assetManifestPath, "utf8");
   manifestInlines += `\nglobalThis.__DINOU_ASSET_MANIFEST__ = ${content};\n`;
@@ -383,11 +373,21 @@ let importMapHtml = "";
 if (!isWebpackBuild && Object.keys(parsedClientManifest).length > 0) {
   const imports = {};
   const moduleBasePath = pathToFileURL(projectRoot).href + "/";
+  const moduleBasePathLower = moduleBasePath.replace(
+    /^file:\/\/\/([a-zA-Z]):/,
+    (_, d) => `file:///${d.toLowerCase()}:`
+  );
+  const moduleBasePathUpper = moduleBasePath.replace(
+    /^file:\/\/\/([a-zA-Z]):/,
+    (_, d) => `file:///${d.toUpperCase()}:`
+  );
 
   for (const [key, val] of Object.entries(parsedClientManifest)) {
     let specifier = key;
-    if (specifier.startsWith(moduleBasePath)) {
-      specifier = specifier.slice(moduleBasePath.length);
+    if (specifier.startsWith(moduleBasePathUpper)) {
+      specifier = specifier.slice(moduleBasePathUpper.length);
+    } else if (specifier.startsWith(moduleBasePathLower)) {
+      specifier = specifier.slice(moduleBasePathLower.length);
     }
     const hashIdx = specifier.indexOf("#");
     if (hashIdx !== -1) {
@@ -450,21 +450,7 @@ if (!isWebpackBuild && Object.keys(parsedClientManifest).length > 0) {
 
 manifestInlines += `\nglobalThis.__DINOU_IMPORT_MAP_HTML__ = ${JSON.stringify(importMapHtml)};\n`;
 
-const discoveredLayouts = [];
-function findLayoutRoutes(dir, rel = "") {
-  if (!fs.existsSync(dir)) return;
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      findLayoutRoutes(path.join(dir, entry.name), rel ? `${rel}/${entry.name}` : entry.name);
-    } else if (/^layout\.[jt]sx?$/.test(entry.name)) {
-      discoveredLayouts.push(rel);
-    } else if (entry.name === "no_layout") {
-      discoveredLayouts.push("!" + rel);
-    }
-  }
-}
-findLayoutRoutes(srcDir);
+const discoveredLayouts = discoverLayoutsFromFs(srcDir, fs);
 manifestInlines += `\nglobalThis.__DINOU_LAYOUTS__ = ${JSON.stringify(discoveredLayouts)};\n`;
 
 if (process.env.DINOU_DEBUG) {
@@ -474,10 +460,11 @@ if (process.env.DINOU_DEBUG) {
 const vfsSnapshot = {};
 function walkVfs(dir) {
   if (!fs.existsSync(dir)) return;
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const entries = sortEntriesByName(fs.readdirSync(dir, { withFileTypes: true }));
   const children = [];
   for (const entry of entries) {
     const isDir = entry.isDirectory();
+    if (isDir && entry.name.startsWith("_")) continue;
     children.push({ name: entry.name, isDirectory: isDir });
     const fullPath = path.join(dir, entry.name);
     const relFromSrc = path.relative(srcDir, fullPath).replace(/\\/g, "/");
@@ -535,10 +522,7 @@ clientComponents.forEach((compPath, index) => {
 });
 
 const serverFunctionFiles = Object.keys(parsedServerFunctionsManifest);
-serverFunctionFiles.forEach((relPath, index) => {
-  const absPath = path.resolve(projectRoot, relPath).replace(/\\/g, "/");
-  ssrManifestCode += `import * as sf_${index} from ${JSON.stringify(absPath)};\n`;
-});
+ssrManifestCode += generateSsrServerManifestStubs(parsedServerFunctionsManifest);
 
 ssrManifestCode += `\nexport const clientModules = {\n`;
 const emittedClientModules = new Set();
@@ -733,12 +717,23 @@ fs.writeFileSync(ssrClientManifestPath, ssrManifestCode, "utf8");
 // Entry Files Generation
 // ====================================================================
 // 1. RSC Engine Entry
+const aotConfigPrelude = configFile
+  ? `import * as __dinouConfigMod from ${JSON.stringify(configFile.replace(/\\/g, "/"))};
+const __resolvedDinouCfg = (__dinouConfigMod && __dinouConfigMod.default) ? __dinouConfigMod.default : (__dinouConfigMod || { plugins: [] });
+globalThis.__DINOU_AOT_CONFIG__ = __resolvedDinouCfg;
+globalThis.__DINOU_CONFIG__ = __resolvedDinouCfg;
+`
+  : "";
 const rscEntryContent = `// Auto-generated RSC Engine entry for Deno Deploy / Edge
 import "./env-setup.js";
-import "./route-modules.js";
+${aotConfigPrelude}import "./route-modules.js";
 import * as edgeRenderer from "react-server-dom-webpack/server.edge";
+import { handleRequest as coreHandleRequest } from "${dinouDirSlash}/core/handler.js";
 globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
-export { handleRequest } from "${dinouDirSlash}/core/handler.js";
+export function handleRequest(request, platformContext) {
+  globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
+  return coreHandleRequest(request, platformContext);
+}
 `;
 const rscEntryPath = path.join(denoDir, "rsc-entry.js");
 fs.writeFileSync(rscEntryPath, rscEntryContent, "utf8");
@@ -749,7 +744,7 @@ import { renderRscStreamToHtmlStream } from "${dinouDirSlash}/core/edge-ssr.js";
 import { clientModules, ssrConsumerManifest } from "./ssr-client-manifest.js";
 
 const lowerMap = new Map();
-globalThis.__webpack_require__ = (id) => {
+const localWebpackRequire = (id) => {
   if (clientModules[id]) return clientModules[id];
   if (typeof id === "string") {
     if (lowerMap.size === 0) {
@@ -761,10 +756,12 @@ globalThis.__webpack_require__ = (id) => {
   console.error("[SSR Engine] Module not found in __webpack_require__:", id);
   return {};
 };
-globalThis.__webpack_require__.u = (chunkId) => "" + chunkId + ".js";
+localWebpackRequire.u = (chunkId) => "" + chunkId + ".js";
+globalThis.__webpack_require__ = localWebpackRequire;
 globalThis.__webpack_chunk_load__ = () => Promise.resolve();
 
 export async function renderHtml(rscStream, options = {}) {
+  globalThis.__webpack_require__ = localWebpackRequire;
   return renderRscStreamToHtmlStream(rscStream, ssrConsumerManifest, options);
 }
 `;
@@ -778,11 +775,25 @@ import { renderHtml } from "./ssr-engine.js";
 import {
   getStorageAdapter,
   setStorageAdapter,
+  hasExplicitStorageAdapter,
   DenoKVStorage,
   MemoryStorage,
 } from "${dinouDirSlash}/core/storage-adapter.js";
+import {
+  getStaticContentType,
+  getStaticCacheControl,
+  normalizePublicRequestPath,
+  parseHttpByteRange,
+  resolveConfinedStaticFile,
+} from "${dinouDirSlash}/core/static-assets.js";
+import { loadEnvFiles } from "${dinouDirSlash}/core/env.js";
 import * as path from "node:path";
 import * as fs from "node:fs";
+
+try {
+  const bootCwd = typeof Deno !== "undefined" && typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
+  loadEnvFiles(bootCwd, { mode: "production" });
+} catch (e) {}
 
 if (typeof globalThis !== "undefined") {
   globalThis.__DINOU_RUNTIME__ = "deno-edge";
@@ -792,25 +803,27 @@ let storageInitialized = false;
 
 export async function fetch(req) {
   if (!storageInitialized) {
-    if (typeof Deno !== "undefined" && typeof Deno.openKv === "function") {
-      try {
-        const kvUrl = Deno.env.get("DENO_KV_URL");
-        let kvInstance;
-        if (kvUrl) {
-          kvInstance = await Deno.openKv(kvUrl);
-        } else if (Deno.env.get("DENO_DEPLOYMENT_ID")) {
-          kvInstance = await Deno.openKv();
-        } else {
-          const cwd = typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
-          const kvPath = Deno.env.get("DENO_KV_PATH") || path.resolve(cwd, ".dinou/kv.db");
-          kvInstance = await Deno.openKv(kvPath);
+    if (!hasExplicitStorageAdapter()) {
+      if (typeof Deno !== "undefined" && typeof Deno.openKv === "function") {
+        try {
+          const kvUrl = Deno.env.get("DENO_KV_URL");
+          let kvInstance;
+          if (kvUrl) {
+            kvInstance = await Deno.openKv(kvUrl);
+          } else if (Deno.env.get("DENO_DEPLOYMENT_ID")) {
+            kvInstance = await Deno.openKv();
+          } else {
+            const cwd = typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
+            const kvPath = Deno.env.get("DENO_KV_PATH") || path.resolve(cwd, ".dinou/kv.db");
+            kvInstance = await Deno.openKv(kvPath);
+          }
+          setStorageAdapter(new DenoKVStorage(kvInstance));
+        } catch (e) {
+          setStorageAdapter(new MemoryStorage());
         }
-        setStorageAdapter(new DenoKVStorage(kvInstance));
-      } catch (e) {
+      } else {
         setStorageAdapter(new MemoryStorage());
       }
-    } else {
-      setStorageAdapter(new MemoryStorage());
     }
     storageInitialized = true;
   }
@@ -819,25 +832,65 @@ export async function fetch(req) {
   const pathname = url.pathname;
 
   // Static assets delivery (if running with local disk access)
-  if (pathname !== "/" && typeof Deno !== "undefined" && typeof Deno.readFile === "function") {
-    try {
-      const cwd = typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
-      const dist3Dir = path.resolve(cwd, ".dinou/dist3");
-      const filePath = path.join(dist3Dir, pathname);
-      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-        const content = await Deno.readFile(filePath);
-        const ext = path.extname(filePath).toLowerCase();
-        const headers = {};
-        if (ext === ".js" || ext === ".mjs") headers["content-type"] = "application/javascript; charset=utf-8";
-        else if (ext === ".css") headers["content-type"] = "text/css; charset=utf-8";
-        else if (ext === ".json") headers["content-type"] = "application/json";
-        else if (ext === ".svg") headers["content-type"] = "image/svg+xml";
-        else if (ext === ".png") headers["content-type"] = "image/png";
-        else if (ext === ".ico") headers["content-type"] = "image/x-icon";
-        return new Response(content, { headers });
+  if (
+    (req.method === "GET" || req.method === "HEAD") &&
+    typeof Deno !== "undefined" &&
+    typeof Deno.readFile === "function"
+  ) {
+    const cleanPath = normalizePublicRequestPath(pathname);
+    if (cleanPath) {
+      try {
+        const cwd = typeof Deno.cwd === "function" ? Deno.cwd() : process.cwd();
+        const dist3Dir = path.resolve(cwd, ".dinou/dist3");
+        const filePath = resolveConfinedStaticFile(dist3Dir, cleanPath);
+        if (filePath && fs.existsSync(filePath)) {
+          const stat = fs.statSync(filePath);
+          if (stat.isFile()) {
+            const contentType = getStaticContentType(cleanPath);
+            const cacheControl = getStaticCacheControl(cleanPath);
+            const rangeHeader = req.method === "GET" ? req.headers.get("range") : null;
+            const range = rangeHeader ? parseHttpByteRange(rangeHeader, stat.size) : null;
+
+            if (range && range.unsatisfiable) {
+              return new Response(null, {
+                status: 416,
+                headers: {
+                  "content-range": range.contentRange,
+                  "accept-ranges": "bytes",
+                },
+              });
+            }
+
+            if (range) {
+              const full = await Deno.readFile(filePath);
+              const slice = full.subarray(range.start, range.end + 1);
+              return new Response(slice, {
+                status: 206,
+                headers: {
+                  "content-type": contentType,
+                  "content-length": String(range.length),
+                  "content-range": range.contentRange,
+                  "accept-ranges": "bytes",
+                  "cache-control": cacheControl,
+                },
+              });
+            }
+
+            const content =
+              req.method === "HEAD" ? null : await Deno.readFile(filePath);
+            return new Response(content, {
+              headers: {
+                "content-type": contentType,
+                "content-length": String(stat.size),
+                "accept-ranges": "bytes",
+                "cache-control": cacheControl,
+              },
+            });
+          }
+        }
+      } catch (e) {
+        // Fallback to Dinou handler
       }
-    } catch (e) {
-      // Fallback to Dinou handler
     }
   }
 
@@ -879,8 +932,8 @@ const externalList = [
 ];
 
 const commonAlias = {
-  "@": path.resolve(projectRoot, "src"),
   "dinou/config": path.resolve(dinouDir, "core/config.js"),
+  "dinou/server": path.resolve(dinouDir, "server.js"),
   dinou: dinouDir,
 };
 
@@ -891,12 +944,6 @@ const commonLoader = {
   ".tsx": "tsx",
   ".json": "json",
   ".css": "empty",
-  ".svg": "dataurl",
-  ".png": "dataurl",
-  ".jpg": "dataurl",
-  ".jpeg": "dataurl",
-  ".webp": "dataurl",
-  ".ico": "dataurl",
 };
 
 const banner = {
@@ -1022,8 +1069,9 @@ const serverReferencesPlugin = {
       transformed += `import { registerServerReference } from "react-server-dom-webpack/server.edge";\n`;
 
       for (const name of exports) {
-        if (name !== "default") {
-          transformed += `registerServerReference(${name}, ${JSON.stringify(relativeFileUrl)}, ${JSON.stringify(name)});\n`;
+        const localIdent = name === "default" ? sfResult.defaultExportIdentifier : name;
+        if (localIdent) {
+          transformed += `registerServerReference(${localIdent}, ${JSON.stringify(relativeFileUrl)}, ${JSON.stringify(name)});\n`;
         }
       }
 
@@ -1054,31 +1102,15 @@ const serverReferencesPluginSsr = {
 
       if (!hasServerFunctions(code)) return null;
 
-      const sfResult = transformServerFunctions(code, args.path);
-      if (!sfResult.actions || sfResult.actions.length === 0) return null;
-
-      const transformedCode = sfResult.code;
-      const exports = sfResult.actions;
       const absPath = path.resolve(args.path);
       const relPath = path.relative(projectRoot, absPath).replace(/\\/g, "/");
       const relativeFileUrl = "file:///" + relPath;
-
-      let transformed = transformedCode + "\n\n";
-      transformed += `import { registerServerReference } from "react-server-dom-webpack/client.edge";\n`;
-
-      for (const name of exports) {
-        if (name !== "default") {
-          transformed += `registerServerReference(${name}, ${JSON.stringify(relativeFileUrl + "#" + name)});\n`;
-          transformed += `registerServerReference(${name}, ${JSON.stringify(pathToFileURL(absPath).href + "#" + name)});\n`;
-        }
-      }
-
-      const ext = path.extname(args.path);
-      const loader = ext === ".ts" ? "ts" : ext === ".tsx" ? "tsx" : ext === ".jsx" ? "jsx" : "js";
+      const stubModule = buildSsrServerReferenceModule(code, args.path, relativeFileUrl);
+      if (!stubModule) return null;
 
       return {
-        contents: transformed,
-        loader,
+        contents: stubModule,
+        loader: "js",
       };
     });
   },
@@ -1087,6 +1119,13 @@ const serverReferencesPluginSsr = {
 const rscOutfile = path.join(denoDir, "rsc-engine.js");
 const ssrOutfile = path.join(denoDir, "ssr-engine.js");
 const finalOutfile = path.join(denoDir, "main.js");
+
+const serverCssModulesPlugin = createServerCssModulesPlugin({ projectRoot });
+const serverAssetPlugin = createServerAssetPlugin({ projectRoot, dinouConfig });
+const serverTsconfigAliasesPlugin = esbuildTsconfigAliasesPlugin({
+  projectRoot,
+  assetRegex: getAssetExtensionsInfo(dinouConfig, projectRoot).regex,
+});
 
 try {
   // Pass A: RSC Engine
@@ -1099,18 +1138,23 @@ try {
     target: "es2022",
     platform: "neutral",
     mainFields: ["module", "main"],
-    conditions: ["deno", "worker", "react-server"],
+    conditions: ["deno", "worker", "react-server", "style"],
     external: externalList,
-    plugins: [clientReferencesPlugin, serverReferencesPlugin],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverTsconfigAliasesPlugin, clientReferencesPlugin, serverReferencesPlugin, serverCssModulesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
     inject: setupFiles.length > 0 ? setupFiles : undefined,
-    define: {
-      "process.env.NODE_ENV": '"production"',
-      "process.env.DINOU_RUNTIME": '"deno-edge"',
-      "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
-    },
+    define: getEsbuildPublicEnvDefines({
+      mode: "production",
+      defineProcessEnvObject: false,
+      extra: {
+        DINOU_RUNTIME: "deno-edge",
+        DINOU_BUILD_TOOL: isWebpackBuild
+          ? "webpack"
+          : process.env.DINOU_BUILD_TOOL || "esbuild",
+      },
+    }),
     logLevel: "warning",
   });
 
@@ -1123,18 +1167,25 @@ try {
     target: "es2022",
     platform: "neutral",
     mainFields: ["module", "main"],
-    conditions: ["deno", "worker", "browser"],
+    conditions: ["deno", "worker", "browser", "style"],
     external: externalList,
-    plugins: [serverReferencesPluginSsr],
+    plugins: [esbuildContextualDinouPlugin({ projectRoot }), serverTsconfigAliasesPlugin, serverReferencesPluginSsr, serverCssModulesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
     jsx: "automatic",
-    inject: setupFiles.length > 0 ? setupFiles : undefined,
-    define: {
-      "process.env.NODE_ENV": '"production"',
-      "process.env.DINOU_RUNTIME": '"deno-edge"',
-      "process.env.DINOU_BUILD_TOOL": JSON.stringify(isWebpackBuild ? "webpack" : (process.env.DINOU_BUILD_TOOL || "esbuild")),
-    },
+    define: getEsbuildPublicEnvDefines({
+      mode: "production",
+      defineProcessEnvObject: true,
+      extra: {
+        DINOU_RUNTIME: "deno-edge",
+        DINOU_BUILD_TOOL: isWebpackBuild
+          ? "webpack"
+          : process.env.DINOU_BUILD_TOOL || "esbuild",
+        ...(process.env.DINOU_DEBUG
+          ? { DINOU_DEBUG: process.env.DINOU_DEBUG }
+          : {}),
+      },
+    }),
     logLevel: "warning",
   });
 
@@ -1151,9 +1202,10 @@ try {
     conditions: ["deno", "worker", "browser"],
     external: externalList,
     banner,
-    inject: setupFiles.length > 0 ? setupFiles : undefined,
+    plugins: [serverTsconfigAliasesPlugin, serverAssetPlugin],
     alias: commonAlias,
     loader: commonLoader,
+    jsx: "automatic",
     define: {
       "process.env.NODE_ENV": '"production"',
       "process.env.DINOU_RUNTIME": '"deno-edge"',

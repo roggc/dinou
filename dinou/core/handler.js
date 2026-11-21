@@ -23,11 +23,17 @@ import { getFilePathAndDynamicParams } from "./get-file-path-and-dynamic-params.
 import getJSX from "./get-jsx.js";
 import { getErrorJSX } from "./get-error-jsx.js";
 import importModule from "./import-module.js";
-import { resolveLayoutFunctionsConfig, getActiveLayoutChain } from "./layout-functions.js";
+import { resolveLayoutFunctionsConfig, getActiveLayoutChain, resolveLayoutChainPpr } from "./layout-functions.js";
 import { revalidating, regenerating, inFlightGenerations } from "./revalidating.js";
 import { generatingISG } from "./generating-isg.js";
 import { requestStorage, setCurrentContext } from "./request-context.js";
+import {
+  createUnifiedEnv,
+  syncEdgeEnvToProcessEnv,
+  isBotEnvProbePath,
+} from "./runtime-env.js";
 import { getStatus } from "./status-manifest.js";
+import { discoverLayoutsFromFileRelPaths, discoverLayoutsFromFs } from "./discover-layouts.js";
 
 import {
   isManifestReady,
@@ -35,9 +41,17 @@ import {
   getServerFunctionsManifest,
 } from "./manifest-provider.js";
 import { pipeRSC, renderRSCStream, isEdgeRuntime } from "./rsc-renderer.js";
-import { getStorageAdapter, setStorageAdapter } from "./storage-adapter.js";
+import {
+  getStorageAdapter,
+  setStorageAdapter,
+  readDist2Fallback,
+} from "./storage-adapter.js";
 import { createBailoutProxy } from "./bailout-proxy.js";
 import getAssetFromManifest from "./get-asset-from-manifest.js";
+import {
+  fetchCloudflareDist2Asset,
+  isReservedCloudflareDist2RequestPath,
+} from "./static-assets.js";
 import { handlePprResume, spliceDynamicHolesIntoShell } from "./ppr-runtime.js";
 import { resolveModulePpr } from "./resolve-module-ppr.js";
 import { getDinouConfig as loadDinouConfig } from "./load-dinou-config.js";
@@ -55,40 +69,55 @@ import {
   getPprHoleCounter,
   runInPageSegment,
   runInLayoutSegment,
+  isSlotDiscoveryActive,
 } from "./ppr-context.js";
 import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
 
 // Load Dinou configuration and plugins
 let dinouConfig = { plugins: [] };
 let dinouConfigPromise = null;
+const AUTO_LOADED_PROD_CONFIG = Symbol.for("dinou.autoLoadedProdConfig");
 
 async function getDinouConfig() {
-  if (typeof globalThis !== "undefined" && globalThis.__DINOU_CONFIG__) {
-    const cfg = globalThis.__DINOU_CONFIG__;
-    if (cfg && cfg.storage) {
-      setStorageAdapter(cfg.storage);
+  const isSsgBuild =
+    typeof globalThis !== "undefined" && Boolean(globalThis.__DINOU_IS_SSG_BUILD__);
+  const isActiveDevServer =
+    process.env.DINOU_DEV === "true" ||
+    (typeof globalThis !== "undefined" && Boolean(globalThis.__DINOU_DEV__));
+  const aotOrProdCached =
+    typeof globalThis !== "undefined"
+      ? globalThis.__DINOU_AOT_CONFIG__ ||
+        (globalThis.__DINOU_CONFIG__ &&
+        !isActiveDevServer &&
+        (!isDevelopment || !globalThis.__DINOU_CONFIG__[AUTO_LOADED_PROD_CONFIG])
+          ? globalThis.__DINOU_CONFIG__
+          : null)
+      : null;
+  if (aotOrProdCached) {
+    if (!isSsgBuild && aotOrProdCached.storage) {
+      setStorageAdapter(aotOrProdCached.storage);
     }
-    dinouConfig = cfg;
-    return cfg;
+    dinouConfig = aotOrProdCached;
+    return aotOrProdCached;
   }
-  if (dinouConfigPromise && !isDevelopment) {
-    return dinouConfigPromise;
+  if (!dinouConfigPromise || isDevelopment) {
+    dinouConfigPromise = loadDinouConfig();
   }
-  dinouConfigPromise = (async () => {
-    const cfg = await loadDinouConfig();
-    if (cfg && cfg.storage) {
-      setStorageAdapter(cfg.storage);
-    }
-    dinouConfig = cfg;
-    return cfg;
-  })();
-  return dinouConfigPromise;
+  const cfg = await dinouConfigPromise;
+  if (!isSsgBuild && cfg && cfg.storage) {
+    setStorageAdapter(cfg.storage);
+  }
+  dinouConfig = cfg;
+  return cfg;
 }
 
 // Initial sync load attempt for immediate storage adapter setup
-if (typeof globalThis !== "undefined" && globalThis.__DINOU_CONFIG__) {
-  const cfg = globalThis.__DINOU_CONFIG__;
-  if (cfg && cfg.storage) {
+if (
+  typeof globalThis !== "undefined" &&
+  (globalThis.__DINOU_AOT_CONFIG__ || globalThis.__DINOU_CONFIG__)
+) {
+  const cfg = globalThis.__DINOU_AOT_CONFIG__ || globalThis.__DINOU_CONFIG__;
+  if (!globalThis.__DINOU_IS_SSG_BUILD__ && cfg && cfg.storage) {
     setStorageAdapter(cfg.storage);
   }
   dinouConfig = cfg;
@@ -105,7 +134,11 @@ if (typeof globalThis !== "undefined" && globalThis.__DINOU_CONFIG__) {
           if (nodeReqSync) {
             const loaded = nodeReqSync(syncPath);
             const cfg = (loaded && loaded.default) ? loaded.default : (loaded || { plugins: [] });
-            if (cfg && cfg.storage) {
+            if (
+              !(typeof globalThis !== "undefined" && globalThis.__DINOU_IS_SSG_BUILD__) &&
+              cfg &&
+              cfg.storage
+            ) {
               setStorageAdapter(cfg.storage);
             }
             dinouConfig = cfg;
@@ -120,17 +153,293 @@ if (typeof globalThis !== "undefined" && globalThis.__DINOU_CONFIG__) {
 function copyCustomContextProperties(source, target) {
   if (!source || !target) return;
   for (const key of Object.keys(source)) {
-    if (!["req", "res", "env", "ctx", "platformContext", "_markDynamic", "_dynamicState"].includes(key)) {
+    if (
+      ![
+        "req",
+        "res",
+        "env",
+        "ctx",
+        "platformContext",
+        "_markDynamic",
+        "_dynamicState",
+        "_hasRedirected",
+        "_isStaticHtmlRender",
+        "_isPprRuntimeResume",
+      ].includes(key)
+    ) {
       target[key] = source[key];
     }
   }
   if (source.req && target.req) {
     for (const key of Object.keys(source.req)) {
-      if (!["cookies", "headers", "query", "path", "url", "method", "env", "ctx"].includes(key)) {
+      if (
+        ![
+          "cookies",
+          "headers",
+          "query",
+          "path",
+          "rawPath",
+          "isRscRequest",
+          "url",
+          "method",
+          "env",
+          "ctx",
+        ].includes(key)
+      ) {
         target.req[key] = source.req[key];
       }
     }
   }
+}
+
+function safeJsonForInlineScript(str) {
+  return JSON.stringify(str)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function formatRscPushScript(kind, chunkStr) {
+  const arrName = `__DINOU_RSC_${kind}__`;
+  const pushFn = `__DINOU_RSC_${kind}_PUSH__`;
+  const encoded = safeJsonForInlineScript(chunkStr);
+  return `<script>(self.${arrName}=self.${arrName}||[]).push(${encoded});if(self.${pushFn})self.${pushFn}(${encoded});</script>`;
+}
+
+function formatRscDoneScript(kind) {
+  const doneName = `__DINOU_RSC_${kind}_DONE__`;
+  const closeFn = `__DINOU_RSC_${kind}_CLOSE__`;
+  return `<script>self.${doneName}=true;if(self.${closeFn})self.${closeFn}();</script>`;
+}
+
+function injectInlineRscIntoHtmlString(fullHtml, layoutRscText, pageRscText, hasLayout) {
+  if (!fullHtml || !pageRscText || (hasLayout && !layoutRscText)) return fullHtml;
+  let inlineScripts =
+    "<script>window.__DINOU_INLINE_RSC__=true;window.__DINOU_RSC_P__=window.__DINOU_RSC_P__||[];window.__DINOU_RSC_L__=window.__DINOU_RSC_L__||[];</script>";
+  if (hasLayout && layoutRscText) {
+    inlineScripts += formatRscPushScript("L", layoutRscText) + formatRscDoneScript("L");
+  }
+  inlineScripts += formatRscPushScript("P", pageRscText) + formatRscDoneScript("P");
+  const scriptMatch = fullHtml.match(/<script[^>]*\bsrc="\/(?:runtime|main)/i);
+  if (scriptMatch && typeof scriptMatch.index === "number") {
+    const idx = scriptMatch.index;
+    return fullHtml.slice(0, idx) + inlineScripts + fullHtml.slice(idx);
+  }
+  const bodyCloseIdx = fullHtml.toLowerCase().lastIndexOf("</body>");
+  if (bodyCloseIdx !== -1) {
+    return fullHtml.slice(0, bodyCloseIdx) + inlineScripts + fullHtml.slice(bodyCloseIdx);
+  }
+  return fullHtml + inlineScripts;
+}
+
+function createInlineRscHtmlStream(htmlStream, context, clientManifest) {
+  const hasLayoutSegment =
+    context._resolvedLayoutClientJsx !== null &&
+    context._resolvedLayoutClientJsx !== undefined;
+  const layoutStream = hasLayoutSegment
+    ? requestStorage.run(context, () =>
+        renderRSCStream(context._resolvedLayoutClientJsx, clientManifest, {
+          runtime: "edge",
+        })
+      )
+    : null;
+  const pageStream = requestStorage.run(context, () =>
+    renderRSCStream(context._resolvedPageClientJsx, clientManifest, {
+      runtime: "edge",
+    })
+  );
+
+  const encoder = new TextEncoder();
+  let initialSpliceDone = false;
+  let streamClosed = false;
+  let htmlBuffer = "";
+  const pendingScripts = [];
+
+  return new ReadableStream({
+    async start(controller) {
+      const safeEnqueueText = (str) => {
+        if (streamClosed || !str) return;
+        try {
+          controller.enqueue(encoder.encode(str));
+        } catch (e) {}
+      };
+
+      const flushPendingScripts = () => {
+        if (pendingScripts.length === 0) return;
+        const batch = pendingScripts.splice(0, pendingScripts.length).join("");
+        safeEnqueueText(batch);
+      };
+
+      const onRscScript = (scriptStr) => {
+        pendingScripts.push(scriptStr);
+        if (initialSpliceDone && htmlBuffer.length === 0) {
+          flushPendingScripts();
+        }
+      };
+
+      const startPump = (rscStream, kind) => {
+        if (!rscStream) {
+          return {
+            firstChunkReady: Promise.resolve(),
+            donePromise: Promise.resolve(),
+          };
+        }
+        let resolveFirst;
+        const firstChunkReady = new Promise((r) => {
+          resolveFirst = r;
+        });
+        const donePromise = (async () => {
+          const reader = rscStream.getReader();
+          const decoder = new TextDecoder();
+          let first = true;
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) {
+                const rem = decoder.decode();
+                if (rem) {
+                  onRscScript(formatRscPushScript(kind, rem));
+                }
+                onRscScript(formatRscDoneScript(kind));
+                if (first) {
+                  first = false;
+                  resolveFirst();
+                }
+                break;
+              }
+              const chunkStr = decoder.decode(value, { stream: true });
+              if (chunkStr) {
+                onRscScript(formatRscPushScript(kind, chunkStr));
+                if (first) {
+                  first = false;
+                  resolveFirst();
+                }
+              }
+            }
+          } catch (err) {
+            onRscScript(formatRscDoneScript(kind));
+            if (first) {
+              first = false;
+              resolveFirst();
+            }
+          }
+        })();
+        return { firstChunkReady, donePromise };
+      };
+
+      const layoutPump = startPump(layoutStream, "L");
+      const pagePump = startPump(pageStream, "P");
+
+      const htmlReader = htmlStream.getReader();
+      const htmlDecoder = new TextDecoder();
+      let heldBodyClose = "";
+
+      try {
+        while (true) {
+          const { done, value } = await htmlReader.read();
+          if (done) {
+            const rem = htmlDecoder.decode();
+            if (rem) {
+              htmlBuffer += rem;
+            }
+            if (heldBodyClose) {
+              htmlBuffer = heldBodyClose + htmlBuffer;
+              heldBodyClose = "";
+            }
+            const closeMatch = htmlBuffer.match(/<\/body>\s*<\/html>\s*$/i);
+            if (closeMatch) {
+              heldBodyClose = closeMatch[0];
+              htmlBuffer = htmlBuffer.slice(0, htmlBuffer.length - heldBodyClose.length);
+            }
+            if (!initialSpliceDone) {
+              await Promise.race([
+                Promise.all([layoutPump.firstChunkReady, pagePump.firstChunkReady]),
+                new Promise((r) => setTimeout(r, 15)),
+              ]);
+              const scriptMatch = htmlBuffer.match(/<script[^>]*\bsrc="\/(?:runtime|main)/i);
+              const scriptsToInject = pendingScripts.splice(0, pendingScripts.length).join("");
+              if (scriptMatch && typeof scriptMatch.index === "number") {
+                const idx = scriptMatch.index;
+                htmlBuffer = htmlBuffer.slice(0, idx) + scriptsToInject + htmlBuffer.slice(idx);
+              } else {
+                htmlBuffer += scriptsToInject;
+              }
+              initialSpliceDone = true;
+            }
+            if (htmlBuffer) {
+              safeEnqueueText(htmlBuffer);
+              htmlBuffer = "";
+            }
+            break;
+          }
+
+          const text = htmlDecoder.decode(value, { stream: true });
+          if (!text) continue;
+
+          if (heldBodyClose) {
+            htmlBuffer += heldBodyClose + text;
+            heldBodyClose = "";
+          } else {
+            htmlBuffer += text;
+          }
+
+          const closeMatch = htmlBuffer.match(/<\/body>\s*<\/html>\s*$/i);
+          if (closeMatch) {
+            heldBodyClose = closeMatch[0];
+            htmlBuffer = htmlBuffer.slice(0, htmlBuffer.length - heldBodyClose.length);
+          }
+
+          if (!initialSpliceDone) {
+            const scriptMatch = htmlBuffer.match(
+              /<script\b[^>]*\bsrc="\/(?:runtime|main)[^"]*"[^>]*><\/script>/i
+            );
+            if (scriptMatch && typeof scriptMatch.index === "number") {
+              await Promise.race([
+                Promise.all([layoutPump.firstChunkReady, pagePump.firstChunkReady]),
+                new Promise((r) => setTimeout(r, 15)),
+              ]);
+              const idx = scriptMatch.index;
+              const scriptsToInject = pendingScripts.splice(0, pendingScripts.length).join("");
+              htmlBuffer = htmlBuffer.slice(0, idx) + scriptsToInject + htmlBuffer.slice(idx);
+              initialSpliceDone = true;
+            }
+          }
+
+          if (initialSpliceDone) {
+            const lastScriptClose = htmlBuffer.toLowerCase().lastIndexOf("</script>");
+            if (lastScriptClose !== -1) {
+              const cutIdx = lastScriptClose + 9;
+              const toFlush = htmlBuffer.slice(0, cutIdx);
+              htmlBuffer = htmlBuffer.slice(cutIdx);
+              if (toFlush) {
+                safeEnqueueText(toFlush);
+              }
+              if (htmlBuffer.length === 0 && pendingScripts.length > 0) {
+                flushPendingScripts();
+              }
+            }
+          }
+        }
+
+        initialSpliceDone = true;
+        flushPendingScripts();
+        await Promise.all([layoutPump.donePromise, pagePump.donePromise]);
+        flushPendingScripts();
+        if (heldBodyClose) {
+          safeEnqueueText(heldBodyClose);
+          heldBodyClose = "";
+        }
+        streamClosed = true;
+        controller.close();
+      } catch (err) {
+        streamClosed = true;
+        try {
+          controller.error(err);
+        } catch (e) {}
+      }
+    },
+  });
 }
 
 // Anti-Bot Shield patterns
@@ -150,6 +459,18 @@ const botGarbagePatterns = [
   /\.log$/i,
 ];
 
+function isBotScannerRequest(pathname) {
+  if (!pathname || typeof pathname !== "string") return false;
+  if (isBotEnvProbePath(pathname)) return true;
+  let decoded = pathname;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {}
+  return botGarbagePatterns.some(
+    (pattern) => pattern.test(pathname) || pattern.test(decoded)
+  );
+}
+
 const IS_DYNAMIC_MAP_KEY = Symbol.for("dinou.isDynamic.map");
 if (!globalThis[IS_DYNAMIC_MAP_KEY]) {
   globalThis[IS_DYNAMIC_MAP_KEY] = new Map();
@@ -157,32 +478,24 @@ if (!globalThis[IS_DYNAMIC_MAP_KEY]) {
 const isDynamic = globalThis[IS_DYNAMIC_MAP_KEY];
 const pageFunctionsConfigCache = new Map();
 
-async function resolvePprForRoute(pagePath, pageFunctionsModule, reqSegments, queryObj) {
-  const globalCfg = await getDinouConfig();
-  let inheritedPpr = Boolean(globalCfg?.ppr);
-  try {
-    const srcFolder = path.resolve(process.cwd(), "src");
-    const layouts = getFilePathAndDynamicParams(
-      reqSegments || [],
-      queryObj || {},
-      srcFolder,
-      "layout",
-      true,
-      false,
-      undefined,
-      0,
-      {},
-      true
-    );
-    if (layouts && Array.isArray(layouts)) {
-      for (const [lPath, lParams] of layouts) {
-        const lConfig = await resolveLayoutFunctionsConfig(lPath, lParams);
-        if (lConfig && lConfig.ppr !== null && lConfig.ppr !== undefined) {
-          inheritedPpr = Boolean(lConfig.ppr);
-        }
-      }
-    }
-  } catch (e) {}
+async function resolvePprForRoute(
+  pagePath,
+  pageFunctionsModule,
+  reqSegments,
+  queryObj,
+  options = {},
+) {
+  const srcFolder = path.resolve(process.cwd(), "src");
+  const { defaultPpr, anyLayoutPpr } = await resolveLayoutChainPpr(
+    reqSegments || [],
+    queryObj || {},
+    srcFolder,
+    { ignoreNoLayout: Boolean(options?.ignoreNoLayout) },
+  );
+
+  if (options?.segment === "layout") {
+    return Boolean(anyLayoutPpr);
+  }
 
   let explicitPagePpr = null;
   let pfMod = pageFunctionsModule;
@@ -197,7 +510,7 @@ async function resolvePprForRoute(pagePath, pageFunctionsModule, reqSegments, qu
         true,
         true,
         undefined,
-        (reqSegments || []).length
+        (reqSegments || []).length,
       );
       if (pageFunctionsPath) {
         pfMod = await importModule(pageFunctionsPath);
@@ -208,17 +521,48 @@ async function resolvePprForRoute(pagePath, pageFunctionsModule, reqSegments, qu
   if (pfMod) {
     explicitPagePpr = await resolveModulePpr(pfMod);
   }
+  if (
+    explicitPagePpr === null &&
+    typeof globalThis !== "undefined" &&
+    globalThis.__DINOU_ROUTE_METADATA__ &&
+    pagePath
+  ) {
+    const normPage = pagePath.replace(/\\/g, "/");
+    const pageDir = path.dirname(normPage);
+    for (const [k, meta] of Object.entries(
+      globalThis.__DINOU_ROUTE_METADATA__,
+    )) {
+      if (
+        meta.ppr !== undefined &&
+        (normPage.endsWith(k) || k.startsWith(pageDir + "/page_functions"))
+      ) {
+        explicitPagePpr = Boolean(meta.ppr);
+        break;
+      }
+    }
+  }
 
-  return explicitPagePpr !== null ? explicitPagePpr : inheritedPpr;
+  const pageEffectivePpr =
+    explicitPagePpr !== null ? explicitPagePpr : Boolean(defaultPpr);
+  if (options?.segment === "page") {
+    return Boolean(pageEffectivePpr);
+  }
+  return Boolean(pageEffectivePpr || anyLayoutPpr);
 }
 
 /**
  * Resolves page_functions configuration (allowISG, validateParams, getStaticPaths)
  * and determines whether the current request path is blocked or allowed for ISG.
  */
-async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynamicParams, reqPath) {
+async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynamicParams, reqPath, isSSG = false) {
+  const globalCfg = await getDinouConfig();
+  const defaultAllowISG =
+    globalCfg?.allowISG !== undefined && globalCfg?.allowISG !== null
+      ? Boolean(globalCfg.allowISG)
+      : true;
+
   let isPathBlocked = false;
-  let allowISGValue = true;
+  let allowISGValue = defaultAllowISG;
   let isDynamicConfig = false;
   let cachedConfig = null;
 
@@ -245,15 +589,20 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
       }
 
       const isPpr = await resolvePprForRoute(pagePath, pageFunctionsModule, reqSegments, queryObj);
+      const isPagePpr = await resolvePprForRoute(pagePath, pageFunctionsModule, reqSegments, queryObj, {
+        segment: "page",
+      });
 
       if (pageFunctionsModule) {
         const defaultExport = pageFunctionsModule.default?.default ? pageFunctionsModule.default.default : pageFunctionsModule.default;
+        const rawAllowISG =
+          pageFunctionsModule.allowISG !== undefined
+            ? pageFunctionsModule.allowISG
+            : defaultExport?.allowISG;
         const resolvedAllowISG =
-          typeof pageFunctionsModule.allowISG === "function"
-            ? await pageFunctionsModule.allowISG()
-            : typeof defaultExport?.allowISG === "function"
-            ? await defaultExport.allowISG()
-            : (pageFunctionsModule.allowISG ?? defaultExport?.allowISG ?? true);
+          typeof rawAllowISG === "function"
+            ? await rawAllowISG()
+            : (rawAllowISG ?? null);
 
         const getStaticPathsFn = pageFunctionsModule.getStaticPaths || defaultExport?.getStaticPaths;
         let staticPathsSet = null;
@@ -265,36 +614,38 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
             staticPathsSet = new Set(
               paths.map((pathObj) => {
                 if (pathObj && typeof pathObj === "object" && !Array.isArray(pathObj)) {
-                  const sortedEntries = Object.entries(pathObj).sort((a, b) =>
-                    a[0].localeCompare(b[0])
-                  );
+                  const sortedEntries = Object.entries(pathObj)
+                    .sort((a, b) => a[0].localeCompare(b[0]))
+                    .map(([k, v]) => [
+                      k,
+                      Array.isArray(v)
+                        ? v.join(",")
+                        : v === undefined || v === null
+                        ? ""
+                        : String(v),
+                    ]);
                   return JSON.stringify(sortedEntries);
                 }
-                return String(pathObj);
+                if (Array.isArray(pathObj)) {
+                  return pathObj.join(",");
+                }
+                return pathObj === undefined || pathObj === null ? "" : String(pathObj);
               })
             );
           }
         }
 
+        const rawRevalidate =
+          pageFunctionsModule.revalidate !== undefined
+            ? pageFunctionsModule.revalidate
+            : defaultExport?.revalidate;
         let revalidateVal =
-          typeof pageFunctionsModule.revalidate === "function"
-            ? await pageFunctionsModule.revalidate()
-            : typeof defaultExport?.revalidate === "function"
-            ? await defaultExport.revalidate()
-            : (pageFunctionsModule.revalidate ?? defaultExport?.revalidate);
+          typeof rawRevalidate === "function"
+            ? await rawRevalidate()
+            : rawRevalidate;
 
         const isDynamic = typeof revalidateVal === "number" && revalidateVal < 1;
         const rawTags = pageFunctionsModule.getCacheTags ?? defaultExport?.getCacheTags;
-        let tagsVal = [];
-        if (typeof rawTags === "function") {
-          try {
-            tagsVal = await rawTags(dynamicParams);
-          } catch (e) {
-            console.error("Error running getCacheTags in handler:", e);
-          }
-        } else if (Array.isArray(rawTags)) {
-          tagsVal = rawTags;
-        }
 
         cachedConfig = {
           allowISG: resolvedAllowISG,
@@ -302,18 +653,22 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
           validateParams: pageFunctionsModule.validateParams || defaultExport?.validateParams || null,
           isDynamic,
           revalidate: revalidateVal,
-          tags: tagsVal,
+          getCacheTagsFn: typeof rawTags === "function" ? rawTags : null,
+          staticTags: Array.isArray(rawTags) ? rawTags : [],
           ppr: isPpr,
+          pagePpr: isPagePpr,
         };
       } else {
         cachedConfig = {
-          allowISG: true,
+          allowISG: null,
           staticPathsSet: null,
           validateParams: null,
           isDynamic: false,
           revalidate: undefined,
-          tags: [],
+          getCacheTagsFn: null,
+          staticTags: [],
           ppr: isPpr,
+          pagePpr: isPagePpr,
         };
       }
 
@@ -323,7 +678,10 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
     }
 
     const { allowISG: cachedAllowISG, staticPathsSet, validateParams: validateParamsFn, isDynamic: cachedIsDynamic } = cachedConfig;
-    allowISGValue = cachedAllowISG;
+    allowISGValue =
+      cachedAllowISG !== null && cachedAllowISG !== undefined
+        ? Boolean(cachedAllowISG)
+        : defaultAllowISG;
     isDynamicConfig = Boolean(cachedIsDynamic);
     const hasParams = Object.keys(dynamicParams || {}).length > 0;
     if (hasParams) {
@@ -334,18 +692,26 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
         }
       }
 
-      if (!isPathBlocked && allowISGValue === false) {
+      if (!isPathBlocked && allowISGValue === false && !isSSG) {
         let isPathAllowed = false;
         if (staticPathsSet) {
           const sortedQueryEntries = Object.entries(dynamicParams)
             .sort((a, b) => a[0].localeCompare(b[0]))
-            .map(([k, v]) => {
-              if (Array.isArray(v)) return [k, v.join(",")];
-              return [k, String(v)];
-            });
+            .map(([k, v]) => [
+              k,
+              Array.isArray(v)
+                ? v.join(",")
+                : v === undefined || v === null
+                ? ""
+                : String(v),
+            ]);
           const serializedQuery = JSON.stringify(sortedQueryEntries);
           const singleVal = Object.values(dynamicParams)[0];
-          const singleValStr = Array.isArray(singleVal) ? singleVal.join(",") : String(singleVal);
+          const singleValStr = Array.isArray(singleVal)
+            ? singleVal.join(",")
+            : singleVal === undefined || singleVal === null
+            ? ""
+            : String(singleVal);
           isPathAllowed = staticPathsSet.has(serializedQuery) || staticPathsSet.has(singleValStr);
         }
         if (!isPathAllowed) {
@@ -354,7 +720,9 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
           } else {
             const cleanReq = reqPath.replace(/^\//, "").replace(/\/$/, "");
             const htmlPath = path.join(process.cwd(), ".dinou/dist2", cleanReq, "index.html");
-            if (!existsSync(htmlPath)) {
+            const shellHtmlPath = path.join(process.cwd(), ".dinou/dist2", cleanReq, "shell.html");
+            const pageRscPath = path.join(process.cwd(), ".dinou/dist2", cleanReq, "page.rsc");
+            if (!existsSync(htmlPath) && !existsSync(shellHtmlPath) && !existsSync(pageRscPath)) {
               isPathBlocked = true;
             }
           }
@@ -363,15 +731,91 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
     }
   }
 
+  let resolvedTags = cachedConfig?.staticTags || [];
+  if (typeof cachedConfig?.getCacheTagsFn === "function") {
+    try {
+      const dynamicTags = await cachedConfig.getCacheTagsFn(dynamicParams);
+      resolvedTags = Array.isArray(dynamicTags) ? dynamicTags : [];
+    } catch (e) {
+      console.error("Error running getCacheTags in handler:", e);
+    }
+  }
+
   return {
     isPathBlocked,
     allowISGValue,
     isDynamicConfig,
     revalidate: cachedConfig?.revalidate,
-    tags: cachedConfig?.tags || [],
+    tags: resolvedTags,
     ppr: Boolean(cachedConfig?.ppr),
+    pagePpr: Boolean(cachedConfig?.pagePpr),
     staticPathsSet: cachedConfig?.staticPathsSet || null,
   };
+}
+
+/**
+ * Evaluates whether a layout segment blocks the current request via validateParams or allowISG=false.
+ * Only applies when the layout segment has dynamic parameters (Object.keys(lParams || {}).length > 0).
+ */
+async function isLayoutSegmentBlocked(
+  layoutPath,
+  lParams,
+  layoutConfig,
+  cleanLayoutKey,
+  reqPath,
+  isDevelopment,
+  isSSG = false,
+) {
+  if (!layoutPath || !layoutConfig) return false;
+  if (Object.keys(lParams || {}).length === 0) return false;
+
+  if (layoutConfig.validateParams) {
+    const isValid = await layoutConfig.validateParams(lParams);
+    if (!isValid) {
+      return true;
+    }
+  }
+
+  if (layoutConfig.allowISG === false && !isSSG) {
+    let isPathAllowed = false;
+    if (layoutConfig.staticPathsSet) {
+      const sortedEntries = Object.entries(lParams)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([k, v]) => [
+          k,
+          Array.isArray(v)
+            ? v.join(",")
+            : v === undefined || v === null
+            ? ""
+            : String(v),
+        ]);
+      const serialized = JSON.stringify(sortedEntries);
+      const singleVal = Object.values(lParams)[0];
+      const singleValStr = Array.isArray(singleVal)
+        ? singleVal.join(",")
+        : singleVal === undefined || singleVal === null
+        ? ""
+        : String(singleVal);
+      isPathAllowed =
+        layoutConfig.staticPathsSet.has(serialized) ||
+        layoutConfig.staticPathsSet.has(singleValStr);
+    }
+    if (!isPathAllowed) {
+      if (isDevelopment) {
+        return true;
+      }
+      const cleanReq = reqPath.replace(/^\//, "").replace(/\/$/, "");
+      const targetLayoutKey = cleanLayoutKey !== undefined ? cleanLayoutKey : cleanReq;
+      const layoutRscPath = path.join(process.cwd(), ".dinou/dist2", targetLayoutKey, "layout.rsc");
+      const htmlPath = path.join(process.cwd(), ".dinou/dist2", cleanReq, "index.html");
+      const shellHtmlPath = path.join(process.cwd(), ".dinou/dist2", cleanReq, "shell.html");
+      if (!existsSync(layoutRscPath) && !existsSync(htmlPath) && !existsSync(shellHtmlPath)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -406,35 +850,38 @@ function getDiscoveredLayouts() {
   if (discoveredLayoutsCache && now - lastLayoutsDiscoveryTime < 1000) {
     return discoveredLayoutsCache;
   }
-  const discovered = [];
+  let discovered = [];
 
-  // 1. Edge/Workers: Discover layouts from VFS
+  // 1. Edge/Workers: Discover layouts and page rules from VFS
   if (typeof globalThis !== "undefined" && globalThis.__DINOU_VFS__) {
     const vfs = globalThis.__DINOU_VFS__;
+    const vfsFiles = [];
     for (const key of Object.keys(vfs)) {
-      if (vfs[key]?.type === "file" && /(?:^|\/)layout\.[jt]sx?$/.test(key)) {
-        const clean = key.replace(/^\/?src\/?/, "").replace(/\/?layout\.[jt]sx?$/, "");
-        if (!discovered.includes(clean)) {
-          discovered.push(clean);
-        }
-      } else if (vfs[key]?.type === "file" && /(?:^|\/)no_layout$/.test(key)) {
-        const clean = "!" + key.replace(/^\/?src\/?/, "").replace(/\/?no_layout$/, "");
-        if (!discovered.includes(clean)) {
-          discovered.push(clean);
+      if (vfs[key]?.type === "file") {
+        const idx = key.indexOf("src/");
+        if (idx !== -1) {
+          vfsFiles.push(key.slice(idx + 4));
         }
       }
     }
+    if (vfsFiles.length > 0) {
+      discovered = discoverLayoutsFromFileRelPaths(vfsFiles);
+    }
   }
 
-  // 2. Edge/Workers: Discover layouts from Route Modules registry
+  // 2. Edge/Workers: Discover layouts and page rules from Route Modules registry
   if (discovered.length === 0 && typeof globalThis !== "undefined" && globalThis.__DINOU_ROUTE_MODULES__) {
+    const modFiles = [];
     for (const key of Object.keys(globalThis.__DINOU_ROUTE_MODULES__)) {
-      if (/(?:^|\/)layout\.[jt]sx?$/.test(key)) {
-        const clean = key.replace(/^\/?src\/?/, "").replace(/\/?layout\.[jt]sx?$/, "");
-        if (!discovered.includes(clean)) {
-          discovered.push(clean);
-        }
+      const idx = key.indexOf("src/");
+      if (idx !== -1) {
+        modFiles.push(key.slice(idx + 4));
+      } else {
+        modFiles.push(key);
       }
+    }
+    if (modFiles.length > 0) {
+      discovered = discoverLayoutsFromFileRelPaths(modFiles);
     }
   }
 
@@ -442,25 +889,7 @@ function getDiscoveredLayouts() {
   if (discovered.length === 0) {
     try {
       const srcFolder = path.resolve(process.cwd(), "src");
-      function find(dir, rel = "") {
-        if (!existsSync(dir)) return;
-        let entries;
-        try {
-          entries = readdirSync(dir, { withFileTypes: true });
-        } catch {
-          return;
-        }
-        for (const entry of entries) {
-          if (entry.isDirectory()) {
-            find(path.join(dir, entry.name), rel ? `${rel}/${entry.name}` : entry.name);
-          } else if (/^layout\.[jt]sx?$/.test(entry.name)) {
-            discovered.push(rel);
-          } else if (entry.name === "no_layout") {
-            discovered.push("!" + rel);
-          }
-        }
-      }
-      find(srcFolder);
+      discovered = discoverLayoutsFromFs(srcFolder, { existsSync, readdirSync });
     } catch (e) {}
   }
 
@@ -489,15 +918,24 @@ async function readMetaFromStorage(storage, metaKey, fallbackKey = null, platfor
       }
     } catch (e) {}
   }
+  const isDeleted =
+    storage &&
+    (typeof storage.isKeyDeleted === "function"
+      ? await storage.isKeyDeleted(metaKey)
+      : typeof storage.isDeleted === "function" && storage.isDeleted(metaKey));
   if (
     platformContext &&
     platformContext.env &&
     platformContext.env.ASSETS &&
     requestUrl &&
-    !(storage && typeof storage.isDeleted === "function" && storage.isDeleted(metaKey))
+    !isDeleted
   ) {
     try {
-      const metaRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${metaKey}`, requestUrl)));
+      const metaRes = await fetchCloudflareDist2Asset(
+        platformContext.env.ASSETS,
+        metaKey,
+        requestUrl
+      );
       if (metaRes && metaRes.status === 200) {
         const text = await metaRes.text();
         if (text && text.trim().startsWith("{")) {
@@ -509,6 +947,19 @@ async function readMetaFromStorage(storage, metaKey, fallbackKey = null, platfor
         }
       }
     } catch (e) {}
+  }
+  if (!isDeleted && storage) {
+    const dist2Item = await readDist2Fallback(storage, metaKey);
+    if (dist2Item) {
+      if (dist2Item.metadata && typeof dist2Item.metadata === "object" && dist2Item.metadata.generatedAt) {
+        return dist2Item.metadata;
+      }
+      if (typeof dist2Item.content === "string" && dist2Item.content.trim().startsWith("{")) {
+        try {
+          return JSON.parse(dist2Item.content);
+        } catch (e) {}
+      }
+    }
   }
   return null;
 }
@@ -522,15 +973,24 @@ async function readRscFromStorage(storage, rscKey, platformContext = null, reque
       }
     } catch (e) {}
   }
+  const isDeleted =
+    storage &&
+    (typeof storage.isKeyDeleted === "function"
+      ? await storage.isKeyDeleted(rscKey)
+      : typeof storage.isDeleted === "function" && storage.isDeleted(rscKey));
   if (
     platformContext &&
     platformContext.env &&
     platformContext.env.ASSETS &&
     requestUrl &&
-    !(storage && typeof storage.isDeleted === "function" && storage.isDeleted(rscKey))
+    !isDeleted
   ) {
     try {
-      const assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${rscKey}`, requestUrl)));
+      const assetRes = await fetchCloudflareDist2Asset(
+        platformContext.env.ASSETS,
+        rscKey,
+        requestUrl
+      );
       if (assetRes && assetRes.status === 200) {
         const text = await assetRes.text();
         if (text && !text.trimStart().startsWith("<")) {
@@ -542,6 +1002,17 @@ async function readRscFromStorage(storage, rscKey, platformContext = null, reque
       }
     } catch (e) {}
   }
+  if (!isDeleted && storage) {
+    const dist2Item = await readDist2Fallback(storage, rscKey);
+    if (
+      dist2Item &&
+      typeof dist2Item.content === "string" &&
+      dist2Item.content.length > 0 &&
+      !dist2Item.content.trimStart().startsWith("<")
+    ) {
+      return dist2Item.content;
+    }
+  }
   return "";
 }
 
@@ -549,18 +1020,35 @@ function __noopMarker() {
   return discovered;
 }
 
+function applyStreamingResponseHeaders(headers) {
+  if (!headers.has("Content-Encoding")) {
+    headers.set("Content-Encoding", "identity");
+  }
+  if (!headers.has("X-Accel-Buffering")) {
+    headers.set("X-Accel-Buffering", "no");
+  }
+  const cacheControl = headers.get("Cache-Control");
+  if (!cacheControl) {
+    headers.set("Cache-Control", "no-store, no-cache, must-revalidate, no-transform");
+  } else if (!/\bno-transform\b/i.test(cacheControl)) {
+    headers.set("Cache-Control", `${cacheControl}, no-transform`);
+  }
+}
+
 /**
  * Bridges Node.js style response methods to a WHATWG Web Response.
  */
 class WebResponseBridge extends PassThrough {
-  constructor() {
+  constructor(platformContext = null) {
     super();
     this.statusCode = 200;
+    this._explicitStatusSet = false;
     this.statusMessage = "";
     this.headers = new Headers();
     this.cookies = [];
     this.headersSent = false;
     this._resolved = false;
+    this._platformContext = platformContext;
     this._responsePromise = new Promise((resolve) => {
       this._resolveResponse = resolve;
     });
@@ -569,6 +1057,7 @@ class WebResponseBridge extends PassThrough {
 
   status(code) {
     this.statusCode = code;
+    this._explicitStatusSet = true;
     return this;
   }
 
@@ -641,11 +1130,13 @@ class WebResponseBridge extends PassThrough {
       for (const c of this.cookies) {
         this.headers.append("Set-Cookie", c);
       }
+      applyStreamingResponseHeaders(this.headers);
       const webStream = Readable.toWeb(this);
       const res = new Response(webStream, {
         status: this.statusCode,
         statusText: this.statusMessage || undefined,
         headers: this.headers,
+        encodeBody: "manual",
       });
       this._resolved = true;
       this._resolveResponse(res);
@@ -695,6 +1186,7 @@ class WebResponseBridge extends PassThrough {
     for (const c of this.cookies) {
       this.headers.append("Set-Cookie", c);
     }
+    applyStreamingResponseHeaders(this.headers);
 
     const textEncoder = new TextEncoder();
     const { readable, writable } = new TransformStream();
@@ -708,7 +1200,7 @@ class WebResponseBridge extends PassThrough {
     };
     this.on("data", onBridgeData);
 
-    (async () => {
+    const pumpPromise = (async () => {
       let reader;
       try {
         reader = readableStream.getReader();
@@ -737,10 +1229,19 @@ class WebResponseBridge extends PassThrough {
       } catch (e) {}
     })();
 
+    if (
+      this._platformContext &&
+      this._platformContext.ctx &&
+      typeof this._platformContext.ctx.waitUntil === "function"
+    ) {
+      this._platformContext.ctx.waitUntil(pumpPromise);
+    }
+
     const res = new Response(readable, {
       status: this.statusCode,
       statusText: this.statusMessage || undefined,
       headers: this.headers,
+      encodeBody: "manual",
     });
     this._resolved = true;
     this._resolveResponse(res);
@@ -758,14 +1259,31 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
   let hasRedirected = false;
 
   const markDynamic = () => {
+    if (isSlotDiscoveryActive()) return;
     if (dynamicState) {
       dynamicState.value = true;
     }
   };
 
+  const isRscSimReq = Boolean(
+    simReq.isRscRequest ||
+      String(simReq.rawPath || simReq.path || "").includes("____rsc_")
+  );
+
+  const isAllowedRedirectTarget = (candidate) =>
+    typeof candidate === "string" &&
+    ((candidate.startsWith("/") && !candidate.startsWith("//")) ||
+      /^https?:\/\//i.test(candidate));
+
   const safeResCall = (methodName, ...args) => {
     if (hasRedirected) return;
-    if (methodName === "setHeader" || methodName === "cookie" || methodName === "clearCookie" || methodName === "redirect") {
+    if (
+      methodName === "status" ||
+      methodName === "setHeader" ||
+      methodName === "cookie" ||
+      methodName === "clearCookie" ||
+      methodName === "redirect"
+    ) {
       markDynamic();
     }
     if (methodName === "clearCookie") {
@@ -783,7 +1301,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
       const scriptTag = `<script>document.cookie = ${safeCookieStr};</script>`;
       resBridge._injectedScripts = (resBridge._injectedScripts || "") + scriptTag;
       if (resBridge.headersSent) {
-        if (!simReq.path.includes("____rsc_")) {
+        if (!isRscSimReq) {
           resBridge.write(scriptTag);
         }
         return;
@@ -806,7 +1324,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
         const scriptTag = `<script>document.cookie = ${safeCookieStr};</script>`;
         resBridge._injectedScripts = (resBridge._injectedScripts || "") + scriptTag;
         if (resBridge.headersSent) {
-          if (!simReq.path.includes("____rsc_")) {
+          if (!isRscSimReq) {
             resBridge.write(scriptTag);
           }
           return;
@@ -819,19 +1337,17 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
     }
     if (resBridge.headersSent) {
       if (methodName === "redirect") {
-        if (simReq.path.includes("____rsc_")) {
+        if (isRscSimReq) {
           return;
         }
         hasRedirected = true;
+        if (context) context._hasRedirected = true;
         let url = args[0];
         if (args.length === 2) {
           url = args[1];
         }
         const resolvedUrl = resolveRelativeUrl(url, simReq.path);
-        let finalUrl = "/";
-        if (typeof resolvedUrl === "string" && resolvedUrl.startsWith("/") && !resolvedUrl.startsWith("//")) {
-          finalUrl = resolvedUrl;
-        }
+        const finalUrl = isAllowedRedirectTarget(resolvedUrl) ? resolvedUrl : "/";
         const safeUrl = JSON.stringify(finalUrl);
         resBridge.write(`<script>window.location.href = ${safeUrl};</script>`);
         resBridge.end();
@@ -841,6 +1357,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
     }
     if (methodName === "redirect") {
       hasRedirected = true;
+      if (context) context._hasRedirected = true;
       let url = args[0];
       let status = 302;
       if (args.length === 2) {
@@ -848,11 +1365,8 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
         url = args[1];
       }
       const resolvedUrl = resolveRelativeUrl(url, simReq.path);
-      let finalUrl = "/";
-      if (typeof resolvedUrl === "string" && resolvedUrl.startsWith("/") && !resolvedUrl.startsWith("//")) {
-        finalUrl = resolvedUrl;
-      }
-      if (simReq.path.includes("____rsc_")) {
+      const finalUrl = isAllowedRedirectTarget(resolvedUrl) ? resolvedUrl : "/";
+      if (isRscSimReq) {
         resBridge.setHeader("x-rsc-redirect", finalUrl);
         resBridge.status(200).end();
         return;
@@ -865,6 +1379,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
   const cookiesProxy = createBailoutProxy(simReq.cookies, "Cookies", markDynamic);
   const headersProxy = createBailoutProxy(simReq.headers, "Headers", markDynamic);
   const queryProxy = createBailoutProxy(simReq.query, "Query", markDynamic);
+  const unifiedEnv = createUnifiedEnv(platformContext.env);
 
   const context = {
     req: {
@@ -872,8 +1387,10 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
       headers: headersProxy,
       query: queryProxy,
       path: simReq.path,
+      rawPath: simReq.rawPath || simReq.path,
+      isRscRequest: isRscSimReq,
       method: simReq.method,
-      env: platformContext.env || {},
+      env: unifiedEnv,
       ctx: platformContext.ctx || null,
     },
     res: {
@@ -883,14 +1400,19 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
       cookie: (name, value, options) => safeResCall("cookie", name, value, options),
       redirect: (...args) => safeResCall("redirect", ...args),
     },
-    env: platformContext.env || {},
+    env: unifiedEnv,
     ctx: platformContext.ctx || null,
     platformContext,
     _markDynamic: markDynamic,
     _dynamicState: dynamicState,
+    _hasRedirected: false,
   };
 
-  if (dinouConfig.plugins && Array.isArray(dinouConfig.plugins)) {
+  if (
+    !platformContext?.isSSG &&
+    dinouConfig.plugins &&
+    Array.isArray(dinouConfig.plugins)
+  ) {
     for (const plugin of dinouConfig.plugins) {
       if (typeof plugin.onRequestContext === "function") {
         try {
@@ -910,14 +1432,17 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
  * Context for Server Function endpoints.
  */
 function createServerFunctionContext(simReq, resBridge, platformContext = {}) {
+  const unifiedEnv = createUnifiedEnv(platformContext.env);
   const context = {
     req: {
       cookies: { ...simReq.cookies },
       headers: { ...simReq.headers },
       query: { ...simReq.query },
       path: simReq.path,
+      rawPath: simReq.rawPath || simReq.path,
+      isRscRequest: false,
       method: simReq.method,
-      env: platformContext.env || {},
+      env: unifiedEnv,
       ctx: platformContext.ctx || null,
     },
     res: {
@@ -976,12 +1501,111 @@ function createServerFunctionContext(simReq, resBridge, platformContext = {}) {
         resBridge.write(`D:{"type":"cookie","cookie":${JSON.stringify(cookieStr)}}\n`);
       },
     },
-    env: platformContext.env || {},
+    env: unifiedEnv,
     ctx: platformContext.ctx || null,
     platformContext,
+    _dynamicState: { value: true },
   };
   setCurrentContext(context);
   return context;
+}
+
+function normalizeLogicalRequestPathname(pathname, headersObj = {}) {
+  if (typeof pathname !== "string" || !pathname) {
+    return "/";
+  }
+  if (
+    /^\/____rsc_(?:page|layout|payload)(?:_(?:old_static|old|static))?____(?:\/|$)/.test(
+      pathname
+    )
+  ) {
+    const stripped = pathname.replace(
+      /^\/____rsc_(?:page|layout|payload)(?:_(?:old_static|old|static))?____/,
+      ""
+    );
+    return stripped || "/";
+  }
+  if (/^\/____rsc_payload_error____(?:\/|$)/.test(pathname)) {
+    const stripped = pathname.replace(/^\/____rsc_payload_error____/, "");
+    return stripped || "/";
+  }
+  if (/^\/____rsc_slot____(?:\/|$)/.test(pathname)) {
+    const currentPath = headersObj["x-dinou-current-path"];
+    if (typeof currentPath === "string" && currentPath.startsWith("/")) {
+      return currentPath.split("?")[0] || "/";
+    }
+  }
+  return pathname;
+}
+
+function finalizePluginResponse(result, bridge, request, isRscWireRequest) {
+  let hasBridgeHeaders = false;
+  for (const _ of bridge.headers.keys()) {
+    hasBridgeHeaders = true;
+    break;
+  }
+  const hasBridgeCookies = bridge.cookies.length > 0;
+  let finalRes = result;
+
+  if (hasBridgeHeaders || hasBridgeCookies) {
+    const mergedHeaders = new Headers(result.headers);
+    for (const [k, v] of bridge.headers.entries()) {
+      if (!mergedHeaders.has(k)) {
+        mergedHeaders.set(k, v);
+      }
+    }
+    for (const c of bridge.cookies) {
+      mergedHeaders.append("Set-Cookie", c);
+    }
+    finalRes = new Response(result.body, {
+      status: result.status,
+      statusText: result.statusText,
+      headers: mergedHeaders,
+    });
+  }
+
+  const location = finalRes.headers.get("location");
+  if (
+    isRscWireRequest &&
+    finalRes.status >= 300 &&
+    finalRes.status < 400 &&
+    location
+  ) {
+    const reqUrl = new URL(request.url);
+    let redirectTarget = location;
+    try {
+      const resolved = new URL(location, reqUrl.origin);
+      if (resolved.origin === reqUrl.origin) {
+        redirectTarget = resolved.pathname + resolved.search + resolved.hash;
+      } else {
+        redirectTarget = resolved.href;
+      }
+    } catch (e) {}
+
+    const rscHeaders = new Headers();
+    for (const [k, v] of finalRes.headers.entries()) {
+      const lower = k.toLowerCase();
+      if (lower === "location" || lower === "set-cookie") continue;
+      rscHeaders.set(k, v);
+    }
+    const setCookies =
+      typeof finalRes.headers.getSetCookie === "function"
+        ? finalRes.headers.getSetCookie()
+        : [];
+    for (const c of setCookies) {
+      rscHeaders.append("Set-Cookie", c);
+    }
+    rscHeaders.set("x-rsc-redirect", redirectTarget);
+    if (!rscHeaders.has("Cache-Control")) {
+      rscHeaders.set("Cache-Control", "no-store, no-cache, must-revalidate");
+    }
+    return new Response("", {
+      status: 200,
+      headers: rscHeaders,
+    });
+  }
+
+  return finalRes;
 }
 
 /**
@@ -997,13 +1621,17 @@ async function handleRequest(request, platformContext = {}) {
     }
     if (platformContext?.env) {
       globalThis.__DINOU_ENV__ = platformContext.env;
+      syncEdgeEnvToProcessEnv(platformContext.env);
     }
   }
   const url = new URL(request.url);
   const pathname = url.pathname;
 
-  // 1. Anti-Bot Shield
-  if (botGarbagePatterns.some((pattern) => pattern.test(pathname))) {
+  // 1. Anti-Bot Shield & Reserved Internal Namespace Guard
+  if (
+    isBotScannerRequest(pathname) ||
+    isReservedCloudflareDist2RequestPath(pathname)
+  ) {
     return new Response("Not Found", { status: 404 });
   }
 
@@ -1032,33 +1660,61 @@ async function handleRequest(request, platformContext = {}) {
     headersObj[k.toLowerCase()] = v;
   }
   const cookiesObj = parseCookieHeader(headersObj["cookie"] || "");
-  const queryObj = Object.fromEntries(url.searchParams.entries());
+  const queryObj = {};
+  for (const [k, v] of url.searchParams.entries()) {
+    if (k === "__proto__") continue;
+    if (Object.prototype.hasOwnProperty.call(queryObj, k)) {
+      if (Array.isArray(queryObj[k])) {
+        queryObj[k].push(v);
+      } else {
+        queryObj[k] = [queryObj[k], v];
+      }
+    } else {
+      queryObj[k] = v;
+    }
+  }
   const internalBuildId = queryObj.____build_id____;
   const internalRefreshVersion = queryObj.____v____;
   delete queryObj.____build_id____;
   delete queryObj.____v____;
 
+  const isRscWireRequest =
+    pathname.includes("____rsc_") && !pathname.includes("____server_function____");
+  const logicalPathname = normalizeLogicalRequestPathname(pathname, headersObj);
+
   const simReq = {
-    path: pathname,
-    url: pathname + url.search,
+    path: logicalPathname,
+    rawPath: pathname,
+    isRscRequest: isRscWireRequest,
+    url: logicalPathname + url.search,
     query: queryObj,
     headers: headersObj,
     cookies: cookiesObj,
     method: request.method,
   };
 
-  const bridge = new WebResponseBridge();
+  const cfg = await getDinouConfig();
+  const bridge = new WebResponseBridge(platformContext);
   const rootContext = createRequestContext(simReq, bridge, platformContext);
 
-  // 4. Plugin onRequest Hook (Universal Middlewares & Webhooks)
-  const cfg = await getDinouConfig();
-  if (cfg.plugins && Array.isArray(cfg.plugins)) {
+  // 4. Plugin onRequest Hook (Universal Middlewares & Webhooks; skipped during build-time SSG)
+  if (!platformContext?.isSSG && cfg.plugins && Array.isArray(cfg.plugins)) {
     for (const plugin of cfg.plugins) {
       if (typeof plugin.onRequest === "function") {
         try {
-          const result = await plugin.onRequest(request, rootContext);
+          const result = await requestStorage.run(rootContext, () =>
+            plugin.onRequest(request, rootContext)
+          );
+          if (bridge._resolved || bridge.headersSent) {
+            return bridge.toResponse();
+          }
           if (result instanceof Response) {
-            return result;
+            return finalizePluginResponse(
+              result,
+              bridge,
+              request,
+              isRscWireRequest
+            );
           }
         } catch (pluginErr) {
           console.error(`[Dinou Plugin Error: "${plugin.name || "unnamed"}"]:`, pluginErr);
@@ -1146,19 +1802,29 @@ async function handleRequest(request, platformContext = {}) {
       }
 
       const normalizedRelativePath = path.normalize(relativePath).replace(/\\/g, "/");
-      if (!normalizedRelativePath.startsWith("src/") && normalizedRelativePath !== "src") {
+      const hasEscapedDir = normalizedRelativePath.split("/").slice(1, -1).some((seg) => seg.startsWith("_"));
+      if ((!normalizedRelativePath.startsWith("src/") && normalizedRelativePath !== "src") || hasEscapedDir) {
         return Response.json({ error: "Forbidden access" }, { status: 403 });
       }
 
       const sfManifest = getServerFunctionsManifest();
+      let resolvedRelativePath = normalizedRelativePath;
       if (sfManifest) {
-        const allowedExports = sfManifest[normalizedRelativePath];
+        let allowedExports = sfManifest[normalizedRelativePath];
+        if (!allowedExports) {
+          const lowerTarget = normalizedRelativePath.toLowerCase();
+          const matchedKey = Object.keys(sfManifest).find((k) => k.toLowerCase() === lowerTarget);
+          if (matchedKey) {
+            allowedExports = sfManifest[matchedKey];
+            resolvedRelativePath = matchedKey;
+          }
+        }
         if (!allowedExports || !allowedExports.has(exportName)) {
           return Response.json({ error: "Invalid export name" }, { status: 400 });
         }
       }
 
-      const absPath = path.resolve(process.cwd(), relativePath);
+      const absPath = path.resolve(process.cwd(), resolvedRelativePath);
       const mod = await importModule(absPath);
       const fn = exportName === "default" ? mod.default : mod[exportName];
 
@@ -1193,14 +1859,22 @@ async function handleRequest(request, platformContext = {}) {
       }
 
       bridge.setHeader("Content-Type", "text/x-component");
-      bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      if (!bridge.headers.has("Cache-Control")) {
+  bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+}
 
       const manifest = getClientManifest();
-      pipeRSC(returnValue, bridge, manifest, platformContext);
+      requestStorage.run(context, () => {
+        pipeRSC(returnValue, bridge, manifest, platformContext);
+      });
       return bridge.toResponse();
     } catch (err) {
       console.error("[Dinou] Error executing server function:", err);
-      return Response.json({ error: err.message || "Internal Server Error" }, { status: 500 });
+      const errorPayload = { error: err?.message || "Internal Server Error" };
+      if (err && typeof err.digest === "string") {
+        errorPayload.digest = err.digest;
+      }
+      return Response.json(errorPayload, { status: 500 });
     }
   }
 
@@ -1235,7 +1909,9 @@ async function handleRequest(request, platformContext = {}) {
           { segment: "page" },
         );
         bridge.setHeader("Content-Type", "text/x-component");
-        bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        if (!bridge.headers.has("Cache-Control")) {
+  bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+}
 
         const manifest = getClientManifest();
         pipeRSC(jsx, bridge, manifest, platformContext);
@@ -1286,7 +1962,9 @@ async function handleRequest(request, platformContext = {}) {
         }
 
         bridge.setHeader("Content-Type", "text/x-component");
-        bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        if (!bridge.headers.has("Cache-Control")) {
+  bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+}
         bridge.setHeader("X-Dinou-Slot", slotId);
 
         const manifest = getClientManifest();
@@ -1356,23 +2034,74 @@ async function handleRequest(request, platformContext = {}) {
 
     let layoutConfig = null;
     let pageConfig = null;
-    if (isLayoutReq) {
-      layoutConfig = await resolveLayoutFunctionsConfig(layoutPath, layoutParams);
-      if (layoutConfig.isDynamic) {
-        dynamicState.value = true;
+    await requestStorage.run(rootContext, async () => {
+      // Authoritative perimeter validation (root-to-child layouts, then page) BEFORE any cached RSC hit
+      const perimeterLayoutChain = getActiveLayoutChain(reqSegments, queryObj, srcFolder, {
+        ignoreNoLayout: isLayoutReq,
+      });
+      if (perimeterLayoutChain.length > 0) {
+        for (let i = perimeterLayoutChain.length - 1; i >= 0; i--) {
+          const entry = perimeterLayoutChain[i];
+          const lCfg = await resolveLayoutFunctionsConfig(entry.layoutPath, entry.dParams);
+          if (i === 0 && isLayoutReq) {
+            layoutConfig = lCfg;
+          }
+          if (isLayoutReq && lCfg.isDynamic) {
+            dynamicState.value = true;
+          }
+          if (
+            await isLayoutSegmentBlocked(
+              entry.layoutPath,
+              entry.dParams,
+              lCfg,
+              entry.cleanLayoutKey,
+              reqPath,
+              isDevelopment,
+              Boolean(platformContext?.isSSG),
+            )
+          ) {
+            isPathBlocked = true;
+            break;
+          }
+        }
+      } else if (isLayoutReq && layoutPath) {
+        layoutConfig = await resolveLayoutFunctionsConfig(layoutPath, layoutParams);
+        if (layoutConfig.isDynamic) {
+          dynamicState.value = true;
+        }
+        if (
+          await isLayoutSegmentBlocked(
+            layoutPath,
+            layoutParams,
+            layoutConfig,
+            undefined,
+            reqPath,
+            isDevelopment,
+            Boolean(platformContext?.isSSG),
+          )
+        ) {
+          isPathBlocked = true;
+        }
       }
-    } else if (isPageReq) {
-      pageConfig = await resolvePageFunctionsConfig(
-        pagePath,
-        reqSegments,
-        queryObj,
-        dynamicParams,
-        reqPath,
-      );
-      if (pageConfig.isDynamicConfig) {
-        dynamicState.value = true;
+
+      if (!isLayoutReq && !isPathBlocked) {
+        pageConfig = await resolvePageFunctionsConfig(
+          pagePath,
+          reqSegments,
+          queryObj,
+          dynamicParams,
+          reqPath,
+          Boolean(platformContext?.isSSG),
+        );
+        if (pageConfig.isDynamicConfig) {
+          dynamicState.value = true;
+        }
+        isPathBlocked = pageConfig.isPathBlocked;
       }
-      isPathBlocked = pageConfig.isPathBlocked;
+    });
+
+    if (isPathBlocked) {
+      return new Response("Not Found", { status: 404 });
     }
 
     const nonBuildIdQueryKeys = Object.keys(queryObj);
@@ -1387,6 +2116,7 @@ async function handleRequest(request, platformContext = {}) {
       : "page.rsc";
 
     let isRoutePpr = false;
+    let hasDetectedSegmentPpr = false;
     let currentGeneratedAt = null;
     let leafLayoutSuspenseCount = 0;
     if (!isDevelopment && isEdgeRuntime(platformContext)) {
@@ -1402,6 +2132,7 @@ async function handleRequest(request, platformContext = {}) {
             const lRscKey = entry.cleanLayoutKey ? `${entry.cleanLayoutKey}/layout.rsc` : "layout.rsc";
             const lMeta = await readMetaFromStorage(storage, lMetaKey, lRscKey, platformContext, request.url);
             entry.generatedAt = Number(lMeta?.generatedAt || 0);
+            entry.layoutGeneratedAt = Number(lMeta?.layoutGeneratedAt || lMeta?.generatedAt || 0);
             entry.suspenseCount = Number(lMeta?.suspenseCount || 0);
             entry.revalidate = lMeta?.revalidate;
             entry.slotTags = Array.isArray(lMeta?.slotTags) ? lMeta.slotTags : [];
@@ -1412,17 +2143,33 @@ async function handleRequest(request, platformContext = {}) {
               const isLayoutTtlExpired =
                 typeof entry.revalidate === "number" &&
                 entry.revalidate >= 1 &&
-                entry.generatedAt > 0 &&
-                Date.now() > entry.generatedAt + entry.revalidate * 1000;
+                entry.layoutGeneratedAt > 0 &&
+                Date.now() > entry.layoutGeneratedAt + entry.revalidate * 1000;
               const isLayoutSlotTtlExpired =
                 !isLayoutTtlExpired &&
                 entry.slotTags.length > 0 &&
                 (await hasExpiredSlots(entry.slotTags));
+              const ancestors =
+                i < activeChain.length - 1 ? activeChain.slice(i + 1) : [];
               const maxAncestorGen =
-                i < activeChain.length - 1
-                  ? Math.max(0, ...activeChain.slice(i + 1).map((l) => l.generatedAt || 0))
+                ancestors.length > 0
+                  ? Math.max(0, ...ancestors.map((l) => l.generatedAt || 0))
                   : 0;
-              const isAncestorNewer = entry.generatedAt > 0 && maxAncestorGen > entry.generatedAt;
+              const maxAncestorOwnGen =
+                ancestors.length > 0
+                  ? Math.max(
+                      0,
+                      ...ancestors.map((l) => l.layoutGeneratedAt || l.generatedAt || 0)
+                    )
+                  : 0;
+              const entryOwnGen = entry.layoutGeneratedAt || entry.generatedAt || 0;
+              const isAncestorOwnNewer =
+                entryOwnGen > 0 && maxAncestorOwnGen > entryOwnGen;
+              const isAncestorSlotOnlyNewer =
+                !isAncestorOwnNewer &&
+                entry.generatedAt > 0 &&
+                maxAncestorGen > entry.generatedAt;
+              const isAncestorNewer = isAncestorOwnNewer || isAncestorSlotOnlyNewer;
               if (isLayoutSlotTtlExpired && !isLayoutTtlExpired && !(isLayoutReq && isAncestorNewer)) {
                 const layoutSlotRevalKey = `layout-slot:${entry.layoutRoutePath}`;
                 const layoutSlotRevalPromise = (async () => {
@@ -1442,7 +2189,11 @@ async function handleRequest(request, platformContext = {}) {
                 }
               } else if (isLayoutTtlExpired || (isLayoutReq && isAncestorNewer)) {
                 const { revalidateLayout } = await import("./cache-revalidate.js");
-                await revalidateLayout(entry.layoutRoutePath, {});
+                await revalidateLayout(entry.layoutRoutePath, {
+                  onlyRefreshSlots:
+                    !isLayoutTtlExpired && !isAncestorOwnNewer && isAncestorSlotOnlyNewer,
+                  onlyIfExpired: isLayoutTtlExpired && !(isLayoutReq && isAncestorNewer),
+                });
                 const lMetaKey = entry.cleanLayoutKey
                   ? `${entry.cleanLayoutKey}/layout.metadata.json`
                   : "layout.metadata.json";
@@ -1458,6 +2209,11 @@ async function handleRequest(request, platformContext = {}) {
                 );
                 if (refreshedMeta?.generatedAt) {
                   entry.generatedAt = Number(refreshedMeta.generatedAt);
+                }
+                if (refreshedMeta?.layoutGeneratedAt || refreshedMeta?.generatedAt) {
+                  entry.layoutGeneratedAt = Number(
+                    refreshedMeta.layoutGeneratedAt || refreshedMeta.generatedAt
+                  );
                 }
                 if (refreshedMeta?.suspenseCount !== undefined) {
                   entry.suspenseCount = Number(refreshedMeta.suspenseCount || 0);
@@ -1481,16 +2237,25 @@ async function handleRequest(request, platformContext = {}) {
             if (edgeMeta.dynamic) {
               dynamicState.value = true;
             }
+            if (edgeMeta.ppr !== undefined) {
+              isRoutePpr = Boolean(edgeMeta.ppr);
+              hasDetectedSegmentPpr = true;
+            }
             if (Array.isArray(edgeMeta.holes) && edgeMeta.holes.length > 0) {
               isRoutePpr = true;
+              hasDetectedSegmentPpr = true;
             }
-          } else if (edgeMeta.ppr) {
-            isRoutePpr = true;
+          } else if (edgeMeta.pagePpr !== undefined) {
+            isRoutePpr = Boolean(edgeMeta.pagePpr);
+            hasDetectedSegmentPpr = true;
+          } else if (edgeMeta.ppr !== undefined) {
+            isRoutePpr = Boolean(edgeMeta.ppr);
+            hasDetectedSegmentPpr = true;
           }
         }
       }
     }
-    if (!currentGeneratedAt && !platformContext?.isSSG) {
+    if (!currentGeneratedAt && !platformContext?.isSSG && !isEdgeRuntime(platformContext)) {
       try {
         const metaFileName = isLayoutReq ? "layout.metadata.json" : "metadata.json";
         const metadataPath = path.join(".dinou/dist2", cleanPath, metaFileName);
@@ -1501,48 +2266,84 @@ async function handleRequest(request, platformContext = {}) {
             if (metaObj.dynamic) {
               dynamicState.value = true;
             }
+            if (metaObj.ppr !== undefined) {
+              isRoutePpr = Boolean(metaObj.ppr);
+              hasDetectedSegmentPpr = true;
+            }
             if (Array.isArray(metaObj.holes) && metaObj.holes.length > 0) {
               isRoutePpr = true;
+              hasDetectedSegmentPpr = true;
             }
-          } else if (metaObj.ppr) {
-            isRoutePpr = true;
+          } else if (metaObj.pagePpr !== undefined) {
+            isRoutePpr = Boolean(metaObj.pagePpr);
+            hasDetectedSegmentPpr = true;
+          } else if (metaObj.ppr !== undefined) {
+            isRoutePpr = Boolean(metaObj.ppr);
+            hasDetectedSegmentPpr = true;
           }
         }
       } catch (e) {}
     }
 
-    if (!isRoutePpr) {
+    if (!hasDetectedSegmentPpr) {
       isRoutePpr = isLayoutReq
-        ? Boolean(platformContext?.isSSG && layoutConfig?.ppr)
-        : pageConfig?.ppr !== undefined && pageConfig?.ppr !== null
-        ? Boolean(pageConfig.ppr)
-        : await resolvePprForRoute(pagePath, null, reqSegments, queryObj);
+        ? await resolvePprForRoute(null, null, reqSegments, queryObj, {
+            segment: "layout",
+            ignoreNoLayout: true,
+          })
+        : pageConfig?.pagePpr !== undefined && pageConfig?.pagePpr !== null
+        ? Boolean(pageConfig.pagePpr)
+        : await resolvePprForRoute(pagePath, null, reqSegments, queryObj, {
+            segment: "page",
+          });
     }
 
     const canServeCachedRsc = isLayoutReq
-      ? !isDevelopment && !platformContext?.isSSG && !dynamicState.value && !isRoutePpr
-      : !isDevelopment && !platformContext?.isSSG && !dynamicState.value && (!hasQueryParams || isStatic) && !isRoutePpr;
+      ? !isDevelopment &&
+        !platformContext?.isSSG &&
+        (!dynamicState.value || (isStatic && Boolean(internalBuildId))) &&
+        !isRoutePpr
+      : !isDevelopment &&
+        !platformContext?.isSSG &&
+        (!dynamicState.value || (isStatic && Boolean(internalBuildId))) &&
+        (!hasQueryParams || isStatic) &&
+        !isRoutePpr;
 
     if (canServeCachedRsc) {
+      const hasTimestampComparison = Boolean(
+        !internalRefreshVersion && internalBuildId && currentGeneratedAt
+      );
       const useOld =
         isOld ||
-        regenerating.has(cleanPath) ||
-        (!internalRefreshVersion &&
-          internalBuildId &&
-          currentGeneratedAt &&
-          Number(internalBuildId) < Number(currentGeneratedAt));
+        (hasTimestampComparison
+          ? Number(internalBuildId) < Number(currentGeneratedAt)
+          : !isEdgeRuntime(platformContext) &&
+            (regenerating.has(reqPath) || regenerating.has(cleanPath)));
+
+      const resolvedTargetFileName = targetFileName;
 
       const actualFileName = useOld
         ? isLayoutReq
           ? "layout._old.rsc"
           : "page._old.rsc"
-        : targetFileName;
+        : resolvedTargetFileName;
 
       let payloadPath = path.resolve(
         ".dinou/dist2",
         cleanPath.replace(/^\//, ""),
         actualFileName,
       );
+
+      if (!existsSync(payloadPath) && useOld) {
+        const currentFallbackPath = path.resolve(
+          ".dinou/dist2",
+          cleanPath.replace(/^\//, ""),
+          resolvedTargetFileName,
+        );
+        if (existsSync(currentFallbackPath)) {
+          payloadPath = currentFallbackPath;
+        }
+      }
 
       // Legacy fallback for rsc_payload if page.rsc doesn't exist
       if (!existsSync(payloadPath) && !isLayoutReq && !isPageReq) {
@@ -1568,7 +2369,9 @@ async function handleRequest(request, platformContext = {}) {
         try {
           let cached = await storage.get(rscKey);
           if (!cached && useOld) {
-            const fallbackCurrKey = cleanRel ? `${cleanRel}/${targetFileName}` : targetFileName;
+            const fallbackCurrKey = cleanRel
+              ? `${cleanRel}/${resolvedTargetFileName}`
+              : resolvedTargetFileName;
             cached = await storage.get(fallbackCurrKey);
           }
           if (!cached && !isLayoutReq && !isPageReq) {
@@ -1590,7 +2393,9 @@ async function handleRequest(request, platformContext = {}) {
                 (await readMetaFromStorage(storage, pMetaKey, pRscBaseKey, platformContext, request.url));
               if (pMeta) {
                 const pReval =
-                  pMeta.pageRevalidate !== undefined ? pMeta.pageRevalidate : pMeta.revalidate;
+                  pMeta.pageRevalidate !== undefined && pMeta.pageRevalidate !== null
+                    ? pMeta.pageRevalidate
+                    : pMeta.revalidate;
                 const pGen = pMeta.pageGeneratedAt || pMeta.generatedAt || 0;
                 if (typeof pReval === "number" && pReval >= 1 && pGen > 0 && Date.now() > pGen + pReval * 1000) {
                   isExpired = true;
@@ -1599,9 +2404,15 @@ async function handleRequest(request, platformContext = {}) {
                 }
               }
               if (isSlotOnlyExpired && !isExpired) {
-                const slotRevalKey = `slot:${cleanPath}`;
+                const slotRevalKey = `slot:${reqPath}`;
                 const slotRevalPromise = (async () => {
-                  if (regenerating.has(slotRevalKey) || regenerating.has(cleanPath)) return;
+                  if (
+                    regenerating.has(slotRevalKey) ||
+                    regenerating.has(reqPath) ||
+                    regenerating.has(cleanPath)
+                  ) {
+                    return;
+                  }
                   regenerating.add(slotRevalKey);
                   try {
                     const { revalidatePage } = await import("./cache-revalidate.js");
@@ -1616,16 +2427,25 @@ async function handleRequest(request, platformContext = {}) {
                   platformContext.ctx.waitUntil(slotRevalPromise);
                 }
               } else if (isExpired) {
-                const { revalidatePage } = await import("./cache-revalidate.js");
-                await revalidatePage(cleanPath, {});
-                if (!dynamicState.value) {
-                  const refreshedCached = await storage.get(rscKey);
-                  if (refreshedCached && refreshedCached.content) {
-                    cached = refreshedCached;
-                    isExpired = false;
-                  }
+                if (regenerating.has(reqPath) || regenerating.has(cleanPath)) {
+                  isExpired = false;
                 } else {
-                  isExpired = true;
+                  regenerating.add(reqPath);
+                  try {
+                    const { revalidatePage } = await import("./cache-revalidate.js");
+                    await revalidatePage(cleanPath, { onlyIfExpired: true });
+                  } finally {
+                    regenerating.delete(reqPath);
+                  }
+                  if (!dynamicState.value) {
+                    const refreshedCached = await storage.get(rscKey);
+                    if (refreshedCached && refreshedCached.content) {
+                      cached = refreshedCached;
+                      isExpired = false;
+                    }
+                  } else {
+                    isExpired = true;
+                  }
                 }
               }
             }
@@ -1633,7 +2453,9 @@ async function handleRequest(request, platformContext = {}) {
               const contentStr = typeof cached.content === "string" ? cached.content : "";
               if (!contentStr.trimStart().startsWith("<")) {
                 bridge.setHeader("Content-Type", "text/x-component");
-                bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+                if (!bridge.headers.has("Cache-Control")) {
+  bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+}
                 bridge.end(cached.content);
                 return bridge.toResponse();
               }
@@ -1641,14 +2463,23 @@ async function handleRequest(request, platformContext = {}) {
           }
         } catch (e) {}
 
+        const isRscDeleted =
+          typeof storage.isKeyDeleted === "function"
+            ? await storage.isKeyDeleted(rscKey)
+            : typeof storage.isDeleted === "function" && storage.isDeleted(rscKey);
+
         if (
           platformContext &&
           platformContext.env &&
           platformContext.env.ASSETS &&
-          !(typeof storage.isDeleted === "function" && storage.isDeleted(rscKey))
+          !isRscDeleted
         ) {
           try {
-            const assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${rscKey}`, request.url)));
+            const assetRes = await fetchCloudflareDist2Asset(
+              platformContext.env.ASSETS,
+              rscKey,
+              request.url
+            );
             if (assetRes && assetRes.status === 200) {
               const contentType = assetRes.headers.get("content-type") || "";
               const rscContent = await assetRes.text();
@@ -1660,19 +2491,40 @@ async function handleRequest(request, platformContext = {}) {
               ) {
                 await storage.set(rscKey, rscContent);
                 bridge.setHeader("Content-Type", "text/x-component");
-                bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+                if (!bridge.headers.has("Cache-Control")) {
+  bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+}
                 bridge.end(rscContent);
                 return bridge.toResponse();
               }
             }
           } catch (e) {}
         }
+
+        if (!isRscDeleted) {
+          const dist2Rsc = await readDist2Fallback(storage, rscKey);
+          if (
+            dist2Rsc &&
+            typeof dist2Rsc.content === "string" &&
+            dist2Rsc.content.trim().length > 0 &&
+            !dist2Rsc.content.trimStart().startsWith("<")
+          ) {
+            bridge.setHeader("Content-Type", "text/x-component");
+            if (!bridge.headers.has("Cache-Control")) {
+  bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+}
+            bridge.end(dist2Rsc.content);
+            return bridge.toResponse();
+          }
+        }
       } else if (existsSync(payloadPath)) {
         try {
           const buffer = readFileSync(payloadPath);
           if (buffer && buffer.length > 0) {
             bridge.setHeader("Content-Type", "application/octet-stream");
-            bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+            if (!bridge.headers.has("Cache-Control")) {
+  bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+}
             bridge.end(buffer);
             return bridge.toResponse();
           }
@@ -1683,94 +2535,9 @@ async function handleRequest(request, platformContext = {}) {
       }
     }
 
-    if (isLayoutReq) {
-      if (layouts && Array.isArray(layouts)) {
-        for (const [lPath, lParams] of layouts) {
-          const lConfig = await resolveLayoutFunctionsConfig(lPath, lParams);
-          if (lConfig.allowISG === false) {
-            let isPathAllowed = false;
-            if (lConfig.staticPathsSet) {
-              const sortedEntries = Object.entries(lParams || {})
-                .sort((a, b) => a[0].localeCompare(b[0]))
-                .map(([k, v]) => {
-                  if (Array.isArray(v)) return [k, v.join(",")];
-                  return [k, String(v)];
-                });
-              const serializedQuery = JSON.stringify(sortedEntries);
-              const singleVal = Object.values(lParams || {})[0];
-              const singleValStr = Array.isArray(singleVal) ? singleVal.join(",") : String(singleVal);
-              isPathAllowed = lConfig.staticPathsSet.has(serializedQuery) || lConfig.staticPathsSet.has(singleValStr);
-            }
-            if (!isPathAllowed) {
-              if (isDevelopment) {
-                isPathBlocked = true;
-                break;
-              }
-              const cleanReq = reqPath.replace(/^\//, "").replace(/\/$/, "");
-              const rscPath = path.join(process.cwd(), ".dinou/dist2", cleanReq, "layout.rsc");
-              if (!existsSync(rscPath)) {
-                isPathBlocked = true;
-                break;
-              }
-            }
-          }
-          if (lConfig.validateParams) {
-            const isValid = await lConfig.validateParams(lParams);
-            if (!isValid) {
-              isPathBlocked = true;
-              break;
-            }
-          }
-        }
-      } else {
-        if (!layoutConfig) {
-          layoutConfig = await resolveLayoutFunctionsConfig(layoutPath, layoutParams);
-        }
-        if (layoutConfig.allowISG === false) {
-          let isPathAllowed = false;
-          if (layoutConfig.staticPathsSet) {
-            const sortedEntries = Object.entries(layoutParams || {})
-              .sort((a, b) => a[0].localeCompare(b[0]))
-              .map(([k, v]) => {
-                if (Array.isArray(v)) return [k, v.join(",")];
-                return [k, String(v)];
-              });
-            const serializedQuery = JSON.stringify(sortedEntries);
-            const singleVal = Object.values(layoutParams || {})[0];
-            const singleValStr = Array.isArray(singleVal) ? singleVal.join(",") : String(singleVal);
-            isPathAllowed = layoutConfig.staticPathsSet.has(serializedQuery) || layoutConfig.staticPathsSet.has(singleValStr);
-          }
-          if (!isPathAllowed) {
-            if (isDevelopment) {
-              isPathBlocked = true;
-            } else {
-              const cleanReq = reqPath.replace(/^\//, "").replace(/\/$/, "");
-              const rscPath = path.join(process.cwd(), ".dinou/dist2", cleanReq, "layout.rsc");
-              if (!existsSync(rscPath)) {
-                isPathBlocked = true;
-              }
-            }
-          }
-        }
-        if (layoutConfig.validateParams) {
-          const isValid = await layoutConfig.validateParams(layoutParams);
-          if (!isValid) {
-            isPathBlocked = true;
-          }
-        }
-      }
-      if (isPathBlocked) {
-        return new Response("Not Found", { status: 404 });
-      }
-    } else if (!pageConfig) {
-      pageConfig = await resolvePageFunctionsConfig(
-        pagePath,
-        reqSegments,
-        queryObj,
-        dynamicParams,
-        reqPath,
-      );
-      isPathBlocked = pageConfig.isPathBlocked;
+    // Perimeter checks (root-to-child layouts + page) already ran authoritatively above before cache lookup.
+    if (isPathBlocked) {
+      return new Response("Not Found", { status: 404 });
     }
 
     const rscDynamicState = isLayoutReq ? dynamicState : (isRoutePpr ? { value: false } : dynamicState);
@@ -1784,7 +2551,13 @@ async function handleRequest(request, platformContext = {}) {
         let jsx;
         if (platformContext?.isSSG) {
           const ssgIsPpr = isLayoutReq
-            ? Boolean(isRoutePpr || (await resolvePprForRoute(null, null, reqSegments, queryObj)))
+            ? Boolean(
+                isRoutePpr ||
+                  (await resolvePprForRoute(null, null, reqSegments, queryObj, {
+                    segment: "layout",
+                    ignoreNoLayout: true,
+                  })),
+              )
             : Boolean(isRoutePpr);
           jsx = await runWithPprContext({ isPpr: ssgIsPpr }, async () => {
             const rawJsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, isPathBlocked, {
@@ -1804,11 +2577,14 @@ async function handleRequest(request, platformContext = {}) {
             if (regHoles.length > 0) {
               bridge.setHeader("X-Dinou-Ppr-Holes", JSON.stringify(regHoles));
             }
+            if (isLayoutReq && ssgIsPpr) {
+              bridge.setHeader("X-Dinou-Ppr", "true");
+            }
             bridge.setHeader("X-Dinou-Suspense-Count", String(getPprHoleCounter()));
             if (rscDynamicState.value) {
               bridge.setHeader("X-Dinou-Dynamic", "true");
             }
-            if (rendered && isEdgeRuntime(platformContext)) {
+            if (rendered && !rscDynamicState.value && isEdgeRuntime(platformContext)) {
               try {
                 const storage = getStorageAdapter();
                 const cleanRel = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
@@ -1818,7 +2594,7 @@ async function handleRequest(request, platformContext = {}) {
             }
             return rendered;
           });
-        } else if (!isDevelopment && (isPageReq || isLayoutReq) && isRoutePpr && isEdgeRuntime(platformContext)) {
+        } else if (!isDevelopment && !dynamicState.value && (isPageReq || isLayoutReq) && isRoutePpr && isEdgeRuntime(platformContext)) {
           const storage = getStorageAdapter();
           const cleanRel = cleanPath.replace(/^\/+/, "").replace(/\/+$/, "");
           if (isPageReq) {
@@ -1878,7 +2654,7 @@ async function handleRequest(request, platformContext = {}) {
               jsx = await spliceDynamicHolesIntoShell(
                 cachedShellTree,
                 () =>
-                  getJSX(reqPath, queryObj, isNotFound, isDevelopment, isPathBlocked, {
+                  getJSX(reqPath, queryObj, isNotFound, isDevelopment, isPathBlocked, { skipLayoutProbe: true,
                     segment,
                   }),
                 isLayoutReq ? 0 : leafLayoutSuspenseCount
@@ -1905,11 +2681,16 @@ async function handleRequest(request, platformContext = {}) {
           bridge.status(404);
         }
         bridge.setHeader("Content-Type", "text/x-component");
-        bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        if (!bridge.headers.has("Cache-Control")) {
+  bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+}
 
         const manifest = getClientManifest();
         pipeRSC(jsx, bridge, manifest, platformContext);
       } catch (err) {
+        if (bridge.headers.has("x-rsc-redirect") || bridge.headers.has("Location")) {
+          return;
+        }
         console.error(`[Dinou] Error rendering RSC ${segment}:`, err);
         const serializedError = {
           message: isDevelopment
@@ -1946,18 +2727,6 @@ async function handleRequest(request, platformContext = {}) {
     dynamicState.value = false;
   }
 
-  let { isPathBlocked, allowISGValue, isDynamicConfig, revalidate, tags, ppr: isPprConfig } = await resolvePageFunctionsConfig(
-    pagePath,
-    reqSegments,
-    queryObj,
-    dynamicParams,
-    reqPath,
-  );
-  let hasStaticDynamicConfig = Boolean(isDynamicConfig);
-  if (isDynamicConfig) {
-    dynamicState.value = true;
-  }
-
   const layouts = getFilePathAndDynamicParams(
     reqSegments,
     queryObj,
@@ -1971,72 +2740,107 @@ async function handleRequest(request, platformContext = {}) {
     true
   );
 
-  let combinedTags = Array.isArray(tags) ? [...tags] : [];
-  let combinedRevalidate = revalidate;
+  let isPathBlocked = false;
+  let allowISGValue = true;
+  let isDynamicConfig = false;
+  let revalidate = undefined;
+  let tags = [];
+  let isPprConfig = false;
+  let isPagePprConfig = false;
+  let hasStaticDynamicConfig = false;
+  let combinedTags = [];
+  let combinedRevalidate = undefined;
 
-  if (layouts && Array.isArray(layouts)) {
-    for (const [layoutPath, layoutParams] of layouts) {
-      const layoutConfig = await resolveLayoutFunctionsConfig(layoutPath, layoutParams);
+  // 1. Evaluate ancestor layouts root-to-child FIRST so a parent layout perimeter guard
+  // (`validateParams` returning false or `allowISG: false`) halts before child layouts/pages run.
+  const activeLayoutsForRoute = getActiveLayoutChain(reqSegments, queryObj, srcFolder);
+  if (activeLayoutsForRoute.length > 0) {
+    await requestStorage.run(rootContext, async () => {
+      for (let i = activeLayoutsForRoute.length - 1; i >= 0; i--) {
+        const entry = activeLayoutsForRoute[i];
+        const layoutConfig = await resolveLayoutFunctionsConfig(entry.layoutPath, entry.dParams);
 
-      if (layoutConfig.validateParams) {
-        try {
-          const isValid = await layoutConfig.validateParams(layoutParams);
-          if (!isValid) {
-            isPathBlocked = true;
-          }
-        } catch (e) {
-          console.error(`[Dinou] Error executing validateParams for layout ${layoutPath}:`, e);
+        if (
+          await isLayoutSegmentBlocked(
+            entry.layoutPath,
+            entry.dParams,
+            layoutConfig,
+            entry.cleanLayoutKey,
+            reqPath,
+            isDevelopment,
+            Boolean(platformContext?.isSSG),
+          )
+        ) {
+          isPathBlocked = true;
+          allowISGValue = false;
+          break;
         }
-      }
 
-      if (layoutConfig.isDynamic) {
-        dynamicState.value = true;
-        hasStaticDynamicConfig = true;
-      }
-
-      if (layoutConfig.allowISG === false) {
-        allowISGValue = false;
-        let isPathAllowed = false;
-        if (layoutConfig.staticPathsSet) {
-          const sortedEntries = Object.entries(layoutParams || {})
-            .sort((a, b) => a[0].localeCompare(b[0]))
-            .map(([k, v]) => {
-              if (Array.isArray(v)) return [k, v.join(",")];
-              return [k, String(v)];
-            });
-          const serializedQuery = JSON.stringify(sortedEntries);
-          const singleVal = Object.values(layoutParams || {})[0];
-          const singleValStr = Array.isArray(singleVal) ? singleVal.join(",") : String(singleVal);
-          isPathAllowed = layoutConfig.staticPathsSet.has(serializedQuery) || layoutConfig.staticPathsSet.has(singleValStr);
+        if (layoutConfig.isDynamic) {
+          dynamicState.value = true;
+          hasStaticDynamicConfig = true;
         }
-        if (!isPathAllowed) {
-          if (isDevelopment) {
-            isPathBlocked = true;
+
+        if (typeof layoutConfig.revalidate === "number" && layoutConfig.revalidate >= 0) {
+          if (typeof combinedRevalidate === "number") {
+            combinedRevalidate = Math.min(combinedRevalidate, layoutConfig.revalidate);
           } else {
-            const cleanReq = reqPath.replace(/^\//, "").replace(/\/$/, "");
-            const htmlPath = path.join(process.cwd(), ".dinou/dist2", cleanReq, "index.html");
-            if (!existsSync(htmlPath)) {
-              isPathBlocked = true;
+            combinedRevalidate = layoutConfig.revalidate;
+          }
+        }
+
+        if (Array.isArray(layoutConfig.tags)) {
+          for (const t of layoutConfig.tags) {
+            if (!combinedTags.includes(t)) {
+              combinedTags.push(t);
             }
           }
         }
       }
+    });
+  }
 
-      if (typeof layoutConfig.revalidate === "number" && layoutConfig.revalidate >= 0) {
-        if (typeof combinedRevalidate === "number") {
-          combinedRevalidate = Math.min(combinedRevalidate, layoutConfig.revalidate);
-        } else {
-          combinedRevalidate = layoutConfig.revalidate;
+  // 2. Evaluate page_functions only when no ancestor layout blocked the request
+  if (!isPathBlocked) {
+    const pageCfg = await requestStorage.run(rootContext, () =>
+      resolvePageFunctionsConfig(
+        pagePath,
+        reqSegments,
+        queryObj,
+        dynamicParams,
+        reqPath,
+        Boolean(platformContext?.isSSG),
+      )
+    );
+    isPathBlocked = pageCfg.isPathBlocked;
+    allowISGValue = pageCfg.allowISGValue;
+    isDynamicConfig = pageCfg.isDynamicConfig;
+    revalidate = pageCfg.revalidate;
+    tags = pageCfg.tags;
+    isPprConfig = pageCfg.ppr;
+    isPagePprConfig = pageCfg.pagePpr;
+
+    if (isDynamicConfig) {
+      dynamicState.value = true;
+      hasStaticDynamicConfig = true;
+    }
+
+    if (typeof revalidate === "number" && revalidate >= 0) {
+      if (typeof combinedRevalidate === "number") {
+        combinedRevalidate = Math.min(combinedRevalidate, revalidate);
+      } else {
+        combinedRevalidate = revalidate;
+      }
+    }
+
+    if (Array.isArray(tags)) {
+      const merged = [...tags];
+      for (const t of combinedTags) {
+        if (!merged.includes(t)) {
+          merged.push(t);
         }
       }
-
-      if (Array.isArray(layoutConfig.tags)) {
-        for (const t of layoutConfig.tags) {
-          if (!combinedTags.includes(t)) {
-            combinedTags.push(t);
-          }
-        }
-      }
+      combinedTags = merged;
     }
   }
 
@@ -2060,13 +2864,22 @@ async function handleRequest(request, platformContext = {}) {
       }
     }
 
-    // 2. If not in storageAdapter, check env.ASSETS for pre-rendered build static page
+    // 2. If not in storageAdapter, check env.ASSETS or local .dinou/dist2 for pre-rendered build static page
+    const checkDeleted = async (k) =>
+      typeof storage.isKeyDeleted === "function"
+        ? await storage.isKeyDeleted(k)
+        : typeof storage.isDeleted === "function" && storage.isDeleted(k);
     const isRouteDeletedInStorage =
-      typeof storage.isDeleted === "function" &&
-      (storage.isDeleted(htmlKey) || storage.isDeleted(metaKey) || (cleanPath && storage.isDeleted(cleanPath)));
+      (await checkDeleted(htmlKey)) ||
+      (await checkDeleted(metaKey)) ||
+      (cleanPath ? await checkDeleted(cleanPath) : false);
     if (!isDevelopment && !cachedItem && !isRouteDeletedInStorage && platformContext && platformContext.env && platformContext.env.ASSETS) {
       try {
-        const metaRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${metaKey}`, request.url)));
+        const metaRes = await fetchCloudflareDist2Asset(
+          platformContext.env.ASSETS,
+          metaKey,
+          request.url
+        );
         if (metaRes && metaRes.status === 200) {
           const ct = metaRes.headers.get("content-type") || "";
           if (ct.includes("json") || !ct.includes("html")) {
@@ -2076,15 +2889,11 @@ async function handleRequest(request, platformContext = {}) {
             } catch (e) {}
 
             if (metadata && typeof metadata === "object" && metadata.generatedAt) {
-              const fetchPath = cleanPath ? `/${cleanPath}/` : "/";
-              let assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(fetchPath, request.url)));
-              if (!assetRes || assetRes.status !== 200) {
-                assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${htmlKey}`, request.url)));
-              }
-              if (!assetRes || assetRes.status !== 200) {
-                const altPath = cleanPath ? `/${cleanPath}` : "/index.html";
-                assetRes = await platformContext.env.ASSETS.fetch(new Request(new URL(altPath, request.url)));
-              }
+              const assetRes = await fetchCloudflareDist2Asset(
+                platformContext.env.ASSETS,
+                htmlKey,
+                request.url
+              );
               if (assetRes && assetRes.status === 200) {
                 const html = await assetRes.text();
                 cachedItem = {
@@ -2095,7 +2904,11 @@ async function handleRequest(request, platformContext = {}) {
                 await storage.set(metaKey, JSON.stringify(cachedItem.metadata));
                 const layoutMetaKey = cleanPath ? `${cleanPath}/layout.metadata.json` : "layout.metadata.json";
                 try {
-                  const layoutMetaRes = await platformContext.env.ASSETS.fetch(new Request(new URL(`/${layoutMetaKey}`, request.url)));
+                  const layoutMetaRes = await fetchCloudflareDist2Asset(
+                    platformContext.env.ASSETS,
+                    layoutMetaKey,
+                    request.url
+                  );
                   if (layoutMetaRes && layoutMetaRes.status === 200) {
                     const layoutMetaText = await layoutMetaRes.text();
                     await storage.set(layoutMetaKey, layoutMetaText);
@@ -2108,13 +2921,24 @@ async function handleRequest(request, platformContext = {}) {
       } catch (e) {}
     }
 
+    if (!isDevelopment && !cachedItem && !isRouteDeletedInStorage) {
+      cachedItem = await readDist2Fallback(storage, htmlKey);
+      if (!cachedItem && isPprConfig) {
+        const shellHtmlKey = cleanPath ? `${cleanPath}/shell.html` : "shell.html";
+        cachedItem = await readDist2Fallback(storage, shellHtmlKey);
+      }
+      if (cachedItem) {
+        const layoutMetaKey = cleanPath ? `${cleanPath}/layout.metadata.json` : "layout.metadata.json";
+        await readDist2Fallback(storage, layoutMetaKey);
+      }
+    }
+
     // 2b. If PPR route shell was invalidated (e.g. by revalidateTag on a static shell slot),
     // or is a dynamic-param ISG route being visited for the first time,
     // regenerate the static shell in an isolated SSG pass before resuming dynamic holes.
     const shellHtmlKeyForCheck = cleanPath ? `${cleanPath}/shell.html` : "shell.html";
     const isShellDeletedInStorage =
-      isRouteDeletedInStorage ||
-      (typeof storage.isDeleted === "function" && storage.isDeleted(shellHtmlKeyForCheck));
+      isRouteDeletedInStorage || (await checkDeleted(shellHtmlKeyForCheck));
     const hasDynamicUrlParams = Boolean(dynamicParams && Object.keys(dynamicParams).length > 0);
     if (
       !isDevelopment &&
@@ -2164,6 +2988,7 @@ async function handleRequest(request, platformContext = {}) {
               request.url
             );
             entry.generatedAt = Number(lMeta?.generatedAt || 0);
+            entry.layoutGeneratedAt = Number(lMeta?.layoutGeneratedAt || lMeta?.generatedAt || 0);
             entry.revalidate = lMeta?.revalidate;
             entry.slotTags = Array.isArray(lMeta?.slotTags) ? lMeta.slotTags : [];
           }
@@ -2172,21 +2997,33 @@ async function handleRequest(request, platformContext = {}) {
             const isLayoutTtlExpired =
               typeof entry.revalidate === "number" &&
               entry.revalidate >= 1 &&
-              entry.generatedAt > 0 &&
-              Date.now() > entry.generatedAt + entry.revalidate * 1000;
+              entry.layoutGeneratedAt > 0 &&
+              Date.now() > entry.layoutGeneratedAt + entry.revalidate * 1000;
             const isLayoutSlotTtlExpired =
               !isLayoutTtlExpired &&
               entry.slotTags.length > 0 &&
               (await hasExpiredSlots(entry.slotTags));
+            const ancestors =
+              i < activeLayoutChain.length - 1 ? activeLayoutChain.slice(i + 1) : [];
             const maxAncestorGen =
-              i < activeLayoutChain.length - 1
+              ancestors.length > 0
+                ? Math.max(0, ...ancestors.map((l) => l.generatedAt || 0))
+                : 0;
+            const maxAncestorOwnGen =
+              ancestors.length > 0
                 ? Math.max(
                     0,
-                    ...activeLayoutChain.slice(i + 1).map((l) => l.generatedAt || 0)
+                    ...ancestors.map((l) => l.layoutGeneratedAt || l.generatedAt || 0)
                   )
                 : 0;
-            const isAncestorNewer =
-              entry.generatedAt > 0 && maxAncestorGen > entry.generatedAt;
+            const entryOwnGen = entry.layoutGeneratedAt || entry.generatedAt || 0;
+            const isAncestorOwnNewer =
+              entryOwnGen > 0 && maxAncestorOwnGen > entryOwnGen;
+            const isAncestorSlotOnlyNewer =
+              !isAncestorOwnNewer &&
+              entry.generatedAt > 0 &&
+              maxAncestorGen > entry.generatedAt;
+            const isAncestorNewer = isAncestorOwnNewer || isAncestorSlotOnlyNewer;
             if (isLayoutSlotTtlExpired && !isLayoutTtlExpired && !isAncestorNewer) {
               const layoutSlotRevalKey = `layout-slot:${entry.layoutRoutePath}`;
               const layoutSlotRevalPromise = (async () => {
@@ -2206,7 +3043,11 @@ async function handleRequest(request, platformContext = {}) {
               }
             } else if (isLayoutTtlExpired || isAncestorNewer) {
               const { revalidateLayout } = await import("./cache-revalidate.js");
-              await revalidateLayout(entry.layoutRoutePath, {});
+              await revalidateLayout(entry.layoutRoutePath, {
+                onlyRefreshSlots:
+                  !isLayoutTtlExpired && !isAncestorOwnNewer && isAncestorSlotOnlyNewer,
+                onlyIfExpired: isLayoutTtlExpired && !isAncestorNewer,
+              });
               const refreshedMeta = await readMetaFromStorage(
                 storage,
                 entry.cleanLayoutKey
@@ -2220,6 +3061,11 @@ async function handleRequest(request, platformContext = {}) {
               );
               if (refreshedMeta?.generatedAt) {
                 entry.generatedAt = Number(refreshedMeta.generatedAt);
+              }
+              if (refreshedMeta?.layoutGeneratedAt || refreshedMeta?.generatedAt) {
+                entry.layoutGeneratedAt = Number(
+                  refreshedMeta.layoutGeneratedAt || refreshedMeta.generatedAt
+                );
               }
             }
           }
@@ -2262,7 +3108,11 @@ async function handleRequest(request, platformContext = {}) {
               }
               bootstrapScriptContent += `window.__DINOU_BUILD_ID__ = "${leafLayout.generatedAt}";\n`;
               const clientEntry = getAssetFromManifest("main.js");
-              const recomposeCtx = createRequestContext(simReq, bridge, platformContext);
+              const recomposeSimReq = simReq
+                ? { ...simReq, query: {}, cookies: {} }
+                : { query: {}, cookies: {}, headers: {}, path: reqPath, method: "GET" };
+              const recomposeCtx = createRequestContext(recomposeSimReq, bridge, platformContext);
+              recomposeCtx._isStaticHtmlRender = true;
               copyCustomContextProperties(rootContext, recomposeCtx);
               let htmlStream;
               await requestStorage.run(recomposeCtx, async () => {
@@ -2286,6 +3136,7 @@ async function handleRequest(request, platformContext = {}) {
                   content: recomposedHtml,
                   metadata: updatedMeta,
                 };
+                await storage.set(metaKey, JSON.stringify(updatedMeta));
                 await storage.set(htmlKey, recomposedHtml, updatedMeta);
                 if (isPprRoute) {
                   const shellHtmlKey = cleanPath ? `${cleanPath}/shell.html` : "shell.html";
@@ -2294,7 +3145,6 @@ async function handleRequest(request, platformContext = {}) {
                 if (cleanPath) {
                   await storage.set(cleanPath, recomposedHtml, updatedMeta);
                 }
-                await storage.set(metaKey, JSON.stringify(updatedMeta));
               }
             }
           }
@@ -2328,7 +3178,7 @@ async function handleRequest(request, platformContext = {}) {
       const metadata = cachedItem.metadata || {};
       const { generatedAt } = metadata;
       const pageOwnRevalidate =
-        metadata.pageRevalidate !== undefined
+        metadata.pageRevalidate !== undefined && metadata.pageRevalidate !== null
           ? metadata.pageRevalidate
           : revalidate;
       const pageOwnGeneratedAt = metadata.pageGeneratedAt || generatedAt;
@@ -2337,20 +3187,45 @@ async function handleRequest(request, platformContext = {}) {
         pageOwnRevalidate >= 1 &&
         Date.now() > (pageOwnGeneratedAt || 0) + pageOwnRevalidate * 1000;
 
-      if (isExpired) {
+      if (isExpired && !regenerating.has(reqPath)) {
         // Trigger background revalidation on Edge!
+        regenerating.add(reqPath);
         const revalPromise = (async () => {
-          if (regenerating.has(reqPath)) return;
-          regenerating.add(reqPath);
           try {
             console.log(`[Edge ISR] Starting regeneration for ${reqPath}...`);
             if (metadata.ppr || isPprConfig || (platformContext && platformContext.renderHtmlStream)) {
               const { revalidatePage } = await import("./cache-revalidate.js");
-              await revalidatePage(reqPath);
+              await revalidatePage(reqPath, { onlyIfExpired: true });
               return;
             }
+            const latestMeta = await readMetaFromStorage(
+              storage,
+              metaKey,
+              cleanPath ? `${cleanPath}/page.rsc` : "page.rsc",
+              platformContext,
+              request.url
+            );
+            if (latestMeta) {
+              const latestReval =
+                latestMeta.pageRevalidate !== undefined && latestMeta.pageRevalidate !== null
+                  ? latestMeta.pageRevalidate
+                  : pageOwnRevalidate;
+              const latestPageGen = Number(latestMeta.pageGeneratedAt || latestMeta.generatedAt || 0);
+              if (
+                typeof latestReval === "number" &&
+                latestReval >= 1 &&
+                latestPageGen > 0 &&
+                Date.now() <= latestPageGen + latestReval * 1000
+              ) {
+                return;
+              }
+            }
             const revalBridge = new WebResponseBridge();
-            const context = createRequestContext(simReq, revalBridge, platformContext);
+            const revalSimReq = simReq
+              ? { ...simReq, query: {}, cookies: {} }
+              : { query: {}, cookies: {}, headers: {}, path: reqPath, method: "GET" };
+            const context = createRequestContext(revalSimReq, revalBridge, platformContext);
+            context._isStaticHtmlRender = true;
             const isNotFound = {};
             let jsx;
             await requestStorage.run(context, async () => {
@@ -2379,12 +3254,23 @@ async function handleRequest(request, platformContext = {}) {
                   pageRscText = rscText;
                 }
 
-                await storage.set(pageRscKey, pageRscText);
-                await storage.set(rscKey, rscText);
+                const oldRscKey = cleanPath ? `${cleanPath}/page._old.rsc` : "page._old.rsc";
+                const oldHtmlKey = cleanPath ? `${cleanPath}/index._old.html` : "index._old.html";
+                try {
+                  const prevPageRsc = await storage.get(pageRscKey);
+                  if (prevPageRsc && prevPageRsc.content) {
+                    await storage.set(oldRscKey, prevPageRsc.content);
+                  }
+                  if (cachedItem && cachedItem.content) {
+                    await storage.set(oldHtmlKey, cachedItem.content);
+                  }
+                } catch (e) {}
+
+                const nextGenAt = Math.max(Date.now(), Number(metadata.generatedAt || 0) + 1);
                 const updatedMeta = {
                   status: 200,
                   revalidate: metadata.revalidate || 3,
-                  generatedAt: Date.now(),
+                  generatedAt: nextGenAt,
                   ...(Array.isArray(metadata.tags) ? { tags: metadata.tags } : {}),
                   ...(context._slotTags && context._slotTags.size > 0
                     ? { slotTags: Array.from(context._slotTags) }
@@ -2392,13 +3278,17 @@ async function handleRequest(request, platformContext = {}) {
                     ? { slotTags: metadata.slotTags }
                     : {}),
                 };
-                await storage.set(htmlKey, htmlText, updatedMeta);
                 await storage.set(metaKey, JSON.stringify(updatedMeta));
+                await storage.set(pageRscKey, pageRscText);
+                await storage.set(rscKey, rscText);
+                await storage.set(htmlKey, htmlText, updatedMeta);
                 console.log(`✅ [Edge ISR] Successfully regenerated ${reqPath}`);
               } else {
                 const rscText = await new Response(rscStream).text();
                 const pageRscKey = cleanPath ? `${cleanPath}/page.rsc` : "page.rsc";
                 const rscKey = cleanPath ? `${cleanPath}/rsc.rsc` : "rsc.rsc";
+                const oldRscKey = cleanPath ? `${cleanPath}/page._old.rsc` : "page._old.rsc";
+                const oldHtmlKey = cleanPath ? `${cleanPath}/index._old.html` : "index._old.html";
 
                 let pageRscText = "";
                 try {
@@ -2409,25 +3299,33 @@ async function handleRequest(request, platformContext = {}) {
                   pageRscText = rscText;
                 }
 
-                await storage.set(pageRscKey, pageRscText);
-                await storage.set(rscKey, rscText);
+                try {
+                  const prevPageRsc = await storage.get(pageRscKey);
+                  if (prevPageRsc && prevPageRsc.content) {
+                    await storage.set(oldRscKey, prevPageRsc.content);
+                  }
+                  if (cachedItem && cachedItem.content) {
+                    await storage.set(oldHtmlKey, cachedItem.content);
+                  }
+                } catch (e) {}
 
+                const nextGenAt = Math.max(Date.now(), Number(metadata.generatedAt || 0) + 1);
                 // Update HTML with new timestamp
                 let html = cachedItem.content || "";
-                const newTimestamp = new Date().toISOString();
+                const newTimestamp = new Date(nextGenAt).toISOString();
                 html = html.replace(
                   /<div data-testid="timestamp">[^<]*<\/div>/g,
                   `<div data-testid="timestamp">${newTimestamp}</div>`
                 );
                 html = html.replace(
-                  /window\.__DINOU_BUILD_ID__="[^"]*"/g,
-                  `window.__DINOU_BUILD_ID__="${Date.now()}"`
+                  /window\.__DINOU_BUILD_ID__\s*=\s*"[^"]*"/g,
+                  `window.__DINOU_BUILD_ID__ = "${nextGenAt}"`
                 );
 
                 const updatedMeta = {
                   status: 200,
                   revalidate: metadata.revalidate || 3,
-                  generatedAt: Date.now(),
+                  generatedAt: nextGenAt,
                   ...(Array.isArray(metadata.tags) ? { tags: metadata.tags } : {}),
                   ...(context._slotTags && context._slotTags.size > 0
                     ? { slotTags: Array.from(context._slotTags) }
@@ -2435,8 +3333,10 @@ async function handleRequest(request, platformContext = {}) {
                     ? { slotTags: metadata.slotTags }
                     : {}),
                 };
-                await storage.set(htmlKey, html, updatedMeta);
                 await storage.set(metaKey, JSON.stringify(updatedMeta));
+                await storage.set(pageRscKey, pageRscText);
+                await storage.set(rscKey, rscText);
+                await storage.set(htmlKey, html, updatedMeta);
                 console.log(`✅ [Edge ISR] Successfully regenerated ${reqPath} with timestamp ${newTimestamp}`);
               }
             });
@@ -2470,8 +3370,14 @@ async function handleRequest(request, platformContext = {}) {
       }
 
       bridge.setHeader("Content-Type", "text/html; charset=utf-8");
-      bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-      bridge.status(metadata.status || 200);
+      if (!bridge.headers.has("Cache-Control")) {
+        if (!bridge.headers.has("Cache-Control")) {
+  bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+}
+      }
+      if (!bridge._explicitStatusSet) {
+        bridge.status(metadata.status || 200);
+      }
       let content = cachedItem.content;
       if (typeof content === "string" && !content.includes("window.__DINOU_LAYOUTS__")) {
         const knownLayouts = getDiscoveredLayouts();
@@ -2486,11 +3392,16 @@ async function handleRequest(request, platformContext = {}) {
       return new Response("Not Found", { status: 404 });
     }
 
-    // Concurrency Stampede Protection (Production only, never share dynamic streams in dev or requests with user cookies)
+    // Concurrency Stampede Protection (Production only, never share dynamic streams in dev or requests with user/plugin cookies)
+    const preRenderPluginCookiesCount = bridge.cookies.length;
     const hasCookies = simReq.cookies && Object.keys(simReq.cookies).length > 0;
+    const hasPluginMutation =
+      preRenderPluginCookiesCount > 0 ||
+      (bridge._explicitStatusSet && bridge.statusCode !== 200);
     const canUseInFlight =
       !isDevelopment &&
       !hasCookies &&
+      !hasPluginMutation &&
       !isDynamicConfig &&
       allowISGValue !== false &&
       Object.keys(queryObj).length === 0;
@@ -2514,19 +3425,81 @@ async function handleRequest(request, platformContext = {}) {
           : null;
         let jsx;
         let rscText = "";
+        let precomputedPageRscText = "";
+        let precomputedLayoutRscText = "";
 
         let pprHoles = [];
         try {
           if (!isError) {
             if (platformContext?.isSSG && isPprConfig) {
-              await requestStorage.run(context, async () => {
-                await runWithPprContext({ isPpr: true }, async () => {
-                  jsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, !pagePath);
-                  resetPprHoles();
-                  jsx = await asyncRenderJSXToClientJSX(jsx);
-                  pprHoles = getRegisteredHoles();
+              const activeChain = getActiveLayoutChain(reqSegments, queryObj, srcFolder);
+              let leafLayoutRsc = "";
+              let leafMeta = null;
+              if (activeChain.length > 0) {
+                const leafLayout = activeChain[0];
+                const leafRscKey = leafLayout.cleanLayoutKey
+                  ? `${leafLayout.cleanLayoutKey}/layout.rsc`
+                  : "layout.rsc";
+                const leafMetaKey = leafLayout.cleanLayoutKey
+                  ? `${leafLayout.cleanLayoutKey}/layout.metadata.json`
+                  : "layout.metadata.json";
+                leafMeta = await readMetaFromStorage(
+                  storage,
+                  leafMetaKey,
+                  leafRscKey,
+                  platformContext,
+                  request.url,
+                );
+                if (!leafMeta?.dynamic) {
+                  leafLayoutRsc = await readRscFromStorage(
+                    storage,
+                    leafRscKey,
+                    platformContext,
+                    request.url,
+                  );
+                }
+              }
+
+              if (activeChain.length > 0 && leafLayoutRsc) {
+                precomputedLayoutRscText = leafLayoutRsc;
+                const leafSuspenseCount = Number(leafMeta?.suspenseCount || 0);
+                const leafHoles = Array.isArray(leafMeta?.holes) ? leafMeta.holes : [];
+                await requestStorage.run(context, async () => {
+                  await runWithPprContext({ isPpr: Boolean(isPagePprConfig) }, async () => {
+                    const rawPageJsx = await getJSX(
+                      reqPath,
+                      queryObj,
+                      isNotFound,
+                      isDevelopment,
+                      !pagePath,
+                      { segment: "page" },
+                    );
+                    resetPprHoles(leafSuspenseCount);
+                    const renderedPageJsx = await runInPageSegment(() =>
+                      asyncRenderJSXToClientJSX(rawPageJsx),
+                    );
+                    context._resolvedPageClientJsx = renderedPageJsx;
+                    context._hasResolvedSegments = true;
+                    jsx = renderedPageJsx;
+                    const pageHoles = isPagePprConfig ? getRegisteredHoles() : [];
+                    pprHoles = Array.from(new Set([...leafHoles, ...pageHoles]));
+                  });
                 });
-              });
+              } else {
+                await requestStorage.run(context, async () => {
+                  await runWithPprContext({ isPpr: true }, async () => {
+                    jsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, !pagePath);
+                    resetPprHoles();
+                    jsx = await asyncRenderJSXToClientJSX(jsx);
+                    pprHoles = getRegisteredHoles();
+                    if (activeChain.length === 0) {
+                      context._resolvedPageClientJsx = jsx;
+                      context._resolvedLayoutClientJsx = null;
+                      context._hasResolvedSegments = true;
+                    }
+                  });
+                });
+              }
             } else {
               await requestStorage.run(context, async () => {
                 jsx = await getJSX(reqPath, queryObj, isNotFound, isDevelopment, !pagePath);
@@ -2568,17 +3541,24 @@ async function handleRequest(request, platformContext = {}) {
 
         const nowGen = Date.now();
         const genMeta = {
-          status: isError ? 500 : isNotFound.value ? 404 : 200,
+          status: isError
+            ? 500
+            : isNotFound.value
+              ? 404
+              : bridge._explicitStatusSet
+                ? bridge.statusCode
+                : 200,
           generatedAt: nowGen,
           pageGeneratedAt: nowGen,
           revalidate: combinedRevalidate,
           pageRevalidate: revalidate !== undefined ? revalidate : null,
           tags: tags || [],
           ppr: Boolean(isPprConfig),
+          pagePpr: Boolean(isPagePprConfig),
           holes: pprHoles,
           effects: {
             redirect: bridge.headers.get("Location") || null,
-            cookies: [...bridge.cookies],
+            cookies: bridge.cookies.slice(preRenderPluginCookiesCount),
           },
         };
 
@@ -2622,7 +3602,21 @@ async function handleRequest(request, platformContext = {}) {
         const rscStream = requestStorage.run(context, () => renderRSCStream(jsx, clientManifest, { runtime: "edge" }));
 
         if (platformContext && platformContext.renderHtmlStream) {
-          const [streamForSsr, streamForCache] = rscStream.tee();
+          const canUseInlineRsc = Boolean(
+            !isError &&
+              !platformContext?.isSSG &&
+              !shouldCacheISG &&
+              context._hasResolvedSegments &&
+              context._resolvedPageClientJsx !== undefined
+          );
+
+          let streamForSsr = rscStream;
+          let streamForCache = null;
+          if (shouldCacheISG) {
+            const teed = rscStream.tee();
+            streamForSsr = teed[0];
+            streamForCache = teed[1];
+          }
 
           let bootstrapScriptContent = "";
           const knownLayouts = getDiscoveredLayouts();
@@ -2638,6 +3632,12 @@ async function handleRequest(request, platformContext = {}) {
                 bootstrapScriptContent += `window.__DINOU_BUILD_ID__ = "${nowGen}";\n`;
               }
             }
+          }
+          if (canUseInlineRsc) {
+            bootstrapScriptContent +=
+              "window.__DINOU_INLINE_RSC__ = true;\n" +
+              "window.__DINOU_RSC_P__ = window.__DINOU_RSC_P__ || [];\n" +
+              "window.__DINOU_RSC_L__ = window.__DINOU_RSC_L__ || [];\n";
           }
           if (isDevelopment) {
             const isStrictMode = dinouConfig?.reactStrictMode !== false;
@@ -2683,20 +3683,113 @@ async function handleRequest(request, platformContext = {}) {
             bootstrapScriptContent += `window.HMR_WEBSOCKET_URL="ws://localhost:${hmrPort}";\n`;
           }
 
+          if (
+            precomputedLayoutRscText &&
+            !precomputedPageRscText &&
+            !isError &&
+            context._resolvedPageClientJsx !== undefined
+          ) {
+            try {
+              const pageStream = requestStorage.run(context, () =>
+                renderRSCStream(context._resolvedPageClientJsx, clientManifest, {
+                  runtime: "edge",
+                })
+              );
+              precomputedPageRscText = await new Response(pageStream).text();
+            } catch (e) {}
+          } else if (
+            shouldCacheISG &&
+            !isPprConfig &&
+            !isError &&
+            context._hasResolvedSegments &&
+            context._resolvedPageClientJsx !== undefined
+          ) {
+            try {
+              const pageStream = requestStorage.run(context, () =>
+                renderRSCStream(context._resolvedPageClientJsx, clientManifest, {
+                  runtime: "edge",
+                })
+              );
+              precomputedPageRscText = await new Response(pageStream).text();
+            } catch (e) {}
+            if (
+              precomputedPageRscText &&
+              context._resolvedLayoutClientJsx !== null &&
+              context._resolvedLayoutClientJsx !== undefined
+            ) {
+              try {
+                const activeChain = getActiveLayoutChain(reqSegments, queryObj, srcFolder);
+                if (activeChain.length > 0) {
+                  const leafLayout = activeChain[0];
+                  const leafRscKey = leafLayout.cleanLayoutKey
+                    ? `${leafLayout.cleanLayoutKey}/layout.rsc`
+                    : "layout.rsc";
+                  const leafMetaKey = leafLayout.cleanLayoutKey
+                    ? `${leafLayout.cleanLayoutKey}/layout.metadata.json`
+                    : "layout.metadata.json";
+                  const lMeta = await readMetaFromStorage(
+                    storage,
+                    leafMetaKey,
+                    leafRscKey,
+                    platformContext,
+                    request.url
+                  );
+                  const layoutHasPprHoles =
+                    Boolean(lMeta?.ppr) ||
+                    (Array.isArray(lMeta?.holes) && lMeta.holes.length > 0);
+                  if (!layoutHasPprHoles) {
+                    precomputedLayoutRscText = await readRscFromStorage(
+                      storage,
+                      leafRscKey,
+                      platformContext,
+                      request.url
+                    );
+                  }
+                }
+              } catch (e) {}
+            }
+          }
+
           let htmlStream;
+          context._isStaticHtmlRender = Boolean(shouldCacheISG);
           try {
             await requestStorage.run(context, async () => {
-              htmlStream = await platformContext.renderHtmlStream(streamForSsr, {
-                bootstrapModules,
-                bootstrapScriptContent,
-                onError(err) {
-                  if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
-                    console.error("[Edge Native SSR] Stream error:", err);
+              if (precomputedLayoutRscText && precomputedPageRscText) {
+                const encoder = new TextEncoder();
+                const toStream = (str) =>
+                  new ReadableStream({
+                    start(controller) {
+                      controller.enqueue(encoder.encode(str));
+                      controller.close();
+                    },
+                  });
+                htmlStream = await platformContext.renderHtmlStream(
+                  toStream(precomputedLayoutRscText),
+                  {
+                    pageRscStream: toStream(precomputedPageRscText),
+                    bootstrapModules,
+                    bootstrapScriptContent,
+                    onError(err) {
+                      if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
+                        console.error("[Edge Native SSR] Stream error:", err);
+                      }
+                    },
                   }
-                },
-              });
+                );
+              } else {
+                htmlStream = await platformContext.renderHtmlStream(streamForSsr, {
+                  bootstrapModules,
+                  bootstrapScriptContent,
+                  onError(err) {
+                    if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
+                      console.error("[Edge Native SSR] Stream error:", err);
+                    }
+                  },
+                });
+              }
             });
           } catch (ssrErr) {
+            context._isStaticHtmlRender = false;
             if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
               console.error("[Edge Native SSR] SSR render threw error, falling back to getErrorJSX:", ssrErr.message);
             }
@@ -2742,7 +3835,9 @@ async function handleRequest(request, platformContext = {}) {
               };
             }
 
-            const errorRscStream = renderRSCStream(errorJsx, clientManifest, { runtime: "edge" });
+            const errorRscStream = requestStorage.run(context, () =>
+              renderRSCStream(errorJsx, clientManifest, { runtime: "edge" })
+            );
             const errorClientEntry = getAssetFromManifest("main.js");
             const errorBootstrapModules = isDevelopment
               ? [
@@ -2827,14 +3922,18 @@ async function handleRequest(request, platformContext = {}) {
             let fullHtml = "";
             let rscPayload = "";
             try {
-              const [rsc, html] = await Promise.all([
-                new Response(streamForCache).text(),
-                new Response(htmlStream).text(),
-              ]);
+              const [rsc, html] = await requestStorage.run(context, () =>
+                Promise.all([
+                  new Response(streamForCache).text(),
+                  new Response(htmlStream).text(),
+                ])
+              );
               rscPayload = rsc;
               fullHtml = html;
             } catch (drainErr) {
               console.error("[Edge ISG] Error reading streams:", drainErr);
+            } finally {
+              context._isStaticHtmlRender = false;
             }
 
             if (fullHtml) {
@@ -2857,14 +3956,16 @@ async function handleRequest(request, platformContext = {}) {
                 }
                 try {
                   const pageRscKey = cleanPath ? `${cleanPath}/page.rsc` : "page.rsc";
-                  let pageRscText = "";
+                  let pageRscText = precomputedPageRscText || "";
                   if (context._resolvedPageClientJsx) {
-                    try {
-                      const pageStream = requestStorage.run(context, () =>
-                        renderRSCStream(context._resolvedPageClientJsx, clientManifest, { runtime: "edge" })
-                      );
-                      pageRscText = await new Response(pageStream).text();
-                    } catch (e) {}
+                    if (!pageRscText) {
+                      try {
+                        const pageStream = requestStorage.run(context, () =>
+                          renderRSCStream(context._resolvedPageClientJsx, clientManifest, { runtime: "edge" })
+                        );
+                        pageRscText = await new Response(pageStream).text();
+                      } catch (e) {}
+                    }
                     if (genMeta.ppr || (Array.isArray(genMeta.slotTags) && genMeta.slotTags.length > 0)) {
                       try {
                         const shellPageKey = cleanPath ? `${cleanPath}/shell.page.json` : "shell.page.json";
@@ -2897,6 +3998,30 @@ async function handleRequest(request, platformContext = {}) {
                     await storage.set(shellHtmlKey, fullHtml, genMeta);
                     await storage.set(shellRscKey, pageRscText || rscPayload);
                   }
+                  if (!platformContext?.isSSG && !genMeta.ppr && !isError && context._hasResolvedSegments && pageRscText) {
+                    let layoutRscText = precomputedLayoutRscText || "";
+                    const hasLayoutSeg =
+                      context._resolvedLayoutClientJsx !== null &&
+                      context._resolvedLayoutClientJsx !== undefined;
+                    if (hasLayoutSeg && !layoutRscText) {
+                      try {
+                        const layoutStream = requestStorage.run(context, () =>
+                          renderRSCStream(context._resolvedLayoutClientJsx, clientManifest, {
+                            runtime: "edge",
+                          })
+                        );
+                        layoutRscText = await new Response(layoutStream).text();
+                      } catch (e) {}
+                    }
+                    if (!hasLayoutSeg || layoutRscText) {
+                      fullHtml = injectInlineRscIntoHtmlString(
+                        fullHtml,
+                        layoutRscText,
+                        pageRscText,
+                        hasLayoutSeg
+                      );
+                    }
+                  }
                   if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
                     console.log(`✅ [Edge ISG] Successfully cached ${reqPath} to KV`);
                   }
@@ -2911,6 +4036,44 @@ async function handleRequest(request, platformContext = {}) {
                   "window.__DINOU_USE_STATIC__ = true;",
                   "window.__DINOU_USE_STATIC__ = false;"
                 );
+                if (
+                  !platformContext?.isSSG &&
+                  !isError &&
+                  context._hasResolvedSegments &&
+                  context._resolvedPageClientJsx !== undefined
+                ) {
+                  try {
+                    const hasLayoutSeg =
+                      context._resolvedLayoutClientJsx !== null &&
+                      context._resolvedLayoutClientJsx !== undefined;
+                    const pageStream = requestStorage.run(context, () =>
+                      renderRSCStream(context._resolvedPageClientJsx, clientManifest, {
+                        runtime: "edge",
+                      })
+                    );
+                    const layoutPromise = hasLayoutSeg
+                      ? new Response(
+                          requestStorage.run(context, () =>
+                            renderRSCStream(context._resolvedLayoutClientJsx, clientManifest, {
+                              runtime: "edge",
+                            })
+                          )
+                        ).text()
+                      : Promise.resolve("");
+                    const [layoutRscText, pageRscText] = await Promise.all([
+                      layoutPromise,
+                      new Response(pageStream).text(),
+                    ]);
+                    if (pageRscText && (!hasLayoutSeg || layoutRscText)) {
+                      fullHtml = injectInlineRscIntoHtmlString(
+                        fullHtml,
+                        layoutRscText,
+                        pageRscText,
+                        hasLayoutSeg
+                      );
+                    }
+                  } catch (e) {}
+                }
                 if (!platformContext?.isSSG || process.env.DINOU_DEBUG) {
                   console.log(`ℹ️ [Edge ISG] Dynamic bailout detected during render for ${reqPath}, skipping KV cache`);
                 }
@@ -2928,6 +4091,10 @@ async function handleRequest(request, platformContext = {}) {
           // Dynamic streaming responses cannot be shared across multiple requests in inFlightGenerations
           if (inFlightKey) {
             inFlightGenerations.delete(inFlightKey);
+          }
+
+          if (canUseInlineRsc && !isError && htmlStream) {
+            htmlStream = createInlineRscHtmlStream(htmlStream, context, clientManifest);
           }
 
           return {
@@ -2982,8 +4149,18 @@ async function handleRequest(request, platformContext = {}) {
         }
       }
       bridge.setHeader("Content-Type", "text/html; charset=utf-8");
-      bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-      bridge.status(result.status || 200);
+      if (!bridge.headers.has("Cache-Control")) {
+        if (!bridge.headers.has("Cache-Control")) {
+  bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+}
+      }
+      if (
+        !bridge._explicitStatusSet ||
+        result.status === 404 ||
+        result.status === 500
+      ) {
+        bridge.status(result.status || 200);
+      }
 
       if (result.type === "stream") {
         bridge.setEdgeStream(result.stream);
@@ -3011,7 +4188,9 @@ async function handleRequest(request, platformContext = {}) {
 
     if (existsSync(fileToRead) && (!dynamicState.value || isPprConfig)) {
       bridge.setHeader("Content-Type", "text/html; charset=utf-8");
-      bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      if (!bridge.headers.has("Cache-Control")) {
+  bridge.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+}
       let status = getStatus(reqPath);
       try {
         let htmlContent = readFileSync(fileToRead, "utf8");
@@ -3043,7 +4222,9 @@ async function handleRequest(request, platformContext = {}) {
           }
         } catch (e) {}
 
-        bridge.status(status || 200);
+        if (!bridge._explicitStatusSet) {
+          bridge.status(status || 200);
+        }
 
         const knownLayouts = getDiscoveredLayouts();
         let scripts = `<script>window.__DINOU_USE_STATIC__=true;window.__DINOU_LAYOUTS__=${JSON.stringify(knownLayouts)};</script>`;

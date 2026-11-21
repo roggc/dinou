@@ -1,4 +1,6 @@
 // dinou/core/request-context.js
+import { createUnifiedEnv } from "./runtime-env.js";
+
 const DINOU_CONTEXT_KEY = Symbol.for("dinou.request.context.storage");
 let requestStorage;
 
@@ -12,6 +14,8 @@ if (typeof window === "undefined") {
     try {
       if (typeof globalThis.__dinou_require__ === "function") {
         AsyncLocalStorageClass = globalThis.__dinou_require__("node:async_hooks")?.AsyncLocalStorage;
+      } else if (typeof process !== "undefined" && typeof process.getBuiltinModule === "function") {
+        AsyncLocalStorageClass = process.getBuiltinModule("node:async_hooks")?.AsyncLocalStorage;
       } else if (typeof process !== "undefined" && process.versions && (process.versions.node || process.versions.bun)) {
         const getRequire = new Function("return typeof require !== 'undefined' ? require : null");
         const nodeRequire = getRequire();
@@ -56,15 +60,67 @@ function getCurrentContext() {
   return undefined;
 }
 
+const noopResponseProxy = Object.freeze({
+  cookie() {},
+  clearCookie() {},
+  setHeader() {},
+  redirect() {},
+  status() {},
+});
+
+function createFallbackServerContext() {
+  const unifiedEnv = createUnifiedEnv();
+  return {
+    req: {
+      query: {},
+      cookies: {},
+      headers: {},
+      path: "/",
+      rawPath: "/",
+      isRscRequest: false,
+      method: "GET",
+      env: unifiedEnv,
+      ctx: null,
+    },
+    res: noopResponseProxy,
+    env: unifiedEnv,
+    ctx: null,
+  };
+}
+
 function getContext() {
   if (typeof window !== "undefined") {
     console.error(
       "[Dinou] ❌ You are calling getContext() inside a Client Component running in the browser. This function is Server-Only. Pass the data as props from a Server Component instead."
     );
-    return {};
+    return {
+      req: {
+        query: {},
+        cookies: {},
+        headers: {},
+        path: "/",
+        rawPath: "/",
+        isRscRequest: false,
+        method: "GET",
+        env: {},
+        ctx: null,
+      },
+      res: noopResponseProxy,
+      env: {},
+      ctx: null,
+    };
   }
-  const store = requestStorage?.getStore();
-  return store || getCurrentContext() || {};
+  const store = requestStorage?.getStore() || getCurrentContext();
+  if (store) {
+    if (!store.env) {
+      store.env = createUnifiedEnv(store.platformContext?.env);
+    }
+    if (store.req && !store.req.env) {
+      store.req.env = store.env;
+    }
+    return store;
+  }
+  return createFallbackServerContext();
 }
 
 export {
