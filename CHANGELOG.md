@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [10.0.2] - 2026-11-21
+
+### Fixed
+- **HTML5 Standards Mode & `<script type="importmap">` `<head>` Injection (`dinou/core/edge-ssr.js`):**
+  - Fixed an issue in Esbuild and Rollup builds where `<script type="importmap">` was prepended at byte `0` before `<!DOCTYPE html>`, which triggered browser Quirks Mode (`document.compatMode === "BackCompat"`), caused HTML5 validation errors, and pushed `<title>`, `<meta name="description">`, and Open Graph (`og:*` / `twitter:*`) tags past the 16–32 KB `<head>` scan buffer used by social preview scrapers in larger apps.
+  - Injected `<script type="importmap">` strictly inside `<head>` right before `</head>` (or before the first `<script type="module">` in `<head>`), keeping `<!DOCTYPE html>` at byte `0` (`document.compatMode === "CSS1Compat"`) and keeping SEO / Open Graph metadata within the first ~1–2 KB of the HTML response across Node.js, Bun, Deno, Cloudflare Workers, Netlify Functions, Dev, SSG, ISR, PPR shells, and Static Export.
+  - Automatically relocated any earlier `<link rel="modulepreload">` tags inside `<head>` (such as React 19's `bootstrapModules` preload) to immediately follow `<script type="importmap">` before `</head>`, ensuring spec-compliant import map resolution across Chrome, Firefox, and Safari.
+  - Added byte-level `Uint8Array` ASCII boundary detection (`createImportMapTransformStream` and `injectImportMapIntoHeadSegment`) so multi-byte UTF-8 characters split across streaming chunks are never corrupted, `<body>` chunks stream with zero decode/re-encode overhead, and `no_layout` bare fragments or `<head>`-less documents never stall streaming.
+
 ## [10.0.1] - 2026-11-21
 
 ### Fixed
