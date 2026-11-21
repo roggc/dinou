@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 export const DINOU_CLI_COMMANDS = [
   "dev",
@@ -157,6 +157,53 @@ export const DINOU_CLI_COMMANDS = [
 const DINOU_CLI_COMMANDS_SET = new Set(DINOU_CLI_COMMANDS);
 const STANDALONE_DINOU_BIN_RE = /(?<![./\\@-])\b(?:npx\s+)?dinou\b(?![/\\.-])/g;
 const EJECTED_DINOU_CLI_RE = /\bnode\s+(?:\.[\\/])?dinou[\\/]cli\.js\b/g;
+const WIN_LOCK_ERROR_CODES = new Set(["EPERM", "EBUSY", "ENOTEMPTY", "EACCES"]);
+
+function scheduleDeferredRemoveOnWindows(targetDir) {
+  try {
+    const script =
+      "const fs=require('node:fs');const dir=process.argv[1];" +
+      "setTimeout(()=>{try{fs.rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:250});}catch{}},400);";
+    const child = spawn(process.execPath, ["-e", script, targetDir], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeDinouDirSafely(targetDir, { allowDeferredFallback = false } = {}) {
+  try {
+    fs.rmSync(targetDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 150,
+    });
+    return { removed: true, deferred: false, error: null };
+  } catch (err) {
+    const isWinLock =
+      process.platform === "win32" &&
+      err &&
+      typeof err.code === "string" &&
+      WIN_LOCK_ERROR_CODES.has(err.code);
+
+    if (allowDeferredFallback && isWinLock) {
+      const deferred = scheduleDeferredRemoveOnWindows(targetDir);
+      return { removed: false, deferred, error: err };
+    }
+
+    if (allowDeferredFallback) {
+      return { removed: false, deferred: false, error: err };
+    }
+
+    throw err;
+  }
+}
 
 export function detectPackageManager(projectRoot = process.cwd()) {
   const userAgent = process.env.npm_config_user_agent;
@@ -339,7 +386,7 @@ export function runEject(options = {}) {
   console.log("🚀 Starting Dinou eject process...");
 
   if (fs.existsSync(targetDinouDir) && force) {
-    fs.rmSync(targetDinouDir, { recursive: true, force: true });
+    removeDinouDirSafely(targetDinouDir, { allowDeferredFallback: false });
   }
 
   fs.cpSync(sourceDinouDir, targetDinouDir, {
@@ -354,7 +401,7 @@ export function runEject(options = {}) {
   if (fs.existsSync(cliDest)) {
     try {
       fs.chmodSync(cliDest, 0o755);
-    } catch {}
+    } catch { }
   }
   console.log("📁 Copied Dinou framework source into ./dinou");
 
@@ -559,15 +606,35 @@ export async function uneject(options = {}) {
     console.log("✅ Installed dinou package in node_modules");
   }
 
+  let dinouDirRemaining = false;
   if (!keepDinouDir && fs.existsSync(localDinouDir)) {
-    fs.rmSync(localDinouDir, { recursive: true, force: true });
-    console.log("🗑️  Removed local ./dinou directory");
+    const rmResult = removeDinouDirSafely(localDinouDir, {
+      allowDeferredFallback: true,
+    });
+    if (rmResult.removed) {
+      console.log("🗑️  Removed local ./dinou directory");
+    } else {
+      dinouDirRemaining = true;
+      const code = rmResult.error?.code || "ERROR";
+      if (rmResult.deferred) {
+        console.warn(
+          `⚠️  [Dinou Uneject] ./dinou is currently locked (${code}). Scheduled automatic cleanup after exit — if ./dinou still remains (e.g. held by an open dev server or IDE), you can safely delete it manually.`
+        );
+      } else {
+        console.warn(
+          `⚠️  [Dinou Uneject] Could not delete ./dinou automatically (${code}: ${rmResult.error?.message || "locked"}). package.json and node_modules/dinou were updated successfully — please delete ./dinou manually.`
+        );
+      }
+    }
   }
 
   console.log(
     "🎉 Uneject completed successfully! Dinou is now running from node_modules/dinou."
   );
-  return { cancelled: false };
+  return {
+    cancelled: false,
+    ...(dinouDirRemaining ? { dinouDirRemaining: true } : {}),
+  };
 }
 
 export default uneject;
