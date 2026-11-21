@@ -294,6 +294,37 @@ const isStaticExportMode = () =>
 const isStaticExportUnloading = () =>
   typeof window !== "undefined" && Boolean(window.__DINOU_STATIC_EXPORT_UNLOADING__);
 
+// Static-export .rsc payloads are pre-rendered static files (not streaming SSR).
+// Buffer the body into an in-memory ArrayBuffer before handing a Response to
+// createFromFetch so that triggering window.location.replace() on a non-RSC
+// fallback cannot abort an in-flight network ReadableStream (e.g. Firefox's
+// "Error in input stream") inside React Flight's stream reader.
+const bufferStaticExportResponse = (res) => {
+  if (isStaticExportUnloading()) {
+    return new Promise(() => {});
+  }
+  return res.arrayBuffer().then(
+    (buf) => {
+      if (isStaticExportUnloading()) {
+        return new Promise(() => {});
+      }
+      return new Response(buf, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: {
+          "Content-Type": res.headers.get("content-type") || "text/x-component",
+        },
+      });
+    },
+    (err) => {
+      if (isStaticExportUnloading()) {
+        return new Promise(() => {});
+      }
+      throw err;
+    }
+  );
+};
+
 const buildStaticExportRscUrl = (rawRouteOrKey, fileName) => {
   const withoutHash = String(rawRouteOrKey || "/").split("#")[0];
   const qIdx = withoutHash.indexOf("?");
@@ -378,6 +409,9 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
           }
           return new Promise(() => {});
         }
+        if (isStaticExportUnloading()) {
+          return new Promise(() => {});
+        }
         if (
           staticExport &&
           (!res.ok ||
@@ -390,6 +424,9 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
             pageCache.delete(url);
           }
           return new Promise(() => {});
+        }
+        if (staticExport) {
+          return bufferStaticExportResponse(res);
         }
         return res;
       }, (err) => {
@@ -480,6 +517,9 @@ const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
               (res.headers.get("content-type") || "").toLowerCase().includes("text/html"))
           ) {
             return new Promise(() => {});
+          }
+          if (staticExport) {
+            return bufferStaticExportResponse(res);
           }
           if (!res.ok) {
             console.warn(
@@ -1111,6 +1151,24 @@ const onRecoverableError = (error) => {
   }
 };
 
+const onUncaughtError = (error) => {
+  if (isStaticExportUnloading()) {
+    return;
+  }
+  if (typeof reportError === "function") {
+    reportError(error);
+  } else {
+    console.error(error);
+  }
+};
+
+const onCaughtError = (error) => {
+  if (isStaticExportUnloading()) {
+    return;
+  }
+  console.error(error);
+};
+
 // If the server rendered a fatal layout error during SSR (meaning there is no layout DOM to hydrate),
 // do NOT attempt to hydrate the application over it.
 const hasInitialServerError =
@@ -1119,7 +1177,11 @@ const isLayoutError =
   hasInitialServerError && window.__DINOU_ERROR_SEGMENT__ !== "page";
 
 if (!isLayoutError) {
-  hydrateRoot(document, app, { onRecoverableError });
+  hydrateRoot(document, app, {
+    onRecoverableError,
+    onUncaughtError,
+    onCaughtError,
+  });
 } else {
   console.warn(
     "[Dinou] Initial layout server error detected:",
