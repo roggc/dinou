@@ -32,7 +32,7 @@ function resolveToolBin(specifier) {
 
 const dinouScript = (rel) => path.join(dinouPath, rel);
 
-// Global CLI options for Dinou v9 (Dual-Mode Vendoring)
+// Global CLI options (Dual-Mode Vendoring)
 program
   .name("dinou")
   .description(

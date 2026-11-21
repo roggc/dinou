@@ -178,7 +178,7 @@ const GLOBAL_EXTERNALS = [
 ];
 
 async function buildVendors() {
-  console.log("🦖 [Dinou v9] Compiling vendor dependencies with esbuild...\n");
+  console.log("🦖 [Dinou] Compiling vendor dependencies with esbuild...\n");
   const startTime = Date.now();
   await fs.mkdir(COMPILED_DIR, { recursive: true });
 

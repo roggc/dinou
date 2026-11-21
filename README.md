@@ -479,7 +479,7 @@ Dinou provides 100% feature parity across three bundlers—with **`babel-plugin-
 - **Netlify Functions v2:** `npm run build:netlify` (or `npm run build`) emits a self-contained AOT bundle at `.dinou/netlify/functions/ssr.mjs` (`publish = ".dinou/dist3"`, `included_files = [".dinou/dist2/**"]`).
 - **Cloudflare Workers:** `npm run build:cloudflare && npx wrangler deploy` (emits `.dinou/cloudflare/worker.js` + `[assets] directory = ".dinou/cloudflare/assets"`, `run_worker_first = true`, `html_handling = "none"`).
 - **Bun:** `npm run build:bun && npm run start:bun` (or `build:bun:compile` / `build:bun:pure:compile` → `dist/server`).
-- **Deno:** `npm run build:deno && npm run start:deno` (or `build:deno:compile` → `dist/server`).
+- **Deno:** `npm run build:deno && npm run start:deno` (or `build:deno:compile` → `dist/deno-server`).
 - **Static Export (SPA):** `npm run export-static` exports standalone HTML + `.rsc` SPA navigation payloads + static assets into `out/`.
 
 ### Dual-Mode Vendoring (`--unvendorized` / `-u`)
