@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [10.0.1] - 2026-11-21
+
+### Fixed
+- **Static Export Client RSC Stream-Abort Race in Firefox (`dinou/core/client.jsx`, `dinou/core/client-webpack.jsx`)**: Buffered static-export `page.rsc` and `layout.rsc` responses into an in-memory `ArrayBuffer` (`bufferStaticExportResponse`) before handing them to React Flight's `createFromFetch`, preventing Firefox from throwing an unhandled `TypeError: Error in input stream` when a non-RSC static HTML fallback triggers `window.location.replace()` while a parallel `.rsc` response stream (such as `/layout.rsc`) is still in flight; also added `isStaticExportUnloading()` guards to `hydrateRoot`'s `onUncaughtError` and `onCaughtError` handlers alongside `onRecoverableError` (without affecting progressive streaming in server/edge modes).
+
 ## [10.0.0] - 2026-11-21
 
 > **Upgrading from v9?** Read the complete [Migration Guide from v9 to v10](https://dinou.dev/docs/migration/v9-to-v10) for step-by-step before/after examples and a verification checklist.

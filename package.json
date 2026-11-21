@@ -1,6 +1,6 @@
 {
   "name": "dinou",
-  "version": "10.0.0",
+  "version": "10.0.1",
   "description": "Full-stack React 19 framework with native RSC, Server Functions, progressive streaming, and zero vendor lock-in.",
   "type": "module",
   "main": "./dinou/index.js",
@@ -35,7 +35,8 @@
   "types": "./dinou/index.d.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build:vendors": "node dinou/scripts/build-vendors.js"
+    "build:vendors": "node dinou/scripts/build-vendors.js",
+    "prepack": "node -e \"const fs=require('node:fs');const p='dinou/cli.js';const s=fs.readFileSync(p,'utf8');if(s.includes('\\r')){fs.writeFileSync(p,s.replace(/\\r\\n?/g,'\\n'),'utf8');console.log('Normalized dinou/cli.js to LF');}\""
   },
   "keywords": [
     "react",
