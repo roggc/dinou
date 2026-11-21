@@ -4,7 +4,7 @@ import ensureVendorMode, {
   isUnvendorizedRequested,
 } from "./core/ensure-vendor-mode.js";
 if (!ensureVendorMode()) {
-  await new Promise(() => {});
+  await new Promise(() => { });
 }
 
 import { program } from "#commander";
@@ -38,7 +38,7 @@ program
   .description(
     "Full-stack React 19 framework with native RSC, progressive streaming, and dual-mode vendoring"
   )
-  .version("9.4.0")
+  .version("10.0.0")
   .option(
     "-u, --unvendorized",
     "Run with standard node_modules dependencies instead of pre-bundled vendor packages"
@@ -66,7 +66,7 @@ function buildChildEnv(extraEnv = {}) {
   const nodeOptions =
     unvendorized && !baseNodeOptions.includes("unvendorized")
       ? (baseNodeOptions ? `${baseNodeOptions} ` : "") +
-        "--conditions=unvendorized"
+      "--conditions=unvendorized"
       : baseNodeOptions;
 
   return {
@@ -354,9 +354,9 @@ for (const t of nodeTargets) {
     const cmdNames =
       b === "esbuild"
         ? [
-            `build:node:compile${t.name}`,
-            `build:node:compile${t.name}:esbuild`,
-          ]
+          `build:node:compile${t.name}`,
+          `build:node:compile${t.name}:esbuild`,
+        ]
         : [`build:node:compile${t.name}:${b}`];
     for (const cmdName of cmdNames) {
       program
@@ -416,9 +416,9 @@ for (const t of nodeTargets) {
     const cmdNames =
       b === "esbuild"
         ? [
-            `build:node:pure:compile${t.name}`,
-            `build:node:pure:compile${t.name}:esbuild`,
-          ]
+          `build:node:pure:compile${t.name}`,
+          `build:node:pure:compile${t.name}:esbuild`,
+        ]
         : [`build:node:pure:compile${t.name}:${b}`];
     for (const cmdName of cmdNames) {
       program
@@ -611,9 +611,9 @@ for (const t of denoTargets) {
     const cmdNames =
       b === "esbuild"
         ? [
-            `build:deno:compile${t.name}`,
-            `build:deno:compile${t.name}:esbuild`,
-          ]
+          `build:deno:compile${t.name}`,
+          `build:deno:compile${t.name}:esbuild`,
+        ]
         : [`build:deno:compile${t.name}:${b}`];
     for (const cmdName of cmdNames) {
       program
@@ -752,9 +752,9 @@ for (const t of bunTargets) {
     const cmdNames =
       b === "esbuild"
         ? [
-            `build:bun:compile${t.name}`,
-            `build:bun:compile${t.name}:esbuild`,
-          ]
+          `build:bun:compile${t.name}`,
+          `build:bun:compile${t.name}:esbuild`,
+        ]
         : [`build:bun:compile${t.name}:${b}`];
     for (const cmdName of cmdNames) {
       program
@@ -812,9 +812,9 @@ for (const t of bunTargets) {
     const cmdNames =
       b === "esbuild"
         ? [
-            `build:bun:pure:compile${t.name}`,
-            `build:bun:pure:compile${t.name}:esbuild`,
-          ]
+          `build:bun:pure:compile${t.name}`,
+          `build:bun:pure:compile${t.name}:esbuild`,
+        ]
         : [`build:bun:pure:compile${t.name}:${b}`];
     for (const cmdName of cmdNames) {
       program

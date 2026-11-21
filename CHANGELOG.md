@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [9.4.0] - 2026-11-12
+## [10.0.0] - 2026-11-21
 
 ### Added
 - **Global Default `allowISG` Configuration in `dinou.config.js` (`index.d.ts`, `layout-functions.js`, `handler.js`)**: Added `allowISG?: boolean` (default: `true`) to `defineConfig(...)` in `dinou.config.js`. When set to `allowISG: false`, all dynamic route segments (`layout` and `page`) across the project default to `allowISG = false` (strict SSG-only mode, returning `404` for any dynamic parameter not pre-rendered at build time) unless a segment explicitly opts in with `allowISG = true` in its own `page_functions.ts` or `layout_functions.ts`.
