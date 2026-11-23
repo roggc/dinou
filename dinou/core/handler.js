@@ -2892,7 +2892,7 @@ async function handleRequest(request, platformContext = {}) {
                   const lRscKey = entry.cleanLayoutKey
                     ? `${entry.cleanLayoutKey}/layout.rsc`
                     : "layout.rsc";
-                  const lMeta = await readMetaFromStorage(
+                  let lMeta = await readMetaFromStorage(
                     storage,
                     lMetaKey,
                     lRscKey,
@@ -2910,19 +2910,103 @@ async function handleRequest(request, platformContext = {}) {
                     if (single && single.ownTree) {
                       overrides.set(entry.cleanLayoutKey || "", single);
                     }
-                  } else if (
-                    lMeta?.ownPpr &&
-                    Array.isArray(lMeta.ownHoles) &&
-                    lMeta.ownHoles.length > 0
-                  ) {
-                    const spliced = await spliceSingleLayoutOwnHoles(entry, storage, {
-                      platformContext,
-                      reqUrl: request.url,
-                      currentPath: reqPath,
-                    });
-                    if (context._hasRedirected) break;
-                    if (spliced && spliced.ownTree) {
-                      overrides.set(entry.cleanLayoutKey || "", spliced);
+                  } else if (lMeta) {
+                    const ownGen = Number(
+                      lMeta.ownGeneratedAt ||
+                        lMeta.layoutGeneratedAt ||
+                        lMeta.generatedAt ||
+                        0
+                    );
+                    const lReval =
+                      typeof lMeta.revalidate === "number"
+                        ? lMeta.revalidate
+                        : lCfg.revalidate;
+                    const lSlotTags = Array.from(
+                      new Set([
+                        ...(Array.isArray(lMeta.ownSlotTags) ? lMeta.ownSlotTags : []),
+                        ...(Array.isArray(lMeta.slotTags) ? lMeta.slotTags : []),
+                      ])
+                    );
+                    if (
+                      typeof lReval === "number" &&
+                      lReval >= 1 &&
+                      ownGen > 0 &&
+                      Date.now() > ownGen + lReval * 1000
+                    ) {
+                      const { revalidateLayout } = await import("./cache-revalidate.js");
+                      await revalidateLayout(entry.layoutRoutePath, {
+                        onlyIfExpired: true,
+                      });
+                      lMeta =
+                        (await readMetaFromStorage(
+                          storage,
+                          lMetaKey,
+                          lRscKey,
+                          platformContext,
+                          request.url
+                        )) || lMeta;
+                    } else if (lSlotTags.length > 0) {
+                      const lSlotFresh = await inspectSlotsFreshness(
+                        lSlotTags,
+                        lMeta.generatedAt || 0
+                      );
+                      if (lSlotFresh.hasNewer) {
+                        const { revalidateLayout } = await import("./cache-revalidate.js");
+                        await revalidateLayout(entry.layoutRoutePath, {
+                          onlyRefreshSlots: true,
+                        });
+                        lMeta =
+                          (await readMetaFromStorage(
+                            storage,
+                            lMetaKey,
+                            lRscKey,
+                            platformContext,
+                            request.url
+                          )) || lMeta;
+                      } else if (lSlotFresh.hasExpired) {
+                        const layoutSlotRevalKey = `layout-slot:${entry.layoutRoutePath}`;
+                        const lSlotPromise = (async () => {
+                          if (regenerating.has(layoutSlotRevalKey)) return;
+                          regenerating.add(layoutSlotRevalKey);
+                          try {
+                            const { revalidateLayout } = await import("./cache-revalidate.js");
+                            await revalidateLayout(entry.layoutRoutePath, {
+                              onlyRefreshSlots: true,
+                            });
+                          } catch (err) {
+                            console.error(
+                              `❌ [Slot ISR] Error refreshing layout slots for ${entry.layoutRoutePath}:`,
+                              err
+                            );
+                          } finally {
+                            regenerating.delete(layoutSlotRevalKey);
+                          }
+                        })();
+                        if (
+                          platformContext?.ctx &&
+                          typeof platformContext.ctx.waitUntil === "function"
+                        ) {
+                          platformContext.ctx.waitUntil(lSlotPromise);
+                        }
+                      }
+                    }
+                    if (
+                      lMeta?.ownPpr &&
+                      Array.isArray(lMeta.ownHoles) &&
+                      lMeta.ownHoles.length > 0
+                    ) {
+                      const spliced = await spliceSingleLayoutOwnHoles(entry, storage, {
+                        platformContext,
+                        reqUrl: request.url,
+                        currentPath: reqPath,
+                        reqSegments,
+                        queryObj,
+                        isDevelopment,
+                      });
+                      if (context._hasRedirected) break;
+                      if (spliced && spliced.ownTree) {
+                        overrides.set(entry.cleanLayoutKey || "", spliced);
+                      }
                     }
                   }
                 }
@@ -3260,7 +3344,35 @@ async function handleRequest(request, platformContext = {}) {
       queryObj.ssr_crash !== "true" &&
       !platformContext?.isSSG
     ) {
+      const newlyPopulatedLayoutKeys = [];
       try {
+        if (hasDynamicUrlParams && activeLayoutsForRoute.length > 0) {
+          for (let i = activeLayoutsForRoute.length - 1; i >= 0; i--) {
+            const entry = activeLayoutsForRoute[i];
+            if (entry.isDynamicConfig) continue;
+            const ownKey = entry.cleanLayoutKey
+              ? `${entry.cleanLayoutKey}/shell.layout.own.json`
+              : "shell.layout.own.json";
+            const lMetaKey = entry.cleanLayoutKey
+              ? `${entry.cleanLayoutKey}/layout.metadata.json`
+              : "layout.metadata.json";
+            const lRscKey = entry.cleanLayoutKey
+              ? `${entry.cleanLayoutKey}/layout.rsc`
+              : "layout.rsc";
+            const [existingOwn, existingMeta] = await Promise.all([
+              readStorageArtifact(storage, ownKey, platformContext, request.url),
+              readMetaFromStorage(storage, lMetaKey, lRscKey, platformContext, request.url),
+            ]);
+            if (existingMeta?.dynamic) continue;
+            if (!existingOwn || !existingMeta) {
+              const { revalidateLayout } = await import("./cache-revalidate.js");
+              const didPopulate = await revalidateLayout(entry.layoutRoutePath);
+              if (didPopulate && entry.cleanLayoutKey) {
+                newlyPopulatedLayoutKeys.push(entry.cleanLayoutKey);
+              }
+            }
+          }
+        }
         const ssgUrl = new URL(reqPath, request.url);
         const ssgReq = new Request(ssgUrl.href, { method: "GET" });
         const ssgRes = await handleRequest(ssgReq, {
@@ -3268,6 +3380,18 @@ async function handleRequest(request, platformContext = {}) {
           isSSG: true,
         });
         await ssgRes.text();
+        if (ssgRes.status !== 200 && newlyPopulatedLayoutKeys.length > 0) {
+          for (const lKey of newlyPopulatedLayoutKeys) {
+            for (const suffix of [
+              "shell.layout.own.json",
+              "shell.layout.json",
+              "layout.rsc",
+              "layout.metadata.json",
+            ]) {
+              await Promise.resolve(storage.delete(`${lKey}/${suffix}`)).catch(() => {});
+            }
+          }
+        }
         cachedItem = await storage.get(htmlKey);
         if (!cachedItem) {
           const shellHtmlKey = cleanPath ? `${cleanPath}/shell.html` : "shell.html";
@@ -3851,6 +3975,22 @@ async function handleRequest(request, platformContext = {}) {
         const context = createRequestContext(simReq, bridge, platformContext, dynamicState);
         copyCustomContextProperties(rootContext, context);
         const isNotFound = { value: !pagePath };
+        let hasNoLayoutNotFound = false;
+        if (!pagePath) {
+          try {
+            const [nfPath] = getFilePathAndDynamicParams(
+              reqSegments,
+              queryObj,
+              srcFolder,
+              "not_found",
+              true,
+              false
+            );
+            if (nfPath && existsSync(path.join(path.dirname(nfPath), "no_layout_not_found"))) {
+              hasNoLayoutNotFound = true;
+            }
+          } catch (e) {}
+        }
         const isSsrCrash = queryObj.ssr_crash === "true";
         let isError = isSsrCrash;
         let caughtError = isSsrCrash
@@ -3937,19 +4077,21 @@ async function handleRequest(request, platformContext = {}) {
               !isDevelopment &&
               !platformContext?.isSSG &&
               (hasDynamicLayoutConfig || isDynamicConfig || dynamicState.value || !cachedItem) &&
-              (!isPprConfig || hasDynamicLayoutConfig || isDynamicConfig || dynamicState.value) &&
+              (!isPprConfig || hasDynamicLayoutConfig || isDynamicConfig || dynamicState.value || !pagePath) &&
               activeLayoutsForRoute.length > 0 &&
-              pagePath &&
+              (pagePath || !hasNoLayoutNotFound) &&
               queryObj.ssr_crash !== "true"
             ) {
-              // Per-level layout composition for BOTH:
-              //  (a) Asymmetric dynamic layout(s) + static/PPR ancestor/descendant layout(s) + static/PPR/dynamic page, AND
-              //  (b) Dynamic / uncached page under static/PPR cached layout chain (S -> S -> D).
+              // Per-level layout composition for:
+              //  (a) Asymmetric dynamic layout(s) + static/PPR ancestor/descendant layout(s) + static/PPR/dynamic page,
+              //  (b) Dynamic / uncached page under static/PPR cached layout chain (S -> S -> D), and
+              //  (c) 404 / not_found.tsx routes under cached static/PPR layouts (reusing cached layout shells without caching the 404).
               // Reuses every static/PPR layout's cached `shell.layout.own.json` and splices live PPR holes without re-executing static shells!
               await requestStorage.run(context, async () => {
                 let composedAsymmetric = false;
                 let pageClientJsx;
                 const canReuseStaticPage =
+                  Boolean(pagePath) &&
                   hasDynamicLayoutConfig &&
                   !isDynamicConfig &&
                   (Boolean(isPagePprConfig) || Object.keys(queryObj).length === 0);
@@ -4181,7 +4323,11 @@ async function handleRequest(request, platformContext = {}) {
                 }
 
                 try {
-                  if (!context._hasRedirected && !isNotFound.value && pageClientJsx !== undefined) {
+                  if (
+                    !context._hasRedirected &&
+                    (!isNotFound.value || !pagePath) &&
+                    pageClientJsx !== undefined
+                  ) {
                     await hydrateActiveChainPpr(
                       activeLayoutsForRoute,
                       reqSegments,
@@ -4307,6 +4453,9 @@ async function handleRequest(request, platformContext = {}) {
                             platformContext,
                             reqUrl: request.url,
                             currentPath: reqPath,
+                            reqSegments,
+                            queryObj,
+                            isDevelopment,
                           });
                           if (context._hasRedirected) break;
                           if (splicedOwn && splicedOwn.ownTree) {
@@ -4845,6 +4994,35 @@ async function handleRequest(request, platformContext = {}) {
                     const shellRscKey = cleanPath ? `${cleanPath}/shell.rsc` : "shell.rsc";
                     await storage.set(shellHtmlKey, fullHtml, genMeta);
                     await storage.set(shellRscKey, pageRscText || rscPayload);
+                  } else if (
+                    !platformContext?.isSSG &&
+                    hasDynamicUrlParams &&
+                    activeLayoutsForRoute.length > 0
+                  ) {
+                    try {
+                      for (let i = activeLayoutsForRoute.length - 1; i >= 0; i--) {
+                        const entry = activeLayoutsForRoute[i];
+                        if (entry.isDynamicConfig) continue;
+                        const ownKey = entry.cleanLayoutKey
+                          ? `${entry.cleanLayoutKey}/shell.layout.own.json`
+                          : "shell.layout.own.json";
+                        const lMetaKey = entry.cleanLayoutKey
+                          ? `${entry.cleanLayoutKey}/layout.metadata.json`
+                          : "layout.metadata.json";
+                        const lRscKey = entry.cleanLayoutKey
+                          ? `${entry.cleanLayoutKey}/layout.rsc`
+                          : "layout.rsc";
+                        const [existingOwn, existingMeta] = await Promise.all([
+                          readStorageArtifact(storage, ownKey, platformContext, request.url),
+                          readMetaFromStorage(storage, lMetaKey, lRscKey, platformContext, request.url),
+                        ]);
+                        if (existingMeta?.dynamic) continue;
+                        if (!existingOwn || !existingMeta) {
+                          const { revalidateLayout } = await import("./cache-revalidate.js");
+                          await revalidateLayout(entry.layoutRoutePath);
+                        }
+                      }
+                    } catch (e) {}
                   }
                   if (!platformContext?.isSSG && !genMeta.ppr && !isError && context._hasResolvedSegments && pageRscText) {
                     let layoutRscText = precomputedLayoutRscText || "";

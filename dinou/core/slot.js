@@ -340,6 +340,7 @@ function ensureKnownSlotEntry(id, tags, children) {
       tags: Array.isArray(tags) ? tags : [],
       baseChildren: children,
       routePath: typeof window !== "undefined" ? window.location.pathname : "/",
+      unmounted: false,
       pendingPromise: null,
       pendingReqId: 0,
       pendingBatchId: 0,
@@ -355,9 +356,6 @@ function ensureKnownSlotEntry(id, tags, children) {
       entry.tags = Array.from(new Set([...(entry.tags || []), ...tags]));
     }
     entry.baseChildren = children;
-    if (typeof window !== "undefined") {
-      entry.routePath = window.location.pathname;
-    }
   }
   return entry;
 }
@@ -410,8 +408,8 @@ if (
         if (
           targetId === "*" &&
           !hasMountedSubscribers &&
-          entry.routePath &&
-          entry.routePath !== window.location.pathname
+          (entry.unmounted ||
+            (entry.routePath && entry.routePath !== window.location.pathname))
         ) {
           continue;
         }
@@ -546,6 +544,10 @@ export function DinouCacheSlotBoundary({ id, tags, children }) {
       getBase: () => childrenRef.current,
     };
     entry.subscribers.add(subscriber);
+    entry.unmounted = false;
+    if (typeof window !== "undefined") {
+      entry.routePath = window.location.pathname;
+    }
     mountedClientSlots.add(id);
 
     if (entry.pendingPromise) {
@@ -587,6 +589,7 @@ export function DinouCacheSlotBoundary({ id, tags, children }) {
       entry.subscribers.delete(subscriber);
       if (entry.subscribers.size === 0) {
         mountedClientSlots.delete(id);
+        entry.unmounted = true;
       }
     };
   }, [id, tagsKey]);

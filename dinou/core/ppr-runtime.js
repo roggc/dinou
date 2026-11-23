@@ -788,6 +788,9 @@ async function handlePprResume({
   const resumePromise = (async () => {
     try {
       // 1. Immediately flush static shell prelude (0ms TTFB)
+      if (bridge) {
+        bridge.headersSent = true;
+      }
       await writer.write(encoder.encode(shellPrelude));
 
       const storage = getStorageAdapter();
@@ -875,6 +878,11 @@ async function handlePprResume({
             staticParentHoles,
             resolvedHolesMap
           );
+        }
+
+        if (bridge && bridge._injectedScripts) {
+          await writer.write(encoder.encode(`\n${bridge._injectedScripts}\n`));
+          bridge._injectedScripts = "";
         }
 
         if (context._hasRedirected && context._redirectLocation) {

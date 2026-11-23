@@ -275,18 +275,162 @@ class CloudflareKVStorage extends StorageAdapter {
     return String(key).replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
   }
 
+  _tombstoneKey(cleanKey) {
+    return `__tombstone__:${cleanKey}`;
+  }
+
+  _tagInvKey(tag) {
+    return `__tag_inv__:${String(tag)}`;
+  }
+
+  _companionKeys(cleanKey) {
+    const companions = [];
+    if (cleanKey.endsWith("/index.html")) {
+      companions.push(cleanKey.slice(0, -11));
+    } else if (cleanKey === "index.html") {
+      companions.push("");
+    } else if (!cleanKey.includes(".")) {
+      companions.push(cleanKey ? `${cleanKey}/index.html` : "index.html");
+    }
+    if (cleanKey.endsWith("/slot.json")) {
+      companions.push(cleanKey.slice(0, -10) + "/slot.metadata.json");
+    } else if (cleanKey.endsWith("/slot.metadata.json")) {
+      companions.push(cleanKey.slice(0, -19) + "/slot.json");
+    }
+    return companions;
+  }
+
+  _companionMetaKey(cleanKey) {
+    if (cleanKey.endsWith("metadata.json")) return null;
+    if (!cleanKey) return "metadata.json";
+    if (!cleanKey.includes(".")) {
+      return `${cleanKey}/metadata.json`;
+    }
+    const isLayoutKey =
+      cleanKey.endsWith("layout.rsc") ||
+      cleanKey.endsWith("layout._old.rsc") ||
+      cleanKey.endsWith("shell.layout.json") ||
+      cleanKey.endsWith("shell.layout.own.json") ||
+      cleanKey.endsWith("shell.layout._old.json");
+    const isSlotKey =
+      cleanKey.startsWith("slots/") || cleanKey.endsWith("/slot.json");
+    const dirPrefix = cleanKey.includes("/")
+      ? cleanKey.slice(0, cleanKey.lastIndexOf("/"))
+      : "";
+    const metaFileName = isLayoutKey
+      ? "layout.metadata.json"
+      : isSlotKey
+      ? "slot.metadata.json"
+      : "metadata.json";
+    return dirPrefix ? `${dirPrefix}/${metaFileName}` : metaFileName;
+  }
+
+  async _safeKvPut(kv, key, content, metadata = null) {
+    if (!key) return false;
+    if (!metadata) {
+      await kv.put(key, content);
+      return false;
+    }
+    let metaJson = "";
+    try {
+      metaJson = JSON.stringify(metadata);
+    } catch (e) {
+      await kv.put(key, content);
+      return false;
+    }
+    const metaBytes =
+      typeof TextEncoder !== "undefined"
+        ? new TextEncoder().encode(metaJson).byteLength
+        : metaJson.length;
+    if (metaBytes <= 1024) {
+      try {
+        await kv.put(key, content, { metadata });
+        return false;
+      } catch (e) {
+        if (!/metadata|413|1024/i.test(String(e?.message || e))) {
+          throw e;
+        }
+      }
+    }
+    await kv.put(key, content);
+    return true;
+  }
+
+  markTagInvalidated(tag) {
+    super.markTagInvalidated(tag);
+    const kv = this._getKv();
+    if (tag && kv && typeof kv.put === "function") {
+      const ts = String(this.getTagInvalidatedAt(tag) || Date.now());
+      Promise.resolve(kv.put(this._tagInvKey(tag), ts)).catch(() => {});
+    }
+  }
+
+  async markTagInvalidatedAsync(tag) {
+    super.markTagInvalidated(tag);
+    const kv = this._getKv();
+    if (tag && kv && typeof kv.put === "function") {
+      const ts = String(this.getTagInvalidatedAt(tag) || Date.now());
+      try {
+        await kv.put(this._tagInvKey(tag), ts);
+      } catch (e) {}
+    }
+  }
+
+  async getTagInvalidatedAtAsync(tag) {
+    const localTs = this.getTagInvalidatedAt(tag);
+    const kv = this._getKv();
+    if (!tag || !kv || typeof kv.get !== "function") {
+      return localTs;
+    }
+    try {
+      const remoteRaw = await kv.get(this._tagInvKey(tag));
+      const remoteTs = remoteRaw ? Number(remoteRaw) || 0 : 0;
+      return Math.max(localTs, remoteTs);
+    } catch (e) {
+      return localTs;
+    }
+  }
+
+  async isKeyDeleted(key) {
+    if (this.isDeleted(key)) return true;
+    const kv = this._getKv();
+    if (!kv || typeof kv.get !== "function") return false;
+    const cleanKey = this._cleanKey(key);
+    try {
+      const val = await kv.get(this._tombstoneKey(cleanKey));
+      return val !== null && val !== undefined;
+    } catch (e) {
+      return false;
+    }
+  }
+
   async get(key) {
     const kv = this._getKv();
     if (!kv) return null;
     const cleanKey = this._cleanKey(key);
-    let res = await kv.getWithMetadata(cleanKey, "text");
+    let matchedKey = cleanKey;
+    let res = null;
+    if (cleanKey) {
+      res = await kv.getWithMetadata(cleanKey, "text");
+    }
     if ((!res || res.value === null) && !cleanKey.includes(".")) {
-      res = await kv.getWithMetadata(cleanKey ? `${cleanKey}/index.html` : "index.html", "text");
+      matchedKey = cleanKey ? `${cleanKey}/index.html` : "index.html";
+      res = await kv.getWithMetadata(matchedKey, "text");
     }
     if (!res || res.value === null) return null;
+    let metadata = res.metadata || null;
+    if (!metadata) {
+      const compMetaKey = this._companionMetaKey(matchedKey);
+      if (compMetaKey && typeof kv.get === "function") {
+        try {
+          const rawMeta = await kv.get(compMetaKey);
+          if (rawMeta) metadata = JSON.parse(rawMeta);
+        } catch (e) {}
+      }
+    }
     return {
       content: res.value,
-      metadata: res.metadata || null,
+      metadata,
     };
   }
 
@@ -295,13 +439,32 @@ class CloudflareKVStorage extends StorageAdapter {
     const kv = this._getKv();
     if (!kv) return;
     const cleanKey = this._cleanKey(key);
-    const options = metadata ? { metadata } : undefined;
-    await kv.put(cleanKey, content, options);
+    const primaryKey = cleanKey || "index.html";
+    const overflowed = await this._safeKvPut(kv, primaryKey, content, metadata);
+    const tombstonesToClear = [
+      this._tombstoneKey(cleanKey),
+      ...(primaryKey !== cleanKey ? [this._tombstoneKey(primaryKey)] : []),
+      ...this._companionKeys(cleanKey).map((tk) => this._tombstoneKey(tk)),
+    ];
     if (cleanKey.endsWith("/index.html")) {
       const folderKey = cleanKey.slice(0, -11);
-      await kv.put(folderKey, content, options);
-    } else if (cleanKey === "index.html") {
-      await kv.put("", content, options);
+      if (folderKey) {
+        await this._safeKvPut(kv, folderKey, content, metadata);
+      }
+    }
+    if (overflowed && metadata) {
+      const compMetaKey = this._companionMetaKey(primaryKey);
+      if (compMetaKey) {
+        try {
+          await kv.put(compMetaKey, JSON.stringify(metadata));
+          tombstonesToClear.push(this._tombstoneKey(compMetaKey));
+        } catch (e) {}
+      }
+    }
+    if (typeof kv.delete === "function") {
+      await Promise.all(
+        tombstonesToClear.map((tk) => Promise.resolve(kv.delete(tk)).catch(() => {}))
+      );
     }
   }
 
@@ -309,8 +472,10 @@ class CloudflareKVStorage extends StorageAdapter {
     const kv = this._getKv();
     if (!kv) return false;
     const cleanKey = this._cleanKey(key);
-    const val = await kv.get(cleanKey);
-    if (val !== null) return true;
+    if (cleanKey) {
+      const val = await kv.get(cleanKey);
+      if (val !== null) return true;
+    }
     if (!cleanKey.includes(".")) {
       const fallbackVal = await kv.get(
         cleanKey ? `${cleanKey}/index.html` : "index.html"
@@ -325,19 +490,21 @@ class CloudflareKVStorage extends StorageAdapter {
     const kv = this._getKv();
     if (!kv) return;
     const cleanKey = this._cleanKey(key);
-    await kv.delete(cleanKey);
-    if (cleanKey.endsWith("/index.html")) {
-      await kv.delete(cleanKey.slice(0, -11));
-    } else if (cleanKey === "index.html") {
-      await kv.delete("");
-    } else if (!cleanKey.includes(".")) {
-      await kv.delete(cleanKey ? `${cleanKey}/index.html` : "index.html");
-    }
-    if (cleanKey.endsWith("/slot.json")) {
-      await kv.delete(cleanKey.slice(0, -10) + "/slot.metadata.json");
-    } else if (cleanKey.endsWith("/slot.metadata.json")) {
-      await kv.delete(cleanKey.slice(0, -19) + "/slot.json");
-    }
+    const targets = [cleanKey, ...this._companionKeys(cleanKey)];
+    await Promise.all(
+      targets.map(async (tk) => {
+        if (tk) {
+          try {
+            await kv.delete(tk);
+          } catch (e) {}
+        }
+        try {
+          if (typeof kv.put === "function") {
+            await kv.put(this._tombstoneKey(tk), String(Date.now()));
+          }
+        } catch (e) {}
+      })
+    );
   }
 
   async keys(prefix = "") {
@@ -356,7 +523,12 @@ class CloudflareKVStorage extends StorageAdapter {
         );
         if (res && Array.isArray(res.keys)) {
           for (const k of res.keys) {
-            if (k && typeof k.name === "string") {
+            if (
+              k &&
+              typeof k.name === "string" &&
+              !k.name.startsWith("__tombstone__:") &&
+              !k.name.startsWith("__tag_inv__:")
+            ) {
               results.push(k.name);
             }
           }

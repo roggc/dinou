@@ -237,58 +237,64 @@ async function generateStatic() {
       `[SSG] (${currentIndex}/${routes.length}) Pre-rendering: ${reqPath}`
     );
     try {
-      // A. Pre-render full HTML (index.html) and metadata (metadata.json)
-      const webReq = new Request(`http://localhost${reqPath}`);
-      const res = await rscModule.handleRequest(webReq, {
-        runtime: "node-bundle",
-        renderHtmlStream: ssrModule.renderHtml,
-        isSSG: true,
-      });
-
       const routeMeta = typeof rscModule.getStaticMetadata === "function" ? rscModule.getStaticMetadata(reqPath) : null;
       const isRoutePpr = Boolean(routeMeta?.ppr);
+      const hasDynamicLayout = Boolean(routeMeta?.hasDynamicLayout);
       const cleanPagePath = reqPath.replace(/^\/+/, "").replace(/\/+$/, "");
 
-      if (res.status === 200) {
-        renderedCount++;
-        if (isRoutePpr) {
-          const indexHtmlKey = cleanPagePath ? `${cleanPagePath}/index.html` : "index.html";
-          const shellHtmlKey = cleanPagePath ? `${cleanPagePath}/shell.html` : "shell.html";
-          const metaKey = cleanPagePath ? `${cleanPagePath}/metadata.json` : "metadata.json";
+      // A. Pre-render full HTML (index.html) and metadata (metadata.json)
+      // Skip full HTML freezing when an ancestor layout is dynamic — Step 5B still
+      // pre-renders the isolated static/PPR Page segment (`page.rsc`, `shell.page.json`).
+      let res = { status: 0 };
+      if (!hasDynamicLayout) {
+        const webReq = new Request(`http://localhost${reqPath}`);
+        res = await rscModule.handleRequest(webReq, {
+          runtime: "node-bundle",
+          renderHtmlStream: ssrModule.renderHtml,
+          isSSG: true,
+        });
 
-          const htmlItem = await storage.get(indexHtmlKey);
-          const effectiveHoles =
-            Array.isArray(htmlItem?.metadata?.holes) && htmlItem.metadata.holes.length > 0
-              ? htmlItem.metadata.holes
-              : routeMeta.holes || [];
-          if (htmlItem) {
-            await storage.set(shellHtmlKey, htmlItem.content, {
-              ...(htmlItem.metadata || {}),
-              ppr: true,
-              ...(routeMeta && typeof routeMeta.pagePpr === "boolean"
-                ? { pagePpr: routeMeta.pagePpr }
-                : {}),
-              holes: effectiveHoles,
-            });
+        if (res.status === 200) {
+          renderedCount++;
+          if (isRoutePpr) {
+            const indexHtmlKey = cleanPagePath ? `${cleanPagePath}/index.html` : "index.html";
+            const shellHtmlKey = cleanPagePath ? `${cleanPagePath}/shell.html` : "shell.html";
+            const metaKey = cleanPagePath ? `${cleanPagePath}/metadata.json` : "metadata.json";
+
+            const htmlItem = await storage.get(indexHtmlKey);
+            const effectiveHoles =
+              Array.isArray(htmlItem?.metadata?.holes) && htmlItem.metadata.holes.length > 0
+                ? htmlItem.metadata.holes
+                : routeMeta.holes || [];
+            if (htmlItem) {
+              await storage.set(shellHtmlKey, htmlItem.content, {
+                ...(htmlItem.metadata || {}),
+                ppr: true,
+                ...(routeMeta && typeof routeMeta.pagePpr === "boolean"
+                  ? { pagePpr: routeMeta.pagePpr }
+                  : {}),
+                holes: effectiveHoles,
+              });
+            }
+            const metaItem = await storage.get(metaKey);
+            let metaObj = {};
+            try {
+              metaObj = metaItem ? JSON.parse(metaItem.content || "{}") : {};
+            } catch (e) {}
+            metaObj.ppr = true;
+            if (routeMeta && typeof routeMeta.pagePpr === "boolean") {
+              metaObj.pagePpr = routeMeta.pagePpr;
+            }
+            metaObj.holes =
+              Array.isArray(metaObj.holes) && metaObj.holes.length > 0
+                ? metaObj.holes
+                : effectiveHoles;
+            await storage.set(metaKey, JSON.stringify(metaObj));
           }
-          const metaItem = await storage.get(metaKey);
-          let metaObj = {};
-          try {
-            metaObj = metaItem ? JSON.parse(metaItem.content || "{}") : {};
-          } catch (e) {}
-          metaObj.ppr = true;
-          if (routeMeta && typeof routeMeta.pagePpr === "boolean") {
-            metaObj.pagePpr = routeMeta.pagePpr;
+        } else {
+          if (process.env.DINOU_DEBUG) {
+            console.warn(`⚠️ [SSG] Route ${reqPath} returned status ${res.status}`);
           }
-          metaObj.holes =
-            Array.isArray(metaObj.holes) && metaObj.holes.length > 0
-              ? metaObj.holes
-              : effectiveHoles;
-          await storage.set(metaKey, JSON.stringify(metaObj));
-        }
-      } else {
-        if (process.env.DINOU_DEBUG) {
-          console.warn(`⚠️ [SSG] Route ${reqPath} returned status ${res.status}`);
         }
       }
 
@@ -310,8 +316,11 @@ async function generateStatic() {
             const isPageDyn = pageRes.headers.get("x-dinou-dynamic") === "true";
             const pageRscText = await pageRes.text();
             if (!isPageDyn && pageRscText && pageRscText.trim().length > 0) {
+              if (hasDynamicLayout) {
+                renderedCount++;
+              }
               await storage.set(pageRscKey, pageRscText);
-              if (isRoutePpr) {
+              if (hasDynamicLayout ? Boolean(routeMeta?.pagePpr) : isRoutePpr) {
                 const shellRscKey = cleanPagePath ? `${cleanPagePath}/shell.rsc` : "shell.rsc";
                 await storage.set(shellRscKey, pageRscText);
               }

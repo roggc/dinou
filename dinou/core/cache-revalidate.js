@@ -1102,8 +1102,8 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
       let didRecomposeOnly = false;
       let pendingShellLayoutJson = null;
       let pendingShellLayoutOwnJson = null;
+      const revalDynamicState = { value: false };
       try {
-        const revalDynamicState = { value: false };
         const rawHeaders = {
           "user-agent": "Dinou-ISR-Revalidator",
           host: "localhost",
@@ -1354,7 +1354,7 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
           }
 
           // 4. Fallback: full layout chain render via getJSX (e.g. missing ancestor shell.layout.own.json)
-          if (!resolvedLayoutJsx && !ownOnlyUnderDynamicAncestor) {
+          if (!resolvedLayoutJsx && !ownOnlyUnderDynamicAncestor && !revalDynamicState.value) {
             const isLayoutPpr = Boolean(
               currentMeta.ppr || (Array.isArray(currentMeta.holes) && currentMeta.holes.length > 0)
             );
@@ -1366,6 +1366,10 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
               resolvedLayoutJsx = await runInLayoutSegment(() =>
                 asyncRenderJSXToClientJSX(rawJsx)
               );
+              if (revalDynamicState.value) {
+                resolvedLayoutJsx = null;
+                return;
+              }
               const layoutHoles = getRegisteredHoles();
               if (layoutHoles.length > 0) {
                 currentMeta.holes = layoutHoles;
@@ -1375,6 +1379,9 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
                 pendingShellLayoutJson = serializeJSX(resolvedLayoutJsx);
               }
             });
+          }
+          if (revalDynamicState.value) {
+            return;
           }
           if (resolvedLayoutJsx) {
             const stream = renderRSCStream(resolvedLayoutJsx, clientManifest, {
@@ -1397,6 +1404,21 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
         if (isEdgeRuntime() || process.env.DINOU_DEBUG) {
           console.warn(`⚠️ [Edge Revalidate] Layout render fallback for ${targetPath}:`, e?.message || e);
         }
+      }
+
+      if (revalDynamicState.value) {
+        if (!hasCachedMeta) {
+          try {
+            await storage.set(
+              layoutMetaKey,
+              JSON.stringify({
+                ...currentMeta,
+                dynamic: true,
+              })
+            );
+          } catch (e) {}
+        }
+        return false;
       }
 
       if (!didRenderFreshLayout && !isEdgeRuntime()) {

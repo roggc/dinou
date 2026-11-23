@@ -1471,7 +1471,16 @@ async function inspectSlotsFreshness(slotTags, hostGeneratedAt = 0) {
     checkedIds.add(targetId);
     const storageKey = `slots/${targetId}/slot.json`;
     const cached = await getSlotFromStorage(storage, storageKey, [targetId]);
-    if (!cached || !cached.content) continue;
+    if (!cached || !cached.content) {
+      const isDeleted =
+        typeof storage.isKeyDeleted === "function"
+          ? await storage.isKeyDeleted(storageKey)
+          : typeof storage.isDeleted === "function" && storage.isDeleted(storageKey);
+      if (isDeleted) {
+        result.hasNewer = true;
+      }
+      continue;
+    }
     const meta = cached.metadata || {};
     const slotGen = Number(meta.generatedAt || 0);
     if (hostGen > 0 && slotGen > hostGen) {
