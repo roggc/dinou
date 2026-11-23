@@ -116,6 +116,13 @@ function doesSlotEntryMatchRoute(entry, targetRouteKey) {
   return false;
 }
 
+function isCloudflareWorkersRuntime() {
+  return (
+    typeof navigator !== "undefined" &&
+    navigator.userAgent === "Cloudflare-Workers"
+  );
+}
+
 function createDiscoveryContext(currentPath) {
   const outerCtx = getContext();
   const rawQuery = unwrapBailoutProxy(outerCtx?.req?.query);
@@ -445,12 +452,15 @@ async function getSlotFromStorage(storage, storageKey, knownTags = []) {
   const slotIdFromKey = cleanKeyForSlotId.match(/^slots\/([^/]+)\//)?.[1];
 
   try {
-    const reqContext = getContext();
+    const isCfWorkers = isCloudflareWorkersRuntime();
+    const reqContext = isCfWorkers ? requestStorage?.getStore?.() : getContext();
     const assets =
       reqContext?.env?.ASSETS ||
       reqContext?.platformContext?.env?.ASSETS ||
       reqContext?.req?.env?.ASSETS ||
-      (typeof globalThis !== "undefined" ? globalThis.__DINOU_ENV__?.ASSETS : null);
+      (!isCfWorkers && typeof globalThis !== "undefined"
+        ? globalThis.__DINOU_ENV__?.ASSETS
+        : null);
     if (assets && typeof assets.fetch === "function") {
       const cleanKey = cleanKeyForSlotId;
       const metaKey = cleanKey.endsWith("/slot.json")
@@ -525,12 +535,15 @@ async function readMetaFromStorageOrAssets(storage, key) {
       : typeof storage.isDeleted === "function" && storage.isDeleted(key);
   if (isDeleted) return null;
   try {
-    const reqContext = getContext();
+    const isCfWorkers = isCloudflareWorkersRuntime();
+    const reqContext = isCfWorkers ? requestStorage?.getStore?.() : getContext();
     const assets =
       reqContext?.env?.ASSETS ||
       reqContext?.platformContext?.env?.ASSETS ||
       reqContext?.req?.env?.ASSETS ||
-      (typeof globalThis !== "undefined" ? globalThis.__DINOU_ENV__?.ASSETS : null);
+      (!isCfWorkers && typeof globalThis !== "undefined"
+        ? globalThis.__DINOU_ENV__?.ASSETS
+        : null);
     if (assets && typeof assets.fetch === "function") {
       const cleanKey = String(key).replace(/^\/+/, "");
       const res = await fetchCloudflareDist2Asset(assets, cleanKey);
@@ -590,16 +603,18 @@ async function refreshNestedSlotsInTree(node, currentSlotId, options = {}) {
           currentPath = getContext()?.req?.path;
         } catch (e) {}
       }
-      const freshInner = await getSlotJSX(nestedSlotId, {
+      const nestedOptions = {
         ...options,
+        fresh: false,
         currentPath,
         skipHostRevalidate: true,
-      });
+      };
+      const freshInner = await getSlotJSX(nestedSlotId, nestedOptions);
       if (freshInner !== null) {
         const refreshedInner = await refreshNestedSlotsInTree(
           freshInner,
           nestedSlotId,
-          options
+          nestedOptions
         );
         const newProps = { ...node.props };
         if (node.key != null) newProps.key = node.key;
@@ -961,11 +976,12 @@ async function DinouCacheSlot(props) {
   }
 
   const inPprSuspense = isPprBuildActive() && isInsideOuterSuspenseOutsideSlot();
+  const reqCtxForMeta = getContext();
+  const isSlotEndpointReq = String(
+    reqCtxForMeta?.req?.rawPath || reqCtxForMeta?.req?.path || ""
+  ).includes("____rsc_slot____");
   const isPprShellBuild =
-    isPprBuildActive() ||
-    Boolean(getContext()?.platformContext?.isSSG) ||
-    isRevalidationActive() ||
-    !getContext()?._isPprRuntimeResume;
+    !isSlotEndpointReq && !reqCtxForMeta?._isPprRuntimeResume;
 
   const renderPromise = (async () => {
     const resolved = await runInCachedSlot(
@@ -1144,9 +1160,36 @@ async function getSlotJSX(slotId, options = {}) {
       !options.fresh &&
       Boolean(options.skipHostRevalidate) &&
       Boolean(meta.inStaticShell) &&
+      !getContext()?._isPprRuntimeResume &&
       !isRevalidationActive() &&
       !isPprBuildActive() &&
       !getContext()?.platformContext?.isSSG;
+
+    if (
+      serveStaleWhileRevalidate &&
+      !backgroundRevalidations.has(storageKey) &&
+      !inflightSlotRenders.has(storageKey)
+    ) {
+      backgroundRevalidations.add(storageKey);
+      const reqContext = getContext();
+      const bgCurrentPath = options.currentPath || reqContext?.req?.path;
+      const bgPromise = (async () => {
+        try {
+          await getSlotJSX(targetId, { fresh: true, currentPath: bgCurrentPath });
+        } catch (e) {
+          console.error(
+            `[getSlotJSX] Background revalidation failed for nested slot "${targetId}":`,
+            e
+          );
+        } finally {
+          backgroundRevalidations.delete(storageKey);
+        }
+      })();
+      const ctx = reqContext?.platformContext?.ctx;
+      if (ctx && typeof ctx.waitUntil === "function") {
+        ctx.waitUntil(bgPromise);
+      }
+    }
 
     if ((!isExpired && !options.fresh) || serveStaleWhileRevalidate) {
       try {
@@ -1192,7 +1235,8 @@ async function getSlotJSX(slotId, options = {}) {
 
   // 3. If still not in slotRegistry (e.g., cold server start), pre-evaluate the route once
   if (!slotRegistry.has(targetId) && options.currentPath) {
-    if (preEvaluatingRoutes.has(options.currentPath)) {
+    const usePreEvalDedup = !isCloudflareWorkersRuntime();
+    if (usePreEvalDedup && preEvaluatingRoutes.has(options.currentPath)) {
       try {
         await preEvaluatingRoutes.get(options.currentPath);
       } catch (e) {}
@@ -1246,10 +1290,14 @@ async function getSlotJSX(slotId, options = {}) {
             e
           );
         } finally {
-          preEvaluatingRoutes.delete(options.currentPath);
+          if (usePreEvalDedup) {
+            preEvaluatingRoutes.delete(options.currentPath);
+          }
         }
       })();
-      preEvaluatingRoutes.set(options.currentPath, preEvalPromise);
+      if (usePreEvalDedup) {
+        preEvaluatingRoutes.set(options.currentPath, preEvalPromise);
+      }
       await preEvalPromise;
       targetId = await resolveCanonicalSlotId(slotId, storage);
     }
@@ -1306,10 +1354,14 @@ async function getSlotJSX(slotId, options = {}) {
           });
         }
         if (storage && !isEntryNoCache && isLatestGen()) {
+          const nextSlotGenAt = Math.max(
+            Date.now(),
+            Number(cached?.metadata?.generatedAt || 0) + 1
+          );
           await storage.set(storageKey, serialized, {
             tags: entry.tags,
             revalidate: entry.revalidate,
-            generatedAt: Date.now(),
+            generatedAt: nextSlotGenAt,
             slotId: targetId,
             inStaticShell: Boolean(cached?.metadata?.inStaticShell),
             inStaticSuspense: Boolean(cached?.metadata?.inStaticSuspense),
@@ -1349,16 +1401,6 @@ async function getSlotJSX(slotId, options = {}) {
             slotId,
             ...(Array.isArray(entry.tags) ? entry.tags : []),
           ]);
-          const metaKey = cleanRouteKey ? `${cleanRouteKey}/metadata.json` : "metadata.json";
-          const pageMeta = await readMetaFromStorageOrAssets(storage, metaKey);
-          if (
-            pageMeta &&
-            Array.isArray(pageMeta.slotTags) &&
-            pageMeta.slotTags.some((t) => slotTagsToMatch.has(t))
-          ) {
-            const { revalidatePage } = await import("./cache-revalidate.js");
-            await revalidatePage("/" + cleanRouteKey, { onlyRefreshSlots: true });
-          }
           const segments = cleanRouteKey.split("/").filter(Boolean);
           const candidateLayoutKeys = [""];
           let acc = "";
@@ -1369,20 +1411,36 @@ async function getSlotJSX(slotId, options = {}) {
           for (const lKey of candidateLayoutKeys) {
             const lMetaKey = lKey ? `${lKey}/layout.metadata.json` : "layout.metadata.json";
             const lMeta = await readMetaFromStorageOrAssets(storage, lMetaKey);
-            if (
-              lMeta &&
-              Array.isArray(lMeta.slotTags) &&
-              lMeta.slotTags.some((t) => slotTagsToMatch.has(t))
-            ) {
+            const lTags = Array.from(
+              new Set([
+                ...(Array.isArray(lMeta?.slotTags) ? lMeta.slotTags : []),
+                ...(Array.isArray(lMeta?.ownSlotTags) ? lMeta.ownSlotTags : []),
+              ])
+            );
+            if (lTags.some((t) => slotTagsToMatch.has(t))) {
               const { revalidateLayout } = await import("./cache-revalidate.js");
               await revalidateLayout(lKey ? "/" + lKey : "/", { onlyRefreshSlots: true });
             }
+          }
+          const metaKey = cleanRouteKey ? `${cleanRouteKey}/metadata.json` : "metadata.json";
+          const pageMeta = await readMetaFromStorageOrAssets(storage, metaKey);
+          if (
+            pageMeta &&
+            Array.isArray(pageMeta.slotTags) &&
+            pageMeta.slotTags.some((t) => slotTagsToMatch.has(t))
+          ) {
+            const { revalidatePage } = await import("./cache-revalidate.js");
+            await revalidatePage("/" + cleanRouteKey, { onlyRefreshSlots: true });
           }
         } catch (e) {}
       }
 
       return await refreshNestedSlotsInTree(restored, targetId, options);
     } catch (e) {
+      try {
+        const failedSet = (globalThis[Symbol.for("dinou.slot.failed.renders")] ||= new Set());
+        failedSet.add(targetId);
+      } catch (err) {}
       console.error(`[getSlotJSX] Failed to regenerate slot "${targetId}":`, e);
     }
   }
@@ -1398,11 +1456,13 @@ async function getSlotJSX(slotId, options = {}) {
   return null;
 }
 
-async function hasExpiredSlots(slotTags) {
-  if (!Array.isArray(slotTags) || slotTags.length === 0) return false;
+async function inspectSlotsFreshness(slotTags, hostGeneratedAt = 0) {
+  const result = { hasExpired: false, hasNewer: false };
+  if (!Array.isArray(slotTags) || slotTags.length === 0) return result;
   const storage = getStorageAdapter();
-  if (!storage) return false;
+  if (!storage) return result;
   const now = Date.now();
+  const hostGen = Number(hostGeneratedAt || 0);
   const checkedIds = new Set();
   for (const rawTagOrId of slotTags) {
     if (!rawTagOrId) continue;
@@ -1413,6 +1473,10 @@ async function hasExpiredSlots(slotTags) {
     const cached = await getSlotFromStorage(storage, storageKey, [targetId]);
     if (!cached || !cached.content) continue;
     const meta = cached.metadata || {};
+    const slotGen = Number(meta.generatedAt || 0);
+    if (hostGen > 0 && slotGen > hostGen) {
+      result.hasNewer = true;
+    }
     const regEntry = slotRegistry.get(targetId);
     const revalidateSeconds =
       typeof regEntry?.revalidate === "number"
@@ -1423,12 +1487,17 @@ async function hasExpiredSlots(slotTags) {
     if (
       typeof revalidateSeconds === "number" &&
       revalidateSeconds >= 1 &&
-      now > (meta.generatedAt || 0) + revalidateSeconds * 1000
+      now > slotGen + revalidateSeconds * 1000
     ) {
-      return true;
+      result.hasExpired = true;
     }
   }
-  return false;
+  return result;
+}
+
+async function hasExpiredSlots(slotTags) {
+  const { hasExpired } = await inspectSlotsFreshness(slotTags, 0);
+  return hasExpired;
 }
 
 export {
@@ -1438,6 +1507,7 @@ export {
   deserializeJSX,
   refreshNestedSlotsInTree,
   hasExpiredSlots,
+  inspectSlotsFreshness,
 };
 export default {
   DinouCacheSlot,
@@ -1446,4 +1516,5 @@ export default {
   deserializeJSX,
   refreshNestedSlotsInTree,
   hasExpiredSlots,
+  inspectSlotsFreshness,
 };

@@ -163,11 +163,39 @@ function replaceHolesWithMap(node, liveHolesMap) {
   return changed ? clone : node;
 }
 
-async function PprDynamicHoleBoundary({ holeId, children }) {
-  return await runInRuntimeDynamicHole(
-    () => asyncRenderJSXToClientJSX(children),
-    holeId
+function createPprHoleErrorElement(holeErr, isDevelopment = false) {
+  const rawErrMsg = isDevelopment
+    ? holeErr?.message || "Unknown dynamic error"
+    : "Error loading dynamic content";
+  return React.createElement(
+    "div",
+    {
+      style: {
+        color: "#e11d48",
+        padding: "8px 12px",
+        background: "#fff1f2",
+        border: "1px solid #fecdd3",
+        borderRadius: "6px",
+        fontSize: "0.875rem",
+        fontFamily: "system-ui,sans-serif",
+      },
+    },
+    `[PPR Error: ${rawErrMsg}]`
   );
+}
+
+async function PprDynamicHoleBoundary({ holeId, children }) {
+  try {
+    return await runInRuntimeDynamicHole(
+      () => asyncRenderJSXToClientJSX(children),
+      holeId
+    );
+  } catch (holeErr) {
+    console.error(`[Dinou PPR] Error resolving dynamic hole ${holeId}:`, holeErr);
+    const isDev =
+      process.env.DINOU_DEV === "true" || process.env.NODE_ENV !== "production";
+    return createPprHoleErrorElement(holeErr, isDev);
+  }
 }
 
 function escapeHtml(str) {
@@ -616,13 +644,39 @@ async function streamDynamicHoles(
             const chunk = `\n<template id="ppr-content-${currentHoleId}"><!--$-->${html}<!--/$--></template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${currentBoundaryIndex}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){if(c.content){t.replaceWith(c.content);}else{t.replaceWith.apply(t,Array.from(c.childNodes));}}}finally{c.remove();}})();</script>\n`;
             await writer.write(encoder.encode(chunk));
           } catch (holeErr) {
-            if (resolvedHolesOut) resolvedHolesOut._hadError = true;
             console.error(`[Dinou PPR] Error resolving dynamic hole ${currentHoleId}:`, holeErr);
-            const rawErrMsg = isDevelopment
-              ? (holeErr?.message || "Unknown dynamic error")
-              : "Error loading dynamic content";
-            const errMsg = escapeHtml(rawErrMsg);
-            const errChunk = `\n<template id="ppr-content-${currentHoleId}"><div style="color:#e11d48;padding:8px 12px;background:#fff1f2;border:1px solid #fecdd3;border-radius:6px;font-size:0.875rem;font-family:system-ui,sans-serif;">[PPR Error: ${errMsg}]</div></template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${currentBoundaryIndex}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){if(c.content){t.replaceWith(c.content);}else{t.replaceWith.apply(t,Array.from(c.childNodes));}}}finally{c.remove();}})();</script>\n`;
+            const errElement = createPprHoleErrorElement(holeErr, isDevelopment);
+            if (resolvedHolesOut && typeof resolvedHolesOut.set === "function") {
+              resolvedHolesOut.set(
+                currentHoleId,
+                React.createElement(React.Suspense, {
+                  ...suspenseProps,
+                  ...(suspenseKey != null ? { key: suspenseKey } : {}),
+                  children: errElement,
+                })
+              );
+            }
+            let errHtml = "";
+            if (platformContext && platformContext.renderHtmlStream) {
+              try {
+                const errRscStream = renderRSCStream(errElement, clientManifest, {
+                  runtime: "edge",
+                });
+                const errHtmlStream = await platformContext.renderHtmlStream(errRscStream, {
+                  bootstrapModules: [],
+                  importMapHtml: "",
+                });
+                errHtml = await new Response(errHtmlStream).text();
+              } catch (_) {}
+            }
+            if (!errHtml) {
+              const rawErrMsg = isDevelopment
+                ? holeErr?.message || "Unknown dynamic error"
+                : "Error loading dynamic content";
+              const errMsg = escapeHtml(rawErrMsg);
+              errHtml = `<div style="color:#e11d48;padding:8px 12px;background:#fff1f2;border:1px solid #fecdd3;border-radius:6px;font-size:0.875rem;font-family:system-ui,sans-serif">[PPR Error: ${errMsg}]</div>`;
+            }
+            const errChunk = `\n<template id="ppr-content-${currentHoleId}"><!--$-->${errHtml}<!--/$--></template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${currentBoundaryIndex}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){if(c.content){t.replaceWith(c.content);}else{t.replaceWith.apply(t,Array.from(c.childNodes));}}}finally{c.remove();}})();</script>\n`;
             await writer.write(encoder.encode(errChunk));
           }
         })(), currentHoleId);
@@ -677,6 +731,8 @@ async function handlePprResume({
   getDiscoveredLayouts,
   createRequestContext,
   copyCustomContextProperties,
+  preloadedPageShellJson,
+  preloadedLayoutShellJson,
 }) {
   let shellHtml = cachedItem.content;
   if (typeof shellHtml === "string") {
@@ -754,9 +810,13 @@ async function handlePprResume({
         ? `http://${simReq.headers?.host || "localhost:3000"}${simReq.url}`
         : null;
       const [pageShellJson, layoutShellJson] = await Promise.all([
-        readShellJsonFromStorage(storage, shellPageKey, platformContext, reqOriginUrl),
+        preloadedPageShellJson !== undefined
+          ? Promise.resolve(preloadedPageShellJson)
+          : readShellJsonFromStorage(storage, shellPageKey, platformContext, reqOriginUrl),
         hasActiveLayout
-          ? readShellJsonFromStorage(storage, shellLayoutKey, platformContext, reqOriginUrl)
+          ? preloadedLayoutShellJson !== undefined
+            ? Promise.resolve(preloadedLayoutShellJson)
+            : readShellJsonFromStorage(storage, shellLayoutKey, platformContext, reqOriginUrl)
           : Promise.resolve(null),
       ]);
 
@@ -817,8 +877,14 @@ async function handlePprResume({
           );
         }
 
+        if (context._hasRedirected && context._redirectLocation) {
+          const safeTarget = safeJsonForInlineScript(context._redirectLocation);
+          const redirectScript = `\n<script>(function(){try{window.__DINOU_STATIC_EXPORT_UNLOADING__=true;window.location.replace(${safeTarget});}catch(_){window.__DINOU_STATIC_EXPORT_UNLOADING__=true;window.location.href=${safeTarget};}})();</script>\n`;
+          await writer.write(encoder.encode(redirectScript));
+          return;
+        }
+
         if (
-          !resolvedHolesMap._hadError &&
           pageShellJson &&
           (!hasActiveLayout || layoutShellJson)
         ) {
@@ -916,9 +982,11 @@ export {
   streamDynamicHoles,
   handlePprResume,
   spliceDynamicHolesIntoShell,
+  readShellJsonFromStorage,
 };
 export default {
   streamDynamicHoles,
   handlePprResume,
   spliceDynamicHolesIntoShell,
+  readShellJsonFromStorage,
 };

@@ -1,6 +1,6 @@
 {
   "name": "dinou",
-  "version": "10.0.2",
+  "version": "10.0.3",
   "description": "Full-stack React 19 framework with native RSC, Server Functions, progressive streaming, and zero vendor lock-in.",
   "type": "module",
   "main": "./dinou/index.js",
@@ -104,7 +104,7 @@
     "ws": "8.22.0"
   },
   "peerDependencies": {
-    "react": ">=19.3.1",
-    "react-dom": ">=19.3.1"
+    "react": "~19.3.1",
+    "react-dom": "~19.3.1"
   }
 }

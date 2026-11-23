@@ -109,6 +109,7 @@ async function generateStatic() {
               status: 200,
               generatedAt: ssgLayoutGen,
               layoutGeneratedAt: ssgLayoutGen,
+              ownGeneratedAt: ssgLayoutGen,
               revalidate: undefined,
               tags: [],
             };
@@ -132,6 +133,13 @@ async function generateStatic() {
                   layoutMeta.slotTags = parsedSlotTags;
                 }
               }
+              const ownSlotTagsHeader = layoutRes.headers.get("x-dinou-own-slot-tags");
+              if (ownSlotTagsHeader) {
+                const parsedOwnSlotTags = JSON.parse(ownSlotTagsHeader);
+                if (Array.isArray(parsedOwnSlotTags)) {
+                  layoutMeta.ownSlotTags = parsedOwnSlotTags;
+                }
+              }
               const holesHeader = layoutRes.headers.get("x-dinou-ppr-holes");
               if (holesHeader) {
                 const parsedHoles = JSON.parse(holesHeader);
@@ -139,21 +147,49 @@ async function generateStatic() {
                   layoutMeta.holes = parsedHoles;
                 }
               }
+              const ownHolesHeader = layoutRes.headers.get("x-dinou-own-ppr-holes");
+              if (ownHolesHeader) {
+                const parsedOwnHoles = JSON.parse(ownHolesHeader);
+                if (Array.isArray(parsedOwnHoles)) {
+                  layoutMeta.ownHoles = parsedOwnHoles;
+                }
+              }
               const suspenseCountHeader = layoutRes.headers.get("x-dinou-suspense-count");
               if (suspenseCountHeader !== null) {
                 layoutMeta.suspenseCount = Number(suspenseCountHeader) || 0;
               }
+              const ownSuspenseCountHeader = layoutRes.headers.get("x-dinou-own-suspense-count");
+              if (ownSuspenseCountHeader !== null) {
+                layoutMeta.ownSuspenseCount = Number(ownSuspenseCountHeader) || 0;
+              }
+              const ownPprHeader = layoutRes.headers.get("x-dinou-own-ppr");
+              if (ownPprHeader !== null) {
+                layoutMeta.ownPpr = ownPprHeader === "true";
+              }
               if (layoutRes.headers.get("x-dinou-ppr") === "true") {
                 layoutMeta.ppr = true;
               }
-              if (layoutRes.headers.get("x-dinou-dynamic") === "true") {
+              const isOwnStatic = layoutRes.headers.get("x-dinou-own-static") === "true";
+              const hasDynAncestor = layoutRes.headers.get("x-dinou-has-dynamic-ancestor") === "true";
+              if (layoutRes.headers.get("x-dinou-dynamic") === "true" && !isOwnStatic) {
                 layoutMeta.dynamic = true;
                 layoutMeta.ppr = false;
                 delete layoutMeta.holes;
+                delete layoutMeta.ownHoles;
+              } else if (hasDynAncestor && isOwnStatic) {
+                layoutMeta.hasDynamicAncestor = true;
+                delete layoutMeta.dynamic;
               }
             } catch (e) {}
 
-            await storage.set(layoutRscKey, layoutRscText, layoutMeta);
+            if (layoutMeta.hasDynamicAncestor || layoutMeta.dynamic) {
+              const layoutMetaKey = cleanLayoutPath
+                ? `${cleanLayoutPath}/layout.metadata.json`
+                : "layout.metadata.json";
+              await storage.set(layoutMetaKey, JSON.stringify(layoutMeta));
+            } else {
+              await storage.set(layoutRscKey, layoutRscText, layoutMeta);
+            }
           }
         } else if (
           !layoutRes.headers.has("x-rsc-redirect") &&
@@ -271,13 +307,90 @@ async function generateStatic() {
             !pageRes.headers.has("x-rsc-redirect") &&
             !pageRes.headers.has("location")
           ) {
+            const isPageDyn = pageRes.headers.get("x-dinou-dynamic") === "true";
             const pageRscText = await pageRes.text();
-            if (pageRscText && pageRscText.trim().length > 0) {
+            if (!isPageDyn && pageRscText && pageRscText.trim().length > 0) {
               await storage.set(pageRscKey, pageRscText);
               if (isRoutePpr) {
                 const shellRscKey = cleanPagePath ? `${cleanPagePath}/shell.rsc` : "shell.rsc";
                 await storage.set(shellRscKey, pageRscText);
               }
+              try {
+                const metaKey = cleanPagePath ? `${cleanPagePath}/metadata.json` : "metadata.json";
+                const existingMetaItem = await storage.get(metaKey);
+                let metaObj = {};
+                if (existingMetaItem?.content) {
+                  try {
+                    metaObj = JSON.parse(existingMetaItem.content);
+                  } catch (e) {}
+                }
+                const nowPageMeta = Date.now();
+                let metaChanged = !existingMetaItem;
+                if (!metaObj.generatedAt) {
+                  metaObj.generatedAt = nowPageMeta;
+                  metaChanged = true;
+                }
+                if (!metaObj.pageGeneratedAt) {
+                  metaObj.pageGeneratedAt = metaObj.generatedAt;
+                  metaChanged = true;
+                }
+                if (metaObj.status === undefined) {
+                  metaObj.status = 200;
+                  metaChanged = true;
+                }
+                if (routeMeta) {
+                  if (metaObj.ppr === undefined && typeof routeMeta.ppr === "boolean") {
+                    metaObj.ppr = routeMeta.ppr;
+                    metaChanged = true;
+                  }
+                  if (metaObj.pagePpr === undefined && typeof routeMeta.pagePpr === "boolean") {
+                    metaObj.pagePpr = routeMeta.pagePpr;
+                    metaChanged = true;
+                  }
+                  if (!Array.isArray(metaObj.tags) && Array.isArray(routeMeta.tags)) {
+                    metaObj.tags = routeMeta.tags;
+                    metaChanged = true;
+                  }
+                  if (metaObj.revalidate === undefined && routeMeta.revalidate !== undefined) {
+                    metaObj.revalidate = routeMeta.revalidate;
+                    metaChanged = true;
+                  }
+                  if (metaObj.pageRevalidate === undefined && routeMeta.pageRevalidate !== undefined) {
+                    metaObj.pageRevalidate = routeMeta.pageRevalidate;
+                    metaChanged = true;
+                  }
+                }
+                const pageSlotTagsHeader = pageRes.headers.get("x-dinou-slot-tags");
+                if (pageSlotTagsHeader) {
+                  const parsedSlots = JSON.parse(pageSlotTagsHeader);
+                  if (Array.isArray(parsedSlots) && parsedSlots.length > 0) {
+                    const merged = Array.from(
+                      new Set([
+                        ...(Array.isArray(metaObj.slotTags) ? metaObj.slotTags : []),
+                        ...parsedSlots,
+                      ])
+                    );
+                    if (
+                      !Array.isArray(metaObj.slotTags) ||
+                      merged.length !== metaObj.slotTags.length
+                    ) {
+                      metaObj.slotTags = merged;
+                      metaChanged = true;
+                    }
+                  }
+                }
+                const pageHolesHeader = pageRes.headers.get("x-dinou-ppr-holes");
+                if (pageHolesHeader && (!Array.isArray(metaObj.holes) || metaObj.holes.length === 0)) {
+                  const parsedHoles = JSON.parse(pageHolesHeader);
+                  if (Array.isArray(parsedHoles) && parsedHoles.length > 0) {
+                    metaObj.holes = parsedHoles;
+                    metaChanged = true;
+                  }
+                }
+                if (metaChanged) {
+                  await storage.set(metaKey, JSON.stringify(metaObj));
+                }
+              } catch (e) {}
             }
           } else if (
             res.status === 200 &&

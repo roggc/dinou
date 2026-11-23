@@ -338,6 +338,7 @@ const buildStaticExportRscUrl = (rawRouteOrKey, fileName) => {
 const executeRscRedirect = (redirectUrl) => {
   if (!redirectUrl || typeof window === "undefined") return;
   if (/^https?:\/\//i.test(redirectUrl) || !window.__DINOU_ROUTER_NAVIGATE__) {
+    window.__DINOU_STATIC_EXPORT_UNLOADING__ = true;
     window.location.href = redirectUrl;
     return;
   }
@@ -353,7 +354,7 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
   }
 
   const staticExport = isStaticExportMode();
-  if (staticExport && isStaticExportUnloading()) {
+  if (isStaticExportUnloading()) {
     const pendingPromise = createFromFetch(new Promise(() => {}), {
       callServer: async (id, args) => {
         const proxy = createServerFunctionProxy(id);
@@ -458,7 +459,7 @@ const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
   if (layoutCache.has(cacheKey)) {
     return layoutCache.get(cacheKey);
   }
-  if (staticExport && isStaticExportUnloading()) {
+  if (isStaticExportUnloading()) {
     const pendingPromise = createFromFetch(new Promise(() => {}), {
       callServer: async (id, args) => {
         const proxy = createServerFunctionProxy(id);
@@ -792,6 +793,7 @@ function Router() {
     const finalPath = resolveUrl(href, window.location.pathname);
 
     if (isExternalUrl(finalPath)) {
+      window.__DINOU_STATIC_EXPORT_UNLOADING__ = true;
       if (options.replace) {
         window.location.replace(finalPath);
       } else {

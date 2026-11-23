@@ -19,6 +19,7 @@ import {
   getPageRootPpr,
   isLayoutRootElement,
   getLayoutRootPpr,
+  getLayoutRootScope,
   runWithSegmentPpr,
   isLayoutChildrenPlaceholder,
   runInPageSegment,
@@ -88,7 +89,10 @@ function useServerId() {
   const layoutStore = getActiveLayoutSegmentStore();
   if (layoutStore && layoutStore.active) {
     layoutStore.idCount = (layoutStore.idCount || 0) + 1;
-    return `_layout_dS_${layoutStore.idCount.toString(32)}_`;
+    const prefix = layoutStore.scopePrefix
+      ? `_layout_${layoutStore.scopePrefix}_dS_`
+      : "_layout_dS_";
+    return `${prefix}${layoutStore.idCount.toString(32)}_`;
   }
   const reqCtx = getContext();
   if (reqCtx) {
@@ -625,6 +629,12 @@ async function asyncRenderJSXToClientJSX(
   }
   if (isLayoutRootElement(jsx)) {
     const layoutPpr = getLayoutRootPpr(jsx);
+    const layoutScope = getLayoutRootScope(jsx);
+    const prevStore = getActiveLayoutSegmentStore();
+    const layoutStore =
+      layoutScope && (!prevStore || prevStore.scopePrefix !== layoutScope)
+        ? { active: true, idCount: 0, holeCount: 0, scopePrefix: layoutScope }
+        : null;
     return await runWithSegmentPpr(layoutPpr, () =>
       runInLayoutSegment(async () => {
         return await asyncRenderJSXToClientJSXInner(
@@ -632,7 +642,7 @@ async function asyncRenderJSXToClientJSX(
           key,
           insideClientProps
         );
-      })
+      }, layoutStore)
     );
   }
   return await asyncRenderJSXToClientJSXInner(jsx, key, insideClientProps);

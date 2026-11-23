@@ -3,17 +3,18 @@
 import ensureVendorMode, {
   isUnvendorizedRequested,
 } from "./core/ensure-vendor-mode.js";
-if (!ensureVendorMode()) {
-  await new Promise(() => { });
-}
-
-import { program } from "#commander";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEnvFiles } from "./core/env.js";
+
+if (!ensureVendorMode()) {
+  await new Promise(() => {});
+}
+
+const { program } = await import("#commander");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dinouPath = __dirname;
@@ -38,7 +39,7 @@ program
   .description(
     "Full-stack React 19 framework with native RSC, progressive streaming, and dual-mode vendoring"
   )
-  .version("10.0.2")
+  .version("10.0.3")
   .option(
     "-u, --unvendorized",
     "Run with standard node_modules dependencies instead of pre-bundled vendor packages"

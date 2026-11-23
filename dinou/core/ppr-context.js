@@ -198,10 +198,11 @@ export function getPageRootPpr(el) {
   return null;
 }
 
-export function markLayoutRootElement(el, segmentPpr = null) {
+export function markLayoutRootElement(el, segmentPpr = null, scopePrefix = null) {
   if (el && typeof el === "object") {
     layoutRootElements.set(el, {
       isPpr: typeof segmentPpr === "boolean" ? segmentPpr : null,
+      scopePrefix: typeof scopePrefix === "string" && scopePrefix ? scopePrefix : null,
     });
   }
   return el;
@@ -214,6 +215,13 @@ export function isLayoutRootElement(el) {
 export function getLayoutRootPpr(el) {
   if (el && typeof el === "object" && layoutRootElements.has(el)) {
     return layoutRootElements.get(el)?.isPpr ?? null;
+  }
+  return null;
+}
+
+export function getLayoutRootScope(el) {
+  if (el && typeof el === "object" && layoutRootElements.has(el)) {
+    return layoutRootElements.get(el)?.scopePrefix ?? null;
   }
   return null;
 }
@@ -581,6 +589,7 @@ export default {
   markLayoutRootElement,
   isLayoutRootElement,
   getLayoutRootPpr,
+  getLayoutRootScope,
   runWithSegmentPpr,
   createLayoutChildrenPlaceholder,
   isLayoutChildrenPlaceholder,
