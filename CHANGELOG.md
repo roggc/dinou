@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [10.0.3] - 2026-11-23
 
+### Changed
+- **Scoped `react` and `react-dom` `peerDependencies` to `~19.3.1`** (`package.json`, `dinou/package.json`): Tightened the `peerDependencies` range from `>=19.3.1` to `~19.3.1` (`>=19.3.1 <19.4.0`), continuing to allow compatible `19.3.x` bugfix and security patch updates while protecting against untested React minor/major jumps that may diverge from Dinou's pinned `react-server-dom-webpack@19.3.1` and `@roggc/react-server-dom-esm@19.3.1` bindings.
+
 ### Fixed
 
 #### PPR & Causal Snapshot Consistency
