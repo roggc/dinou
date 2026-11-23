@@ -60,6 +60,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Unified per-level scoped layout `useId()` generation between SSR HTML and `layout.rsc`** (`dinou/core/ppr-context.js`, `dinou/core/render-jsx-to-client-jsx.js`, `dinou/core/get-jsx.js`, `dinou/core/layout-composition.js`): Scoped layout `useId()` IDs per layout level (`_layout_<scope>_dS_<n>_`) to prevent collisions across independently rendered layout levels, and propagated `scopePrefix` via `markLayoutRootElement` / `getLayoutRootScope` during full `getJSX` renders so SSR HTML and independently compiled `layout.rsc` payloads always emit identical IDs with zero hydration mismatches.
 - **Made `RouterContext` a `globalThis` singleton in client bundles** (`dinou/core/navigation.js`): Stored `RouterContext` on `globalThis.__DINOU_ROUTER_CONTEXT__` (matching `DinouPageContext`), resolving `"warning: navigate called outside Router"` where `"use client"` components importing `{ Link, useRouter } from "dinou"` in ejected or workspace-linked monorepo setups received a separate `RouterContext` instance from the runtime shell.
 
+#### CLI & Dual-Mode Vendoring
+- **Deferred `#commander` resolution until after `ensureVendorMode()` in CLI entry** (`dinou/cli.js`): Replaced the static `import { program } from "#commander"` (which ES module hoisting previously evaluated before `ensureVendorMode()` ran) with a dynamic `await import("#commander")` after the `ensureVendorMode()` guard, preventing `-u` / `--unvendorized` invocations from pre-loading `dinou/compiled/commander/index.js` or failing with `ERR_MODULE_NOT_FOUND` when `dinou/compiled/` is absent.
+
 ## [10.0.2] - 2026-11-21
 
 ### Fixed
