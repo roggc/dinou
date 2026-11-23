@@ -80,12 +80,21 @@ async function getJSX(
   let jsx;
   let pageFunctionsProps;
 
-  const { layoutPprMap, defaultPpr } = await resolveLayoutChainPpr(
+  const { activeChain, layoutPprMap, defaultPpr } = await resolveLayoutChainPpr(
     reqSegments,
     query || {},
     srcFolder,
     { ignoreNoLayout: options?.segment === "layout" },
   );
+  const layoutScopeMap = new Map();
+  if (Array.isArray(activeChain)) {
+    for (const entry of activeChain) {
+      const scope = String(entry.cleanLayoutKey || "root").replace(/[^a-zA-Z0-9_-]/g, "_");
+      layoutScopeMap.set(entry.layoutPath, scope);
+      layoutScopeMap.set(path.normalize(entry.layoutPath), scope);
+      layoutScopeMap.set(entry.layoutPath.replace(/\\/g, "/"), scope);
+    }
+  }
 
   // 1. Segmented handling for Layout: If only the layout is requested
   if (options && options.segment === "layout") {
@@ -339,7 +348,6 @@ async function getJSX(
 
   if (layouts && Array.isArray(layouts)) {
     let index = 0;
-    const layoutSegmentStore = { active: true, idCount: 0, holeCount: 0 };
     let layoutOnlyJsx = !options?.segment && layouts.length > 0 ? createDinouPageSlotElement() : null;
     let layoutRenderFailed = false;
     for (const [layoutPath, dParams, slots] of layouts.reverse()) {
@@ -355,6 +363,16 @@ async function getJSX(
       const layoutEffectivePpr = layoutPprMap.has(normLayoutPath)
         ? Boolean(layoutPprMap.get(normLayoutPath))
         : Boolean(defaultPpr);
+      const layoutScope =
+        layoutScopeMap.get(normLayoutPath) ||
+        layoutScopeMap.get(layoutPath) ||
+        "root";
+      const layoutSegmentStore = {
+        active: true,
+        idCount: 0,
+        holeCount: 0,
+        scopePrefix: layoutScope,
+      };
 
       if (getContext()?._isPprRuntimeResume && !layoutEffectivePpr) {
         if (resetLayoutPath) {
@@ -389,6 +407,7 @@ async function getJSX(
           elementToRender = markLayoutRootElement(
             elementToRender,
             layoutEffectivePpr,
+            layoutScope,
           );
           const resolvedSlot = options?.skipLayoutProbe ? elementToRender : await runInLayoutSegment(
             () => asyncRenderJSXToClientJSX(elementToRender),
@@ -460,6 +479,7 @@ async function getJSX(
         jsx = markLayoutRootElement(
           React.createElement(Layout, props, jsx),
           layoutEffectivePpr,
+          layoutScope,
         );
         layoutOnlyJsx = null;
       } else if (isPprBuildActive() || Boolean(getPprStore())) {
@@ -467,14 +487,16 @@ async function getJSX(
           const testElement = markLayoutRootElement(
             React.createElement(Layout, props, null),
             layoutEffectivePpr,
+            layoutScope,
           );
-          await runInLayoutSegment(() => asyncRenderJSXToClientJSX(testElement));
+          await runInLayoutSegment(() => asyncRenderJSXToClientJSX(testElement), layoutSegmentStore);
           if (getContext()?._hasRedirected) {
             return null;
           }
           jsx = markLayoutRootElement(
             React.createElement(Layout, props, jsx),
             layoutEffectivePpr,
+            layoutScope,
           );
           layoutOnlyJsx = null;
         } catch (layoutErr) {
@@ -505,6 +527,7 @@ async function getJSX(
           const testElement = markLayoutRootElement(
             React.createElement(Layout, props, placeholder),
             layoutEffectivePpr,
+            layoutScope,
           );
           const resolvedLayout = await runInLayoutSegment(
             () => asyncRenderJSXToClientJSX(testElement),
@@ -568,5 +591,5 @@ async function getJSX(
   return jsx;
 }
 
-export { getJSX };
+export { getJSX, createDinouPageSlotElement };
 export default getJSX;

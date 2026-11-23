@@ -20,14 +20,25 @@ const useSyncExternalStore =
   React.useSyncExternalStore || ((_sub, getSnap) => getSnap());
 const emptySubscribe = () => () => {};
 
-// 🔄 CHANGE: Now default value is a compatible object
-export const RouterContext = createContext({
-  url: "",
-  navigate: (url) => {
-    console.warn("navigate called outside Router");
-  },
-  isPending: false, // Default value
-});
+// 🔄 CHANGE: Share RouterContext via globalThis singleton so client chunks
+// importing from "dinou" and internal core/client.jsx always share the same context
+// even in symlinked/ejected monorepo setups.
+export const RouterContext =
+  typeof globalThis !== "undefined" && globalThis.__DINOU_ROUTER_CONTEXT__
+    ? globalThis.__DINOU_ROUTER_CONTEXT__
+    : (() => {
+        const ctx = createContext({
+          url: "",
+          navigate: (url) => {
+            console.warn("navigate called outside Router");
+          },
+          isPending: false, // Default value
+        });
+        if (typeof globalThis !== "undefined") {
+          globalThis.__DINOU_ROUTER_CONTEXT__ = ctx;
+        }
+        return ctx;
+      })();
 
 // Cleanup function (We keep the trailing slash logic)
 function normalizePath(path) {
