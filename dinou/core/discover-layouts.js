@@ -111,20 +111,30 @@ export function discoverLayoutsFromFileRelPaths(rawPaths) {
       let curr = pageDir;
       while (true) {
         if (layoutDirs.has(curr)) {
-          const cleanLayoutSegs = stripGroups(curr);
-          const hasCatchAll = cleanLayoutSegs.some(
+          const currSegs = curr ? curr.split("/").filter(Boolean) : [];
+          const needsTemplateSpec = currSegs.some(
             (s) =>
-              (s.startsWith("[...") && s.endsWith("]")) ||
-              (s.startsWith("[[...") && s.endsWith("]]"))
+              (s.startsWith("(") && s.endsWith(")")) ||
+              (s.startsWith("[[") && s.endsWith("]]"))
           );
-          if (hasCatchAll) {
-            const trailing = Math.max(
-              0,
-              cleanPageSegs.length - cleanLayoutSegs.length
-            );
-            spec = `*-${trailing}`;
+          if (needsTemplateSpec) {
+            spec = `~${curr}`;
           } else {
-            spec = String(cleanLayoutSegs.length);
+            const cleanLayoutSegs = stripGroups(curr);
+            const hasCatchAll = cleanLayoutSegs.some(
+              (s) =>
+                (s.startsWith("[...") && s.endsWith("]")) ||
+                (s.startsWith("[[...") && s.endsWith("]]"))
+            );
+            if (hasCatchAll) {
+              const trailing = Math.max(
+                0,
+                cleanPageSegs.length - cleanLayoutSegs.length
+              );
+              spec = `*-${trailing}`;
+            } else {
+              spec = String(cleanLayoutSegs.length);
+            }
           }
           break;
         }

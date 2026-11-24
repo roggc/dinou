@@ -451,10 +451,27 @@ async function streamDynamicHoles(
   platformContext,
   isDevelopment = false,
   staticParentHoles = null,
-  resolvedHolesOut = null
+  resolvedHolesOut = null,
+  streamCtrl = null
 ) {
   let holeIndex = 0;
   const holePromises = [];
+
+  const isAborted =
+    streamCtrl && typeof streamCtrl.isAborted === "function"
+      ? streamCtrl.isAborted
+      : () => false;
+  const safeWrite =
+    streamCtrl && typeof streamCtrl.safeWrite === "function"
+      ? streamCtrl.safeWrite
+      : async (chunkStr) => {
+          try {
+            await writer.write(encoder.encode(chunkStr));
+            return true;
+          } catch (_) {
+            return false;
+          }
+        };
 
   const hasExplicitHoles = Array.isArray(expectedHoles);
   const knownHoleIds = new Set(
@@ -617,9 +634,12 @@ async function streamDynamicHoles(
         const suspenseProps = current.props || {};
         const suspenseKey = current.key;
         const promise = runInRuntimeDynamicHole(() => (async () => {
+          if (isAborted()) return;
+          let chunkToWrite = null;
           try {
             let html = "";
             const resolvedChildren = await asyncRenderJSXToClientJSX(children);
+            if (isAborted()) return;
             if (resolvedHolesOut && typeof resolvedHolesOut.set === "function") {
               resolvedHolesOut.set(
                 currentHoleId,
@@ -638,12 +658,13 @@ async function streamDynamicHoles(
               const htmlStream = await platformContext.renderHtmlStream(rscStream, {
                 bootstrapModules: [], importMapHtml: "",
               });
+              if (isAborted()) return;
               html = await new Response(htmlStream).text();
             }
-
-            const chunk = `\n<template id="ppr-content-${currentHoleId}"><!--$-->${html}<!--/$--></template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${currentBoundaryIndex}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){if(c.content){t.replaceWith(c.content);}else{t.replaceWith.apply(t,Array.from(c.childNodes));}}}finally{c.remove();}})();</script>\n`;
-            await writer.write(encoder.encode(chunk));
+            if (isAborted()) return;
+            chunkToWrite = `\n<template id="ppr-content-${currentHoleId}"><!--$-->${html}<!--/$--></template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${currentBoundaryIndex}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){if(c.content){t.replaceWith(c.content);}else{t.replaceWith.apply(t,Array.from(c.childNodes));}}}finally{c.remove();}})();</script>\n`;
           } catch (holeErr) {
+            if (isAborted()) return;
             console.error(`[Dinou PPR] Error resolving dynamic hole ${currentHoleId}:`, holeErr);
             const errElement = createPprHoleErrorElement(holeErr, isDevelopment);
             if (resolvedHolesOut && typeof resolvedHolesOut.set === "function") {
@@ -657,7 +678,7 @@ async function streamDynamicHoles(
               );
             }
             let errHtml = "";
-            if (platformContext && platformContext.renderHtmlStream) {
+            if (platformContext && platformContext.renderHtmlStream && !isAborted()) {
               try {
                 const errRscStream = renderRSCStream(errElement, clientManifest, {
                   runtime: "edge",
@@ -676,8 +697,10 @@ async function streamDynamicHoles(
               const errMsg = escapeHtml(rawErrMsg);
               errHtml = `<div style="color:#e11d48;padding:8px 12px;background:#fff1f2;border:1px solid #fecdd3;border-radius:6px;font-size:0.875rem;font-family:system-ui,sans-serif">[PPR Error: ${errMsg}]</div>`;
             }
-            const errChunk = `\n<template id="ppr-content-${currentHoleId}"><!--$-->${errHtml}<!--/$--></template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${currentBoundaryIndex}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){if(c.content){t.replaceWith(c.content);}else{t.replaceWith.apply(t,Array.from(c.childNodes));}}}finally{c.remove();}})();</script>\n`;
-            await writer.write(encoder.encode(errChunk));
+            chunkToWrite = `\n<template id="ppr-content-${currentHoleId}"><!--$-->${errHtml}<!--/$--></template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${currentBoundaryIndex}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){if(c.content){t.replaceWith(c.content);}else{t.replaceWith.apply(t,Array.from(c.childNodes));}}}finally{c.remove();}})();</script>\n`;
+          }
+          if (chunkToWrite && !isAborted()) {
+            await safeWrite(chunkToWrite);
           }
         })(), currentHoleId);
         holePromises.push(promise);
@@ -711,7 +734,7 @@ async function streamDynamicHoles(
   }
 
   await traverse(node);
-  await Promise.all(holePromises);
+  await Promise.allSettled(holePromises);
 }
 
 /**
@@ -783,6 +806,22 @@ async function handlePprResume({
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
+  const abortState = { aborted: false };
+  writer.closed.catch(() => {
+    abortState.aborted = true;
+  });
+  const isAborted = () => abortState.aborted;
+  const safeWrite = async (str) => {
+    if (abortState.aborted) return false;
+    try {
+      await writer.write(encoder.encode(str));
+      return true;
+    } catch (_) {
+      abortState.aborted = true;
+      return false;
+    }
+  };
+  const streamCtrl = { isAborted, safeWrite };
 
   // Stream dynamic holes in parallel with the prelude
   const resumePromise = (async () => {
@@ -791,7 +830,7 @@ async function handlePprResume({
       if (bridge) {
         bridge.headersSent = true;
       }
-      await writer.write(encoder.encode(shellPrelude));
+      if (!(await safeWrite(shellPrelude))) return;
 
       const storage = getStorageAdapter();
       const cleanRel = (reqPath || "").replace(/^\/+/, "").replace(/\/+$/, "");
@@ -876,23 +915,30 @@ async function handlePprResume({
             platformContext,
             isDevelopment,
             staticParentHoles,
-            resolvedHolesMap
+            resolvedHolesMap,
+            streamCtrl
           );
         }
 
+        if (isAborted()) {
+          return;
+        }
+
         if (bridge && bridge._injectedScripts) {
-          await writer.write(encoder.encode(`\n${bridge._injectedScripts}\n`));
+          const ok = await safeWrite(`\n${bridge._injectedScripts}\n`);
           bridge._injectedScripts = "";
+          if (!ok) return;
         }
 
         if (context._hasRedirected && context._redirectLocation) {
           const safeTarget = safeJsonForInlineScript(context._redirectLocation);
           const redirectScript = `\n<script>(function(){try{window.__DINOU_STATIC_EXPORT_UNLOADING__=true;window.location.replace(${safeTarget});}catch(_){window.__DINOU_STATIC_EXPORT_UNLOADING__=true;window.location.href=${safeTarget};}})();</script>\n`;
-          await writer.write(encoder.encode(redirectScript));
+          await safeWrite(redirectScript);
           return;
         }
 
         if (
+          !isAborted() &&
           pageShellJson &&
           (!hasActiveLayout || layoutShellJson)
         ) {
@@ -921,7 +967,7 @@ async function handlePprResume({
               layoutRscPromise,
               new Response(pageRscStream).text(),
             ]);
-            if (pageRscText && (!hasActiveLayout || layoutRscText)) {
+            if (!isAborted() && pageRscText && (!hasActiveLayout || layoutRscText)) {
               let rscScripts =
                 "\n<script>window.__DINOU_INLINE_RSC__=true;window.__DINOU_RSC_P__=window.__DINOU_RSC_P__||[];window.__DINOU_RSC_L__=window.__DINOU_RSC_L__||[];</script>";
               if (hasActiveLayout && layoutRscText) {
@@ -930,21 +976,28 @@ async function handlePprResume({
               }
               rscScripts +=
                 formatRscPushScript("P", pageRscText) + formatRscDoneScript("P") + "\n";
-              await writer.write(encoder.encode(rscScripts));
+              await safeWrite(rscScripts);
             }
           } catch (inlineRscErr) {
-            if (process.env.DINOU_DEBUG) {
+            if (!isAborted() && process.env.DINOU_DEBUG) {
               console.warn("[Dinou PPR] Inline RSC emission error:", inlineRscErr);
             }
           }
         }
       });
     } catch (streamErr) {
-      console.error("[Dinou PPR] Runtime streaming resume error:", streamErr);
+      if (!abortState.aborted) {
+        console.error("[Dinou PPR] Runtime streaming resume error:", streamErr);
+      }
     } finally {
+      if (!abortState.aborted) {
+        await safeWrite(shellPostlude);
+        try {
+          await writer.close();
+        } catch (_) {}
+      }
       try {
-        await writer.write(encoder.encode(shellPostlude));
-        await writer.close();
+        writer.releaseLock();
       } catch (_) {}
     }
   })();

@@ -81,36 +81,49 @@ const isRouterSyntaxSeg = (rawSeg) => {
   );
 };
 
-const matchRoutePattern = (pSegs, uSegs, pIdx = 0, uIdx = 0) => {
+const matchRoutePattern = (pSegs, uSegs, pIdx = 0, uIdx = 0, captures = null) => {
   if (pIdx === pSegs.length) return uIdx === uSegs.length;
   const p = pSegs[pIdx];
   if (p.startsWith("[[...") && p.endsWith("]]")) {
-    if (pIdx === pSegs.length - 1) return uIdx <= uSegs.length;
+    if (pIdx === pSegs.length - 1) {
+      if (uIdx <= uSegs.length) {
+        if (captures) captures[pIdx] = uSegs.slice(uIdx);
+        return true;
+      }
+      return false;
+    }
     for (let k = uIdx; k <= uSegs.length; k++) {
-      if (matchRoutePattern(pSegs, uSegs, pIdx + 1, k)) return true;
+      if (captures) captures[pIdx] = uSegs.slice(uIdx, k);
+      if (matchRoutePattern(pSegs, uSegs, pIdx + 1, k, captures)) return true;
     }
     return false;
   }
   if (p.startsWith("[...") && p.endsWith("]")) {
     if (uIdx >= uSegs.length) return false;
-    if (pIdx === pSegs.length - 1) return true;
+    if (pIdx === pSegs.length - 1) {
+      if (captures) captures[pIdx] = uSegs.slice(uIdx);
+      return true;
+    }
     for (let k = uIdx + 1; k <= uSegs.length; k++) {
-      if (matchRoutePattern(pSegs, uSegs, pIdx + 1, k)) return true;
+      if (captures) captures[pIdx] = uSegs.slice(uIdx, k);
+      if (matchRoutePattern(pSegs, uSegs, pIdx + 1, k, captures)) return true;
     }
     return false;
   }
   if (p.startsWith("[[") && p.endsWith("]]")) {
-    if (
-      uIdx < uSegs.length &&
-      matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx + 1)
-    ) {
-      return true;
+    if (uIdx < uSegs.length) {
+      if (captures) captures[pIdx] = [uSegs[uIdx]];
+      if (matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx + 1, captures)) {
+        return true;
+      }
     }
-    return matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx);
+    if (captures) captures[pIdx] = [];
+    return matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx, captures);
   }
   if (p.startsWith("[") && p.endsWith("]")) {
     if (uIdx >= uSegs.length) return false;
-    return matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx + 1);
+    if (captures) captures[pIdx] = [uSegs[uIdx]];
+    return matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx + 1, captures);
   }
   if (uIdx >= uSegs.length || isRouterSyntaxSeg(uSegs[uIdx])) {
     return false;
@@ -118,7 +131,8 @@ const matchRoutePattern = (pSegs, uSegs, pIdx = 0, uIdx = 0) => {
   if (uSegs[uIdx] !== p && safeDecodeSeg(uSegs[uIdx]) !== p) {
     return false;
   }
-  return matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx + 1);
+  if (captures) captures[pIdx] = [uSegs[uIdx]];
+  return matchRoutePattern(pSegs, uSegs, pIdx + 1, uIdx + 1, captures);
 };
 
 // Helper to determine active layout folder for a pathname
@@ -140,8 +154,27 @@ const getLayoutKey = (pathname) => {
     const pattern = rule.slice(1, colonIdx);
     const spec = rule.slice(colonIdx + 1);
     const pSegs = pattern ? pattern.split("/").filter(Boolean) : [];
-    if (matchRoutePattern(pSegs, segments0)) {
+    const captures = [];
+    if (matchRoutePattern(pSegs, segments0, 0, 0, captures)) {
       if (spec === "-1") return null;
+      if (spec.startsWith("~")) {
+        const tplSegs = spec.slice(1).split("/").filter(Boolean);
+        const outSegs = [];
+        let pCursor = 0;
+        for (const seg of tplSegs) {
+          if (seg.startsWith("(") && seg.endsWith(")")) {
+            outSegs.push(seg);
+          } else {
+            const matched = captures[pCursor++] || [];
+            if (matched.length > 0) {
+              for (const m of matched) outSegs.push(m);
+            } else {
+              outSegs.push(seg);
+            }
+          }
+        }
+        return outSegs.length === 0 ? "/" : "/" + outSegs.join("/");
+      }
       if (spec.startsWith("*-")) {
         const trailing = Number(spec.slice(2)) || 0;
         const take = Math.max(0, segments0.length - trailing);
@@ -290,6 +323,17 @@ const consumeInlineRscResponse = (kind) => {
 
 const isStaticExportMode = () =>
   typeof window !== "undefined" && Boolean(window.__DINOU_STATIC_EXPORT__);
+
+if (typeof window !== "undefined") {
+  const markDocumentUnloading = () => {
+    window.__DINOU_STATIC_EXPORT_UNLOADING__ = true;
+  };
+  window.addEventListener("beforeunload", markDocumentUnloading);
+  window.addEventListener("pagehide", markDocumentUnloading);
+  window.addEventListener("pageshow", () => {
+    window.__DINOU_STATIC_EXPORT_UNLOADING__ = false;
+  });
+}
 
 const isStaticExportUnloading = () =>
   typeof window !== "undefined" && Boolean(window.__DINOU_STATIC_EXPORT_UNLOADING__);
@@ -576,19 +620,30 @@ const getErrorRSCPayload = (route, error) => {
           stack: error.stack,
         },
       }),
-    }).then((res) => {
-      if (res.headers.has("x-rsc-redirect")) {
-        const redirectUrl = res.headers.get("x-rsc-redirect");
-        pageCache.delete(cacheKey);
-        if (window.__DINOU_ROUTER_NAVIGATE__) {
-          window.__DINOU_ROUTER_NAVIGATE__(redirectUrl, { replace: true });
-        } else {
-          window.location.href = redirectUrl;
+    }).then(
+      (res) => {
+        if (isStaticExportUnloading()) {
+          return new Promise(() => {});
         }
-        return new Promise(() => {});
+        if (res.headers.has("x-rsc-redirect")) {
+          const redirectUrl = res.headers.get("x-rsc-redirect");
+          pageCache.delete(cacheKey);
+          if (window.__DINOU_ROUTER_NAVIGATE__) {
+            window.__DINOU_ROUTER_NAVIGATE__(redirectUrl, { replace: true });
+          } else {
+            window.location.href = redirectUrl;
+          }
+          return new Promise(() => {});
+        }
+        return res;
+      },
+      (err) => {
+        if (isStaticExportUnloading()) {
+          return new Promise(() => {});
+        }
+        throw err;
       }
-      return res;
-    }),
+    ),
     {
       callServer: async (id, args) => {
         const proxy = createServerFunctionProxy(id);
@@ -852,12 +907,21 @@ function Router() {
   const back = () => window.history.back();
   const forward = () => window.history.forward();
   const refresh = useCallback((options = {}) => {
-    const currentPath = window.location.pathname + window.location.search;
+    if (typeof window !== "undefined" && window.__DINOU_ACTIVE_LAYOUT__) {
+      window.__DINOU_ACTIVE_LAYOUT__ = null;
+    }
+    const currentPathname = window.location.pathname;
+    const currentPath = currentPathname + window.location.search;
     pageCache.delete(currentPath);
+    for (const k of pageCache.keys()) {
+      if (k === currentPathname || k.startsWith(currentPathname + "?")) {
+        pageCache.delete(k);
+      }
+    }
 
     const shouldRefreshLayout = Boolean(options && options.layout);
     if (shouldRefreshLayout) {
-      const currentLayoutKey = getLayoutKey(window.location.pathname);
+      const currentLayoutKey = getLayoutKey(currentPathname);
       if (currentLayoutKey) {
         for (const k of layoutCache.keys()) {
           if (k === currentLayoutKey || k.startsWith(currentLayoutKey + "?")) {
@@ -884,9 +948,15 @@ function Router() {
       // 🛡️ PREFETCH PROTECTION: If it's a local hash, do nothing
       if (isHashChangeOnly(url)) return;
       const cleanUrl = String(url || "/").split("#")[0] || "/";
+      const prefetchSearchPart = cleanUrl.includes("?")
+        ? "?" + cleanUrl.split("?")[1]
+        : "";
       const lKey = getLayoutKey(cleanUrl);
-      if (lKey && !layoutCache.has(lKey)) {
-        getLayoutPayload(lKey);
+      const prefetchLayoutCacheKey = isStaticExportMode()
+        ? lKey
+        : `${lKey}${prefetchSearchPart}`;
+      if (lKey && !layoutCache.has(prefetchLayoutCacheKey)) {
+        getLayoutPayload(lKey, prefetchSearchPart);
       }
       getPagePayload(cleanUrl, true);
     };

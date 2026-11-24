@@ -93,7 +93,39 @@ async function sendWebResponseToNode(webResponse, res) {
 
   if (typeof webResponse.body.getReader === "function") {
     const nodeStream = Readable.fromWeb(webResponse.body);
+    let clientClosed = false;
+    const onResClose = () => {
+      if (!res.writableEnded) {
+        clientClosed = true;
+        if (!nodeStream.destroyed) {
+          nodeStream.destroy();
+        }
+      }
+    };
+    const cleanup = () => {
+      if (typeof res.off === "function") {
+        res.off("close", onResClose);
+      } else if (typeof res.removeListener === "function") {
+        res.removeListener("close", onResClose);
+      }
+    };
+    if (typeof res.once === "function") {
+      res.once("close", onResClose);
+    }
+    nodeStream.once("end", cleanup);
+    nodeStream.once("close", cleanup);
     nodeStream.on("error", (err) => {
+      cleanup();
+      const isBenignAbort =
+        clientClosed ||
+        res.destroyed ||
+        res.writableEnded ||
+        err?.code === "ERR_STREAM_PREMATURE_CLOSE" ||
+        err?.code === "ECONNRESET" ||
+        err?.name === "AbortError";
+      if (isBenignAbort) {
+        return;
+      }
       console.error("[http-adapter] Error in response stream:", err);
       if (!res.headersSent) {
         res.statusCode = 500;

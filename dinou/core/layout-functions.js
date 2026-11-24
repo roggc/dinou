@@ -2,7 +2,10 @@ import path from "node:path";
 import { existsSync } from "./vfs.js";
 import importModule from "./import-module.js";
 import { resolveModulePpr } from "./resolve-module-ppr.js";
-import { getFilePathAndDynamicParams } from "./get-file-path-and-dynamic-params.js";
+import {
+  getFilePathAndDynamicParams,
+  getLayoutsForLayoutKey,
+} from "./get-file-path-and-dynamic-params.js";
 import { getDinouConfig } from "./load-dinou-config.js";
 
 const LAYOUT_FUNCTIONS_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js", ".mjs"];
@@ -195,6 +198,108 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
   }
 }
 
+function safeDecodeSegment(val) {
+  try {
+    return val ? decodeURIComponent(val) : val;
+  } catch (e) {
+    return val;
+  }
+}
+
+/**
+ * Computes a collision-free canonical storage/routing key (`cleanLayoutKey` & `layoutRoutePath`)
+ * from a layout folder's relative path segments under `src/`, concrete request segments, and
+ * resolved dynamic parameters. Preserves `(group)` segments so sibling route-group layouts
+ * never overwrite each other, and preserves empty optional segment markers (`[[...slug]]` /
+ * `[[param]]`) so a 0-segment optional layout never collides with its parent directory layout.
+ */
+function computeLayoutKeyFromFolder(rawFolderSegs, reqSegments = [], dParams = {}) {
+  const decodedReqSegs = (reqSegments || []).map((s) =>
+    s === undefined || s === null ? "" : safeDecodeSegment(String(s))
+  );
+  const keySegs = [];
+  let uIdx = 0;
+
+  for (const seg of rawFolderSegs || []) {
+    if (seg.startsWith("(") && seg.endsWith(")")) {
+      if (uIdx < decodedReqSegs.length && decodedReqSegs[uIdx] === seg) {
+        uIdx += 1;
+      }
+      keySegs.push(seg);
+      continue;
+    }
+    if (seg.startsWith("[[...") && seg.endsWith("]]")) {
+      const pName = seg.slice(5, -2);
+      const val = dParams?.[pName];
+      const count = Array.isArray(val) ? val.length : val ? 1 : 0;
+      if (count > 0) {
+        for (let k = 0; k < count; k++) {
+          if (uIdx < decodedReqSegs.length) {
+            keySegs.push(decodedReqSegs[uIdx++]);
+          } else if (Array.isArray(val) && val[k] !== undefined) {
+            keySegs.push(String(val[k]));
+          } else if (!Array.isArray(val) && val !== undefined) {
+            keySegs.push(String(val));
+          }
+        }
+      } else {
+        if (uIdx < decodedReqSegs.length && decodedReqSegs[uIdx] === seg) {
+          uIdx += 1;
+        }
+        keySegs.push(seg);
+      }
+      continue;
+    }
+    if (seg.startsWith("[...") && seg.endsWith("]")) {
+      const pName = seg.slice(4, -1);
+      const val = dParams?.[pName];
+      const count = Array.isArray(val) ? val.length : val ? 1 : 0;
+      for (let k = 0; k < count; k++) {
+        if (uIdx < decodedReqSegs.length) {
+          keySegs.push(decodedReqSegs[uIdx++]);
+        } else if (Array.isArray(val) && val[k] !== undefined) {
+          keySegs.push(String(val[k]));
+        } else if (!Array.isArray(val) && val !== undefined) {
+          keySegs.push(String(val));
+        }
+      }
+      continue;
+    }
+    if (seg.startsWith("[[") && seg.endsWith("]]")) {
+      const pName = seg.slice(2, -2);
+      const val = dParams?.[pName];
+      if (val !== undefined && val !== null && val !== "") {
+        if (uIdx < decodedReqSegs.length) {
+          keySegs.push(decodedReqSegs[uIdx++]);
+        } else {
+          keySegs.push(String(val));
+        }
+      } else {
+        if (uIdx < decodedReqSegs.length && decodedReqSegs[uIdx] === seg) {
+          uIdx += 1;
+        }
+        keySegs.push(seg);
+      }
+      continue;
+    }
+    if (uIdx < decodedReqSegs.length) {
+      keySegs.push(decodedReqSegs[uIdx++]);
+    } else if (seg.startsWith("[") && seg.endsWith("]")) {
+      const pName = seg.slice(1, -1);
+      const val = dParams?.[pName];
+      if (val !== undefined && val !== null) {
+        keySegs.push(String(val));
+      }
+    } else {
+      keySegs.push(seg);
+    }
+  }
+
+  const cleanLayoutKey = keySegs.join("/");
+  const layoutRoutePath = cleanLayoutKey ? "/" + cleanLayoutKey : "/";
+  return { cleanLayoutKey, layoutRoutePath };
+}
+
 /**
  * Returns the active layout chain for a route from innermost (leaf) to outermost (root),
  * honoring `no_layout` and stopping at `reset_layout`.
@@ -212,18 +317,20 @@ function getActiveLayoutChain(
     return [];
   }
 
-  const allLayouts = getFilePathAndDynamicParams(
-    reqSegments,
-    queryObj,
-    srcFolder,
-    "layout",
-    true,
-    false,
-    undefined,
-    0,
-    {},
-    true
-  );
+  const allLayouts = options.exactLayoutKey
+    ? getLayoutsForLayoutKey(reqSegments, queryObj, srcFolder)
+    : getFilePathAndDynamicParams(
+        reqSegments,
+        queryObj,
+        srcFolder,
+        "layout",
+        true,
+        false,
+        undefined,
+        0,
+        {},
+        true
+      );
 
   if (!allLayouts || !Array.isArray(allLayouts) || allLayouts.length === 0) {
     return [];
@@ -258,24 +365,11 @@ function getActiveLayoutChain(
     }
 
     const rawFolderSegs = relFromSrc.split("/").filter(Boolean);
-    let urlSegCount = 0;
-    for (const seg of rawFolderSegs) {
-      if (seg.startsWith("(") && seg.endsWith(")")) continue;
-      if (seg.startsWith("[[...") && seg.endsWith("]]")) {
-        const pName = seg.slice(5, -2);
-        const val = dParams?.[pName];
-        urlSegCount += Array.isArray(val) ? val.length : val ? 1 : 0;
-      } else if (seg.startsWith("[...") && seg.endsWith("]")) {
-        const pName = seg.slice(4, -1);
-        const val = dParams?.[pName];
-        urlSegCount += Array.isArray(val) ? val.length : val ? 1 : 0;
-      } else {
-        urlSegCount += 1;
-      }
-    }
-
-    const cleanLayoutKey = reqSegments.slice(0, urlSegCount).join("/");
-    const layoutRoutePath = cleanLayoutKey ? "/" + cleanLayoutKey : "/";
+    const { cleanLayoutKey, layoutRoutePath } = computeLayoutKeyFromFolder(
+      rawFolderSegs,
+      reqSegments,
+      dParams
+    );
 
     activeChain.push({
       layoutPath,
@@ -336,6 +430,7 @@ export {
   getLayoutFunctionsPath,
   getLayoutProps,
   resolveLayoutFunctionsConfig,
+  computeLayoutKeyFromFolder,
   getActiveLayoutChain,
   resolveLayoutChainPpr,
 };
@@ -343,6 +438,7 @@ export default {
   getLayoutFunctionsPath,
   getLayoutProps,
   resolveLayoutFunctionsConfig,
+  computeLayoutKeyFromFolder,
   getActiveLayoutChain,
   resolveLayoutChainPpr,
 };

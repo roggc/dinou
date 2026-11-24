@@ -1002,7 +1002,43 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
 
   const revalPromise = enqueueRevalidation(async () => {
       const storage = getStorageAdapter();
-      const cleanPathKey = targetPath.replace(/^\/+/, "").replace(/\/+$/, "");
+      const rawReqSegments = targetPath.split("/").filter(Boolean).map((s) => {
+        try {
+          return decodeURIComponent(s);
+        } catch (e) {
+          return s;
+        }
+      });
+      const rawCleanPathKey = rawReqSegments.join("/");
+      const srcFolder = path.resolve(process.cwd(), "src");
+
+      let activeChainPre = [];
+      try {
+        activeChainPre = getActiveLayoutChain(rawReqSegments, {}, srcFolder, {
+          ignoreNoLayout: true,
+          exactLayoutKey: true,
+        });
+      } catch (e) {}
+
+      const stripEmptyOptional = (k) =>
+        String(k || "")
+          .split("/")
+          .filter(Boolean)
+          .filter((s) => !(s.startsWith("[[") && s.endsWith("]]")))
+          .join("/");
+
+      let cleanPathKey = rawCleanPathKey;
+      if (
+        activeChainPre.length > 0 &&
+        (activeChainPre[0].cleanLayoutKey === rawCleanPathKey ||
+          stripEmptyOptional(activeChainPre[0].cleanLayoutKey) === rawCleanPathKey)
+      ) {
+        cleanPathKey = activeChainPre[0].cleanLayoutKey || "";
+      }
+
+      const reqSegments = cleanPathKey ? cleanPathKey.split("/").filter(Boolean) : [];
+      const effectiveTargetPath = cleanPathKey ? "/" + cleanPathKey : "/";
+
       const layoutRscKey = cleanPathKey ? `${cleanPathKey}/layout.rsc` : "layout.rsc";
       const layoutOldRscKey = cleanPathKey ? `${cleanPathKey}/layout._old.rsc` : "layout._old.rsc";
       const layoutMetaKey = cleanPathKey ? `${cleanPathKey}/layout.metadata.json` : "layout.metadata.json";
@@ -1021,21 +1057,29 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
         }
       } catch (e) {}
 
-      const reqSegments = targetPath.split("/").filter(Boolean);
-      const srcFolder = path.resolve(process.cwd(), "src");
       let resolvedLayoutFilePath = null;
       let isTargetLayoutDynamic = false;
       try {
-        const [layoutPath, layoutParams] = getFilePathAndDynamicParams(
-          reqSegments,
-          {},
-          srcFolder,
-          "layout",
-          true,
-          false,
-          undefined,
-          0
-        );
+        const leafEntryPre =
+          activeChainPre.length > 0 && activeChainPre[0].cleanLayoutKey === cleanPathKey
+            ? activeChainPre[0]
+            : null;
+        let layoutPath = leafEntryPre?.layoutPath || null;
+        let layoutParams = leafEntryPre?.dParams || {};
+        if (!layoutPath) {
+          const fallbackMatch = getFilePathAndDynamicParams(
+            reqSegments,
+            {},
+            srcFolder,
+            "layout",
+            true,
+            false,
+            undefined,
+            0
+          );
+          layoutPath = fallbackMatch[0] || null;
+          layoutParams = fallbackMatch[1] || {};
+        }
         resolvedLayoutFilePath = layoutPath || null;
         if (layoutPath) {
           const layoutCfg = await resolveLayoutFunctionsConfig(layoutPath, layoutParams || {});
@@ -1053,6 +1097,7 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
         }
         const { anyLayoutPpr } = await resolveLayoutChainPpr(reqSegments, {}, srcFolder, {
           ignoreNoLayout: true,
+          exactLayoutKey: true,
         });
         currentMeta.ppr = Boolean(anyLayoutPpr);
       } catch (e) {}
@@ -1095,7 +1140,9 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
         currentMeta.status = 200;
       }
 
-      const reqPathWithSlash = targetPath.endsWith("/") ? targetPath : targetPath + "/";
+      const reqPathWithSlash = effectiveTargetPath.endsWith("/")
+        ? effectiveTargetPath
+        : effectiveTargetPath + "/";
       let newLayoutRsc = cached && cached.content ? cached.content : "";
       let didRenderFreshLayout = false;
       let didSpliceOnlyLayoutSlots = false;
@@ -1154,10 +1201,12 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
           let resolvedLayoutJsx = null;
           const activeChain = getActiveLayoutChain(reqSegments, {}, srcFolder, {
             ignoreNoLayout: true,
+            exactLayoutKey: true,
           });
           if (activeChain.length > 0) {
             await hydrateActiveChainPpr(activeChain, reqSegments, {}, srcFolder, {
               ignoreNoLayout: true,
+              exactLayoutKey: true,
             });
           }
           const hasExactOwnLayout =

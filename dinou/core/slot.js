@@ -33,7 +33,11 @@ export function pruneOrphanedSsrStreams() {
   for (let i = rb.length - 2; i >= 0; i -= 2) {
     const boundaryTpl = rb[i];
     const hiddenSlot = rb[i + 1];
-    if (!boundaryTpl || !boundaryTpl.parentNode) {
+    const isDetached =
+      !boundaryTpl ||
+      boundaryTpl.isConnected === false ||
+      !boundaryTpl.parentNode;
+    if (isDetached) {
       if (hiddenSlot && hiddenSlot.parentNode) {
         hiddenSlot.parentNode.removeChild(hiddenSlot);
       }

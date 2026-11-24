@@ -6,7 +6,14 @@ import { getFilePathAndDynamicParams } from "./get-file-path-and-dynamic-params.
 import importModule from "./import-module.js";
 import { requestStorage } from "./request-context.js";
 import { createUnifiedEnv } from "./runtime-env.js";
-import { getLayoutProps, resolveLayoutFunctionsConfig, getLayoutFunctionsPath, resolveLayoutChainPpr } from "./layout-functions.js";
+import {
+  getLayoutProps,
+  resolveLayoutFunctionsConfig,
+  getLayoutFunctionsPath,
+  resolveLayoutChainPpr,
+  computeLayoutKeyFromFolder,
+  getActiveLayoutChain,
+} from "./layout-functions.js";
 import {
   runWithPprContext,
   getRegisteredHoles,
@@ -95,22 +102,30 @@ async function buildStaticPages(onProgress = null) {
     const pages = [];
 
     // 🛡️ Descubrir layout en esta carpeta si existe
-    const layoutExtensions = [".tsx", ".jsx", ".ts", ".js"];
-    for (const ext of layoutExtensions) {
-      const candidateLayout = path.join(currentPath, `layout${ext}`);
-      if (existsSync(candidateLayout)) {
-        const routePath = segments.length ? "/" + segments.join("/") : "/";
-        const layoutConfig = await resolveLayoutFunctionsConfig(candidateLayout, params);
-        if (!layoutConfig.isDynamic) {
-          staticLayouts.set(routePath, {
-            folderPath: currentPath,
-            layoutPath: candidateLayout,
-            routePath,
+    if (dynamicStructure.length === 0) {
+      const layoutExtensions = [".tsx", ".jsx", ".ts", ".js"];
+      for (const ext of layoutExtensions) {
+        const candidateLayout = path.join(currentPath, `layout${ext}`);
+        if (existsSync(candidateLayout)) {
+          const relFromSrc = path.relative(srcFolder, currentPath).replace(/\\/g, "/");
+          const rawFolderSegs = relFromSrc ? relFromSrc.split("/").filter(Boolean) : [];
+          const { layoutRoutePath: routePath } = computeLayoutKeyFromFolder(
+            rawFolderSegs,
             segments,
             params,
-          });
+          );
+          const layoutConfig = await resolveLayoutFunctionsConfig(candidateLayout, params);
+          if (!layoutConfig.isDynamic) {
+            staticLayouts.set(routePath, {
+              folderPath: currentPath,
+              layoutPath: candidateLayout,
+              routePath,
+              segments,
+              params,
+            });
+          }
+          break;
         }
-        break;
       }
     }
 
@@ -905,6 +920,26 @@ async function buildStaticPages(onProgress = null) {
       await resolveBuildPprForRoute(segments, pagePath, pageFunctionsPath, srcFolder);
 
     if (pagePath && (!(await isDynamicRoute(revalidate)) || isPpr) && !doNotPushAtEnd) {
+      try {
+        const activeLayoutsForPage = getActiveLayoutChain(segments, {}, srcFolder);
+        for (const entry of activeLayoutsForPage) {
+          if (!staticLayouts.has(entry.layoutRoutePath)) {
+            const layoutConfig = await resolveLayoutFunctionsConfig(
+              entry.layoutPath,
+              entry.dParams || {},
+            );
+            if (!layoutConfig.isDynamic) {
+              staticLayouts.set(entry.layoutRoutePath, {
+                folderPath: path.dirname(entry.layoutPath),
+                layoutPath: entry.layoutPath,
+                routePath: entry.layoutRoutePath,
+                segments,
+                params: entry.dParams || {},
+              });
+            }
+          }
+        }
+      } catch (e) {}
       pages.push({
         path: currentPath,
         segments,

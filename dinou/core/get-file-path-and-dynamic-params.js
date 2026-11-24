@@ -645,9 +645,192 @@ function getFilePathAndDynamicParams(
   );
 }
 
+function getLayoutsForLayoutKey(
+  reqSegments,
+  query,
+  srcFolder,
+  possibleExtensions = [".tsx", ".ts", ".jsx", ".js", ".mjs"]
+) {
+  const decodedSegs = (reqSegments || []).map((s) =>
+    s === undefined || s === null ? "" : safeDecode(String(s))
+  );
+
+  function walk(dir, index, dParams, acc) {
+    const nextAcc = [...acc];
+    const cand = findCandidateFile(dir, "layout", true, possibleExtensions);
+    if (cand) {
+      const slots = getSlots(dir, decodedSegs, query, dParams);
+      nextAcc.push([cand, dParams, slots]);
+    }
+
+    if (index >= decodedSegs.length) {
+      return { matched: true, layouts: nextAcc, leafHasLayout: Boolean(cand) };
+    }
+
+    const seg = decodedSegs[index];
+    const entries = sortDirEntries(readdirSync(dir, { withFileTypes: true })).filter(
+      (e) => e.isDirectory() && !e.name.startsWith("_") && !e.name.startsWith("@")
+    );
+
+    if (isGroupDir(seg)) {
+      const exactGroup = entries.find((e) => e.name === seg);
+      if (exactGroup) {
+        return walk(path.join(dir, exactGroup.name), index + 1, dParams, nextAcc);
+      }
+      return { matched: false, layouts: nextAcc, leafHasLayout: false };
+    }
+
+    if (isOptionalCatchAllDir(seg)) {
+      const exactOptCa = entries.find((e) => e.name === seg);
+      if (exactOptCa) {
+        const paramName = seg.slice(5, -2);
+        return walk(
+          path.join(dir, exactOptCa.name),
+          index + 1,
+          { ...dParams, [paramName]: [] },
+          nextAcc
+        );
+      }
+      return { matched: false, layouts: nextAcc, leafHasLayout: false };
+    }
+
+    if (isOptionalSingleDynamicDir(seg)) {
+      const exactOptSingle = entries.find((e) => e.name === seg);
+      if (exactOptSingle) {
+        const paramName = seg.slice(2, -2);
+        return walk(
+          path.join(dir, exactOptSingle.name),
+          index + 1,
+          { ...dParams, [paramName]: undefined },
+          nextAcc
+        );
+      }
+      return { matched: false, layouts: nextAcc, leafHasLayout: false };
+    }
+
+    const isRouterSyntax =
+      (seg.startsWith("[") && seg.endsWith("]")) ||
+      seg.startsWith("@") ||
+      seg.startsWith("_");
+
+    // Tier 1: Exact static directory
+    if (!isRouterSyntax) {
+      const staticDir = entries.find(
+        (e) =>
+          e.name === seg &&
+          !isGroupDir(e.name) &&
+          !isSingleDynamicDir(e.name) &&
+          !isOptionalSingleDynamicDir(e.name) &&
+          !isCatchAllDir(e.name) &&
+          !isOptionalCatchAllDir(e.name)
+      );
+      if (staticDir) {
+        const res = walk(path.join(dir, staticDir.name), index + 1, dParams, nextAcc);
+        if (res.matched) return res;
+      }
+    }
+
+    // Tier 2: Required single dynamic [param]
+    for (const entry of entries) {
+      if (!isSingleDynamicDir(entry.name)) continue;
+      const paramName = entry.name.slice(1, -1);
+      const res = walk(
+        path.join(dir, entry.name),
+        index + 1,
+        { ...dParams, [paramName]: seg },
+        nextAcc
+      );
+      if (res.matched) return res;
+    }
+
+    // Tier 3: Optional single dynamic [[param]]
+    for (const entry of entries) {
+      if (!isOptionalSingleDynamicDir(entry.name)) continue;
+      const paramName = entry.name.slice(2, -2);
+      const res = walk(
+        path.join(dir, entry.name),
+        index + 1,
+        { ...dParams, [paramName]: seg },
+        nextAcc
+      );
+      if (res.matched) return res;
+    }
+
+    // Tier 4: Required catch-all [...param]
+    for (const entry of entries) {
+      if (!isCatchAllDir(entry.name)) continue;
+      const paramName = entry.name.slice(4, -1);
+      const remaining = decodedSegs.slice(index);
+      const groupIdx = remaining.findIndex((s) => isGroupDir(s));
+      const sliceEnd = groupIdx === -1 ? remaining.length : groupIdx;
+      const paramVals = remaining.slice(0, sliceEnd);
+      if (paramVals.length === 0) continue;
+      const res = walk(
+        path.join(dir, entry.name),
+        index + sliceEnd,
+        { ...dParams, [paramName]: paramVals },
+        nextAcc
+      );
+      if (res.matched) return res;
+    }
+
+    // Tier 5: Optional catch-all [[...param]]
+    for (const entry of entries) {
+      if (!isOptionalCatchAllDir(entry.name)) continue;
+      const paramName = entry.name.slice(5, -2);
+      const remaining = decodedSegs.slice(index);
+      const groupIdx = remaining.findIndex((s) => isGroupDir(s));
+      const sliceEnd = groupIdx === -1 ? remaining.length : groupIdx;
+      const paramVals = remaining.slice(0, sliceEnd);
+      const res = walk(
+        path.join(dir, entry.name),
+        index + sliceEnd,
+        { ...dParams, [paramName]: paramVals },
+        nextAcc
+      );
+      if (res.matched) return res;
+    }
+
+    return { matched: false, layouts: nextAcc, leafHasLayout: false };
+  }
+
+  const exactRes = walk(srcFolder, 0, {}, []);
+  if (exactRes.matched && exactRes.leafHasLayout) {
+    return exactRes.layouts;
+  }
+
+  const hasExplicitKeySyntax = decodedSegs.some(
+    (s) =>
+      isGroupDir(s) ||
+      isOptionalCatchAllDir(s) ||
+      isOptionalSingleDynamicDir(s)
+  );
+  if (hasExplicitKeySyntax) {
+    return exactRes.matched ? exactRes.layouts : [];
+  }
+
+  return getFilePathAndDynamicParams(
+    reqSegments,
+    query,
+    srcFolder,
+    "layout",
+    true,
+    false,
+    undefined,
+    0,
+    {},
+    true,
+    [],
+    { value: false },
+    possibleExtensions
+  );
+}
+
 export {
   getFilePathAndDynamicParams,
+  getLayoutsForLayoutKey,
 };
 export default {
   getFilePathAndDynamicParams,
+  getLayoutsForLayoutKey,
 };
