@@ -76,17 +76,26 @@ function useServerId() {
     return "_discovery_dS_";
   }
   const holeStore = getActiveRuntimeDynamicHoleStore();
+  const pageStore = getActivePageSegmentStore();
+  const layoutStore = getActiveLayoutSegmentStore();
   if (holeStore && holeStore.holeId) {
     holeStore.idCount = (holeStore.idCount || 0) + 1;
     const safeHole = sanitizeIdSegment(holeStore.holeId);
+    if (pageStore && pageStore.active) {
+      return `_hole_${safeHole}_dS_${holeStore.idCount.toString(32)}_`;
+    }
+    if (layoutStore && layoutStore.active) {
+      const prefix = layoutStore.scopePrefix
+        ? `_layout_${layoutStore.scopePrefix}_hole_`
+        : "_layout_hole_";
+      return `${prefix}${safeHole}_dS_${holeStore.idCount.toString(32)}_`;
+    }
     return `_hole_${safeHole}_dS_${holeStore.idCount.toString(32)}_`;
   }
-  const pageStore = getActivePageSegmentStore();
   if (pageStore && pageStore.active) {
     pageStore.idCount = (pageStore.idCount || 0) + 1;
     return `_page_dS_${pageStore.idCount.toString(32)}_`;
   }
-  const layoutStore = getActiveLayoutSegmentStore();
   if (layoutStore && layoutStore.active) {
     layoutStore.idCount = (layoutStore.idCount || 0) + 1;
     const prefix = layoutStore.scopePrefix

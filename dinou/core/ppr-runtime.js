@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import React from "react";
 import { renderRSCStream } from "./rsc-renderer.js";
 import { getClientManifest } from "./manifest-provider.js";
-import { requestStorage, setCurrentContext } from "./request-context.js";
+import { requestStorage, setCurrentContext, getContext } from "./request-context.js";
 import getJSX from "./get-jsx.js";
 import { getStorageAdapter, readDist2Fallback } from "./storage-adapter.js";
 import { deserializeJSX } from "./cache-slot.js";
@@ -22,6 +22,12 @@ import {
   SKIP_STATIC_SUSPENSE_SYMBOL,
   runInRuntimeStaticSuspense,
   runInRuntimeDynamicHole,
+  isLayoutRootElement,
+  getLayoutRootScope,
+  isPageRootElement,
+  runInLayoutSegment,
+  runInPageSegment,
+  getActiveLayoutSegmentStore,
 } from "./ppr-context.js";
 import { fetchCloudflareDist2Asset } from "./static-assets.js";
 
@@ -170,6 +176,7 @@ function createPprHoleErrorElement(holeErr, isDevelopment = false) {
   return React.createElement(
     "div",
     {
+      "data-dinou-ppr-error": "true",
       style: {
         color: "#e11d48",
         padding: "8px 12px",
@@ -192,6 +199,9 @@ async function PprDynamicHoleBoundary({ holeId, children }) {
     );
   } catch (holeErr) {
     console.error(`[Dinou PPR] Error resolving dynamic hole ${holeId}:`, holeErr);
+    try {
+      getContext()?.res?.setHeader?.("x-dinou-has-error", "true");
+    } catch (_) {}
     const isDev =
       process.env.DINOU_DEV === "true" || process.env.NODE_ENV !== "production";
     return createPprHoleErrorElement(holeErr, isDev);
@@ -214,6 +224,106 @@ function isClientComponentRef(type) {
     Boolean(type.$$id) ||
     Boolean(type.filepath)
   );
+}
+
+/**
+ * Builds a minimal ancestor-path skeleton from the cached layout/page shell tree down to
+ * a single PPR dynamic hole, preserving exact React 19 sibling array lengths, unnamed
+ * `<ViewTransition>` wrappers, and ancestor user Client Components (which may call `useId()`).
+ * Rendering this skeleton produces the bit-for-bit identical React 19 `useId()` TreeId
+ * that client `hydrateRoot` computes for the full composed document, preventing both
+ * duplicate `useId()` collisions across multiple PPR holes and React `#418` hydration errors.
+ */
+function buildPprHoleSkeleton(node, targetHoleId, replacementEl, pageTree = null) {
+  if (!node || typeof node !== "object") {
+    return { found: false, node: null };
+  }
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i++) {
+      const res = buildPprHoleSkeleton(node[i], targetHoleId, replacementEl, pageTree);
+      if (res.found) {
+        const pruned = new Array(node.length).fill(null);
+        pruned[i] = res.node;
+        return { found: true, node: pruned };
+      }
+    }
+    return { found: false, node: null };
+  }
+  if (node.$$typeof === Symbol.for("react.transitional.element")) {
+    if (node.props && node.props["data-ppr-hole"] === targetHoleId) {
+      return { found: true, node: replacementEl };
+    }
+    if (isClientComponentRef(node.type)) {
+      const refId = String(node.type?.$$id || node.type?.name || "");
+      if (refId.endsWith("#DinouPageSlot") || refId === "DinouPageSlot") {
+        if (pageTree != null) {
+          const res = buildPprHoleSkeleton(pageTree, targetHoleId, replacementEl, null);
+          if (res.found) {
+            return { found: true, node: React.createElement(React.Fragment, null, res.node) };
+          }
+        }
+        return { found: false, node: null };
+      }
+      if (refId.endsWith("#DinouCacheSlotBoundary") || refId === "DinouCacheSlotBoundary") {
+        const res = buildPprHoleSkeleton(node.props?.children, targetHoleId, replacementEl, pageTree);
+        if (res.found) {
+          return { found: true, node: React.createElement(React.Fragment, null, res.node) };
+        }
+        return { found: false, node: null };
+      }
+      if (node.props && typeof node.props === "object") {
+        for (const [propKey, propVal] of Object.entries(node.props)) {
+          if (propVal && typeof propVal === "object") {
+            const res = buildPprHoleSkeleton(propVal, targetHoleId, replacementEl, pageTree);
+            if (res.found) {
+              const clonedProps = { ...node.props, [propKey]: res.node };
+              if (node.key != null) clonedProps.key = node.key;
+              return { found: true, node: React.createElement(node.type, clonedProps) };
+            }
+          }
+        }
+      }
+      return { found: false, node: null };
+    }
+    if (
+      typeof node.type === "string" ||
+      node.type === Symbol.for("react.fragment") ||
+      node.type === Symbol.for("react.suspense")
+    ) {
+      const res = buildPprHoleSkeleton(node.props?.children, targetHoleId, replacementEl, pageTree);
+      if (res.found) {
+        return { found: true, node: React.createElement(React.Fragment, null, res.node) };
+      }
+      return { found: false, node: null };
+    }
+    if (node.type === Symbol.for("react.view_transition")) {
+      const res = buildPprHoleSkeleton(node.props?.children, targetHoleId, replacementEl, pageTree);
+      if (res.found) {
+        return {
+          found: true,
+          node: React.createElement(
+            node.type,
+            node.props?.name != null ? { name: node.props.name } : null,
+            res.node
+          ),
+        };
+      }
+      return { found: false, node: null };
+    }
+  }
+  return { found: false, node: null };
+}
+
+function extractPprHoleHtml(rawHtml, holeId) {
+  if (typeof rawHtml !== "string") return null;
+  const openTag = `<dinou-ppr-extract data-h="${holeId}">`;
+  const closeTag = "</dinou-ppr-extract>";
+  const startIdx = rawHtml.indexOf(openTag);
+  const endIdx = rawHtml.lastIndexOf(closeTag);
+  if (startIdx !== -1 && endIdx > startIdx) {
+    return rawHtml.slice(startIdx + openTag.length, endIdx);
+  }
+  return null;
 }
 
 /**
@@ -452,7 +562,8 @@ async function streamDynamicHoles(
   isDevelopment = false,
   staticParentHoles = null,
   resolvedHolesOut = null,
-  streamCtrl = null
+  streamCtrl = null,
+  shellContext = null
 ) {
   let holeIndex = 0;
   const holePromises = [];
@@ -540,17 +651,34 @@ async function streamDynamicHoles(
 
     // Handle React Server Component function
     if (typeof current?.type === "function") {
-      try {
-        const evaluated = await invokeWithServerHooksDispatcher(() =>
-          current.type(current.props || {})
-        );
-        await traverse(evaluated, false);
-      } catch (err) {
-        if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
-          return;
+      const runEval = async () => {
+        try {
+          const evaluated = await invokeWithServerHooksDispatcher(() =>
+            current.type(current.props || {})
+          );
+          await traverse(evaluated, false);
+        } catch (err) {
+          if (err && err.$$typeof === SKIP_STATIC_SUSPENSE_SYMBOL) {
+            return;
+          }
+          console.error("[Dinou PPR] Error evaluating component in hole traversal:", err);
         }
-        console.error("[Dinou PPR] Error evaluating component in hole traversal:", err);
+      };
+      if (isPageRootElement(current)) {
+        await runInPageSegment(runEval);
+        return;
       }
+      if (isLayoutRootElement(current)) {
+        const layoutScope = getLayoutRootScope(current);
+        const prevStore = getActiveLayoutSegmentStore();
+        const layoutStore =
+          layoutScope && (!prevStore || prevStore.scopePrefix !== layoutScope)
+            ? { active: true, idCount: 0, holeCount: 0, scopePrefix: layoutScope }
+            : null;
+        await runInLayoutSegment(runEval, layoutStore);
+        return;
+      }
+      await runEval();
       return;
     }
 
@@ -654,12 +782,53 @@ async function streamDynamicHoles(
               );
             }
             if (platformContext && platformContext.renderHtmlStream) {
-              const rscStream = renderRSCStream(resolvedChildren, clientManifest, { runtime: "edge" });
-              const htmlStream = await platformContext.renderHtmlStream(rscStream, {
-                bootstrapModules: [], importMapHtml: "",
-              });
-              if (isAborted()) return;
-              html = await new Response(htmlStream).text();
+              let renderedViaSkeleton = false;
+              if (shellContext && (shellContext.layoutTree || shellContext.pageTree)) {
+                try {
+                  const extractEl = React.createElement(
+                    "dinou-ppr-extract",
+                    { "data-h": currentHoleId },
+                    resolvedChildren
+                  );
+                  const skelRes = shellContext.layoutTree
+                    ? buildPprHoleSkeleton(
+                        shellContext.layoutTree,
+                        currentHoleId,
+                        extractEl,
+                        shellContext.pageTree
+                      )
+                    : buildPprHoleSkeleton(
+                        shellContext.pageTree,
+                        currentHoleId,
+                        extractEl,
+                        null
+                      );
+                  if (skelRes.found) {
+                    const skelRscStream = renderRSCStream(skelRes.node, clientManifest, {
+                      runtime: "edge",
+                    });
+                    const skelHtmlStream = await platformContext.renderHtmlStream(skelRscStream, {
+                      bootstrapModules: [],
+                      importMapHtml: "",
+                    });
+                    if (isAborted()) return;
+                    const rawSkelHtml = await new Response(skelHtmlStream).text();
+                    const extracted = extractPprHoleHtml(rawSkelHtml, currentHoleId);
+                    if (extracted !== null) {
+                      html = extracted;
+                      renderedViaSkeleton = true;
+                    }
+                  }
+                } catch (_) {}
+              }
+              if (!renderedViaSkeleton) {
+                const rscStream = renderRSCStream(resolvedChildren, clientManifest, { runtime: "edge" });
+                const htmlStream = await platformContext.renderHtmlStream(rscStream, {
+                  bootstrapModules: [], importMapHtml: "",
+                });
+                if (isAborted()) return;
+                html = await new Response(htmlStream).text();
+              }
             }
             if (isAborted()) return;
             chunkToWrite = `\n<template id="ppr-content-${currentHoleId}"><!--$-->${html}<!--/$--></template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${currentBoundaryIndex}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){if(c.content){t.replaceWith(c.content);}else{t.replaceWith.apply(t,Array.from(c.childNodes));}}}finally{c.remove();}})();</script>\n`;
@@ -883,6 +1052,25 @@ async function handlePprResume({
       }
 
       const resolvedHolesMap = new Map();
+      let cachedPageTreeForResume = null;
+      let cachedLayoutTreeForResume = null;
+      if (pageShellJson) {
+        try {
+          cachedPageTreeForResume = deserializeJSX(pageShellJson);
+        } catch (_) {}
+      }
+      if (hasActiveLayout && layoutShellJson) {
+        try {
+          cachedLayoutTreeForResume = deserializeJSX(layoutShellJson);
+        } catch (_) {}
+      }
+      const shellContextForHoles =
+        cachedPageTreeForResume || cachedLayoutTreeForResume
+          ? {
+              layoutTree: cachedLayoutTreeForResume,
+              pageTree: cachedPageTreeForResume,
+            }
+          : null;
 
       await requestStorage.run(context, async () => {
         if (!Array.isArray(holes) || holes.length > 0) {
@@ -916,7 +1104,8 @@ async function handlePprResume({
             isDevelopment,
             staticParentHoles,
             resolvedHolesMap,
-            streamCtrl
+            streamCtrl,
+            shellContextForHoles
           );
         }
 
@@ -944,14 +1133,15 @@ async function handlePprResume({
         ) {
           try {
             const clientManifest = getClientManifest();
-            const cachedPageTree = deserializeJSX(pageShellJson);
+            const cachedPageTree = cachedPageTreeForResume || deserializeJSX(pageShellJson);
             const splicedPageTree = replaceHolesWithMap(cachedPageTree, resolvedHolesMap);
             const pageRscStream = renderRSCStream(splicedPageTree, clientManifest, {
               runtime: "edge",
             });
             let layoutRscPromise = Promise.resolve("");
             if (hasActiveLayout && layoutShellJson) {
-              const cachedLayoutTree = deserializeJSX(layoutShellJson);
+              const cachedLayoutTree =
+                cachedLayoutTreeForResume || deserializeJSX(layoutShellJson);
               const splicedLayoutTree = replaceHolesWithMap(
                 cachedLayoutTree,
                 resolvedHolesMap

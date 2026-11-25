@@ -140,7 +140,91 @@ async function readEdgeStorageOrAsset(storage, key) {
   return await readDist2Fallback(storage, key);
 }
 
-async function resolveRouteConfigForRevalidate(pagePath, reqSegments, existingMeta = {}) {
+function matchesStaticPathsSet(staticPathsSet, paramsObj) {
+  if (!staticPathsSet || !paramsObj || Object.keys(paramsObj).length === 0) {
+    return false;
+  }
+  const sortedEntries = Object.entries(paramsObj)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, v]) => [
+      k,
+      Array.isArray(v)
+        ? v.join(",")
+        : v === undefined || v === null
+        ? ""
+        : String(v),
+    ]);
+  const serialized = JSON.stringify(sortedEntries);
+  const singleVal = Object.values(paramsObj)[0];
+  const singleValStr = Array.isArray(singleVal)
+    ? singleVal.join(",")
+    : singleVal === undefined || singleVal === null
+    ? ""
+    : String(singleVal);
+  return staticPathsSet.has(serialized) || staticPathsSet.has(singleValStr);
+}
+
+function buildStaticPathsSetFromRaw(paths) {
+  if (!Array.isArray(paths)) return null;
+  const set = new Set();
+  for (const p of paths) {
+    if (typeof p === "string" || typeof p === "number") {
+      set.add(String(p));
+    } else if (Array.isArray(p)) {
+      set.add(p.map((item) => (item === undefined || item === null ? "" : String(item))).join(","));
+    } else if (p && typeof p === "object") {
+      const sortedEntries = Object.entries(p)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([k, v]) => [
+          k,
+          Array.isArray(v)
+            ? v.join(",")
+            : v === undefined || v === null
+            ? ""
+            : String(v),
+        ]);
+      set.add(JSON.stringify(sortedEntries));
+    }
+  }
+  return set;
+}
+
+async function isLayoutChainBlockedForRevalidate(activeChain, storage) {
+  if (!Array.isArray(activeChain) || activeChain.length === 0) return false;
+  for (let i = activeChain.length - 1; i >= 0; i--) {
+    const entry = activeChain[i];
+    if (!entry?.layoutPath || !entry.dParams || Object.keys(entry.dParams).length === 0) {
+      continue;
+    }
+    try {
+      const lCfg = await resolveLayoutFunctionsConfig(entry.layoutPath, entry.dParams);
+      if (typeof lCfg.validateParams === "function") {
+        const isValid = await lCfg.validateParams(entry.dParams);
+        if (!isValid) return true;
+      }
+      if (lCfg.allowISG === false) {
+        if (matchesStaticPathsSet(lCfg.staticPathsSet, entry.dParams)) {
+          continue;
+        }
+        const lRscKey = entry.cleanLayoutKey
+          ? `${entry.cleanLayoutKey}/layout.rsc`
+          : "layout.rsc";
+        const existing = await readEdgeStorageOrAsset(storage, lRscKey);
+        if (!existing || !existing.content) {
+          return true;
+        }
+      }
+    } catch (e) {}
+  }
+  return false;
+}
+
+async function resolveRouteConfigForRevalidate(
+  pagePath,
+  reqSegments,
+  existingMeta = {},
+  hasExistingArtifact = false
+) {
   const srcFolder = path.resolve(process.cwd(), "src");
   let isRoutePpr =
     typeof existingMeta?.ppr === "boolean" ? existingMeta.ppr : null;
@@ -149,6 +233,7 @@ async function resolveRouteConfigForRevalidate(pagePath, reqSegments, existingMe
   let tags = Array.isArray(existingMeta?.tags) ? existingMeta.tags : null;
   let revalidate = existingMeta?.revalidate;
   let pageRevalidate = existingMeta?.pageRevalidate;
+  let isBlocked = false;
 
   let pfMod = null;
   let dParams = {};
@@ -173,6 +258,48 @@ async function resolveRouteConfigForRevalidate(pagePath, reqSegments, existingMe
       );
       if (pageFunctionsPath) {
         pfMod = await importModule(pageFunctionsPath);
+      }
+    } catch (e) {}
+  }
+
+  if (pfMod && Object.keys(dParams).length > 0) {
+    try {
+      const defaultExport = pfMod.default?.default
+        ? pfMod.default.default
+        : pfMod.default;
+      const validateParamsFn = pfMod.validateParams || defaultExport?.validateParams;
+      if (typeof validateParamsFn === "function") {
+        const isValid = await validateParamsFn(dParams);
+        if (!isValid) {
+          isBlocked = true;
+        }
+      }
+      if (!isBlocked) {
+        const globalCfg = await getDinouConfig();
+        const defaultAllowISG =
+          globalCfg?.allowISG !== undefined && globalCfg?.allowISG !== null
+            ? Boolean(globalCfg.allowISG)
+            : true;
+        const rawAllowISG =
+          pfMod.allowISG !== undefined ? pfMod.allowISG : defaultExport?.allowISG;
+        const resolvedAllowISG =
+          typeof rawAllowISG === "function"
+            ? await rawAllowISG()
+            : rawAllowISG !== undefined && rawAllowISG !== null
+            ? Boolean(rawAllowISG)
+            : defaultAllowISG;
+        if (resolvedAllowISG === false && !hasExistingArtifact) {
+          const getStaticPathsFn = pfMod.getStaticPaths || defaultExport?.getStaticPaths;
+          let allowed = false;
+          if (typeof getStaticPathsFn === "function") {
+            const rawPaths = await getStaticPathsFn();
+            const set = buildStaticPathsSetFromRaw(rawPaths);
+            allowed = matchesStaticPathsSet(set, dParams);
+          }
+          if (!allowed) {
+            isBlocked = true;
+          }
+        }
       }
     } catch (e) {}
   }
@@ -245,6 +372,7 @@ async function resolveRouteConfigForRevalidate(pagePath, reqSegments, existingMe
     tags: Array.isArray(tags) ? tags : [],
     revalidate,
     pageRevalidate,
+    isBlocked,
   };
 }
 
@@ -364,11 +492,23 @@ async function revalidatePage(reqPath, internalOptions = {}) {
     const srcFolder = path.resolve(process.cwd(), "src");
     const [pagePath] = getFilePathAndDynamicParams(reqSegments, {}, srcFolder);
 
+    const activeChainCheck = getActiveLayoutChain(reqSegments, {}, srcFolder);
+    if (await isLayoutChainBlockedForRevalidate(activeChainCheck, storage)) {
+      return;
+    }
+
+    const hasExistingPageArtifact = Boolean(
+      (cached && cached.content) || (existingPageRsc && existingPageRsc.content)
+    );
     const routeCfg = await resolveRouteConfigForRevalidate(
       pagePath,
       reqSegments,
-      currentMeta
+      currentMeta,
+      hasExistingPageArtifact
     );
+    if (routeCfg.isBlocked) {
+      return;
+    }
     const isRoutePpr = routeCfg.isRoutePpr;
     const isPagePpr = routeCfg.isPagePpr;
     if (!Array.isArray(currentMeta.tags) || currentMeta.tags.length === 0) {
@@ -465,8 +605,12 @@ async function revalidatePage(reqPath, internalOptions = {}) {
               : 0;
           const leafGen = leafLayout.generatedAt || 0;
           const leafOwnGen = leafLayout.layoutGeneratedAt || leafGen;
+          const hasRouteEngine = Boolean(
+            typeof globalThis !== "undefined" && globalThis.__DINOU_ROUTE_MAP__
+          );
           const isLeafMissing =
-            !hasValidLeafRsc && (isEdgeRuntime() || maxAncestorGen > 0 || onlyRefreshSlots);
+            !hasValidLeafRsc &&
+            (isEdgeRuntime() || hasRouteEngine || maxAncestorGen > 0 || onlyRefreshSlots);
           const isAncestorOwnNewer = leafOwnGen > 0 && maxAncestorOwnGen > leafOwnGen;
           const isAncestorSlotOnlyNewer =
             !isAncestorOwnNewer && leafGen > 0 && maxAncestorGen > leafGen;
@@ -564,12 +708,14 @@ async function revalidatePage(reqPath, internalOptions = {}) {
             markRevalDynamic();
           },
           redirect() {
+            revalContext._hasRedirected = true;
             markRevalDynamic();
           },
         },
         env: activeEnv,
         platformContext: outerCtx?.platformContext || { env: activeEnv },
         _isStaticHtmlRender: true,
+        _hasRedirected: false,
       };
       const clientManifest =
         (typeof globalThis !== "undefined" && globalThis.__DINOU_CLIENT_MANIFEST__) || {};
@@ -811,6 +957,9 @@ async function revalidatePage(reqPath, internalOptions = {}) {
           console.warn(`⚠️ [Edge Revalidate] Render fallback for ${cleanPath}:`, e?.message || e);
         }
       }
+      if (revalContext._hasRedirected) {
+        return;
+      }
       if (revalDynamicState.value && !isRoutePpr) {
         markRouteDynamicInMap(reqPathWithSlash, cleanPath, true);
         console.log(`[ISR] Bailout detected for ${cleanPath}. Switching to Dynamic.`);
@@ -831,6 +980,7 @@ async function revalidatePage(reqPath, internalOptions = {}) {
         rscKey,
         shellRscKey,
         shellPageKey,
+        shellPageOldKey,
         oldRscKey,
         legacyRscKey,
         metaKey,
@@ -1059,6 +1209,9 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
 
       let resolvedLayoutFilePath = null;
       let isTargetLayoutDynamic = false;
+      if (await isLayoutChainBlockedForRevalidate(activeChainPre, storage)) {
+        return false;
+      }
       try {
         const leafEntryPre =
           activeChainPre.length > 0 && activeChainPre[0].cleanLayoutKey === cleanPathKey
@@ -1150,6 +1303,7 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
       let pendingShellLayoutJson = null;
       let pendingShellLayoutOwnJson = null;
       const revalDynamicState = { value: false };
+      let layoutHasRedirected = false;
       try {
         const rawHeaders = {
           "user-agent": "Dinou-ISR-Revalidator",
@@ -1188,12 +1342,15 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
               markRevalDynamic();
             },
             redirect() {
+              layoutHasRedirected = true;
+              revalContext._hasRedirected = true;
               markRevalDynamic();
             },
           },
           env: activeEnv,
           platformContext: outerCtx?.platformContext || { env: activeEnv },
           _isStaticHtmlRender: true,
+          _hasRedirected: false,
         };
         const clientManifest =
           (typeof globalThis !== "undefined" && globalThis.__DINOU_CLIENT_MANIFEST__) || {};
@@ -1455,6 +1612,9 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
         }
       }
 
+      if (layoutHasRedirected) {
+        return false;
+      }
       if (revalDynamicState.value) {
         if (!hasCachedMeta) {
           try {
@@ -1529,7 +1689,9 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
         (didSpliceOnlyLayoutSlots || didRecomposeOnly) && prevLayoutOwnLevelGenTime > 0
           ? prevLayoutOwnLevelGenTime
           : commitLayoutGenTime;
-      await storage.set(layoutMetaKey, JSON.stringify(currentMeta));
+      // Causal commit order: persist layout payload artifacts (shell.layout.own.json, shell.layout.json,
+      // and layout.rsc with inline currentMeta) BEFORE advancing layout.metadata.json so concurrent
+      // readers checking layoutGeneratedAt never observe T_new while layout.rsc is still T_old.
       if (pendingShellLayoutOwnJson) {
         try {
           await storage.set(shellLayoutOwnKey, pendingShellLayoutOwnJson);
@@ -1543,6 +1705,7 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
       if (newLayoutRsc) {
         await storage.set(layoutRscKey, newLayoutRsc, currentMeta);
       }
+      await storage.set(layoutMetaKey, JSON.stringify(currentMeta));
       console.log(`✅ [Edge Revalidate] Successfully revalidated layout ${targetPath} (generatedAt: ${commitLayoutGenTime})`);
       return true;
   });

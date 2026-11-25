@@ -449,6 +449,9 @@ function matchRouteTree(
   }
 
   // Tier 3: Optional single dynamic segment [[param]]
+  // Try consuming 1 segment first; if that fails to match a descendant route (e.g.
+  // `opt/[[locale]]/about/page.tsx` visited as `/opt/about`), backtrack and try omitting
+  // the optional segment (0 segments consumed, paramValue = undefined).
   for (const { targetDir, groupDirs, dirEntries } of chains) {
     for (const entry of dirEntries) {
       if (!isOptionalSingleDynamicDir(entry.name)) continue;
@@ -465,48 +468,72 @@ function matchRouteTree(
         groupDirs
       );
       if (attempt.matched) return attempt.value;
+
+      const omittedParams = {
+        ...dParams,
+        [paramName]: undefined,
+      };
+      const omittedAttempt = runCandidateBranch(
+        path.join(targetDir, entry.name),
+        index,
+        omittedParams,
+        groupDirs,
+        index
+      );
+      if (omittedAttempt.matched) return omittedAttempt.value;
     }
   }
 
   // Tier 4: Required catch-all segment [...param]
+  // Greedy longest-first, backtracking down to 1 consumed segment so child routes nested
+  // under a catch-all layout (e.g. `ca/[...section]/view/page.tsx` at `/ca/guides/auth/view`)
+  // can match after the catch-all prefix.
   for (const { targetDir, groupDirs, dirEntries } of chains) {
     for (const entry of dirEntries) {
       if (!isCatchAllDir(entry.name)) continue;
       const paramName = entry.name.slice(4, -1);
-      const paramValue = reqSegments.slice(index).map(safeDecode);
-      const newParams = {
-        ...dParams,
-        [paramName]: paramValue,
-      };
-      const attempt = runCandidateBranch(
-        path.join(targetDir, entry.name),
-        reqSegments.length,
-        newParams,
-        groupDirs,
-        index + 1
-      );
-      if (attempt.matched) return attempt.value;
+      for (let end = reqSegments.length; end >= index + 1; end--) {
+        const paramValue = reqSegments.slice(index, end).map(safeDecode);
+        const newParams = {
+          ...dParams,
+          [paramName]: paramValue,
+        };
+        const attempt = runCandidateBranch(
+          path.join(targetDir, entry.name),
+          end,
+          newParams,
+          groupDirs,
+          index + 1
+        );
+        if (attempt.matched) return attempt.value;
+      }
     }
   }
 
   // Tier 5: Optional catch-all segment [[...param]]
+  // Greedy longest-first, backtracking all the way down to 0 consumed segments (`[]`) so
+  // child routes nested under an optional catch-all layout (e.g. `oca/[[...seg]]/doc/page.tsx`
+  // at `/oca/doc` and `/oca/v1/api/doc`) resolve cleanly.
   for (const { targetDir, groupDirs, dirEntries } of chains) {
     for (const entry of dirEntries) {
       if (!isOptionalCatchAllDir(entry.name)) continue;
       const paramName = entry.name.slice(5, -2);
-      const paramValue = reqSegments.slice(index).map(safeDecode);
-      const newParams = {
-        ...dParams,
-        [paramName]: paramValue,
-      };
-      const attempt = runCandidateBranch(
-        path.join(targetDir, entry.name),
-        reqSegments.length,
-        newParams,
-        groupDirs,
-        index + 1
-      );
-      if (attempt.matched) return attempt.value;
+      for (let end = reqSegments.length; end >= index; end--) {
+        const paramValue =
+          end > index ? reqSegments.slice(index, end).map(safeDecode) : [];
+        const newParams = {
+          ...dParams,
+          [paramName]: paramValue,
+        };
+        const attempt = runCandidateBranch(
+          path.join(targetDir, entry.name),
+          end,
+          newParams,
+          groupDirs,
+          end > index ? index + 1 : index
+        );
+        if (attempt.matched) return attempt.value;
+      }
     }
   }
 
@@ -754,6 +781,14 @@ function getLayoutsForLayoutKey(
         nextAcc
       );
       if (res.matched) return res;
+
+      const omittedRes = walk(
+        path.join(dir, entry.name),
+        index,
+        { ...dParams, [paramName]: undefined },
+        nextAcc
+      );
+      if (omittedRes.matched) return omittedRes;
     }
 
     // Tier 4: Required catch-all [...param]
@@ -762,16 +797,17 @@ function getLayoutsForLayoutKey(
       const paramName = entry.name.slice(4, -1);
       const remaining = decodedSegs.slice(index);
       const groupIdx = remaining.findIndex((s) => isGroupDir(s));
-      const sliceEnd = groupIdx === -1 ? remaining.length : groupIdx;
-      const paramVals = remaining.slice(0, sliceEnd);
-      if (paramVals.length === 0) continue;
-      const res = walk(
-        path.join(dir, entry.name),
-        index + sliceEnd,
-        { ...dParams, [paramName]: paramVals },
-        nextAcc
-      );
-      if (res.matched) return res;
+      const maxSliceEnd = groupIdx === -1 ? remaining.length : groupIdx;
+      for (let sliceEnd = maxSliceEnd; sliceEnd >= 1; sliceEnd--) {
+        const paramVals = remaining.slice(0, sliceEnd);
+        const res = walk(
+          path.join(dir, entry.name),
+          index + sliceEnd,
+          { ...dParams, [paramName]: paramVals },
+          nextAcc
+        );
+        if (res.matched) return res;
+      }
     }
 
     // Tier 5: Optional catch-all [[...param]]
@@ -780,15 +816,17 @@ function getLayoutsForLayoutKey(
       const paramName = entry.name.slice(5, -2);
       const remaining = decodedSegs.slice(index);
       const groupIdx = remaining.findIndex((s) => isGroupDir(s));
-      const sliceEnd = groupIdx === -1 ? remaining.length : groupIdx;
-      const paramVals = remaining.slice(0, sliceEnd);
-      const res = walk(
-        path.join(dir, entry.name),
-        index + sliceEnd,
-        { ...dParams, [paramName]: paramVals },
-        nextAcc
-      );
-      if (res.matched) return res;
+      const maxSliceEnd = groupIdx === -1 ? remaining.length : groupIdx;
+      for (let sliceEnd = maxSliceEnd; sliceEnd >= 0; sliceEnd--) {
+        const paramVals = remaining.slice(0, sliceEnd);
+        const res = walk(
+          path.join(dir, entry.name),
+          index + sliceEnd,
+          { ...dParams, [paramName]: paramVals },
+          nextAcc
+        );
+        if (res.matched) return res;
+      }
     }
 
     return { matched: false, layouts: nextAcc, leafHasLayout: false };

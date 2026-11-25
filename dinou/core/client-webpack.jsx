@@ -324,6 +324,19 @@ const consumeInlineRscResponse = (kind) => {
 const isStaticExportMode = () =>
   typeof window !== "undefined" && Boolean(window.__DINOU_STATIC_EXPORT__);
 
+const isNavigationAbortError = (err) => {
+  if (!err) return false;
+  const name = typeof err === "object" ? String(err.name || "") : "";
+  const msg = typeof err === "object" ? String(err.message || "") : String(err);
+  return (
+    name === "AbortError" ||
+    /^(?:Load failed|Failed to fetch|NetworkError|The operation was aborted|Error in input stream)/i.test(
+      msg.trim()
+    ) ||
+    /____rsc_payload_error____.*due to access control checks/i.test(msg)
+  );
+};
+
 if (typeof window !== "undefined") {
   const markDocumentUnloading = () => {
     window.__DINOU_STATIC_EXPORT_UNLOADING__ = true;
@@ -332,6 +345,23 @@ if (typeof window !== "undefined") {
   window.addEventListener("pagehide", markDocumentUnloading);
   window.addEventListener("pageshow", () => {
     window.__DINOU_STATIC_EXPORT_UNLOADING__ = false;
+  });
+  // Detect pre-hydration native <a href> hard navigations (before Router's useEffect
+  // attaches soft-navigation click handling) so WebKit does not abort in-flight PPR
+  // streams into spurious /____rsc_payload_error____ fetches before beforeunload fires.
+  window.addEventListener("click", (e) => {
+    if (e.defaultPrevented || window.__DINOU_ROUTER_NAVIGATE__) return;
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const target = e.target;
+    const anchor = target && typeof target.closest === "function" ? target.closest("a") : null;
+    if (!anchor || (anchor.target && anchor.target !== "_self") || anchor.hasAttribute("download")) {
+      return;
+    }
+    const href = anchor.getAttribute("href");
+    if (!href || /^(?:mailto:|tel:|javascript:|#)/i.test(href.trim())) return;
+    const finalPath = resolveUrl(href, window.location.pathname);
+    if (!isExternalUrl(finalPath) && isHashChangeOnly(finalPath)) return;
+    window.__DINOU_STATIC_EXPORT_UNLOADING__ = true;
   });
 }
 
@@ -374,8 +404,14 @@ const buildStaticExportRscUrl = (rawRouteOrKey, fileName) => {
   const qIdx = withoutHash.indexOf("?");
   const rawPathname = qIdx === -1 ? withoutHash : withoutHash.slice(0, qIdx);
   const existingQuery = qIdx === -1 ? "" : withoutHash.slice(qIdx + 1);
-  const cleanPathname = rawPathname.replace(/\/+$/, "");
-  const baseRscPath = cleanPathname ? `${cleanPathname}/${fileName}` : `/${fileName}`;
+  const encodedSegments = rawPathname
+    .split("/")
+    .filter(Boolean)
+    .map((seg) => encodeURIComponent(safeDecodeSeg(seg)));
+  const baseRscPath =
+    encodedSegments.length > 0
+      ? `/${encodedSegments.join("/")}/${fileName}`
+      : `/${fileName}`;
   return existingQuery ? `${baseRscPath}?${existingQuery}` : baseRscPath;
 };
 
@@ -389,6 +425,38 @@ const executeRscRedirect = (redirectUrl) => {
   if (getCurrentRoute() !== redirectUrl) {
     window.__DINOU_ROUTER_NAVIGATE__(redirectUrl, { replace: true });
   }
+};
+
+const erroredPageCacheKeys = new Set();
+const erroredLayoutCacheKeys = new Set();
+
+const clearErroredCaches = () => {
+  if (
+    typeof document !== "undefined" &&
+    document.querySelector('[data-dinou-ppr-error="true"]')
+  ) {
+    const curRoute = getCurrentRoute();
+    pageCache.delete(curRoute);
+    const curLayoutKey = getLayoutKey(window.location.pathname);
+    if (curLayoutKey) {
+      const curSearch = window.location.search || "";
+      layoutCache.delete(curLayoutKey);
+      layoutCache.delete(`${curLayoutKey}${curSearch}`);
+    }
+  }
+  for (const k of erroredPageCacheKeys) {
+    pageCache.delete(k);
+  }
+  erroredPageCacheKeys.clear();
+  for (const k of Array.from(pageCache.keys())) {
+    if (String(k).startsWith("error::")) {
+      pageCache.delete(k);
+    }
+  }
+  for (const k of erroredLayoutCacheKeys) {
+    layoutCache.delete(k);
+  }
+  erroredLayoutCacheKeys.clear();
 };
 
 const getPagePayload = (route, isPrefetch = false, version = 0) => {
@@ -472,6 +540,9 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
         }
         if (staticExport) {
           return bufferStaticExportResponse(res);
+        }
+        if (res.status >= 500 || res.headers.get("x-dinou-has-error") === "true") {
+          erroredPageCacheKeys.add(url);
         }
         return res;
       }, (err) => {
@@ -561,6 +632,7 @@ const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
             (!res.ok ||
               (res.headers.get("content-type") || "").toLowerCase().includes("text/html"))
           ) {
+            layoutCache.delete(cacheKey);
             return new Promise(() => {});
           }
           if (staticExport) {
@@ -570,6 +642,9 @@ const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
             console.warn(
               `[Dinou Router] Layout ${layoutKey} fetch returned status ${res.status}`
             );
+          }
+          if (res.status >= 500 || res.headers.get("x-dinou-has-error") === "true") {
+            erroredLayoutCacheKeys.add(cacheKey);
           }
           return res;
         },
@@ -638,7 +713,7 @@ const getErrorRSCPayload = (route, error) => {
         return res;
       },
       (err) => {
-        if (isStaticExportUnloading()) {
+        if (isStaticExportUnloading() || isNavigationAbortError(err)) {
           return new Promise(() => {});
         }
         throw err;
@@ -657,6 +732,9 @@ const getErrorRSCPayload = (route, error) => {
 };
 
 const fetchSlotRSC = (slotId, options = {}) => {
+  if (isStaticExportMode() || isStaticExportUnloading()) {
+    return new Promise(() => {});
+  }
   const currentPath =
     (options && options.currentPath) ||
     (typeof window !== "undefined" ? window.location.pathname : "/");
@@ -668,7 +746,15 @@ const fetchSlotRSC = (slotId, options = {}) => {
       headers: {
         "x-dinou-current-path": currentPath,
       },
-    }),
+    }).then(
+      (res) => (isStaticExportUnloading() ? new Promise(() => {}) : res),
+      (err) => {
+        if (isStaticExportUnloading() || isNavigationAbortError(err)) {
+          return new Promise(() => {});
+        }
+        throw err;
+      }
+    ),
     {
       callServer: async (id, args) => {
         const proxy = createServerFunctionProxy(id);
@@ -680,6 +766,9 @@ const fetchSlotRSC = (slotId, options = {}) => {
 
 export const refreshSlot = (slotId, options) => {
   if (typeof window !== "undefined") {
+    if (isStaticExportMode() || isStaticExportUnloading()) {
+      return Promise.resolve();
+    }
     flushPendingSsrStreams();
     const promises = [];
     window.dispatchEvent(
@@ -696,6 +785,7 @@ if (typeof globalThis !== "undefined") {
   globalThis.__DINOU_GET_ERROR_RSC_PAYLOAD__ = getErrorRSCPayload;
   globalThis.__DINOU_FETCH_SLOT__ = fetchSlotRSC;
   globalThis.__DINOU_REFRESH_SLOT__ = refreshSlot;
+  globalThis.__DINOU_CLEAR_ERROR_CACHES__ = clearErroredCaches;
 }
 
 class ErrorBoundary extends Component {
@@ -877,6 +967,7 @@ function Router() {
 
     const routeWithoutHash = finalPath.split("#")[0] || "/";
 
+    clearErroredCaches();
     if (options.fresh) {
       pageCache.delete(routeWithoutHash);
     }
@@ -907,6 +998,8 @@ function Router() {
   const back = () => window.history.back();
   const forward = () => window.history.forward();
   const refresh = useCallback((options = {}) => {
+    initialPageErrorRef.current = null;
+    clearErroredCaches();
     if (typeof window !== "undefined" && window.__DINOU_ACTIVE_LAYOUT__) {
       window.__DINOU_ACTIVE_LAYOUT__ = null;
     }
@@ -1019,6 +1112,7 @@ function Router() {
 
     const onPopState = () => {
       initialPageErrorRef.current = null;
+      clearErroredCaches();
       if (typeof window !== "undefined" && window.__DINOU_ACTIVE_LAYOUT__) {
         window.__DINOU_ACTIVE_LAYOUT__ = null;
       }
@@ -1127,7 +1221,7 @@ function Router() {
       return window.__DINOU_ACTIVE_LAYOUT__;
     }
     return getLayoutKey(cleanRoutePath);
-  }, [cleanRoutePath, route]);
+  }, [cleanRoutePath, route, layoutVersion]);
 
   const pagePromise = useMemo(() => {
     if (initialPageErrorRef.current && route === getCurrentRoute()) {
@@ -1204,6 +1298,9 @@ const onRecoverableError = (error) => {
   if (isStaticExportUnloading()) {
     return;
   }
+  if (isNavigationAbortError(error)) {
+    return;
+  }
   if (
     error?.name === "InvalidStateError" &&
     (error?.message?.includes("Document hidden") || (typeof document !== "undefined" && document.hidden))
@@ -1225,6 +1322,9 @@ const onUncaughtError = (error) => {
   if (isStaticExportUnloading()) {
     return;
   }
+  if (isNavigationAbortError(error)) {
+    return;
+  }
   if (typeof reportError === "function") {
     reportError(error);
   } else {
@@ -1234,6 +1334,9 @@ const onUncaughtError = (error) => {
 
 const onCaughtError = (error) => {
   if (isStaticExportUnloading()) {
+    return;
+  }
+  if (isNavigationAbortError(error)) {
     return;
   }
   console.error(error);

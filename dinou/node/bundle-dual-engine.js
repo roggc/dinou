@@ -260,12 +260,14 @@ export async function bundleDualEngine(options = {}) {
   if (slotChunkId) {
     const slotChunks = isWebpackBuild ? slotEntry?.chunks || [slotChunkId] : "DinouPageSlot";
     const slotBoundaryChunks = isWebpackBuild ? slotEntry?.chunks || [slotChunkId] : "DinouCacheSlotBoundary";
+    const slotErrorResetChunks = isWebpackBuild ? slotEntry?.chunks || [slotChunkId] : "DinouErrorResetWrapper";
     const slotDefaultChunks = isWebpackBuild ? slotEntry?.chunks || [slotChunkId] : "default";
 
     for (const sp of candidateSlotPaths) {
       for (const url of generateAllUrlVariants(sp)) {
         normalizedManifest[`${url}#DinouPageSlot`] = { id: slotChunkId, chunks: slotChunks, name: "DinouPageSlot" };
         normalizedManifest[`${url}#DinouCacheSlotBoundary`] = { id: slotChunkId, chunks: slotBoundaryChunks, name: "DinouCacheSlotBoundary" };
+        normalizedManifest[`${url}#DinouErrorResetWrapper`] = { id: slotChunkId, chunks: slotErrorResetChunks, name: "DinouErrorResetWrapper" };
         normalizedManifest[`${url}#default`] = { id: slotChunkId, chunks: slotDefaultChunks, name: "default" };
         normalizedManifest[url] = { id: slotChunkId, chunks: slotDefaultChunks, name: "default" };
       }
@@ -728,6 +730,8 @@ export function handleRequest(request, platformContext) {
 }
 export { WebResponseBridge, resolvePageFunctionsConfig };
 export { buildStaticPages, getStaticPaths, getStaticLayouts, getStaticMetadata } from "${dinouDirSlash}/core/build-static-pages.js";
+export { revalidatePath, revalidatePage, revalidateLayout, revalidateTag } from "${dinouDirSlash}/core/cache-revalidate.js";
+export { revalidating, regenerating } from "${dinouDirSlash}/core/revalidating.js";
 `;
   const rscEntryPath = path.join(nodeDir, "rsc-entry.mjs");
   fs.writeFileSync(rscEntryPath, rscEntryContent, "utf8");
