@@ -123,15 +123,68 @@ function getContext() {
   return createFallbackServerContext();
 }
 
+const RESERVED_CTX_KEYS = new Set([
+  "req",
+  "res",
+  "env",
+  "ctx",
+  "platformContext",
+  "_markDynamic",
+  "_dynamicState",
+  "_hasRedirected",
+  "_isStaticHtmlRender",
+  "_isPprRuntimeResume",
+  "_isSlotDiscovery",
+  "_slotTags",
+  "_layoutSlotTags",
+  "_pageSlotTags",
+  "_resolvedPageClientJsx",
+  "_resolvedLayoutClientJsx",
+  "_hasResolvedSegments",
+  "_redirectLocation",
+  "_dinouUseIdCount",
+]);
+
+const RESERVED_REQ_KEYS = new Set([
+  "cookies",
+  "headers",
+  "query",
+  "path",
+  "rawPath",
+  "isRscRequest",
+  "url",
+  "method",
+  "env",
+  "ctx",
+]);
+
+function copyCustomContextProperties(source, target) {
+  if (!source || !target) return;
+  for (const key of Object.keys(source)) {
+    if (!RESERVED_CTX_KEYS.has(key)) {
+      target[key] = source[key];
+    }
+  }
+  if (source.req && target.req) {
+    for (const key of Object.keys(source.req)) {
+      if (!RESERVED_REQ_KEYS.has(key)) {
+        target.req[key] = source.req[key];
+      }
+    }
+  }
+}
+
 export {
   requestStorage,
   getContext,
   setCurrentContext,
   getCurrentContext,
+  copyCustomContextProperties,
 };
 export default {
   requestStorage,
   getContext,
   setCurrentContext,
   getCurrentContext,
+  copyCustomContextProperties,
 };

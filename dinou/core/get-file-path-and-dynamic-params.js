@@ -449,6 +449,9 @@ function matchRouteTree(
   }
 
   // Tier 3: Optional single dynamic segment [[param]]
+  // Try consuming 1 segment first; if that fails to match a descendant route (e.g.
+  // `opt/[[locale]]/about/page.tsx` visited as `/opt/about`), backtrack and try omitting
+  // the optional segment (0 segments consumed, paramValue = undefined).
   for (const { targetDir, groupDirs, dirEntries } of chains) {
     for (const entry of dirEntries) {
       if (!isOptionalSingleDynamicDir(entry.name)) continue;
@@ -465,48 +468,72 @@ function matchRouteTree(
         groupDirs
       );
       if (attempt.matched) return attempt.value;
+
+      const omittedParams = {
+        ...dParams,
+        [paramName]: undefined,
+      };
+      const omittedAttempt = runCandidateBranch(
+        path.join(targetDir, entry.name),
+        index,
+        omittedParams,
+        groupDirs,
+        index
+      );
+      if (omittedAttempt.matched) return omittedAttempt.value;
     }
   }
 
   // Tier 4: Required catch-all segment [...param]
+  // Greedy longest-first, backtracking down to 1 consumed segment so child routes nested
+  // under a catch-all layout (e.g. `ca/[...section]/view/page.tsx` at `/ca/guides/auth/view`)
+  // can match after the catch-all prefix.
   for (const { targetDir, groupDirs, dirEntries } of chains) {
     for (const entry of dirEntries) {
       if (!isCatchAllDir(entry.name)) continue;
       const paramName = entry.name.slice(4, -1);
-      const paramValue = reqSegments.slice(index).map(safeDecode);
-      const newParams = {
-        ...dParams,
-        [paramName]: paramValue,
-      };
-      const attempt = runCandidateBranch(
-        path.join(targetDir, entry.name),
-        reqSegments.length,
-        newParams,
-        groupDirs,
-        index + 1
-      );
-      if (attempt.matched) return attempt.value;
+      for (let end = reqSegments.length; end >= index + 1; end--) {
+        const paramValue = reqSegments.slice(index, end).map(safeDecode);
+        const newParams = {
+          ...dParams,
+          [paramName]: paramValue,
+        };
+        const attempt = runCandidateBranch(
+          path.join(targetDir, entry.name),
+          end,
+          newParams,
+          groupDirs,
+          index + 1
+        );
+        if (attempt.matched) return attempt.value;
+      }
     }
   }
 
   // Tier 5: Optional catch-all segment [[...param]]
+  // Greedy longest-first, backtracking all the way down to 0 consumed segments (`[]`) so
+  // child routes nested under an optional catch-all layout (e.g. `oca/[[...seg]]/doc/page.tsx`
+  // at `/oca/doc` and `/oca/v1/api/doc`) resolve cleanly.
   for (const { targetDir, groupDirs, dirEntries } of chains) {
     for (const entry of dirEntries) {
       if (!isOptionalCatchAllDir(entry.name)) continue;
       const paramName = entry.name.slice(5, -2);
-      const paramValue = reqSegments.slice(index).map(safeDecode);
-      const newParams = {
-        ...dParams,
-        [paramName]: paramValue,
-      };
-      const attempt = runCandidateBranch(
-        path.join(targetDir, entry.name),
-        reqSegments.length,
-        newParams,
-        groupDirs,
-        index + 1
-      );
-      if (attempt.matched) return attempt.value;
+      for (let end = reqSegments.length; end >= index; end--) {
+        const paramValue =
+          end > index ? reqSegments.slice(index, end).map(safeDecode) : [];
+        const newParams = {
+          ...dParams,
+          [paramName]: paramValue,
+        };
+        const attempt = runCandidateBranch(
+          path.join(targetDir, entry.name),
+          end,
+          newParams,
+          groupDirs,
+          end > index ? index + 1 : index
+        );
+        if (attempt.matched) return attempt.value;
+      }
     }
   }
 
@@ -645,9 +672,203 @@ function getFilePathAndDynamicParams(
   );
 }
 
+function getLayoutsForLayoutKey(
+  reqSegments,
+  query,
+  srcFolder,
+  possibleExtensions = [".tsx", ".ts", ".jsx", ".js", ".mjs"]
+) {
+  const decodedSegs = (reqSegments || []).map((s) =>
+    s === undefined || s === null ? "" : safeDecode(String(s))
+  );
+
+  function walk(dir, index, dParams, acc) {
+    const nextAcc = [...acc];
+    const cand = findCandidateFile(dir, "layout", true, possibleExtensions);
+    if (cand) {
+      const slots = getSlots(dir, decodedSegs, query, dParams);
+      nextAcc.push([cand, dParams, slots]);
+    }
+
+    if (index >= decodedSegs.length) {
+      return { matched: true, layouts: nextAcc, leafHasLayout: Boolean(cand) };
+    }
+
+    const seg = decodedSegs[index];
+    const entries = sortDirEntries(readdirSync(dir, { withFileTypes: true })).filter(
+      (e) => e.isDirectory() && !e.name.startsWith("_") && !e.name.startsWith("@")
+    );
+
+    if (isGroupDir(seg)) {
+      const exactGroup = entries.find((e) => e.name === seg);
+      if (exactGroup) {
+        return walk(path.join(dir, exactGroup.name), index + 1, dParams, nextAcc);
+      }
+      return { matched: false, layouts: nextAcc, leafHasLayout: false };
+    }
+
+    if (isOptionalCatchAllDir(seg)) {
+      const exactOptCa = entries.find((e) => e.name === seg);
+      if (exactOptCa) {
+        const paramName = seg.slice(5, -2);
+        return walk(
+          path.join(dir, exactOptCa.name),
+          index + 1,
+          { ...dParams, [paramName]: [] },
+          nextAcc
+        );
+      }
+      return { matched: false, layouts: nextAcc, leafHasLayout: false };
+    }
+
+    if (isOptionalSingleDynamicDir(seg)) {
+      const exactOptSingle = entries.find((e) => e.name === seg);
+      if (exactOptSingle) {
+        const paramName = seg.slice(2, -2);
+        return walk(
+          path.join(dir, exactOptSingle.name),
+          index + 1,
+          { ...dParams, [paramName]: undefined },
+          nextAcc
+        );
+      }
+      return { matched: false, layouts: nextAcc, leafHasLayout: false };
+    }
+
+    const isRouterSyntax =
+      (seg.startsWith("[") && seg.endsWith("]")) ||
+      seg.startsWith("@") ||
+      seg.startsWith("_");
+
+    // Tier 1: Exact static directory
+    if (!isRouterSyntax) {
+      const staticDir = entries.find(
+        (e) =>
+          e.name === seg &&
+          !isGroupDir(e.name) &&
+          !isSingleDynamicDir(e.name) &&
+          !isOptionalSingleDynamicDir(e.name) &&
+          !isCatchAllDir(e.name) &&
+          !isOptionalCatchAllDir(e.name)
+      );
+      if (staticDir) {
+        const res = walk(path.join(dir, staticDir.name), index + 1, dParams, nextAcc);
+        if (res.matched) return res;
+      }
+    }
+
+    // Tier 2: Required single dynamic [param]
+    for (const entry of entries) {
+      if (!isSingleDynamicDir(entry.name)) continue;
+      const paramName = entry.name.slice(1, -1);
+      const res = walk(
+        path.join(dir, entry.name),
+        index + 1,
+        { ...dParams, [paramName]: seg },
+        nextAcc
+      );
+      if (res.matched) return res;
+    }
+
+    // Tier 3: Optional single dynamic [[param]]
+    for (const entry of entries) {
+      if (!isOptionalSingleDynamicDir(entry.name)) continue;
+      const paramName = entry.name.slice(2, -2);
+      const res = walk(
+        path.join(dir, entry.name),
+        index + 1,
+        { ...dParams, [paramName]: seg },
+        nextAcc
+      );
+      if (res.matched) return res;
+
+      const omittedRes = walk(
+        path.join(dir, entry.name),
+        index,
+        { ...dParams, [paramName]: undefined },
+        nextAcc
+      );
+      if (omittedRes.matched) return omittedRes;
+    }
+
+    // Tier 4: Required catch-all [...param]
+    for (const entry of entries) {
+      if (!isCatchAllDir(entry.name)) continue;
+      const paramName = entry.name.slice(4, -1);
+      const remaining = decodedSegs.slice(index);
+      const groupIdx = remaining.findIndex((s) => isGroupDir(s));
+      const maxSliceEnd = groupIdx === -1 ? remaining.length : groupIdx;
+      for (let sliceEnd = maxSliceEnd; sliceEnd >= 1; sliceEnd--) {
+        const paramVals = remaining.slice(0, sliceEnd);
+        const res = walk(
+          path.join(dir, entry.name),
+          index + sliceEnd,
+          { ...dParams, [paramName]: paramVals },
+          nextAcc
+        );
+        if (res.matched) return res;
+      }
+    }
+
+    // Tier 5: Optional catch-all [[...param]]
+    for (const entry of entries) {
+      if (!isOptionalCatchAllDir(entry.name)) continue;
+      const paramName = entry.name.slice(5, -2);
+      const remaining = decodedSegs.slice(index);
+      const groupIdx = remaining.findIndex((s) => isGroupDir(s));
+      const maxSliceEnd = groupIdx === -1 ? remaining.length : groupIdx;
+      for (let sliceEnd = maxSliceEnd; sliceEnd >= 0; sliceEnd--) {
+        const paramVals = remaining.slice(0, sliceEnd);
+        const res = walk(
+          path.join(dir, entry.name),
+          index + sliceEnd,
+          { ...dParams, [paramName]: paramVals },
+          nextAcc
+        );
+        if (res.matched) return res;
+      }
+    }
+
+    return { matched: false, layouts: nextAcc, leafHasLayout: false };
+  }
+
+  const exactRes = walk(srcFolder, 0, {}, []);
+  if (exactRes.matched && exactRes.leafHasLayout) {
+    return exactRes.layouts;
+  }
+
+  const hasExplicitKeySyntax = decodedSegs.some(
+    (s) =>
+      isGroupDir(s) ||
+      isOptionalCatchAllDir(s) ||
+      isOptionalSingleDynamicDir(s)
+  );
+  if (hasExplicitKeySyntax) {
+    return exactRes.matched ? exactRes.layouts : [];
+  }
+
+  return getFilePathAndDynamicParams(
+    reqSegments,
+    query,
+    srcFolder,
+    "layout",
+    true,
+    false,
+    undefined,
+    0,
+    {},
+    true,
+    [],
+    { value: false },
+    possibleExtensions
+  );
+}
+
 export {
   getFilePathAndDynamicParams,
+  getLayoutsForLayoutKey,
 };
 export default {
   getFilePathAndDynamicParams,
+  getLayoutsForLayoutKey,
 };

@@ -4,6 +4,7 @@ import { existsSync } from "./vfs.js";
 import React from "react";
 import {
   getFilePathAndDynamicParams,
+  getLayoutsForLayoutKey,
 } from "./get-file-path-and-dynamic-params.js";
 import importModule from "./import-module.js";
 import {
@@ -84,7 +85,10 @@ async function getJSX(
     reqSegments,
     query || {},
     srcFolder,
-    { ignoreNoLayout: options?.segment === "layout" },
+    {
+      ignoreNoLayout: options?.segment === "layout",
+      exactLayoutKey: options?.segment === "layout",
+    },
   );
   const layoutScopeMap = new Map();
   if (Array.isArray(activeChain)) {
@@ -333,18 +337,21 @@ async function getJSX(
     return jsx;
   }
 
-  const layouts = getFilePathAndDynamicParams(
-    reqSegments,
-    query,
-    srcFolder,
-    "layout",
-    true,
-    false,
-    undefined,
-    0,
-    {},
-    true,
-  );
+  const layouts =
+    options?.segment === "layout"
+      ? getLayoutsForLayoutKey(reqSegments, query, srcFolder)
+      : getFilePathAndDynamicParams(
+          reqSegments,
+          query,
+          srcFolder,
+          "layout",
+          true,
+          false,
+          undefined,
+          0,
+          {},
+          true,
+        );
 
   if (layouts && Array.isArray(layouts)) {
     let index = 0;

@@ -267,9 +267,12 @@ export function useSearchParams() {
   // ⚠️ CRITICAL CHANGE: We extract .url
   const fullRoute = typeof context === "string" ? context : context?.url;
 
-  if (typeof fullRoute === "string" && fullRoute.includes("?")) {
-    const searchPart = (fullRoute.split("?")[1] || "").split("#")[0];
-    return new URLSearchParams(searchPart);
+  if (typeof fullRoute === "string" && fullRoute.length > 0) {
+    if (fullRoute.includes("?")) {
+      const searchPart = (fullRoute.split("?")[1] || "").split("#")[0];
+      return new URLSearchParams(searchPart);
+    }
+    return new URLSearchParams();
   }
 
   if (typeof window !== "undefined" && window.location && window.location.search) {

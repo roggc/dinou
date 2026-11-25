@@ -51,6 +51,13 @@ function getEdgeRenderer() {
   return edgeRender;
 }
 
+function shouldUseWebStreamRenderer(options = {}) {
+  return (
+    isEdgeRuntime(options) ||
+    Boolean(typeof globalThis !== "undefined" && globalThis.__DINOU_EDGE_RENDERER__)
+  );
+}
+
 /**
  * Renders JSX / Model to an RSC Stream based on runtime environment.
  * @param {*} model The React element tree or value to render
@@ -61,7 +68,7 @@ function getEdgeRenderer() {
 function renderRSCStream(model, manifest, options = {}) {
   ensureServerHooksPatched();
 
-  if (isEdgeRuntime(options)) {
+  if (shouldUseWebStreamRenderer(options)) {
     const edge = getEdgeRenderer();
     const clientManifest =
       manifest ||
@@ -85,7 +92,7 @@ function renderRSCStream(model, manifest, options = {}) {
  * @param {object} options
  */
 function pipeRSC(model, bridge, manifest, options = {}) {
-  if (isEdgeRuntime(options)) {
+  if (shouldUseWebStreamRenderer(options)) {
     const stream = renderRSCStream(model, manifest, options);
     bridge.setEdgeStream(stream);
     return;

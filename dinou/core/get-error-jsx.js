@@ -1,4 +1,6 @@
 import path from "node:path";
+import { pathToFileURL, fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { existsSync } from "./vfs.js";
 import React from "react";
 import {
@@ -7,6 +9,58 @@ import {
 import importModule from "./import-module.js";
 import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
 import { getLayoutProps } from "./layout-functions.js";
+import { DinouErrorResetWrapper as RawDinouErrorResetWrapper } from "./slot.js";
+
+let _requireErr = null;
+let _currentErrDir = ".";
+try {
+  _requireErr = createRequire(import.meta.url);
+  _currentErrDir = path.dirname(fileURLToPath(import.meta.url));
+} catch (e) {}
+
+let _DinouErrorResetWrapper = null;
+function getErrorResetWrapper() {
+  if (!_DinouErrorResetWrapper) {
+    let Wrapper = RawDinouErrorResetWrapper;
+    if (
+      typeof Wrapper === "function" &&
+      Wrapper.$$typeof !== Symbol.for("react.client.reference")
+    ) {
+      const slotPath = path.resolve(_currentErrDir, "slot.js");
+      const fileUrl = pathToFileURL(slotPath).href;
+      let regFn = null;
+      if (
+        typeof globalThis !== "undefined" &&
+        globalThis.__DINOU_EDGE_RENDERER__ &&
+        typeof globalThis.__DINOU_EDGE_RENDERER__.registerClientReference === "function"
+      ) {
+        regFn = globalThis.__DINOU_EDGE_RENDERER__.registerClientReference;
+      }
+      if (!regFn && _requireErr) {
+        try {
+          const pkg = _requireErr("react-server-dom-webpack/server");
+          regFn = pkg.registerClientReference;
+        } catch (e) {}
+      }
+      if (!regFn && _requireErr) {
+        try {
+          const pkg = _requireErr("@roggc/react-server-dom-esm/server.node");
+          regFn = pkg.registerClientReference;
+        } catch (e) {}
+      }
+      if (regFn) {
+        Wrapper = regFn(Wrapper, fileUrl, "DinouErrorResetWrapper");
+      } else {
+        Object.defineProperties(Wrapper, {
+          $$typeof: { value: Symbol.for("react.client.reference") },
+          $$id: { value: fileUrl + "#DinouErrorResetWrapper" },
+        });
+      }
+    }
+    _DinouErrorResetWrapper = Wrapper;
+  }
+  return _DinouErrorResetWrapper;
+}
 
 function cleanErrorStack(stack) {
   if (!stack || typeof stack !== "string") return "";
@@ -170,10 +224,12 @@ async function getErrorJSX(reqPath, query, error, isDevelopment = false, options
       name: error?.name || "Error",
       stack: isDevelopment ? error?.stack : undefined,
     };
-    jsx = React.createElement(Page, {
+    const rawErrorEl = React.createElement(Page, {
       params: dynamicParams ?? {},
       error: sanitizedError,
     });
+    const ResetWrapper = getErrorResetWrapper();
+    jsx = ResetWrapper ? React.createElement(ResetWrapper, null, rawErrorEl) : rawErrorEl;
   }
 
   // Segmented handling for Page: If only the error for the page slot is requested

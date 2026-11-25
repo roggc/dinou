@@ -275,18 +275,162 @@ class CloudflareKVStorage extends StorageAdapter {
     return String(key).replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
   }
 
+  _tombstoneKey(cleanKey) {
+    return `__tombstone__:${cleanKey}`;
+  }
+
+  _tagInvKey(tag) {
+    return `__tag_inv__:${String(tag)}`;
+  }
+
+  _companionKeys(cleanKey) {
+    const companions = [];
+    if (cleanKey.endsWith("/index.html")) {
+      companions.push(cleanKey.slice(0, -11));
+    } else if (cleanKey === "index.html") {
+      companions.push("");
+    } else if (!cleanKey.includes(".")) {
+      companions.push(cleanKey ? `${cleanKey}/index.html` : "index.html");
+    }
+    if (cleanKey.endsWith("/slot.json")) {
+      companions.push(cleanKey.slice(0, -10) + "/slot.metadata.json");
+    } else if (cleanKey.endsWith("/slot.metadata.json")) {
+      companions.push(cleanKey.slice(0, -19) + "/slot.json");
+    }
+    return companions;
+  }
+
+  _companionMetaKey(cleanKey) {
+    if (cleanKey.endsWith("metadata.json")) return null;
+    if (!cleanKey) return "metadata.json";
+    if (!cleanKey.includes(".")) {
+      return `${cleanKey}/metadata.json`;
+    }
+    const isLayoutKey =
+      cleanKey.endsWith("layout.rsc") ||
+      cleanKey.endsWith("layout._old.rsc") ||
+      cleanKey.endsWith("shell.layout.json") ||
+      cleanKey.endsWith("shell.layout.own.json") ||
+      cleanKey.endsWith("shell.layout._old.json");
+    const isSlotKey =
+      cleanKey.startsWith("slots/") || cleanKey.endsWith("/slot.json");
+    const dirPrefix = cleanKey.includes("/")
+      ? cleanKey.slice(0, cleanKey.lastIndexOf("/"))
+      : "";
+    const metaFileName = isLayoutKey
+      ? "layout.metadata.json"
+      : isSlotKey
+      ? "slot.metadata.json"
+      : "metadata.json";
+    return dirPrefix ? `${dirPrefix}/${metaFileName}` : metaFileName;
+  }
+
+  async _safeKvPut(kv, key, content, metadata = null) {
+    if (!key) return false;
+    if (!metadata) {
+      await kv.put(key, content);
+      return false;
+    }
+    let metaJson = "";
+    try {
+      metaJson = JSON.stringify(metadata);
+    } catch (e) {
+      await kv.put(key, content);
+      return false;
+    }
+    const metaBytes =
+      typeof TextEncoder !== "undefined"
+        ? new TextEncoder().encode(metaJson).byteLength
+        : metaJson.length;
+    if (metaBytes <= 1024) {
+      try {
+        await kv.put(key, content, { metadata });
+        return false;
+      } catch (e) {
+        if (!/metadata|413|1024/i.test(String(e?.message || e))) {
+          throw e;
+        }
+      }
+    }
+    await kv.put(key, content);
+    return true;
+  }
+
+  markTagInvalidated(tag) {
+    super.markTagInvalidated(tag);
+    const kv = this._getKv();
+    if (tag && kv && typeof kv.put === "function") {
+      const ts = String(this.getTagInvalidatedAt(tag) || Date.now());
+      Promise.resolve(kv.put(this._tagInvKey(tag), ts)).catch(() => {});
+    }
+  }
+
+  async markTagInvalidatedAsync(tag) {
+    super.markTagInvalidated(tag);
+    const kv = this._getKv();
+    if (tag && kv && typeof kv.put === "function") {
+      const ts = String(this.getTagInvalidatedAt(tag) || Date.now());
+      try {
+        await kv.put(this._tagInvKey(tag), ts);
+      } catch (e) {}
+    }
+  }
+
+  async getTagInvalidatedAtAsync(tag) {
+    const localTs = this.getTagInvalidatedAt(tag);
+    const kv = this._getKv();
+    if (!tag || !kv || typeof kv.get !== "function") {
+      return localTs;
+    }
+    try {
+      const remoteRaw = await kv.get(this._tagInvKey(tag));
+      const remoteTs = remoteRaw ? Number(remoteRaw) || 0 : 0;
+      return Math.max(localTs, remoteTs);
+    } catch (e) {
+      return localTs;
+    }
+  }
+
+  async isKeyDeleted(key) {
+    if (this.isDeleted(key)) return true;
+    const kv = this._getKv();
+    if (!kv || typeof kv.get !== "function") return false;
+    const cleanKey = this._cleanKey(key);
+    try {
+      const val = await kv.get(this._tombstoneKey(cleanKey));
+      return val !== null && val !== undefined;
+    } catch (e) {
+      return false;
+    }
+  }
+
   async get(key) {
     const kv = this._getKv();
     if (!kv) return null;
     const cleanKey = this._cleanKey(key);
-    let res = await kv.getWithMetadata(cleanKey, "text");
+    let matchedKey = cleanKey;
+    let res = null;
+    if (cleanKey) {
+      res = await kv.getWithMetadata(cleanKey, "text");
+    }
     if ((!res || res.value === null) && !cleanKey.includes(".")) {
-      res = await kv.getWithMetadata(cleanKey ? `${cleanKey}/index.html` : "index.html", "text");
+      matchedKey = cleanKey ? `${cleanKey}/index.html` : "index.html";
+      res = await kv.getWithMetadata(matchedKey, "text");
     }
     if (!res || res.value === null) return null;
+    let metadata = res.metadata || null;
+    if (!metadata) {
+      const compMetaKey = this._companionMetaKey(matchedKey);
+      if (compMetaKey && typeof kv.get === "function") {
+        try {
+          const rawMeta = await kv.get(compMetaKey);
+          if (rawMeta) metadata = JSON.parse(rawMeta);
+        } catch (e) {}
+      }
+    }
     return {
       content: res.value,
-      metadata: res.metadata || null,
+      metadata,
     };
   }
 
@@ -295,13 +439,32 @@ class CloudflareKVStorage extends StorageAdapter {
     const kv = this._getKv();
     if (!kv) return;
     const cleanKey = this._cleanKey(key);
-    const options = metadata ? { metadata } : undefined;
-    await kv.put(cleanKey, content, options);
+    const primaryKey = cleanKey || "index.html";
+    const overflowed = await this._safeKvPut(kv, primaryKey, content, metadata);
+    const tombstonesToClear = [
+      this._tombstoneKey(cleanKey),
+      ...(primaryKey !== cleanKey ? [this._tombstoneKey(primaryKey)] : []),
+      ...this._companionKeys(cleanKey).map((tk) => this._tombstoneKey(tk)),
+    ];
     if (cleanKey.endsWith("/index.html")) {
       const folderKey = cleanKey.slice(0, -11);
-      await kv.put(folderKey, content, options);
-    } else if (cleanKey === "index.html") {
-      await kv.put("", content, options);
+      if (folderKey) {
+        await this._safeKvPut(kv, folderKey, content, metadata);
+      }
+    }
+    if (overflowed && metadata) {
+      const compMetaKey = this._companionMetaKey(primaryKey);
+      if (compMetaKey) {
+        try {
+          await kv.put(compMetaKey, JSON.stringify(metadata));
+          tombstonesToClear.push(this._tombstoneKey(compMetaKey));
+        } catch (e) {}
+      }
+    }
+    if (typeof kv.delete === "function") {
+      await Promise.all(
+        tombstonesToClear.map((tk) => Promise.resolve(kv.delete(tk)).catch(() => {}))
+      );
     }
   }
 
@@ -309,8 +472,10 @@ class CloudflareKVStorage extends StorageAdapter {
     const kv = this._getKv();
     if (!kv) return false;
     const cleanKey = this._cleanKey(key);
-    const val = await kv.get(cleanKey);
-    if (val !== null) return true;
+    if (cleanKey) {
+      const val = await kv.get(cleanKey);
+      if (val !== null) return true;
+    }
     if (!cleanKey.includes(".")) {
       const fallbackVal = await kv.get(
         cleanKey ? `${cleanKey}/index.html` : "index.html"
@@ -325,19 +490,21 @@ class CloudflareKVStorage extends StorageAdapter {
     const kv = this._getKv();
     if (!kv) return;
     const cleanKey = this._cleanKey(key);
-    await kv.delete(cleanKey);
-    if (cleanKey.endsWith("/index.html")) {
-      await kv.delete(cleanKey.slice(0, -11));
-    } else if (cleanKey === "index.html") {
-      await kv.delete("");
-    } else if (!cleanKey.includes(".")) {
-      await kv.delete(cleanKey ? `${cleanKey}/index.html` : "index.html");
-    }
-    if (cleanKey.endsWith("/slot.json")) {
-      await kv.delete(cleanKey.slice(0, -10) + "/slot.metadata.json");
-    } else if (cleanKey.endsWith("/slot.metadata.json")) {
-      await kv.delete(cleanKey.slice(0, -19) + "/slot.json");
-    }
+    const targets = [cleanKey, ...this._companionKeys(cleanKey)];
+    await Promise.all(
+      targets.map(async (tk) => {
+        if (tk) {
+          try {
+            await kv.delete(tk);
+          } catch (e) {}
+        }
+        try {
+          if (typeof kv.put === "function") {
+            await kv.put(this._tombstoneKey(tk), String(Date.now()));
+          }
+        } catch (e) {}
+      })
+    );
   }
 
   async keys(prefix = "") {
@@ -356,7 +523,12 @@ class CloudflareKVStorage extends StorageAdapter {
         );
         if (res && Array.isArray(res.keys)) {
           for (const k of res.keys) {
-            if (k && typeof k.name === "string") {
+            if (
+              k &&
+              typeof k.name === "string" &&
+              !k.name.startsWith("__tombstone__:") &&
+              !k.name.startsWith("__tag_inv__:")
+            ) {
               results.push(k.name);
             }
           }
@@ -706,11 +878,20 @@ class RedisStorage extends StorageAdapter {
 
 /**
  * Deno KV Storage Adapter for Deno Deploy & Edge.
+ * Shares ISR / ISG cache, chunked >16KB payloads, invalidation tombstones,
+ * and tag invalidation timestamps across multiple Deno Deploy isolates.
  */
 class DenoKVStorage extends StorageAdapter {
-  constructor(kvInstance = null) {
+  constructor(kvInstance = null, options = null) {
     super();
     this.kv = kvInstance;
+    if (
+      options &&
+      typeof options === "object" &&
+      typeof options.hydrateFromDisk === "boolean"
+    ) {
+      this.hydrateFromDisk = options.hydrateFromDisk;
+    }
   }
 
   async _getKV() {
@@ -738,6 +919,85 @@ class DenoKVStorage extends StorageAdapter {
       .replace(/\/+$/, "");
   }
 
+  _tombstoneKey(cleanKey) {
+    return ["dinou_cache_tombstone", cleanKey];
+  }
+
+  _tagInvKey(tag) {
+    return ["dinou_cache_tag_inv", String(tag)];
+  }
+
+  _companionKeys(cleanKey) {
+    const companions = [];
+    if (cleanKey.endsWith("/index.html")) {
+      companions.push(cleanKey.slice(0, -11));
+    } else if (cleanKey === "index.html") {
+      companions.push("");
+    } else if (!cleanKey.includes(".")) {
+      companions.push(cleanKey ? `${cleanKey}/index.html` : "index.html");
+    }
+    if (cleanKey.endsWith("/slot.json")) {
+      companions.push(cleanKey.slice(0, -10) + "/slot.metadata.json");
+    } else if (cleanKey.endsWith("/slot.metadata.json")) {
+      companions.push(cleanKey.slice(0, -19) + "/slot.json");
+    }
+    return companions;
+  }
+
+  markTagInvalidated(tag) {
+    super.markTagInvalidated(tag);
+    if (!tag) return;
+    const ts = String(this.getTagInvalidatedAt(tag) || Date.now());
+    this._getKV()
+      .then((kv) => {
+        if (kv && typeof kv.set === "function") {
+          return kv.set(this._tagInvKey(tag), ts);
+        }
+      })
+      .catch(() => {});
+  }
+
+  async markTagInvalidatedAsync(tag) {
+    super.markTagInvalidated(tag);
+    if (!tag) return;
+    const kv = await this._getKV();
+    if (!kv || typeof kv.set !== "function") return;
+    const ts = String(this.getTagInvalidatedAt(tag) || Date.now());
+    try {
+      await kv.set(this._tagInvKey(tag), ts);
+    } catch (e) {}
+  }
+
+  async getTagInvalidatedAtAsync(tag) {
+    const localTs = this.getTagInvalidatedAt(tag);
+    if (!tag) return localTs;
+    const kv = await this._getKV();
+    if (!kv || typeof kv.get !== "function") return localTs;
+    try {
+      const res = await kv.get(this._tagInvKey(tag));
+      const remoteTs =
+        res && res.value !== null && res.value !== undefined
+          ? Number(res.value) || 0
+          : 0;
+      return Math.max(localTs, remoteTs);
+    } catch (e) {
+      return localTs;
+    }
+  }
+
+  async isKeyDeleted(key) {
+    if (this.isDeleted(key)) return true;
+    const kv = await this._getKV();
+    if (!kv || typeof kv.get !== "function") return false;
+    const cleanKey = this._cleanKey(key);
+    try {
+      const res = await kv.get(this._tombstoneKey(cleanKey));
+      return Boolean(res && res.value !== null && res.value !== undefined);
+    } catch (e) {
+      return false;
+    }
+  }
+
   async get(key) {
     const kv = await this._getKV();
     if (!kv) return null;
@@ -751,16 +1011,19 @@ class DenoKVStorage extends StorageAdapter {
     if (!res || res.value === null) return null;
     const val = res.value;
     if (val && val.chunked) {
+      const totalChunks = Number(val.totalChunks) || 0;
+      if (totalChunks <= 0) return null;
       const chunkPromises = [];
-      for (let i = 0; i < val.totalChunks; i++) {
+      for (let i = 0; i < totalChunks; i++) {
         chunkPromises.push(kv.get(["dinou_cache_chunk", matchedKey, i]));
       }
       const chunkResults = await Promise.all(chunkPromises);
       let fullContent = "";
       for (const chunkRes of chunkResults) {
-        if (chunkRes && typeof chunkRes.value === "string") {
-          fullContent += chunkRes.value;
+        if (!chunkRes || typeof chunkRes.value !== "string") {
+          return null;
         }
+        fullContent += chunkRes.value;
       }
       return {
         content: fullContent,
@@ -781,35 +1044,87 @@ class DenoKVStorage extends StorageAdapter {
     const KV_CHUNK_SIZE = 16384;
 
     const writeKey = async (targetKey) => {
-      if (typeof content === "string" && content.length > KV_CHUNK_SIZE) {
-        const totalChunks = Math.ceil(content.length / KV_CHUNK_SIZE);
-        const atomic = kv.atomic();
-        atomic.set(["dinou_cache", targetKey], {
-          chunked: true,
-          totalChunks,
-          metadata,
-        });
-        for (let i = 0; i < totalChunks; i++) {
-          const chunk = content.slice(i * KV_CHUNK_SIZE, (i + 1) * KV_CHUNK_SIZE);
-          atomic.set(["dinou_cache_chunk", targetKey, i], chunk);
+      let prevChunks = 0;
+      try {
+        const prev = await kv.get(["dinou_cache", targetKey]);
+        if (prev && prev.value && prev.value.chunked) {
+          prevChunks = Number(prev.value.totalChunks) || 0;
         }
+      } catch (e) {}
+
+      const isChunked = typeof content === "string" && content.length > KV_CHUNK_SIZE;
+      const totalChunks = isChunked ? Math.ceil(content.length / KV_CHUNK_SIZE) : 0;
+
+      if (typeof kv.atomic === "function") {
+        const atomic = kv.atomic();
+        if (isChunked) {
+          atomic.set(["dinou_cache", targetKey], {
+            chunked: true,
+            totalChunks,
+            metadata,
+          });
+          for (let i = 0; i < totalChunks; i++) {
+            const chunk = content.slice(i * KV_CHUNK_SIZE, (i + 1) * KV_CHUNK_SIZE);
+            atomic.set(["dinou_cache_chunk", targetKey, i], chunk);
+          }
+        } else {
+          atomic.set(["dinou_cache", targetKey], {
+            chunked: false,
+            content,
+            metadata,
+          });
+        }
+        for (let i = totalChunks; i < prevChunks; i++) {
+          atomic.delete(["dinou_cache_chunk", targetKey, i]);
+        }
+        atomic.delete(this._tombstoneKey(targetKey));
         await atomic.commit();
       } else {
-        await kv.set(["dinou_cache", targetKey], {
-          chunked: false,
-          content,
-          metadata,
-        });
+        if (isChunked) {
+          for (let i = 0; i < totalChunks; i++) {
+            const chunk = content.slice(i * KV_CHUNK_SIZE, (i + 1) * KV_CHUNK_SIZE);
+            await kv.set(["dinou_cache_chunk", targetKey, i], chunk);
+          }
+          await kv.set(["dinou_cache", targetKey], {
+            chunked: true,
+            totalChunks,
+            metadata,
+          });
+        } else {
+          await kv.set(["dinou_cache", targetKey], {
+            chunked: false,
+            content,
+            metadata,
+          });
+        }
+        for (let i = totalChunks; i < prevChunks; i++) {
+          await kv.delete(["dinou_cache_chunk", targetKey, i]);
+        }
+        await kv.delete(this._tombstoneKey(targetKey));
       }
     };
 
+    const writtenKeys = new Set([cleanKey]);
     await writeKey(cleanKey);
 
     if (cleanKey.endsWith("/index.html")) {
       const folderKey = cleanKey.slice(0, -11);
+      writtenKeys.add(folderKey);
       await writeKey(folderKey);
     } else if (cleanKey === "index.html") {
+      writtenKeys.add("");
       await writeKey("");
+    }
+
+    const extraTombstonesToClear = this._companionKeys(cleanKey).filter(
+      (tk) => !writtenKeys.has(tk)
+    );
+    if (extraTombstonesToClear.length > 0 && typeof kv.delete === "function") {
+      await Promise.all(
+        extraTombstonesToClear.map((tk) =>
+          Promise.resolve(kv.delete(this._tombstoneKey(tk))).catch(() => {})
+        )
+      );
     }
   }
 
@@ -821,7 +1136,7 @@ class DenoKVStorage extends StorageAdapter {
     if (res && res.value !== null) return true;
     if (!cleanKey.includes(".")) {
       const fallbackRes = await kv.get(["dinou_cache", cleanKey ? `${cleanKey}/index.html` : "index.html"]);
-      return fallbackRes && fallbackRes.value !== null;
+      return Boolean(fallbackRes && fallbackRes.value !== null);
     }
     return false;
   }
@@ -831,49 +1146,57 @@ class DenoKVStorage extends StorageAdapter {
     const kv = await this._getKV();
     if (!kv) return;
     const cleanKey = this._cleanKey(key);
+    const ts = String(Date.now());
+    const targets = Array.from(new Set([cleanKey, ...this._companionKeys(cleanKey)]));
 
     const delKey = async (targetKey) => {
-      const res = await kv.get(["dinou_cache", targetKey]);
-      if (res && res.value && res.value.chunked) {
+      let prevChunks = 0;
+      try {
+        const res = await kv.get(["dinou_cache", targetKey]);
+        if (res && res.value && res.value.chunked) {
+          prevChunks = Number(res.value.totalChunks) || 0;
+        }
+      } catch (e) {}
+
+      if (typeof kv.atomic === "function") {
         const atomic = kv.atomic();
-        for (let i = 0; i < res.value.totalChunks; i++) {
+        for (let i = 0; i < prevChunks; i++) {
           atomic.delete(["dinou_cache_chunk", targetKey, i]);
         }
         atomic.delete(["dinou_cache", targetKey]);
+        atomic.set(this._tombstoneKey(targetKey), ts);
         await atomic.commit();
       } else {
+        for (let i = 0; i < prevChunks; i++) {
+          await kv.delete(["dinou_cache_chunk", targetKey, i]);
+        }
         await kv.delete(["dinou_cache", targetKey]);
+        if (typeof kv.set === "function") {
+          await kv.set(this._tombstoneKey(targetKey), ts);
+        }
       }
     };
 
-    await delKey(cleanKey);
-
-    if (cleanKey.endsWith("/index.html")) {
-      const folderKey = cleanKey.slice(0, -11);
-      await delKey(folderKey);
-    } else if (cleanKey === "index.html") {
-      await delKey("");
-    } else if (!cleanKey.includes(".")) {
-      await delKey(cleanKey ? `${cleanKey}/index.html` : "index.html");
-    }
-
-    if (cleanKey.endsWith("/slot.json")) {
-      await delKey(cleanKey.slice(0, -10) + "/slot.metadata.json");
-    } else if (cleanKey.endsWith("/slot.metadata.json")) {
-      await delKey(cleanKey.slice(0, -19) + "/slot.json");
-    }
+    await Promise.all(targets.map((tk) => delKey(tk)));
   }
 
   async keys(prefix = "") {
     const kv = await this._getKV();
     if (!kv) return [];
+    const normPrefix =
+      !prefix || prefix === "dinou_cache"
+        ? ""
+        : String(prefix).replace(/\\/g, "/").replace(/^\/+/, "");
     try {
       const entries = kv.list({ prefix: ["dinou_cache"] });
       const result = [];
       for await (const entry of entries) {
         if (entry.key && entry.key.length >= 2 && typeof entry.key[1] === "string") {
           const k = entry.key[1];
-          if (!prefix || prefix === "dinou_cache" || k.startsWith(prefix)) {
+          if (k.startsWith("__tombstone__:") || k.startsWith("__tag_inv__:")) {
+            continue;
+          }
+          if (!normPrefix || k.startsWith(normPrefix)) {
             result.push(k);
           }
         }

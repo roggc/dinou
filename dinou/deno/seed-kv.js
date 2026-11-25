@@ -122,18 +122,35 @@ async function processDir(dir, relPrefix = "") {
     } else if (
       entry.name.endsWith(".rsc") ||
       entry.name === "shell.page.json" ||
-      entry.name === "shell.layout.json"
+      entry.name === "shell.page._old.json" ||
+      entry.name === "shell.layout.json" ||
+      entry.name === "shell.layout.own.json" ||
+      entry.name === "shell.layout._old.json"
     ) {
       const rsc = fs.readFileSync(fullPath, "utf8");
       if (entry.name.endsWith(".rsc") && rsc.trim().length === 0) {
         continue;
       }
       let metadata = null;
-      if (entry.name === "layout.rsc") {
+      if (
+        entry.name === "layout.rsc" ||
+        entry.name === "shell.layout.json" ||
+        entry.name === "shell.layout.own.json"
+      ) {
         const lMetaPath = path.join(dir, "layout.metadata.json");
         if (fs.existsSync(lMetaPath)) {
           try {
             metadata = JSON.parse(fs.readFileSync(lMetaPath, "utf8"));
+          } catch (e) { }
+        }
+      } else if (
+        entry.name === "page.rsc" ||
+        entry.name === "shell.page.json"
+      ) {
+        const pMetaPath = path.join(dir, "metadata.json");
+        if (fs.existsSync(pMetaPath)) {
+          try {
+            metadata = JSON.parse(fs.readFileSync(pMetaPath, "utf8"));
           } catch (e) { }
         }
       }

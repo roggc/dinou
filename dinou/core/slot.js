@@ -33,7 +33,11 @@ export function pruneOrphanedSsrStreams() {
   for (let i = rb.length - 2; i >= 0; i -= 2) {
     const boundaryTpl = rb[i];
     const hiddenSlot = rb[i + 1];
-    if (!boundaryTpl || !boundaryTpl.parentNode) {
+    const isDetached =
+      !boundaryTpl ||
+      boundaryTpl.isConnected === false ||
+      !boundaryTpl.parentNode;
+    if (isDetached) {
       if (hiddenSlot && hiddenSlot.parentNode) {
         hiddenSlot.parentNode.removeChild(hiddenSlot);
       }
@@ -155,19 +159,36 @@ export function DefaultDevError({ error }) {
   );
 }
 
+function isSlotNavigationAbortError(err) {
+  if (!err) return false;
+  const name = typeof err === "object" ? String(err.name || "") : "";
+  const msg = typeof err === "object" ? String(err.message || "") : String(err);
+  return (
+    name === "AbortError" ||
+    /^(?:Load failed|Failed to fetch|NetworkError|The operation was aborted|Error in input stream)/i.test(
+      msg.trim()
+    ) ||
+    /____rsc_payload_error____.*due to access control checks/i.test(msg)
+  );
+}
+
 function SlotErrorRenderer({ error, reset }) {
   const getErrorRSC = typeof globalThis !== "undefined" ? globalThis.__DINOU_GET_ERROR_RSC_PAYLOAD__ : null;
   const isStaticExport =
     typeof window !== "undefined" &&
     Boolean(window.__DINOU_STATIC_EXPORT__ || window.__DINOU_STATIC_EXPORT_UNLOADING__);
+  const isAbort = isSlotNavigationAbortError(error);
   const errorPromise = useMemo(() => {
-    if (!isStaticExport && typeof getErrorRSC === "function") {
+    if (!isStaticExport && !isAbort && typeof getErrorRSC === "function") {
       const route = typeof window !== "undefined" ? window.location.pathname + window.location.search : "";
       return getErrorRSC(route, error);
     }
     return null;
-  }, [error, isStaticExport]);
+  }, [error, isStaticExport, isAbort]);
 
+  if (isAbort && typeof window !== "undefined" && window.__DINOU_STATIC_EXPORT_UNLOADING__) {
+    return null;
+  }
   if (!errorPromise) {
     return createElement(DefaultDevError, { error });
   }
@@ -238,7 +259,16 @@ class SlotErrorBoundary extends Component {
       if (typeof window !== "undefined" && window.__DINOU_STATIC_EXPORT_UNLOADING__) {
         return null;
       }
-      const reset = () => this.setState({ hasError: false, error: null });
+      const reset = () => {
+        if (typeof window !== "undefined" && typeof window.__DINOU_CLEAR_ERROR_CACHES__ === "function") {
+          window.__DINOU_CLEAR_ERROR_CACHES__();
+        }
+        this.setState({ hasError: false, error: null }, () => {
+          if (typeof window !== "undefined" && typeof window.__DINOU_ROUTER_REFRESH__ === "function") {
+            window.__DINOU_ROUTER_REFRESH__({ layout: true });
+          }
+        });
+      };
       return createElement(
         InnerErrorBoundary,
         null,
@@ -251,6 +281,35 @@ class SlotErrorBoundary extends Component {
     }
     return this.props.children;
   }
+}
+
+export function DinouErrorResetWrapper({ children, reset: parentReset, error: parentError }) {
+  const defaultReset = () => {
+    if (typeof window !== "undefined") {
+      if (typeof window.__DINOU_CLEAR_ERROR_CACHES__ === "function") {
+        window.__DINOU_CLEAR_ERROR_CACHES__();
+      }
+      if (typeof window.__DINOU_ROUTER_REFRESH__ === "function") {
+        window.__DINOU_ROUTER_REFRESH__({ layout: true });
+        return;
+      }
+      window.location.reload();
+    }
+  };
+  const effectiveReset = typeof parentReset === "function" ? parentReset : defaultReset;
+  if (React.isValidElement(children) && typeof children.type !== "string") {
+    const patch = {};
+    if (children.props?.reset === undefined) {
+      patch.reset = effectiveReset;
+    }
+    if (parentError !== undefined) {
+      patch.error = parentError;
+    }
+    if (Object.keys(patch).length > 0) {
+      return React.cloneElement(children, patch);
+    }
+  }
+  return children;
 }
 
 function PageConsumer({ pagePromise, pageElement }) {
@@ -340,6 +399,7 @@ function ensureKnownSlotEntry(id, tags, children) {
       tags: Array.isArray(tags) ? tags : [],
       baseChildren: children,
       routePath: typeof window !== "undefined" ? window.location.pathname : "/",
+      unmounted: false,
       pendingPromise: null,
       pendingReqId: 0,
       pendingBatchId: 0,
@@ -355,9 +415,6 @@ function ensureKnownSlotEntry(id, tags, children) {
       entry.tags = Array.from(new Set([...(entry.tags || []), ...tags]));
     }
     entry.baseChildren = children;
-    if (typeof window !== "undefined") {
-      entry.routePath = window.location.pathname;
-    }
   }
   return entry;
 }
@@ -391,6 +448,9 @@ if (
 ) {
   window.__DINOU_SLOT_REFRESH_DISPATCHER_INSTALLED__ = true;
   window.addEventListener("dinou:refresh-slot", (e) => {
+    if (window.__DINOU_STATIC_EXPORT__ || window.__DINOU_STATIC_EXPORT_UNLOADING__) {
+      return;
+    }
     const targetId = e?.detail?.id;
     const options = e?.detail?.options;
     if (typeof window.__DINOU_FETCH_SLOT__ !== "function") return;
@@ -410,8 +470,8 @@ if (
         if (
           targetId === "*" &&
           !hasMountedSubscribers &&
-          entry.routePath &&
-          entry.routePath !== window.location.pathname
+          (entry.unmounted ||
+            (entry.routePath && entry.routePath !== window.location.pathname))
         ) {
           continue;
         }
@@ -546,6 +606,10 @@ export function DinouCacheSlotBoundary({ id, tags, children }) {
       getBase: () => childrenRef.current,
     };
     entry.subscribers.add(subscriber);
+    entry.unmounted = false;
+    if (typeof window !== "undefined") {
+      entry.routePath = window.location.pathname;
+    }
     mountedClientSlots.add(id);
 
     if (entry.pendingPromise) {
@@ -587,6 +651,7 @@ export function DinouCacheSlotBoundary({ id, tags, children }) {
       entry.subscribers.delete(subscriber);
       if (entry.subscribers.size === 0) {
         mountedClientSlots.delete(id);
+        entry.unmounted = true;
       }
     };
   }, [id, tagsKey]);

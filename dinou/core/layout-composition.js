@@ -601,6 +601,9 @@ async function spliceSingleLayoutOwnHoles(entry, storage, options = {}) {
     platformContext = null,
     reqUrl = null,
     currentPath = "/",
+    reqSegments = [],
+    queryObj = {},
+    isDevelopment = false,
   } = options;
 
   const key = entry.cleanLayoutKey || "";
@@ -629,11 +632,47 @@ async function spliceSingleLayoutOwnHoles(entry, storage, options = {}) {
   const rawSlots = {};
 
   for (const [slotName, slotValue] of Object.entries(slots)) {
+    const slotFilePath = slotValue?.slotPath || slotValue?.props?.__modulePath;
     const slotParams = slotValue?.slotParams || slotValue?.props?.params || dParams || {};
     if (slotValue && slotValue.slotPath) {
       const slotModule = await importModule(slotValue.slotPath);
       const Slot = slotModule.default ?? slotModule;
-      rawSlots[slotName] = React.createElement(Slot, {
+      const SafeParallelSlot = async (slotProps) => {
+        try {
+          return await Slot(slotProps);
+        } catch (e) {
+          if (slotFilePath) {
+            const realSlotFolder = path.dirname(slotFilePath);
+            const [slotErrorPath, slotErrorParams] = getFilePathAndDynamicParams(
+              reqSegments,
+              queryObj,
+              realSlotFolder,
+              "error",
+              true,
+              true,
+              undefined,
+              reqSegments.length,
+              slotParams
+            );
+            if (slotErrorPath) {
+              const slotErrorModule = await importModule(slotErrorPath);
+              const SlotError = slotErrorModule.default ?? slotErrorModule;
+              const serializedError = {
+                message: e?.message || "Unknown Error",
+                name: e?.name,
+                stack: isDevelopment ? e?.stack : undefined,
+              };
+              return React.createElement(SlotError, {
+                params: slotErrorParams,
+                key: slotName,
+                error: serializedError,
+              });
+            }
+          }
+          return null;
+        }
+      };
+      rawSlots[slotName] = React.createElement(SafeParallelSlot, {
         params: slotParams,
         key: slotName,
         __modulePath: slotValue.slotPath,

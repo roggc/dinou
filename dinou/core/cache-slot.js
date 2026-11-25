@@ -12,9 +12,14 @@ import {
 } from "./storage-adapter.js";
 import { asyncRenderJSXToClientJSX } from "./render-jsx-to-client-jsx.js";
 import { DinouCacheSlotBoundary as RawDinouCacheSlotBoundary } from "./slot.js";
-import { getContext, requestStorage } from "./request-context.js";
+import {
+  getContext,
+  requestStorage,
+  copyCustomContextProperties,
+} from "./request-context.js";
 import { createBailoutProxy, unwrapBailoutProxy } from "./bailout-proxy.js";
 import { getJSX } from "./get-jsx.js";
+import { getActiveLayoutChain } from "./layout-functions.js";
 import {
   isPprBuildActive,
   isInsideSuspense,
@@ -139,7 +144,7 @@ function createDiscoveryContext(currentPath) {
       ? currentPath.split("?")[0]
       : outerCtx?.req?.path || "/";
   if (!reqPath.startsWith("/")) reqPath = "/" + reqPath;
-  return {
+  const discoveryCtx = {
     req: {
       query: createBailoutProxy(
         rawQuery && typeof rawQuery === "object" ? { ...rawQuery } : {},
@@ -172,6 +177,10 @@ function createDiscoveryContext(currentPath) {
     _isStaticHtmlRender: Boolean(outerCtx?._isStaticHtmlRender),
     _isSlotDiscovery: true,
   };
+  if (outerCtx && !outerCtx._isStaticHtmlRender) {
+    copyCustomContextProperties(outerCtx, discoveryCtx);
+  }
+  return discoveryCtx;
 }
 
 let _registerServerRefFn = null;
@@ -323,7 +332,17 @@ function deserializeJSX(json) {
         const regServerRef = getRegisterServerReference();
         if (regServerRef) {
           try {
-            serverRef = regServerRef(serverRef, value.id, null);
+            const rawId = typeof value.id === "string" ? value.id : "";
+            const hashIdx = rawId.lastIndexOf("#");
+            if (hashIdx !== -1) {
+              serverRef = regServerRef(
+                serverRef,
+                rawId.slice(0, hashIdx),
+                rawId.slice(hashIdx + 1)
+              );
+            } else {
+              serverRef = regServerRef(serverRef, rawId, null);
+            }
             if (Array.isArray(value.bound) && typeof serverRef.bind === "function") {
               serverRef = serverRef.bind(null, ...value.bound);
             }
@@ -1316,18 +1335,20 @@ async function getSlotJSX(slotId, options = {}) {
 
   if (slotRegistry.has(targetId)) {
     const entry = slotRegistry.get(targetId);
+    const isEntryNoCache =
+      typeof entry.revalidate === "number" && entry.revalidate < 1;
     const reqUrl = String(options.req?.url || "");
     const qIdx = reqUrl.indexOf("?");
     const queryKey = qIdx !== -1 ? reqUrl.slice(qIdx) : "";
     const stampedeKey = `${storageKey}::${queryKey}`;
     const inflightKey = options.fresh ? stampedeKey : storageKey;
     try {
-      if (inflightSlotRenders.has(inflightKey)) {
+      if (!isEntryNoCache && inflightSlotRenders.has(inflightKey)) {
         const deduped = await inflightSlotRenders.get(inflightKey);
         return await refreshNestedSlotsInTree(deduped, targetId, options);
       }
 
-      if (options.fresh && recentFreshSlotRenders.has(stampedeKey)) {
+      if (!isEntryNoCache && options.fresh && recentFreshSlotRenders.has(stampedeKey)) {
         const recent = recentFreshSlotRenders.get(stampedeKey);
         if (recent && Date.now() - recent.timestamp < 500 && recent.serialized) {
           recent.timestamp = Date.now();
@@ -1341,13 +1362,10 @@ async function getSlotJSX(slotId, options = {}) {
       slotRenderGenerations.set(storageKey, renderGen);
       const isLatestGen = () => slotRenderGenerations.get(storageKey) === renderGen;
 
-      const isEntryNoCache =
-        typeof entry.revalidate === "number" && entry.revalidate < 1;
-
       const renderPromise = (async () => {
         const resolved = await entry.render();
         const serialized = serializeJSX(resolved);
-        if (options.fresh && isLatestGen()) {
+        if (!isEntryNoCache && options.fresh && isLatestGen()) {
           recentFreshSlotRenders.set(stampedeKey, {
             timestamp: Date.now(),
             serialized,
@@ -1367,7 +1385,7 @@ async function getSlotJSX(slotId, options = {}) {
             inStaticSuspense: Boolean(cached?.metadata?.inStaticSuspense),
           });
         }
-        if (options.fresh && isLatestGen()) {
+        if (!isEntryNoCache && options.fresh && isLatestGen()) {
           recentFreshSlotRenders.set(stampedeKey, {
             timestamp: Date.now(),
             serialized,
@@ -1377,11 +1395,15 @@ async function getSlotJSX(slotId, options = {}) {
       })();
 
       let restored;
-      inflightSlotRenders.set(inflightKey, renderPromise);
+      if (!isEntryNoCache) {
+        inflightSlotRenders.set(inflightKey, renderPromise);
+      }
       try {
         restored = await renderPromise;
       } finally {
-        inflightSlotRenders.delete(inflightKey);
+        if (!isEntryNoCache) {
+          inflightSlotRenders.delete(inflightKey);
+        }
       }
 
       if (
@@ -1402,13 +1424,23 @@ async function getSlotJSX(slotId, options = {}) {
             ...(Array.isArray(entry.tags) ? entry.tags : []),
           ]);
           const segments = cleanRouteKey.split("/").filter(Boolean);
-          const candidateLayoutKeys = [""];
+          const candidateLayoutKeySet = new Set([""]);
+          try {
+            const activeChain = getActiveLayoutChain(
+              segments,
+              {},
+              path.resolve(process.cwd(), "src")
+            );
+            for (const entry of activeChain) {
+              candidateLayoutKeySet.add(entry.cleanLayoutKey || "");
+            }
+          } catch (e) {}
           let acc = "";
           for (const seg of segments) {
             acc = acc ? `${acc}/${seg}` : seg;
-            candidateLayoutKeys.push(acc);
+            candidateLayoutKeySet.add(acc);
           }
-          for (const lKey of candidateLayoutKeys) {
+          for (const lKey of candidateLayoutKeySet) {
             const lMetaKey = lKey ? `${lKey}/layout.metadata.json` : "layout.metadata.json";
             const lMeta = await readMetaFromStorageOrAssets(storage, lMetaKey);
             const lTags = Array.from(
@@ -1471,7 +1503,16 @@ async function inspectSlotsFreshness(slotTags, hostGeneratedAt = 0) {
     checkedIds.add(targetId);
     const storageKey = `slots/${targetId}/slot.json`;
     const cached = await getSlotFromStorage(storage, storageKey, [targetId]);
-    if (!cached || !cached.content) continue;
+    if (!cached || !cached.content) {
+      const isDeleted =
+        typeof storage.isKeyDeleted === "function"
+          ? await storage.isKeyDeleted(storageKey)
+          : typeof storage.isDeleted === "function" && storage.isDeleted(storageKey);
+      if (isDeleted) {
+        result.hasNewer = true;
+      }
+      continue;
+    }
     const meta = cached.metadata || {};
     const slotGen = Number(meta.generatedAt || 0);
     if (hostGen > 0 && slotGen > hostGen) {

@@ -51,7 +51,10 @@ async function generateStaticPage(reqPath) {
         await fs.writeFile(shellHtmlPath, text, "utf8").catch(() => {});
         try {
           const pageReq = new Request(`http://localhost/____rsc_page____${finalReqPath}`);
-          const pageRes = await rscModule.handleRequest(pageReq, { runtime: "node-bundle" });
+          const pageRes = await rscModule.handleRequest(pageReq, {
+            runtime: "node-bundle",
+            isSSG: true,
+          });
           if (pageRes.status === 200) {
             const pageRscText = await pageRes.text();
             const shellRscPath = path.join(OUT_DIR, finalReqPath, "shell.rsc");

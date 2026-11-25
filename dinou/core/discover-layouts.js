@@ -57,6 +57,7 @@ export function discoverLayoutsFromFileRelPaths(rawPaths) {
   const discovered = [];
   const layoutDirs = new Set();
   const noLayoutDirs = new Set();
+  const resetLayoutDirs = new Set();
   const pageDirs = new Set();
 
   for (const relFile of normalized) {
@@ -79,6 +80,10 @@ export function discoverLayoutsFromFileRelPaths(rawPaths) {
       if (!isSlotOrPrivate && !noLayoutDirs.has(dirRel)) {
         noLayoutDirs.add(dirRel);
         discovered.push("!" + dirRel);
+      }
+    } else if (fileName === "reset_layout") {
+      if (!isSlotOrPrivate) {
+        resetLayoutDirs.add(dirRel);
       }
     } else if (/^page\.(?:[jt]sx?|mjs)$/.test(fileName)) {
       if (!isSlotOrPrivate) {
@@ -111,21 +116,34 @@ export function discoverLayoutsFromFileRelPaths(rawPaths) {
       let curr = pageDir;
       while (true) {
         if (layoutDirs.has(curr)) {
-          const cleanLayoutSegs = stripGroups(curr);
-          const hasCatchAll = cleanLayoutSegs.some(
+          const currSegs = curr ? curr.split("/").filter(Boolean) : [];
+          const needsTemplateSpec = currSegs.some(
             (s) =>
-              (s.startsWith("[...") && s.endsWith("]")) ||
-              (s.startsWith("[[...") && s.endsWith("]]"))
+              (s.startsWith("(") && s.endsWith(")")) ||
+              (s.startsWith("[[") && s.endsWith("]]"))
           );
-          if (hasCatchAll) {
-            const trailing = Math.max(
-              0,
-              cleanPageSegs.length - cleanLayoutSegs.length
-            );
-            spec = `*-${trailing}`;
+          if (needsTemplateSpec) {
+            spec = `~${curr}`;
           } else {
-            spec = String(cleanLayoutSegs.length);
+            const cleanLayoutSegs = stripGroups(curr);
+            const hasCatchAll = cleanLayoutSegs.some(
+              (s) =>
+                (s.startsWith("[...") && s.endsWith("]")) ||
+                (s.startsWith("[[...") && s.endsWith("]]"))
+            );
+            if (hasCatchAll) {
+              const trailing = Math.max(
+                0,
+                cleanPageSegs.length - cleanLayoutSegs.length
+              );
+              spec = `*-${trailing}`;
+            } else {
+              spec = String(cleanLayoutSegs.length);
+            }
           }
+          break;
+        }
+        if (resetLayoutDirs.has(curr)) {
           break;
         }
         if (curr === "") break;
@@ -182,7 +200,8 @@ export function discoverLayoutsFromFs(srcDir, fsImpl = fs) {
       } else if (
         /^layout\.(?:[jt]sx?|mjs)$/.test(entry.name) ||
         /^page\.(?:[jt]sx?|mjs)$/.test(entry.name) ||
-        entry.name === "no_layout"
+        entry.name === "no_layout" ||
+        entry.name === "reset_layout"
       ) {
         relFiles.push(childRel);
       }
