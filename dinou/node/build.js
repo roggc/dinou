@@ -46,9 +46,11 @@ try {
     configFile,
   } = engineResult;
 
-  const nodeConfigImportLine = configFile
-    ? `import * as __dinouNodeConfigMod from ${JSON.stringify(configFile.replace(/\\/g, "/"))};\nconst __bundledDinouConfig = (__dinouNodeConfigMod && __dinouNodeConfigMod.default) ? __dinouNodeConfigMod.default : (__dinouNodeConfigMod || { plugins: [] });\nglobalThis.__DINOU_AOT_CONFIG__ = __bundledDinouConfig;\nglobalThis.__DINOU_CONFIG__ = __bundledDinouConfig;\n`
-    : `const __bundledDinouConfig = { plugins: [] };\n`;
+  // Pass A (./rsc-engine.mjs) already bundles dinou.config with react-server +
+  // clientReferencesPlugin and populates globalThis.__DINOU_AOT_CONFIG__ / __DINOU_CONFIG__.
+  // Reading the RSC-compiled config from globalThis avoids duplicate config execution and
+  // prevents Pass C from bundling a non-RSC copy of cache-revalidate.js / slot.js.
+  const nodeConfigImportLine = `const __bundledDinouConfig = (typeof globalThis !== "undefined" && (globalThis.__DINOU_AOT_CONFIG__ || globalThis.__DINOU_CONFIG__)) || { plugins: [] };\n`;
 
   // Pass C: Node Orchestrator Entry
   const nodeEntryContent = `// Auto-generated main entry for Node.js (Dual-Bundle)

@@ -34,19 +34,50 @@ try {
   currentDir = path.dirname(fileURLToPath(import.meta.url));
 } catch (e) {}
 
+function resolveSlotFileUrlFromManifest(exportName) {
+  const manifest =
+    typeof globalThis !== "undefined" ? globalThis.__DINOU_CLIENT_MANIFEST__ : null;
+  if (manifest && typeof manifest === "object") {
+    const suffix = `#${exportName}`;
+    const preferredSuffix = `/slot.js${suffix}`;
+    let fallbackKey = null;
+    for (const key of Object.keys(manifest)) {
+      if (key.endsWith(preferredSuffix)) {
+        return key.slice(0, -suffix.length);
+      }
+      if (!fallbackKey && key.endsWith(suffix)) {
+        fallbackKey = key;
+      }
+    }
+    if (fallbackKey) {
+      return fallbackKey.slice(0, -suffix.length);
+    }
+  }
+  const slotPath = path.resolve(currentDir, "slot.js");
+  return pathToFileURL(slotPath).href;
+}
+
 function createDinouPageSlotElement() {
   let DinouPageSlot = RawDinouPageSlot;
   if (
     typeof DinouPageSlot === "function" &&
     DinouPageSlot.$$typeof !== Symbol.for("react.client.reference")
   ) {
-    const slotPath = path.resolve(currentDir, "slot.js");
-    const fileUrl = pathToFileURL(slotPath).href;
+    const fileUrl = resolveSlotFileUrlFromManifest("DinouPageSlot");
     let regFn = null;
-    try {
-      const pkg = require("react-server-dom-webpack/server");
-      regFn = pkg.registerClientReference;
-    } catch (e) {}
+    if (
+      typeof globalThis !== "undefined" &&
+      globalThis.__DINOU_EDGE_RENDERER__ &&
+      typeof globalThis.__DINOU_EDGE_RENDERER__.registerClientReference === "function"
+    ) {
+      regFn = globalThis.__DINOU_EDGE_RENDERER__.registerClientReference;
+    }
+    if (!regFn) {
+      try {
+        const pkg = require("react-server-dom-webpack/server");
+        regFn = pkg.registerClientReference;
+      } catch (e) {}
+    }
     if (!regFn) {
       try {
         const pkg = require("@roggc/react-server-dom-esm/server.node");

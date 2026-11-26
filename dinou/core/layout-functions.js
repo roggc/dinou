@@ -159,7 +159,7 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
       mod.revalidate !== undefined ? mod.revalidate : defaultExport?.revalidate;
     const revalidateVal =
       typeof rawRevalidate === "function"
-        ? await rawRevalidate()
+        ? await rawRevalidate(dParams)
         : rawRevalidate;
 
     const isDynamic = typeof revalidateVal === "number" && revalidateVal < 1;

@@ -993,6 +993,7 @@ async function handlePprResume({
   const streamCtrl = { isAborted, safeWrite };
 
   // Stream dynamic holes in parallel with the prelude
+  let didEmitRedirect = false;
   const resumePromise = (async () => {
     try {
       // 1. Immediately flush static shell prelude (0ms TTFB)
@@ -1122,6 +1123,7 @@ async function handlePprResume({
         if (context._hasRedirected && context._redirectLocation) {
           const safeTarget = safeJsonForInlineScript(context._redirectLocation);
           const redirectScript = `\n<script>(function(){try{window.__DINOU_STATIC_EXPORT_UNLOADING__=true;window.location.replace(${safeTarget});}catch(_){window.__DINOU_STATIC_EXPORT_UNLOADING__=true;window.location.href=${safeTarget};}})();</script>\n`;
+          didEmitRedirect = true;
           await safeWrite(redirectScript);
           return;
         }
@@ -1181,7 +1183,11 @@ async function handlePprResume({
       }
     } finally {
       if (!abortState.aborted) {
-        await safeWrite(shellPostlude);
+        const finalPostlude = didEmitRedirect
+          ? shellPostlude.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "") ||
+            "</body></html>"
+          : shellPostlude;
+        await safeWrite(finalPostlude);
         try {
           await writer.close();
         } catch (_) {}

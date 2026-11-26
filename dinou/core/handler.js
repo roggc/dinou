@@ -622,20 +622,16 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
           pageFunctionsModule.revalidate !== undefined
             ? pageFunctionsModule.revalidate
             : defaultExport?.revalidate;
-        let revalidateVal =
-          typeof rawRevalidate === "function"
-            ? await rawRevalidate()
-            : rawRevalidate;
-
-        const isDynamic = typeof revalidateVal === "number" && revalidateVal < 1;
+        const revalidateFn = typeof rawRevalidate === "function" ? rawRevalidate : null;
+        const staticRevalidate = revalidateFn ? undefined : rawRevalidate;
         const rawTags = pageFunctionsModule.getCacheTags ?? defaultExport?.getCacheTags;
 
         cachedConfig = {
           allowISG: resolvedAllowISG,
           staticPathsSet,
           validateParams: pageFunctionsModule.validateParams || defaultExport?.validateParams || null,
-          isDynamic,
-          revalidate: revalidateVal,
+          revalidateFn,
+          staticRevalidate,
           getCacheTagsFn: typeof rawTags === "function" ? rawTags : null,
           staticTags: Array.isArray(rawTags) ? rawTags : [],
           ppr: isPpr,
@@ -646,8 +642,8 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
           allowISG: null,
           staticPathsSet: null,
           validateParams: null,
-          isDynamic: false,
-          revalidate: undefined,
+          revalidateFn: null,
+          staticRevalidate: undefined,
           getCacheTagsFn: null,
           staticTags: [],
           ppr: isPpr,
@@ -660,12 +656,11 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
       }
     }
 
-    const { allowISG: cachedAllowISG, staticPathsSet, validateParams: validateParamsFn, isDynamic: cachedIsDynamic } = cachedConfig;
+    const { allowISG: cachedAllowISG, staticPathsSet, validateParams: validateParamsFn } = cachedConfig;
     allowISGValue =
       cachedAllowISG !== null && cachedAllowISG !== undefined
         ? Boolean(cachedAllowISG)
         : defaultAllowISG;
-    isDynamicConfig = Boolean(cachedIsDynamic);
     const hasParams = Object.keys(dynamicParams || {}).length > 0;
     if (hasParams) {
       if (validateParamsFn) {
@@ -714,6 +709,16 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
     }
   }
 
+  let resolvedRevalidate = cachedConfig?.staticRevalidate;
+  if (typeof cachedConfig?.revalidateFn === "function") {
+    try {
+      resolvedRevalidate = await cachedConfig.revalidateFn(dynamicParams);
+    } catch (e) {
+      console.error("Error running revalidate in handler:", e);
+    }
+  }
+  isDynamicConfig = typeof resolvedRevalidate === "number" && resolvedRevalidate < 1;
+
   let resolvedTags = cachedConfig?.staticTags || [];
   if (typeof cachedConfig?.getCacheTagsFn === "function") {
     try {
@@ -728,7 +733,7 @@ async function resolvePageFunctionsConfig(pagePath, reqSegments, queryObj, dynam
     isPathBlocked,
     allowISGValue,
     isDynamicConfig,
-    revalidate: cachedConfig?.revalidate,
+    revalidate: resolvedRevalidate,
     tags: resolvedTags,
     ppr: Boolean(cachedConfig?.ppr),
     pagePpr: Boolean(cachedConfig?.pagePpr),
@@ -1340,7 +1345,7 @@ function createRequestContext(simReq, resBridge, platformContext = {}, dynamicSt
         const finalUrl = isAllowedRedirectTarget(resolvedUrl) ? resolvedUrl : "/";
         if (context) context._redirectLocation = finalUrl;
         const safeUrl = JSON.stringify(finalUrl);
-        resBridge.write(`<script>window.location.href = ${safeUrl};</script>`);
+        resBridge.write(`<script>window.__DINOU_STATIC_EXPORT_UNLOADING__ = true; window.location.href = ${safeUrl};</script>`);
         resBridge.end();
         return;
       }
@@ -1938,7 +1943,11 @@ async function handleRequest(request, platformContext = {}) {
       }
 
       const urlObj = new URL(request.url || `http://localhost${pathname}`);
-      const isFresh = urlObj.searchParams.get("fresh") === "1" || urlObj.searchParams.has("fresh");
+      const rawFreshParam = urlObj.searchParams.get("fresh");
+      const isFresh =
+        rawFreshParam !== null &&
+        rawFreshParam !== "0" &&
+        rawFreshParam.toLowerCase() !== "false";
 
       const currentPath =
         request.headers?.get?.("x-dinou-current-path") ||
@@ -2248,16 +2257,32 @@ async function handleRequest(request, platformContext = {}) {
             const lMetaKey = entry.cleanLayoutKey ? `${entry.cleanLayoutKey}/layout.metadata.json` : "layout.metadata.json";
             const lRscKey = entry.cleanLayoutKey ? `${entry.cleanLayoutKey}/layout.rsc` : "layout.rsc";
             const lMeta = await readMetaFromStorage(storage, lMetaKey, lRscKey, platformContext, request.url);
+            entry.hasMeta = Boolean(lMeta);
             entry.generatedAt = Number(lMeta?.generatedAt || 0);
             entry.layoutGeneratedAt = Number(lMeta?.layoutGeneratedAt || lMeta?.generatedAt || 0);
             entry.ownGeneratedAt = Number(lMeta?.ownGeneratedAt || lMeta?.layoutGeneratedAt || lMeta?.generatedAt || 0);
             entry.suspenseCount = Number(lMeta?.suspenseCount || 0);
             entry.revalidate = lMeta?.revalidate;
-            entry.slotTags = Array.isArray(lMeta?.slotTags) ? lMeta.slotTags : [];
+            entry.slotTags = Array.from(
+              new Set([
+                ...(Array.isArray(lMeta?.ownSlotTags) ? lMeta.ownSlotTags : []),
+                ...(Array.isArray(lMeta?.slotTags) ? lMeta.slotTags : []),
+              ])
+            );
           }
-          if (!platformContext?.isSSG && !isOld && !dynamicState.value) {
+          if (!platformContext?.isSSG && !isOld && !dynamicState.value && !internalBuildId) {
+            const pendingRscLayoutSlotRevalPaths = [];
             for (let i = activeChain.length - 1; i >= 0; i--) {
               const entry = activeChain[i];
+              let isLayoutEvictedStatic = false;
+              if (isLayoutReq && !internalBuildId && !entry.hasMeta) {
+                try {
+                  const lCfg = await resolveLayoutFunctionsConfig(entry.layoutPath, entry.dParams);
+                  if (!lCfg?.isDynamic) {
+                    isLayoutEvictedStatic = true;
+                  }
+                } catch (e) {}
+              }
               const isLayoutTtlExpired =
                 typeof entry.revalidate === "number" &&
                 entry.revalidate >= 1 &&
@@ -2293,40 +2318,31 @@ async function handleRequest(request, platformContext = {}) {
               const isAncestorNewer = isAncestorOwnNewer || isAncestorSlotOnlyNewer;
               if (
                 isLayoutSlotTtlExpired &&
+                !isLayoutEvictedStatic &&
                 !isLayoutSlotNewer &&
                 !isLayoutTtlExpired &&
                 !(isLayoutReq && isAncestorNewer)
               ) {
-                const layoutSlotRevalKey = `layout-slot:${entry.layoutRoutePath}`;
-                const layoutSlotRevalPromise = (async () => {
-                  if (regenerating.has(layoutSlotRevalKey)) return;
-                  regenerating.add(layoutSlotRevalKey);
-                  try {
-                    const { revalidateLayout } = await import("./cache-revalidate.js");
-                    await revalidateLayout(entry.layoutRoutePath, { onlyRefreshSlots: true });
-                  } catch (err) {
-                    console.error(`❌ [Slot ISR] Error refreshing layout slots for ${entry.layoutRoutePath}:`, err);
-                  } finally {
-                    regenerating.delete(layoutSlotRevalKey);
-                  }
-                })();
-                if (platformContext && platformContext.ctx && typeof platformContext.ctx.waitUntil === "function") {
-                  platformContext.ctx.waitUntil(layoutSlotRevalPromise);
-                }
+                pendingRscLayoutSlotRevalPaths.push(entry.layoutRoutePath);
               } else if (
+                isLayoutEvictedStatic ||
                 isLayoutTtlExpired ||
                 isLayoutSlotNewer ||
                 (isLayoutReq && isAncestorNewer)
               ) {
                 const { revalidateLayout } = await import("./cache-revalidate.js");
                 await revalidateLayout(entry.layoutRoutePath, {
-                  recomposeOnly: !isLayoutTtlExpired && !isLayoutSlotNewer && isAncestorOwnNewer,
+                  recomposeOnly:
+                    !isLayoutEvictedStatic && !isLayoutTtlExpired && !isLayoutSlotNewer && isAncestorOwnNewer,
                   onlyRefreshSlots:
+                    !isLayoutEvictedStatic &&
                     !isLayoutTtlExpired &&
-                    !isAncestorOwnNewer &&
-                    (isLayoutSlotNewer || isAncestorSlotOnlyNewer),
+                    (isLayoutSlotNewer || (!isAncestorOwnNewer && isAncestorSlotOnlyNewer)),
                   onlyIfExpired:
-                    isLayoutTtlExpired && !isLayoutSlotNewer && !(isLayoutReq && isAncestorNewer),
+                    !isLayoutEvictedStatic &&
+                    isLayoutTtlExpired &&
+                    !isLayoutSlotNewer &&
+                    !(isLayoutReq && isAncestorNewer),
                 });
                 const lMetaKey = entry.cleanLayoutKey
                   ? `${entry.cleanLayoutKey}/layout.metadata.json`
@@ -2365,6 +2381,26 @@ async function handleRequest(request, platformContext = {}) {
                 }
               }
             }
+            if (pendingRscLayoutSlotRevalPaths.length > 0) {
+              const rscLayoutSlotsPromise = (async () => {
+                const { revalidateLayout } = await import("./cache-revalidate.js");
+                for (const layoutRoutePath of pendingRscLayoutSlotRevalPaths) {
+                  const layoutSlotRevalKey = `layout-slot:${layoutRoutePath}`;
+                  if (regenerating.has(layoutSlotRevalKey)) continue;
+                  regenerating.add(layoutSlotRevalKey);
+                  try {
+                    await revalidateLayout(layoutRoutePath, { onlyRefreshSlots: true });
+                  } catch (err) {
+                    console.error(`❌ [Slot ISR] Error refreshing layout slots for ${layoutRoutePath}:`, err);
+                  } finally {
+                    regenerating.delete(layoutSlotRevalKey);
+                  }
+                }
+              })();
+              if (platformContext && platformContext.ctx && typeof platformContext.ctx.waitUntil === "function") {
+                platformContext.ctx.waitUntil(rscLayoutSlotsPromise);
+              }
+            }
           }
           leafLayoutSuspenseCount = Number(activeChain[0]?.suspenseCount || 0);
         }
@@ -2390,12 +2426,17 @@ async function handleRequest(request, platformContext = {}) {
               isRoutePpr = true;
               hasDetectedSegmentPpr = true;
             }
-          } else if (edgeMeta.pagePpr !== undefined) {
-            isRoutePpr = Boolean(edgeMeta.pagePpr);
-            hasDetectedSegmentPpr = true;
-          } else if (edgeMeta.ppr !== undefined) {
-            isRoutePpr = Boolean(edgeMeta.ppr);
-            hasDetectedSegmentPpr = true;
+          } else {
+            if (edgeMeta.dynamic) {
+              dynamicState.value = true;
+            }
+            if (edgeMeta.pagePpr !== undefined) {
+              isRoutePpr = Boolean(edgeMeta.pagePpr);
+              hasDetectedSegmentPpr = true;
+            } else if (edgeMeta.ppr !== undefined) {
+              isRoutePpr = Boolean(edgeMeta.ppr);
+              hasDetectedSegmentPpr = true;
+            }
           }
         }
       }
@@ -2419,12 +2460,17 @@ async function handleRequest(request, platformContext = {}) {
               isRoutePpr = true;
               hasDetectedSegmentPpr = true;
             }
-          } else if (metaObj.pagePpr !== undefined) {
-            isRoutePpr = Boolean(metaObj.pagePpr);
-            hasDetectedSegmentPpr = true;
-          } else if (metaObj.ppr !== undefined) {
-            isRoutePpr = Boolean(metaObj.ppr);
-            hasDetectedSegmentPpr = true;
+          } else {
+            if (metaObj.dynamic) {
+              dynamicState.value = true;
+            }
+            if (metaObj.pagePpr !== undefined) {
+              isRoutePpr = Boolean(metaObj.pagePpr);
+              hasDetectedSegmentPpr = true;
+            } else if (metaObj.ppr !== undefined) {
+              isRoutePpr = Boolean(metaObj.ppr);
+              hasDetectedSegmentPpr = true;
+            }
           }
         }
       } catch (e) {}
@@ -2530,6 +2576,11 @@ async function handleRequest(request, platformContext = {}) {
               cached = oldCached;
             }
           }
+          if (!cached && !useOld && isStatic && internalBuildId) {
+            const bailoutOldName = isLayoutReq ? "layout._old.rsc" : "page._old.rsc";
+            const bailoutOldKey = cleanRel ? `${cleanRel}/${bailoutOldName}` : bailoutOldName;
+            cached = await storage.get(bailoutOldKey);
+          }
           if (!cached && useOld) {
             const fallbackCurrKey = cleanRel
               ? `${cleanRel}/${resolvedTargetFileName}`
@@ -2542,7 +2593,7 @@ async function handleRequest(request, platformContext = {}) {
           if (cached && cached.content) {
             let isExpired = false;
             let isSlotOnlyExpired = false;
-            if (isLayoutReq && cached.metadata) {
+            if (isLayoutReq && !useOld && !internalBuildId && cached.metadata) {
               const { revalidate, generatedAt } = cached.metadata;
               if (typeof revalidate === "number" && revalidate >= 1 && Date.now() > (generatedAt || 0) + revalidate * 1000) {
                 isExpired = true;
@@ -2565,7 +2616,7 @@ async function handleRequest(request, platformContext = {}) {
                 } else if (Array.isArray(pMeta.slotTags) && pMeta.slotTags.length > 0) {
                   const slotFreshness = await inspectSlotsFreshness(
                     pMeta.slotTags,
-                    pMeta.generatedAt || 0
+                    pMeta.pageSlotsGeneratedAt || pMeta.generatedAt || 0
                   );
                   isSlotNewer = slotFreshness.hasNewer;
                   isSlotOnlyExpired = !isSlotNewer && slotFreshness.hasExpired;
@@ -2915,14 +2966,40 @@ async function handleRequest(request, platformContext = {}) {
             : cleanRel
             ? `${cleanRel}/shell.page.json`
             : "shell.page.json";
-          // Snapshot shellJson BEFORE launching any background slot SWR so this response stays consistent.
-          const shellJson = await readRscFromStorage(
-            storage,
-            shellKey,
-            platformContext,
-            request.url
+          const shellOldKey = isLayoutReq
+            ? cleanRel
+              ? `${cleanRel}/shell.layout._old.json`
+              : "shell.layout._old.json"
+            : cleanRel
+            ? `${cleanRel}/shell.page._old.json`
+            : "shell.page._old.json";
+          const useOldPprShell = Boolean(
+            isOld ||
+              (!internalRefreshVersion &&
+                internalBuildId &&
+                currentGeneratedAt &&
+                Number(internalBuildId) < Number(currentGeneratedAt))
           );
-          if (isPageReq) {
+          // Snapshot causal shellJson BEFORE launching any background slot SWR so initial T1
+          // hydration matches the T1 SSR HTML (using shell.*._old.json when server advanced to T2).
+          let shellJson = null;
+          if (useOldPprShell) {
+            shellJson = await readRscFromStorage(
+              storage,
+              shellOldKey,
+              platformContext,
+              request.url
+            );
+          }
+          if (!shellJson) {
+            shellJson = await readRscFromStorage(
+              storage,
+              shellKey,
+              platformContext,
+              request.url
+            );
+          }
+          if (isPageReq && !useOldPprShell) {
             try {
               const pMetaKey = cleanRel ? `${cleanRel}/metadata.json` : "metadata.json";
               const pRscBaseKey = cleanRel ? `${cleanRel}/page.rsc` : "page.rsc";
@@ -2956,13 +3033,18 @@ async function handleRequest(request, platformContext = {}) {
               let cachedShellTree = deserializeJSX(shellJson);
               const runSeg = isLayoutReq ? runInLayoutSegment : runInPageSegment;
               const slotScope = isLayoutReq ? "__layout_shell__" : "__ppr_shell__";
-              cachedShellTree = await runSeg(() =>
-                refreshNestedSlotsInTree(
-                  cachedShellTree,
-                  slotScope,
-                  { currentPath: reqPath }
-                )
+              const isInitialCausalHydration = Boolean(
+                useOldPprShell || (internalBuildId && !internalRefreshVersion)
               );
+              if (!isInitialCausalHydration) {
+                cachedShellTree = await runSeg(() =>
+                  refreshNestedSlotsInTree(
+                    cachedShellTree,
+                    slotScope,
+                    { currentPath: reqPath }
+                  )
+                );
+              }
               jsx = await spliceDynamicHolesIntoShell(
                 cachedShellTree,
                 () =>
@@ -3523,31 +3605,52 @@ async function handleRequest(request, platformContext = {}) {
             } catch (e) {}
 
             if (metadata && typeof metadata === "object" && metadata.generatedAt) {
-              const assetRes = await fetchCloudflareDist2Asset(
-                platformContext.env.ASSETS,
-                htmlKey,
-                request.url
-              );
-              if (assetRes && assetRes.status === 200) {
-                const html = await assetRes.text();
-                cachedItem = {
-                  content: html,
-                  metadata,
-                };
-                await storage.set(htmlKey, html, cachedItem.metadata);
-                await storage.set(metaKey, JSON.stringify(cachedItem.metadata));
-                const layoutMetaKey = cleanPath ? `${cleanPath}/layout.metadata.json` : "layout.metadata.json";
-                try {
-                  const layoutMetaRes = await fetchCloudflareDist2Asset(
-                    platformContext.env.ASSETS,
-                    layoutMetaKey,
-                    request.url
-                  );
-                  if (layoutMetaRes && layoutMetaRes.status === 200) {
-                    const layoutMetaText = await layoutMetaRes.text();
-                    await storage.set(layoutMetaKey, layoutMetaText);
-                  }
-                } catch (e) {}
+              const assetCombinedTags = new Set([
+                ...(Array.isArray(metadata.tags) ? metadata.tags : []),
+                ...(Array.isArray(metadata.slotTags) ? metadata.slotTags : []),
+                ...(Array.isArray(metadata.ownSlotTags) ? metadata.ownSlotTags : []),
+              ]);
+              let isAssetTagInvalidated = false;
+              for (const t of assetCombinedTags) {
+                if (!t) continue;
+                const invAt =
+                  typeof storage.getTagInvalidatedAtAsync === "function"
+                    ? await storage.getTagInvalidatedAtAsync(t)
+                    : typeof storage.getTagInvalidatedAt === "function"
+                    ? storage.getTagInvalidatedAt(t)
+                    : 0;
+                if (invAt > 0 && invAt >= Number(metadata.generatedAt || 0)) {
+                  isAssetTagInvalidated = true;
+                  break;
+                }
+              }
+              if (!isAssetTagInvalidated) {
+                const assetRes = await fetchCloudflareDist2Asset(
+                  platformContext.env.ASSETS,
+                  htmlKey,
+                  request.url
+                );
+                if (assetRes && assetRes.status === 200) {
+                  const html = await assetRes.text();
+                  cachedItem = {
+                    content: html,
+                    metadata,
+                  };
+                  await storage.set(htmlKey, html, cachedItem.metadata);
+                  await storage.set(metaKey, JSON.stringify(cachedItem.metadata));
+                  const layoutMetaKey = cleanPath ? `${cleanPath}/layout.metadata.json` : "layout.metadata.json";
+                  try {
+                    const layoutMetaRes = await fetchCloudflareDist2Asset(
+                      platformContext.env.ASSETS,
+                      layoutMetaKey,
+                      request.url
+                    );
+                    if (layoutMetaRes && layoutMetaRes.status === 200) {
+                      const layoutMetaText = await layoutMetaRes.text();
+                      await storage.set(layoutMetaKey, layoutMetaText);
+                    }
+                  } catch (e) {}
+                }
               }
             }
           }
@@ -3574,12 +3677,28 @@ async function handleRequest(request, platformContext = {}) {
     const isShellDeletedInStorage =
       isRouteDeletedInStorage || (await checkDeleted(shellHtmlKeyForCheck));
     const hasDynamicUrlParams = Boolean(dynamicParams && Object.keys(dynamicParams).length > 0);
+    if (!isDevelopment && !cachedItem && !dynamicState.value && !platformContext?.isSSG) {
+      try {
+        const existingPageMeta = await readMetaFromStorage(
+          storage,
+          metaKey,
+          cleanPath ? `${cleanPath}/page.rsc` : "page.rsc",
+          platformContext,
+          request.url
+        );
+        if (existingPageMeta?.dynamic) {
+          dynamicState.value = true;
+        }
+      } catch (e) {}
+    }
     if (
       !isDevelopment &&
+      Boolean(pagePath) &&
       !cachedItem &&
       !dynamicState.value &&
+      !isDynamicConfig &&
       isPprConfig &&
-      (isShellDeletedInStorage || (hasDynamicUrlParams && allowISGValue !== false)) &&
+      (isShellDeletedInStorage || !hasDynamicUrlParams || allowISGValue !== false) &&
       !isPathBlocked &&
       queryObj.ssr_crash !== "true" &&
       !platformContext?.isSSG
@@ -3652,13 +3771,18 @@ async function handleRequest(request, platformContext = {}) {
     }
 
     // 3. If we found a cached/pre-rendered page:
-    if (!isDevelopment && cachedItem && !hasDynamicLayoutConfig && (!dynamicState.value || cachedItem?.metadata?.ppr || isPprConfig) && !isPathBlocked && queryObj.ssr_crash !== "true" && !platformContext?.isSSG) {
+    if (!isDevelopment && cachedItem && !cachedItem?.metadata?.dynamic && !isDynamicConfig && !hasDynamicLayoutConfig && (!dynamicState.value || cachedItem?.metadata?.ppr || isPprConfig) && !isPathBlocked && queryObj.ssr_crash !== "true" && !platformContext?.isSSG) {
       const pendingLayoutSlotRevalPaths = [];
       let cachedHitActiveLayoutChain = [];
       try {
         const activeLayoutChain = getActiveLayoutChain(reqSegments, queryObj, srcFolder);
         cachedHitActiveLayoutChain = activeLayoutChain;
         if (activeLayoutChain.length > 0) {
+          const dynLayoutKeys = new Set(
+            activeLayoutsForRoute
+              .filter((e) => Boolean(e?.isDynamicConfig))
+              .map((e) => e.cleanLayoutKey || "")
+          );
           for (const entry of activeLayoutChain) {
             const lMetaKey = entry.cleanLayoutKey
               ? `${entry.cleanLayoutKey}/layout.metadata.json`
@@ -3673,14 +3797,22 @@ async function handleRequest(request, platformContext = {}) {
               platformContext,
               request.url
             );
+            entry.hasMeta = Boolean(lMeta);
+            entry.isDynamicConfig = dynLayoutKeys.has(entry.cleanLayoutKey || "");
             entry.generatedAt = Number(lMeta?.generatedAt || 0);
             entry.layoutGeneratedAt = Number(lMeta?.layoutGeneratedAt || lMeta?.generatedAt || 0);
             entry.ownGeneratedAt = Number(lMeta?.ownGeneratedAt || lMeta?.layoutGeneratedAt || lMeta?.generatedAt || 0);
             entry.revalidate = lMeta?.revalidate;
-            entry.slotTags = Array.isArray(lMeta?.slotTags) ? lMeta.slotTags : [];
+            entry.slotTags = Array.from(
+              new Set([
+                ...(Array.isArray(lMeta?.ownSlotTags) ? lMeta.ownSlotTags : []),
+                ...(Array.isArray(lMeta?.slotTags) ? lMeta.slotTags : []),
+              ])
+            );
           }
           for (let i = activeLayoutChain.length - 1; i >= 0; i--) {
             const entry = activeLayoutChain[i];
+            const isLayoutEvictedStatic = !entry.hasMeta && !entry.isDynamicConfig;
             const isLayoutTtlExpired =
               typeof entry.revalidate === "number" &&
               entry.revalidate >= 1 &&
@@ -3713,17 +3845,30 @@ async function handleRequest(request, platformContext = {}) {
               entry.generatedAt > 0 &&
               maxAncestorGen > entry.generatedAt;
             const isAncestorNewer = isAncestorOwnNewer || isAncestorSlotOnlyNewer;
-            if (isLayoutSlotTtlExpired && !isLayoutSlotNewer && !isLayoutTtlExpired && !isAncestorNewer) {
+            if (
+              isLayoutSlotTtlExpired &&
+              !isLayoutEvictedStatic &&
+              !isLayoutSlotNewer &&
+              !isLayoutTtlExpired &&
+              !isAncestorNewer
+            ) {
               pendingLayoutSlotRevalPaths.push(entry.layoutRoutePath);
-            } else if (isLayoutTtlExpired || isLayoutSlotNewer || isAncestorNewer) {
+            } else if (
+              isLayoutEvictedStatic ||
+              isLayoutTtlExpired ||
+              isLayoutSlotNewer ||
+              isAncestorNewer
+            ) {
               const { revalidateLayout } = await import("./cache-revalidate.js");
               await revalidateLayout(entry.layoutRoutePath, {
-                recomposeOnly: !isLayoutTtlExpired && !isLayoutSlotNewer && isAncestorOwnNewer,
+                recomposeOnly:
+                  !isLayoutEvictedStatic && !isLayoutTtlExpired && !isLayoutSlotNewer && isAncestorOwnNewer,
                 onlyRefreshSlots:
+                  !isLayoutEvictedStatic &&
                   !isLayoutTtlExpired &&
-                  !isAncestorOwnNewer &&
-                  (isLayoutSlotNewer || isAncestorSlotOnlyNewer),
-                onlyIfExpired: isLayoutTtlExpired && !isLayoutSlotNewer && !isAncestorNewer,
+                  (isLayoutSlotNewer || (!isAncestorOwnNewer && isAncestorSlotOnlyNewer)),
+                onlyIfExpired:
+                  !isLayoutEvictedStatic && isLayoutTtlExpired && !isLayoutSlotNewer && !isAncestorNewer,
               });
               const refreshedMeta = await readMetaFromStorage(
                 storage,
@@ -3757,7 +3902,49 @@ async function handleRequest(request, platformContext = {}) {
               }
             }
           }
-          const leafLayout = activeLayoutChain[0];
+        }
+      } catch (lazyErr) {
+        console.warn(`⚠️ [Dinou] Error during lazy layout chain sync for ${reqPath}:`, lazyErr?.message || lazyErr);
+      }
+
+      // Synchronously splice any shared <DinouCacheSlot> already refreshed elsewhere
+      // (slot.generatedAt > pageSlotsGeneratedAt || page.generatedAt) BEFORE lazy layout-only
+      // HTML re-composition AND BEFORE snapshotting PPR shell JSONs so:
+      // 1. A newer layout.generatedAt (e.g. from refreshSlot("*") updating an L1 slot AFTER a
+      //    page shared slot) never bumps page metadata.generatedAt past the shared slot and masks it.
+      // 2. Cross-route shared slots reflect fresh cached JSX on the first Direct SSR hit with 0 #418.
+      let isPageSlotTtlExpired = false;
+      if (Array.isArray(cachedItem.metadata?.slotTags) && cachedItem.metadata.slotTags.length > 0) {
+        try {
+          const pageSlotBaseline = Number(
+            cachedItem.metadata?.pageSlotsGeneratedAt ||
+              cachedItem.metadata?.generatedAt ||
+              0
+          );
+          const pageSlotFreshness = await inspectSlotsFreshness(
+            cachedItem.metadata.slotTags,
+            pageSlotBaseline
+          );
+          if (pageSlotFreshness.hasNewer) {
+            const { revalidatePage } = await import("./cache-revalidate.js");
+            await revalidatePage(reqPath, { onlyRefreshSlots: true });
+            const refreshedHtml =
+              (await storage.get(htmlKey)) ||
+              (isPprConfig
+                ? await storage.get(cleanPath ? `${cleanPath}/shell.html` : "shell.html")
+                : null);
+            if (refreshedHtml && refreshedHtml.content) {
+              cachedItem = refreshedHtml;
+            }
+          } else {
+            isPageSlotTtlExpired = pageSlotFreshness.hasExpired;
+          }
+        } catch (slotSyncErr) {}
+      }
+
+      try {
+        if (cachedHitActiveLayoutChain.length > 0) {
+          const leafLayout = cachedHitActiveLayoutChain[0];
           const pageGeneratedAt = Number(cachedItem.metadata?.generatedAt || 0);
           if ((leafLayout.generatedAt || 0) > pageGeneratedAt && platformContext?.renderHtmlStream) {
             const leafRscKey = leafLayout.cleanLayoutKey
@@ -3821,6 +4008,10 @@ async function handleRequest(request, platformContext = {}) {
                   pageGeneratedAt:
                     cachedItem.metadata?.pageGeneratedAt ||
                     cachedItem.metadata?.generatedAt,
+                  pageSlotsGeneratedAt:
+                    cachedItem.metadata?.pageSlotsGeneratedAt ||
+                    cachedItem.metadata?.pageGeneratedAt ||
+                    cachedItem.metadata?.generatedAt,
                   generatedAt: leafLayout.generatedAt,
                 };
                 cachedItem = {
@@ -3842,32 +4033,6 @@ async function handleRequest(request, platformContext = {}) {
         }
       } catch (lazyErr) {
         console.warn(`⚠️ [Dinou] Error during lazy HTML re-composition for ${reqPath}:`, lazyErr?.message || lazyErr);
-      }
-
-      // Synchronously splice any shared <DinouCacheSlot> already refreshed elsewhere (slot.generatedAt > page.generatedAt)
-      // BEFORE snapshotting PPR shell JSONs so cross-route shared slots reflect fresh cached JSX on the first hit with 0 #418.
-      let isPageSlotTtlExpired = false;
-      if (Array.isArray(cachedItem.metadata?.slotTags) && cachedItem.metadata.slotTags.length > 0) {
-        try {
-          const pageSlotFreshness = await inspectSlotsFreshness(
-            cachedItem.metadata.slotTags,
-            cachedItem.metadata?.generatedAt || 0
-          );
-          if (pageSlotFreshness.hasNewer) {
-            const { revalidatePage } = await import("./cache-revalidate.js");
-            await revalidatePage(reqPath, { onlyRefreshSlots: true });
-            const refreshedHtml =
-              (await storage.get(htmlKey)) ||
-              (isPprConfig
-                ? await storage.get(cleanPath ? `${cleanPath}/shell.html` : "shell.html")
-                : null);
-            if (refreshedHtml && refreshedHtml.content) {
-              cachedItem = refreshedHtml;
-            }
-          } else {
-            isPageSlotTtlExpired = pageSlotFreshness.hasExpired;
-          }
-        } catch (slotSyncErr) {}
       }
 
       // Snapshot PPR shell JSONs causally matching `cachedItem.content` BEFORE launching ANY background SWR,
@@ -3939,23 +4104,25 @@ async function handleRequest(request, platformContext = {}) {
         }
       }
 
-      // Now safe to launch deferred layout-slot background SWR revalidations
-      for (const layoutRoutePath of pendingLayoutSlotRevalPaths) {
-        const layoutSlotRevalKey = `layout-slot:${layoutRoutePath}`;
-        const layoutSlotRevalPromise = (async () => {
-          if (regenerating.has(layoutSlotRevalKey)) return;
-          regenerating.add(layoutSlotRevalKey);
-          try {
-            const { revalidateLayout } = await import("./cache-revalidate.js");
-            await revalidateLayout(layoutRoutePath, { onlyRefreshSlots: true });
-          } catch (err) {
-            console.error(`❌ [Slot ISR] Error refreshing layout slots for ${layoutRoutePath}:`, err);
-          } finally {
-            regenerating.delete(layoutSlotRevalKey);
+      // Now safe to launch deferred layout-slot background SWR revalidations sequentially (ancestor-first)
+      if (pendingLayoutSlotRevalPaths.length > 0) {
+        const layoutSlotsChainPromise = (async () => {
+          const { revalidateLayout } = await import("./cache-revalidate.js");
+          for (const layoutRoutePath of pendingLayoutSlotRevalPaths) {
+            const layoutSlotRevalKey = `layout-slot:${layoutRoutePath}`;
+            if (regenerating.has(layoutSlotRevalKey)) continue;
+            regenerating.add(layoutSlotRevalKey);
+            try {
+              await revalidateLayout(layoutRoutePath, { onlyRefreshSlots: true });
+            } catch (err) {
+              console.error(`❌ [Slot ISR] Error refreshing layout slots for ${layoutRoutePath}:`, err);
+            } finally {
+              regenerating.delete(layoutSlotRevalKey);
+            }
           }
         })();
         if (platformContext && platformContext.ctx && typeof platformContext.ctx.waitUntil === "function") {
-          platformContext.ctx.waitUntil(layoutSlotRevalPromise);
+          platformContext.ctx.waitUntil(layoutSlotsChainPromise);
         }
       }
       if (isPageSlotTtlExpired) {
@@ -4411,7 +4578,7 @@ async function handleRequest(request, platformContext = {}) {
                         ) {
                           const pSlotFresh = await inspectSlotsFreshness(
                             pageMeta.slotTags,
-                            pageMeta.generatedAt || 0
+                            pageMeta.pageSlotsGeneratedAt || pageMeta.generatedAt || 0
                           );
                           if (pSlotFresh.hasNewer) {
                             const { revalidatePage } = await import("./cache-revalidate.js");
@@ -4601,6 +4768,7 @@ async function handleRequest(request, platformContext = {}) {
                     );
                     const overrides = new Map();
                     let anyDynamicInChain = false;
+                    const pendingAsymLayoutSlotRevalPaths = [];
                     for (let i = effectiveLayoutsForRender.length - 1; i >= 0; i--) {
                       const entry = effectiveLayoutsForRender[i];
                       const lMetaKey = entry.cleanLayoutKey
@@ -4671,51 +4839,33 @@ async function handleRequest(request, platformContext = {}) {
                               platformContext,
                               request.url
                             )) || lMeta;
-                        } else if (
-                          Array.isArray(lMeta.slotTags) &&
-                          lMeta.slotTags.length > 0
-                        ) {
-                          const lSlotFresh = await inspectSlotsFreshness(
-                            lMeta.slotTags,
-                            lMeta.generatedAt || 0
+                        } else {
+                          const mergedLSlotTags = Array.from(
+                            new Set([
+                              ...(Array.isArray(lMeta.ownSlotTags) ? lMeta.ownSlotTags : []),
+                              ...(Array.isArray(lMeta.slotTags) ? lMeta.slotTags : []),
+                            ])
                           );
-                          if (lSlotFresh.hasNewer) {
-                            const { revalidateLayout } = await import("./cache-revalidate.js");
-                            await revalidateLayout(entry.layoutRoutePath, {
-                              onlyRefreshSlots: true,
-                            });
-                            effectiveLMeta =
-                              (await readMetaFromStorage(
-                                storage,
-                                lMetaKey,
-                                lRscKey,
-                                platformContext,
-                                request.url
-                              )) || lMeta;
-                          } else if (lSlotFresh.hasExpired) {
-                            const layoutSlotRevalKey = `layout-slot:${entry.layoutRoutePath}`;
-                            const lSlotPromise = (async () => {
-                              if (regenerating.has(layoutSlotRevalKey)) return;
-                              regenerating.add(layoutSlotRevalKey);
-                              try {
-                                const { revalidateLayout } = await import("./cache-revalidate.js");
-                                await revalidateLayout(entry.layoutRoutePath, {
-                                  onlyRefreshSlots: true,
-                                });
-                              } catch (err) {
-                                console.error(
-                                  `❌ [Slot ISR] Error refreshing layout slots for ${entry.layoutRoutePath}:`,
-                                  err
-                                );
-                              } finally {
-                                regenerating.delete(layoutSlotRevalKey);
-                              }
-                            })();
-                            if (
-                              platformContext?.ctx &&
-                              typeof platformContext.ctx.waitUntil === "function"
-                            ) {
-                              platformContext.ctx.waitUntil(lSlotPromise);
+                          if (mergedLSlotTags.length > 0) {
+                            const lSlotFresh = await inspectSlotsFreshness(
+                              mergedLSlotTags,
+                              lMeta.generatedAt || 0
+                            );
+                            if (lSlotFresh.hasNewer) {
+                              const { revalidateLayout } = await import("./cache-revalidate.js");
+                              await revalidateLayout(entry.layoutRoutePath, {
+                                onlyRefreshSlots: true,
+                              });
+                              effectiveLMeta =
+                                (await readMetaFromStorage(
+                                  storage,
+                                  lMetaKey,
+                                  lRscKey,
+                                  platformContext,
+                                  request.url
+                                )) || lMeta;
+                            } else if (lSlotFresh.hasExpired) {
+                              pendingAsymLayoutSlotRevalPaths.push(entry.layoutRoutePath);
                             }
                           }
                         }
@@ -4739,7 +4889,6 @@ async function handleRequest(request, platformContext = {}) {
                         }
                       }
                     }
-
                     if (!isError && !context._hasRedirected && (!anyDynamicInChain || overrides.size > 0)) {
                       const composed = await composeLayoutChainFromOwnFragments(
                         effectiveLayoutsForRender,
@@ -4764,6 +4913,33 @@ async function handleRequest(request, platformContext = {}) {
                         context._resolvedLayoutClientJsx = composed.layoutOnlyTree;
                         context._hasResolvedSegments = true;
                         composedAsymmetric = true;
+                      }
+                    }
+
+                    if (pendingAsymLayoutSlotRevalPaths.length > 0) {
+                      const asymLayoutSlotsPromise = (async () => {
+                        const { revalidateLayout } = await import("./cache-revalidate.js");
+                        for (const layoutRoutePath of pendingAsymLayoutSlotRevalPaths) {
+                          const layoutSlotRevalKey = `layout-slot:${layoutRoutePath}`;
+                          if (regenerating.has(layoutSlotRevalKey)) continue;
+                          regenerating.add(layoutSlotRevalKey);
+                          try {
+                            await revalidateLayout(layoutRoutePath, { onlyRefreshSlots: true });
+                          } catch (err) {
+                            console.error(
+                              `❌ [Slot ISR] Error refreshing layout slots for ${layoutRoutePath}:`,
+                              err
+                            );
+                          } finally {
+                            regenerating.delete(layoutSlotRevalKey);
+                          }
+                        }
+                      })();
+                      if (
+                        platformContext?.ctx &&
+                        typeof platformContext.ctx.waitUntil === "function"
+                      ) {
+                        platformContext.ctx.waitUntil(asymLayoutSlotsPromise);
                       }
                     }
                   }

@@ -733,9 +733,23 @@ import "./env-setup.js";
 ${aotConfigPrelude}import "./route-modules.js";
 import * as edgeRenderer from "react-server-dom-webpack/server.edge";
 import { handleRequest as coreHandleRequest } from "${dinouDirSlash}/core/handler.js";
+import {
+  revalidatePath,
+  revalidatePage,
+  revalidateLayout,
+  revalidateTag,
+} from "${dinouDirSlash}/core/cache-revalidate.js";
+const __dinouRevalidationApi = {
+  revalidatePath,
+  revalidatePage,
+  revalidateLayout,
+  revalidateTag,
+};
 globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
+globalThis[Symbol.for("dinou.revalidation.api")] = __dinouRevalidationApi;
 export function handleRequest(request, platformContext) {
   globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
+  globalThis[Symbol.for("dinou.revalidation.api")] = __dinouRevalidationApi;
   return coreHandleRequest(request, platformContext);
 }
 `;

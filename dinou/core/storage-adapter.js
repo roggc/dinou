@@ -1316,6 +1316,9 @@ async function readDist2Fallback(storage, key, knownTags = []) {
         ...(!isShellJson && Array.isArray(item.metadata?.slotTags)
           ? item.metadata.slotTags
           : []),
+        ...(!isShellJson && Array.isArray(item.metadata?.ownSlotTags)
+          ? item.metadata.ownSlotTags
+          : []),
         ...(item.metadata?.slotId ? [item.metadata.slotId] : []),
         ...(slotIdFromKey ? [slotIdFromKey] : []),
         ...(Array.isArray(knownTags) ? knownTags : []),

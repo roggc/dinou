@@ -10,6 +10,7 @@ function executeRedirect(url) {
   if (isInternal && typeof window !== "undefined" && window.__DINOU_ROUTER_NAVIGATE__) {
     window.__DINOU_ROUTER_NAVIGATE__(safeUrl);
   } else if (typeof window !== "undefined") {
+    window.__DINOU_STATIC_EXPORT_UNLOADING__ = true;
     window.location.href = safeUrl;
   }
 }

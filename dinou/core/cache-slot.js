@@ -211,6 +211,29 @@ function getRegisterServerReference() {
   return null;
 }
 
+function resolveCacheSlotFileUrlFromManifest(exportName) {
+  const manifest =
+    typeof globalThis !== "undefined" ? globalThis.__DINOU_CLIENT_MANIFEST__ : null;
+  if (manifest && typeof manifest === "object") {
+    const suffix = `#${exportName}`;
+    const preferredSuffix = `/slot.js${suffix}`;
+    let fallbackKey = null;
+    for (const key of Object.keys(manifest)) {
+      if (key.endsWith(preferredSuffix)) {
+        return key.slice(0, -suffix.length);
+      }
+      if (!fallbackKey && key.endsWith(suffix)) {
+        fallbackKey = key;
+      }
+    }
+    if (fallbackKey) {
+      return fallbackKey.slice(0, -suffix.length);
+    }
+  }
+  const slotPath = path.resolve(currentDir, "slot.js");
+  return pathToFileURL(slotPath).href;
+}
+
 let _DinouCacheSlotBoundary = null;
 function getCacheSlotBoundary() {
   if (!_DinouCacheSlotBoundary) {
@@ -219,8 +242,7 @@ function getCacheSlotBoundary() {
       typeof DinouCacheSlotBoundary === "function" &&
       DinouCacheSlotBoundary.$$typeof !== Symbol.for("react.client.reference")
     ) {
-      const slotPath = path.resolve(currentDir, "slot.js");
-      const fileUrl = pathToFileURL(slotPath).href;
+      const fileUrl = resolveCacheSlotFileUrlFromManifest("DinouCacheSlotBoundary");
       let regFn = null;
       if (
         typeof globalThis !== "undefined" &&
@@ -1024,6 +1046,11 @@ async function DinouCacheSlot(props) {
     const persistSlot = async () => {
       try {
         await storage.set(storageKey, serialized, slotMeta);
+        if (!storage.baseDir) {
+          try {
+            await storage.set(`slots/${slotId}/slot.metadata.json`, JSON.stringify(slotMeta));
+          } catch (metaErr) {}
+        }
       } catch (err) {
         console.error(`[DinouCacheSlot] Failed to write cache for slot "${slotId}":`, err);
       }
@@ -1131,17 +1158,26 @@ async function getSlotJSX(slotId, options = {}) {
   const reqUrlEarly = String(options.req?.url || "");
   const qIdxEarly = reqUrlEarly.indexOf("?");
   const queryKeyEarly = qIdxEarly !== -1 ? reqUrlEarly.slice(qIdxEarly) : "";
+  const hasHttpRequestEarly = Boolean(reqUrlEarly);
   const earlyStampedeKey = `${storageKey}::${queryKeyEarly}`;
   const earlyInflightKey = options.fresh ? earlyStampedeKey : storageKey;
+  const regEntryEarly = slotRegistry.get(targetId);
+  const isEarlyNoCache =
+    typeof regEntryEarly?.revalidate === "number" && regEntryEarly.revalidate < 1;
 
-  if (inflightSlotRenders.has(earlyInflightKey)) {
+  if (!isEarlyNoCache && inflightSlotRenders.has(earlyInflightKey)) {
     try {
       const deduped = await inflightSlotRenders.get(earlyInflightKey);
       return await refreshNestedSlotsInTree(deduped, targetId, options);
     } catch (e) {}
   }
 
-  if (options.fresh && recentFreshSlotRenders.has(earlyStampedeKey)) {
+  if (
+    !isEarlyNoCache &&
+    options.fresh &&
+    hasHttpRequestEarly &&
+    recentFreshSlotRenders.has(earlyStampedeKey)
+  ) {
     const recent = recentFreshSlotRenders.get(earlyStampedeKey);
     if (recent && Date.now() - recent.timestamp < 500 && recent.serialized) {
       recent.timestamp = Date.now();
@@ -1340,6 +1376,7 @@ async function getSlotJSX(slotId, options = {}) {
     const reqUrl = String(options.req?.url || "");
     const qIdx = reqUrl.indexOf("?");
     const queryKey = qIdx !== -1 ? reqUrl.slice(qIdx) : "";
+    const hasHttpRequest = Boolean(reqUrl);
     const stampedeKey = `${storageKey}::${queryKey}`;
     const inflightKey = options.fresh ? stampedeKey : storageKey;
     try {
@@ -1348,7 +1385,12 @@ async function getSlotJSX(slotId, options = {}) {
         return await refreshNestedSlotsInTree(deduped, targetId, options);
       }
 
-      if (!isEntryNoCache && options.fresh && recentFreshSlotRenders.has(stampedeKey)) {
+      if (
+        !isEntryNoCache &&
+        options.fresh &&
+        hasHttpRequest &&
+        recentFreshSlotRenders.has(stampedeKey)
+      ) {
         const recent = recentFreshSlotRenders.get(stampedeKey);
         if (recent && Date.now() - recent.timestamp < 500 && recent.serialized) {
           recent.timestamp = Date.now();
@@ -1365,27 +1407,41 @@ async function getSlotJSX(slotId, options = {}) {
       const renderPromise = (async () => {
         const resolved = await entry.render();
         const serialized = serializeJSX(resolved);
-        if (!isEntryNoCache && options.fresh && isLatestGen()) {
+        if (!isEntryNoCache && options.fresh && hasHttpRequest && isLatestGen()) {
           recentFreshSlotRenders.set(stampedeKey, {
             timestamp: Date.now(),
             serialized,
           });
         }
         if (storage && !isEntryNoCache && isLatestGen()) {
+          const revalStateRef =
+            typeof globalThis !== "undefined"
+              ? globalThis[Symbol.for("dinou.reval.queue.state")]
+              : null;
           const nextSlotGenAt = Math.max(
             Date.now(),
-            Number(cached?.metadata?.generatedAt || 0) + 1
+            Number(cached?.metadata?.generatedAt || 0) + 1,
+            Number(revalStateRef?.lastGenTime || 0) + 1
           );
-          await storage.set(storageKey, serialized, {
+          if (revalStateRef && nextSlotGenAt > (revalStateRef.lastGenTime || 0)) {
+            revalStateRef.lastGenTime = nextSlotGenAt;
+          }
+          const freshSlotMeta = {
             tags: entry.tags,
             revalidate: entry.revalidate,
             generatedAt: nextSlotGenAt,
             slotId: targetId,
             inStaticShell: Boolean(cached?.metadata?.inStaticShell),
             inStaticSuspense: Boolean(cached?.metadata?.inStaticSuspense),
-          });
+          };
+          await storage.set(storageKey, serialized, freshSlotMeta);
+          if (!storage.baseDir) {
+            try {
+              await storage.set(`slots/${targetId}/slot.metadata.json`, JSON.stringify(freshSlotMeta));
+            } catch (metaErr) {}
+          }
         }
-        if (!isEntryNoCache && options.fresh && isLatestGen()) {
+        if (!isEntryNoCache && options.fresh && hasHttpRequest && isLatestGen()) {
           recentFreshSlotRenders.set(stampedeKey, {
             timestamp: Date.now(),
             serialized,
@@ -1440,7 +1496,13 @@ async function getSlotJSX(slotId, options = {}) {
             acc = acc ? `${acc}/${seg}` : seg;
             candidateLayoutKeySet.add(acc);
           }
-          for (const lKey of candidateLayoutKeySet) {
+          const sortedLayoutKeys = Array.from(candidateLayoutKeySet).sort((a, b) => {
+            const depthA = a ? a.split("/").filter(Boolean).length : 0;
+            const depthB = b ? b.split("/").filter(Boolean).length : 0;
+            if (depthA !== depthB) return depthA - depthB;
+            return a < b ? -1 : a > b ? 1 : 0;
+          });
+          for (const lKey of sortedLayoutKeys) {
             const lMetaKey = lKey ? `${lKey}/layout.metadata.json` : "layout.metadata.json";
             const lMeta = await readMetaFromStorageOrAssets(storage, lMetaKey);
             const lTags = Array.from(
@@ -1502,13 +1564,29 @@ async function inspectSlotsFreshness(slotTags, hostGeneratedAt = 0) {
     if (checkedIds.has(targetId)) continue;
     checkedIds.add(targetId);
     const storageKey = `slots/${targetId}/slot.json`;
-    const cached = await getSlotFromStorage(storage, storageKey, [targetId]);
+    const cached = await getSlotFromStorage(storage, storageKey, [targetId, rawTagOrId]);
     if (!cached || !cached.content) {
       const isDeleted =
         typeof storage.isKeyDeleted === "function"
           ? await storage.isKeyDeleted(storageKey)
           : typeof storage.isDeleted === "function" && storage.isDeleted(storageKey);
-      if (isDeleted) {
+      let isTagInvalidated = false;
+      if (!isDeleted && hostGen > 0) {
+        for (const t of new Set([rawTagOrId, targetId])) {
+          if (!t) continue;
+          const invAt =
+            typeof storage.getTagInvalidatedAtAsync === "function"
+              ? await storage.getTagInvalidatedAtAsync(t)
+              : typeof storage.getTagInvalidatedAt === "function"
+              ? storage.getTagInvalidatedAt(t)
+              : 0;
+          if (invAt > 0 && invAt >= hostGen) {
+            isTagInvalidated = true;
+            break;
+          }
+        }
+      }
+      if (isDeleted || isTagInvalidated) {
         result.hasNewer = true;
       }
       continue;

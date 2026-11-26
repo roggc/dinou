@@ -15,6 +15,7 @@ export function ClientRedirect({ to }) {
       } else if (router && router.replace) {
         router.replace(to);
       } else {
+        window.__DINOU_STATIC_EXPORT_UNLOADING__ = true;
         window.location.href = to;
       }
     }

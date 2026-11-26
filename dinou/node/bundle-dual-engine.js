@@ -723,14 +723,28 @@ import {
   WebResponseBridge,
   resolvePageFunctionsConfig,
 } from "${dinouDirSlash}/core/handler.js";
+import {
+  revalidatePath,
+  revalidatePage,
+  revalidateLayout,
+  revalidateTag,
+} from "${dinouDirSlash}/core/cache-revalidate.js";
+const __dinouRevalidationApi = {
+  revalidatePath,
+  revalidatePage,
+  revalidateLayout,
+  revalidateTag,
+};
 globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
+globalThis[Symbol.for("dinou.revalidation.api")] = __dinouRevalidationApi;
 export function handleRequest(request, platformContext) {
   globalThis.__DINOU_EDGE_RENDERER__ = edgeRenderer;
+  globalThis[Symbol.for("dinou.revalidation.api")] = __dinouRevalidationApi;
   return coreHandleRequest(request, platformContext);
 }
 export { WebResponseBridge, resolvePageFunctionsConfig };
 export { buildStaticPages, getStaticPaths, getStaticLayouts, getStaticMetadata } from "${dinouDirSlash}/core/build-static-pages.js";
-export { revalidatePath, revalidatePage, revalidateLayout, revalidateTag } from "${dinouDirSlash}/core/cache-revalidate.js";
+export { revalidatePath, revalidatePage, revalidateLayout, revalidateTag };
 export { revalidating, regenerating } from "${dinouDirSlash}/core/revalidating.js";
 `;
   const rscEntryPath = path.join(nodeDir, "rsc-entry.mjs");
@@ -1081,27 +1095,13 @@ export async function bundleServerAndNetlifyAdapters(engineResult) {
     } catch (e) {}
   }
 
-  const configImportLine = configFile
-    ? `import * as __dinouPassCConfigMod from ${JSON.stringify(configFile.replace(/\\/g, "/"))};\nconst __bundledPassCConfig = (__dinouPassCConfigMod && __dinouPassCConfigMod.default) ? __dinouPassCConfigMod.default : (__dinouPassCConfigMod || { plugins: [] });\nglobalThis.__DINOU_AOT_CONFIG__ = __bundledPassCConfig;\nglobalThis.__DINOU_CONFIG__ = __bundledPassCConfig;\n`
-    : "";
+  // Pass A (./rsc-engine.mjs) already bundles dinou.config with react-server +
+  // clientReferencesPlugin and populates globalThis.__DINOU_AOT_CONFIG__ / __DINOU_CONFIG__.
+  // Do NOT re-import dinou.config in Pass C, which lacks react-server conditions and would
+  // overwrite Pass A's config with non-RSC revalidation closures.
+  const configImportLine = "";
 
-  const passCConfigAliasPlugin = configFile
-    ? {
-        name: "dinou-passc-config-alias",
-        setup(build) {
-          const normConfig = path.resolve(configFile).toLowerCase();
-          build.onResolve({ filter: /^dinou$/ }, (args) => {
-            if (
-              args.importer &&
-              path.resolve(args.importer).toLowerCase() === normConfig
-            ) {
-              return { path: path.resolve(dinouDirSlash, "core/config.js") };
-            }
-            return null;
-          });
-        },
-      }
-    : null;
+  const passCConfigAliasPlugin = null;
 
   const handlerEntryCode = `// Auto-generated Universal Web Standards Handler (AOT Dual-Bundle)
 import path from "node:path";
