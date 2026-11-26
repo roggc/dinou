@@ -343,8 +343,10 @@ if (typeof window !== "undefined") {
   };
   window.addEventListener("beforeunload", markDocumentUnloading);
   window.addEventListener("pagehide", markDocumentUnloading);
-  window.addEventListener("pageshow", () => {
-    window.__DINOU_STATIC_EXPORT_UNLOADING__ = false;
+  window.addEventListener("pageshow", (event) => {
+    if (event && event.persisted) {
+      window.__DINOU_STATIC_EXPORT_UNLOADING__ = false;
+    }
   });
   window.addEventListener("unhandledrejection", (event) => {
     if (isStaticExportUnloading() || isNavigationAbortError(event?.reason)) {
@@ -1402,7 +1404,10 @@ const hasInitialServerError =
 const isLayoutError =
   hasInitialServerError && window.__DINOU_ERROR_SEGMENT__ !== "page";
 
-if (!isLayoutError) {
+if (isStaticExportUnloading()) {
+  // Document is already redirecting / unloading (e.g. PPR hole or streaming SSR redirect);
+  // skip hydration so no spurious /____rsc_page____ or /____rsc_layout____ fetches are started.
+} else if (!isLayoutError) {
   hydrateRoot(document, app, {
     onRecoverableError,
     onUncaughtError,
