@@ -333,7 +333,7 @@ const isNavigationAbortError = (err) => {
     /^(?:Load failed|Failed to fetch|NetworkError|The operation was aborted|Error in input stream)/i.test(
       msg.trim()
     ) ||
-    /____rsc_payload_error____.*due to access control checks/i.test(msg)
+    /____rsc_[a-z_]+____.*due to access control checks/i.test(msg)
   );
 };
 
@@ -345,6 +345,19 @@ if (typeof window !== "undefined") {
   window.addEventListener("pagehide", markDocumentUnloading);
   window.addEventListener("pageshow", () => {
     window.__DINOU_STATIC_EXPORT_UNLOADING__ = false;
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    if (isStaticExportUnloading() || isNavigationAbortError(event?.reason)) {
+      event.preventDefault();
+    }
+  });
+  window.addEventListener("error", (event) => {
+    if (
+      isStaticExportUnloading() ||
+      isNavigationAbortError(event?.error || event?.message)
+    ) {
+      event.preventDefault();
+    }
   });
   // Detect pre-hydration native <a href> hard navigations (before Router's useEffect
   // attaches soft-navigation click handling) so WebKit does not abort in-flight PPR
@@ -413,6 +426,43 @@ const buildStaticExportRscUrl = (rawRouteOrKey, fileName) => {
       ? `/${encodedSegments.join("/")}/${fileName}`
       : `/${fileName}`;
   return existingQuery ? `${baseRscPath}?${existingQuery}` : baseRscPath;
+};
+
+const wrapAbortSafeResponse = (res) => {
+  if (
+    !res ||
+    !res.body ||
+    typeof res.body.getReader !== "function" ||
+    typeof ReadableStream === "undefined"
+  ) {
+    return res;
+  }
+  const reader = res.body.getReader();
+  const safeBody = new ReadableStream({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          controller.close();
+        } else {
+          controller.enqueue(value);
+        }
+      } catch (err) {
+        if (isStaticExportUnloading() || isNavigationAbortError(err)) {
+          return new Promise(() => {});
+        }
+        controller.error(err);
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason).catch(() => {});
+    },
+  });
+  return new Response(safeBody, {
+    status: res.status,
+    statusText: res.statusText,
+    headers: res.headers,
+  });
 };
 
 const executeRscRedirect = (redirectUrl) => {
@@ -544,9 +594,9 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
         if (res.status >= 500 || res.headers.get("x-dinou-has-error") === "true") {
           erroredPageCacheKeys.add(url);
         }
-        return res;
+        return wrapAbortSafeResponse(res);
       }, (err) => {
-        if (isStaticExportUnloading()) {
+        if (isStaticExportUnloading() || isNavigationAbortError(err)) {
           return new Promise(() => {});
         }
         throw err;
@@ -646,10 +696,10 @@ const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
           if (res.status >= 500 || res.headers.get("x-dinou-has-error") === "true") {
             erroredLayoutCacheKeys.add(cacheKey);
           }
-          return res;
+          return wrapAbortSafeResponse(res);
         },
         (err) => {
-          if (isStaticExportUnloading()) {
+          if (isStaticExportUnloading() || isNavigationAbortError(err)) {
             return new Promise(() => {});
           }
           throw err;
@@ -706,6 +756,7 @@ const getErrorRSCPayload = (route, error) => {
           if (window.__DINOU_ROUTER_NAVIGATE__) {
             window.__DINOU_ROUTER_NAVIGATE__(redirectUrl, { replace: true });
           } else {
+            window.__DINOU_STATIC_EXPORT_UNLOADING__ = true;
             window.location.href = redirectUrl;
           }
           return new Promise(() => {});

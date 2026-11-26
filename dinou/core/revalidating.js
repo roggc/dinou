@@ -85,7 +85,12 @@ function revalidating(reqPath, isDynamicFromServer) {
           lReval >= 1 &&
           ownGen > 0 &&
           Date.now() > ownGen + lReval * 1000;
-        const slotTags = Array.isArray(lMeta.slotTags) ? lMeta.slotTags : [];
+        const slotTags = Array.from(
+          new Set([
+            ...(Array.isArray(lMeta.ownSlotTags) ? lMeta.ownSlotTags : []),
+            ...(Array.isArray(lMeta.slotTags) ? lMeta.slotTags : []),
+          ])
+        );
         const slotFresh =
           !isLayoutTtlExpired && slotTags.length > 0
             ? await inspectSlotsFreshness(slotTags, genAt)
@@ -127,7 +132,7 @@ function revalidating(reqPath, isDynamicFromServer) {
         !isPageExpired && pageSlotTags.length > 0
           ? await inspectSlotsFreshness(
               pageSlotTags,
-              Number(metadata?.generatedAt || 0)
+              Number(metadata?.pageSlotsGeneratedAt || metadata?.generatedAt || 0)
             )
           : { hasExpired: false, hasNewer: false };
       const isPageSlotDirty = pageSlotFresh.hasExpired || pageSlotFresh.hasNewer;

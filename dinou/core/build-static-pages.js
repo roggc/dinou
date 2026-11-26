@@ -70,10 +70,28 @@ function safeDecode(val) {
   }
 }
 
-async function isDynamicRoute(revalidate) {
+function hasZeroParameters(fn) {
+  if (typeof fn !== "function") return false;
+  if (fn.length > 0) return false;
+  try {
+    const src = Function.prototype.toString.call(fn).trim();
+    return /^(?:async\s+)?(?:function(?:\s+[\w$]+)?\s*)?\(\s*\)/.test(src);
+  } catch (e) {
+    return fn.length === 0;
+  }
+}
+
+async function isDynamicRoute(revalidate, params) {
   if (revalidate === undefined || revalidate === false) return false;
-  const val = typeof revalidate === "function" ? await revalidate() : revalidate;
-  return typeof val === "number" && val < 1;
+  if (typeof revalidate === "function") {
+    // When called without concrete params before getStaticPaths expansion,
+    // defer parameterized revalidate(params) functions until concrete pathItems are expanded,
+    // while still evaluating 0-arg functions (e.g. `() => 0`, `async () => 0`) immediately.
+    if (params === undefined && !hasZeroParameters(revalidate)) return false;
+    const val = await revalidate(params || {});
+    return typeof val === "number" && val < 1;
+  }
+  return typeof revalidate === "number" && revalidate < 1;
 }
 
 
@@ -792,7 +810,7 @@ async function buildStaticPages(onProgress = null) {
             }
             const isLocalPage =
               pagePath && path.dirname(pagePath) === dynamicPath;
-            if (isLocalPage && !(await isDynamicRoute(revalidate))) {
+            if (isLocalPage && !(await isDynamicRoute(revalidate, getStaticPaths ? undefined : params))) {
               try {
                 if (getStaticPaths) {
                   const paths = await (typeof getStaticPaths === "function"
@@ -919,7 +937,8 @@ async function buildStaticPages(onProgress = null) {
     const { isRoutePpr: isPpr, pageEffectivePpr, layoutPprMap } =
       await resolveBuildPprForRoute(segments, pagePath, pageFunctionsPath, srcFolder);
 
-    if (pagePath && (!(await isDynamicRoute(revalidate)) || isPpr) && !doNotPushAtEnd) {
+    const isPageDynamicForParams = pagePath ? await isDynamicRoute(revalidate, dParams) : false;
+    if (pagePath && !doNotPushAtEnd) {
       try {
         const activeLayoutsForPage = getActiveLayoutChain(segments, {}, srcFolder);
         for (const entry of activeLayoutsForPage) {
@@ -940,6 +959,9 @@ async function buildStaticPages(onProgress = null) {
           }
         }
       } catch (e) {}
+    }
+
+    if (pagePath && !isPageDynamicForParams && !doNotPushAtEnd) {
       pages.push({
         path: currentPath,
         segments,
@@ -1352,7 +1374,7 @@ async function buildStaticPages(onProgress = null) {
           };
 
       const resolvedRevalidate =
-        typeof revalidate === "function" ? await revalidate() : revalidate;
+        typeof revalidate === "function" ? await revalidate(params) : revalidate;
       const effectiveIsPpr = layoutBailedOut
         ? Boolean(pageEffectivePpr)
         : Boolean(pageIsPpr);
@@ -1557,7 +1579,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
           const defMod = pageFunctionsModule.default?.default ? pageFunctionsModule.default.default : pageFunctionsModule.default;
           const getProps = pageFunctionsModule.getProps || defMod?.getProps;
           revalidate = pageFunctionsModule.revalidate ?? defMod?.revalidate;
-          if (await isDynamicRoute(revalidate)) {
+          if (await isDynamicRoute(revalidate, dParams)) {
             markAsDynamic();
             if (isDynamic) isDynamic.value = true;
             return null;
@@ -1747,7 +1769,7 @@ async function buildStaticPage(reqPath, isDynamic = null) {
     const holes = pageIsPpr ? capturedHoles : [];
     staticRoutes.add(reqPath);
     staticMetadata.set(reqPath, {
-      revalidate: typeof revalidate === "function" ? await revalidate() : revalidate,
+      revalidate: typeof revalidate === "function" ? await revalidate(dynamicParams) : revalidate,
       effects: sideEffects,
       tags: cacheTags,
       ppr: pageIsPpr,
