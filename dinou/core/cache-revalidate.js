@@ -1030,16 +1030,6 @@ async function revalidatePage(reqPath, internalOptions = {}) {
             await storage.set(shellPageOldKey, prevShellPage.content);
           }
         } catch (e) {}
-        const bailoutKeysToEvict = [
-          shellHtmlKey,
-          rscKey,
-          shellRscKey,
-          shellPageKey,
-          legacyRscKey,
-        ];
-        await Promise.all(
-          bailoutKeysToEvict.map((k) => Promise.resolve(storage.delete(k)).catch(() => {}))
-        );
         try {
           await storage.set(
             metaKey,
@@ -1050,6 +1040,16 @@ async function revalidatePage(reqPath, internalOptions = {}) {
             })
           );
         } catch (e) {}
+        const bailoutKeysToEvict = [
+          shellHtmlKey,
+          rscKey,
+          shellRscKey,
+          shellPageKey,
+          legacyRscKey,
+        ];
+        await Promise.all(
+          bailoutKeysToEvict.map((k) => Promise.resolve(storage.delete(k)).catch(() => {}))
+        );
         console.log(`[ISR] Bailout detected for ${cleanPath}. Switching to Dynamic.`);
         return;
       }

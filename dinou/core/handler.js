@@ -2270,7 +2270,7 @@ async function handleRequest(request, platformContext = {}) {
               ])
             );
           }
-          if (!platformContext?.isSSG && !isOld && !dynamicState.value) {
+          if (!platformContext?.isSSG && !isOld && !dynamicState.value && !internalBuildId) {
             const pendingRscLayoutSlotRevalPaths = [];
             for (let i = activeChain.length - 1; i >= 0; i--) {
               const entry = activeChain[i];
@@ -2576,6 +2576,11 @@ async function handleRequest(request, platformContext = {}) {
               cached = oldCached;
             }
           }
+          if (!cached && !useOld && isStatic && internalBuildId) {
+            const bailoutOldName = isLayoutReq ? "layout._old.rsc" : "page._old.rsc";
+            const bailoutOldKey = cleanRel ? `${cleanRel}/${bailoutOldName}` : bailoutOldName;
+            cached = await storage.get(bailoutOldKey);
+          }
           if (!cached && useOld) {
             const fallbackCurrKey = cleanRel
               ? `${cleanRel}/${resolvedTargetFileName}`
@@ -2588,7 +2593,7 @@ async function handleRequest(request, platformContext = {}) {
           if (cached && cached.content) {
             let isExpired = false;
             let isSlotOnlyExpired = false;
-            if (isLayoutReq && cached.metadata) {
+            if (isLayoutReq && !useOld && !internalBuildId && cached.metadata) {
               const { revalidate, generatedAt } = cached.metadata;
               if (typeof revalidate === "number" && revalidate >= 1 && Date.now() > (generatedAt || 0) + revalidate * 1000) {
                 isExpired = true;
@@ -4884,33 +4889,6 @@ async function handleRequest(request, platformContext = {}) {
                         }
                       }
                     }
-                    if (pendingAsymLayoutSlotRevalPaths.length > 0) {
-                      const asymLayoutSlotsPromise = (async () => {
-                        const { revalidateLayout } = await import("./cache-revalidate.js");
-                        for (const layoutRoutePath of pendingAsymLayoutSlotRevalPaths) {
-                          const layoutSlotRevalKey = `layout-slot:${layoutRoutePath}`;
-                          if (regenerating.has(layoutSlotRevalKey)) continue;
-                          regenerating.add(layoutSlotRevalKey);
-                          try {
-                            await revalidateLayout(layoutRoutePath, { onlyRefreshSlots: true });
-                          } catch (err) {
-                            console.error(
-                              `❌ [Slot ISR] Error refreshing layout slots for ${layoutRoutePath}:`,
-                              err
-                            );
-                          } finally {
-                            regenerating.delete(layoutSlotRevalKey);
-                          }
-                        }
-                      })();
-                      if (
-                        platformContext?.ctx &&
-                        typeof platformContext.ctx.waitUntil === "function"
-                      ) {
-                        platformContext.ctx.waitUntil(asymLayoutSlotsPromise);
-                      }
-                    }
-
                     if (!isError && !context._hasRedirected && (!anyDynamicInChain || overrides.size > 0)) {
                       const composed = await composeLayoutChainFromOwnFragments(
                         effectiveLayoutsForRender,
@@ -4935,6 +4913,33 @@ async function handleRequest(request, platformContext = {}) {
                         context._resolvedLayoutClientJsx = composed.layoutOnlyTree;
                         context._hasResolvedSegments = true;
                         composedAsymmetric = true;
+                      }
+                    }
+
+                    if (pendingAsymLayoutSlotRevalPaths.length > 0) {
+                      const asymLayoutSlotsPromise = (async () => {
+                        const { revalidateLayout } = await import("./cache-revalidate.js");
+                        for (const layoutRoutePath of pendingAsymLayoutSlotRevalPaths) {
+                          const layoutSlotRevalKey = `layout-slot:${layoutRoutePath}`;
+                          if (regenerating.has(layoutSlotRevalKey)) continue;
+                          regenerating.add(layoutSlotRevalKey);
+                          try {
+                            await revalidateLayout(layoutRoutePath, { onlyRefreshSlots: true });
+                          } catch (err) {
+                            console.error(
+                              `❌ [Slot ISR] Error refreshing layout slots for ${layoutRoutePath}:`,
+                              err
+                            );
+                          } finally {
+                            regenerating.delete(layoutSlotRevalKey);
+                          }
+                        }
+                      })();
+                      if (
+                        platformContext?.ctx &&
+                        typeof platformContext.ctx.waitUntil === "function"
+                      ) {
+                        platformContext.ctx.waitUntil(asymLayoutSlotsPromise);
                       }
                     }
                   }
