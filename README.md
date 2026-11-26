@@ -1,7 +1,7 @@
 # Dinou
 
 [![Documentation](https://img.shields.io/badge/docs-dinou.dev-blue?style=flat-square)](https://dinou.dev)
-[![Version](https://img.shields.io/badge/version-10.0.4-orange?style=flat-square)](https://www.npmjs.com/package/dinou)
+[![Version](https://img.shields.io/badge/version-10.0.5-orange?style=flat-square)](https://www.npmjs.com/package/dinou)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](./LICENSE.md)
 
 **The Ejectable Full-Stack React 19 Framework.**
