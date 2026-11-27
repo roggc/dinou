@@ -4,11 +4,29 @@ function isSafeRedirect(url) {
   return typeof url === "string" && url.startsWith("/") && !url.startsWith("//");
 }
 
+function applyRevalidationHint(hint) {
+  if (!hint || typeof window === "undefined") return;
+  if (typeof window.__DINOU_INVALIDATE_CLIENT_CACHE__ === "function") {
+    try {
+      window.__DINOU_INVALIDATE_CLIENT_CACHE__(hint);
+    } catch (e) {}
+  }
+}
+
+function applyRevalidationHeader(res) {
+  if (!res || !res.headers) return;
+  const raw = res.headers.get("X-Dinou-Revalidated");
+  if (!raw) return;
+  try {
+    applyRevalidationHint(JSON.parse(raw));
+  } catch (e) {}
+}
+
 function executeRedirect(url) {
   const safeUrl = isSafeRedirect(url) ? url : "/";
   const isInternal = safeUrl.startsWith("/") && !safeUrl.startsWith("//");
   if (isInternal && typeof window !== "undefined" && window.__DINOU_ROUTER_NAVIGATE__) {
-    window.__DINOU_ROUTER_NAVIGATE__(safeUrl);
+    window.__DINOU_ROUTER_NAVIGATE__(safeUrl, { fresh: true });
   } else if (typeof window !== "undefined") {
     window.__DINOU_STATIC_EXPORT_UNLOADING__ = true;
     window.location.href = safeUrl;
@@ -91,6 +109,9 @@ export function createServerFunctionProxy(id) {
         throw err;
       }
 
+      // Apply any server-side revalidate*() invalidation hints before redirect or return
+      applyRevalidationHeader(res);
+
       // Check header first
       const redirectUrl = res.headers.get("X-Dinou-Redirect");
       if (redirectUrl) {
@@ -142,6 +163,8 @@ export function createServerFunctionProxy(id) {
                           executeRedirect(payload.url);
                         } else if (payload.type === "cookie") {
                           document.cookie = payload.cookie;
+                        } else if (payload.type === "revalidate") {
+                          applyRevalidationHint(payload);
                         }
                       } catch (e) {
                         console.error("[Dinou] Failed to parse stream command line at end:", e);
@@ -179,6 +202,8 @@ export function createServerFunctionProxy(id) {
                           executeRedirect(payload.url);
                         } else if (payload.type === "cookie") {
                           document.cookie = payload.cookie;
+                        } else if (payload.type === "revalidate") {
+                          applyRevalidationHint(payload);
                         }
                       } catch (e) {
                         console.error("[Dinou] Failed to parse stream command line:", e);

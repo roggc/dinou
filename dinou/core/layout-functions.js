@@ -11,33 +11,128 @@ import { getDinouConfig } from "./load-dinou-config.js";
 const LAYOUT_FUNCTIONS_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js", ".mjs"];
 const LAYOUT_FUNCTIONS_NAMES = ["layout_functions", "layout.functions"];
 
+const MAX_ACTIVE_CHAIN_CACHE_ENTRIES = 1000;
+const layoutFunctionsPathCache = new Map();
+const layoutFunctionsConfigCache = new Map();
+const activeLayoutChainCache = new Map();
+let activeLayoutChainCacheVfsRef = null;
+
+function isLayoutDevMode() {
+  return (
+    process.env.DINOU_DEV === "true" ||
+    (typeof globalThis !== "undefined" && Boolean(globalThis.__DINOU_DEV__)) ||
+    process.env.NODE_ENV !== "production"
+  );
+}
+
+function clearLayoutFunctionsPathCache() {
+  layoutFunctionsPathCache.clear();
+}
+
+function clearLayoutFunctionsConfigCache() {
+  layoutFunctionsConfigCache.clear();
+}
+
+function clearActiveLayoutChainCache() {
+  activeLayoutChainCache.clear();
+  activeLayoutChainCacheVfsRef =
+    typeof globalThis !== "undefined" ? globalThis.__DINOU_VFS__ || null : null;
+}
+
+function getActiveLayoutChainCacheSize() {
+  return activeLayoutChainCache.size;
+}
+
+function cloneLayoutParams(params) {
+  if (!params || typeof params !== "object") return {};
+  const out = {};
+  for (const [k, v] of Object.entries(params)) {
+    out[k] = Array.isArray(v) ? v.slice() : v;
+  }
+  return out;
+}
+
+function cloneLayoutSlots(slots) {
+  if (!slots || typeof slots !== "object") return {};
+  const out = {};
+  for (const [k, v] of Object.entries(slots)) {
+    out[k] =
+      v && typeof v === "object"
+        ? { slotPath: v.slotPath, slotParams: cloneLayoutParams(v.slotParams) }
+        : v;
+  }
+  return out;
+}
+
+function cloneActiveLayoutChain(chain) {
+  if (!Array.isArray(chain) || chain.length === 0) return [];
+  return chain.map((entry) => ({
+    layoutPath: entry.layoutPath,
+    dParams: cloneLayoutParams(entry.dParams),
+    slots: cloneLayoutSlots(entry.slots),
+    cleanLayoutKey: entry.cleanLayoutKey,
+    layoutRoutePath: entry.layoutRoutePath,
+    hasResetLayout: entry.hasResetLayout,
+  }));
+}
+
+function getLayoutConfigCacheKey(layoutFunctionsPath) {
+  const hasRouteModules =
+    typeof globalThis !== "undefined" && Boolean(globalThis.__DINOU_ROUTE_MODULES__);
+  const rawKey = String(layoutFunctionsPath || "").replace(/\\/g, "/");
+  const prefix = hasRouteModules ? "m:" : "f:";
+  return path.isAbsolute(layoutFunctionsPath)
+    ? `${prefix}${rawKey}`
+    : `${prefix}${process.cwd().replace(/\\/g, "/")}/${rawKey}`;
+}
+
 /**
  * Finds the layout_functions file in the given layout directory, if it exists.
+ * Cached in production (`!isLayoutDevMode()`) to avoid repeated extension probes.
  * @param {string} layoutFolderPath
  * @returns {string | null}
  */
 function getLayoutFunctionsPath(layoutFolderPath) {
   if (!layoutFolderPath) return null;
-  for (const name of LAYOUT_FUNCTIONS_NAMES) {
+  const isDev = isLayoutDevMode();
+  const routeModules =
+    typeof globalThis !== "undefined" ? globalThis.__DINOU_ROUTE_MODULES__ : null;
+  let cacheKey = null;
+  if (!isDev) {
+    const rawKey = String(layoutFolderPath).replace(/\\/g, "/");
+    const prefix = routeModules ? "m:" : "f:";
+    cacheKey = path.isAbsolute(layoutFolderPath)
+      ? `${prefix}${rawKey}`
+      : `${prefix}${process.cwd().replace(/\\/g, "/")}/${rawKey}`;
+    if (layoutFunctionsPathCache.has(cacheKey)) {
+      return layoutFunctionsPathCache.get(cacheKey);
+    }
+  }
+
+  let resolved = null;
+  outer: for (const name of LAYOUT_FUNCTIONS_NAMES) {
     for (const ext of LAYOUT_FUNCTIONS_EXTENSIONS) {
       const candidate = path.join(layoutFolderPath, `${name}${ext}`);
       if (existsSync(candidate)) {
-        return candidate;
+        resolved = candidate;
+        break outer;
       }
-      const slashCandidate = candidate.replace(/\\/g, "/");
-      if (existsSync(slashCandidate)) {
-        return slashCandidate;
-      }
-      if (typeof globalThis !== "undefined" && globalThis.__DINOU_ROUTE_MODULES__) {
+      if (routeModules) {
+        const slashCandidate = candidate.replace(/\\/g, "/");
         const norm = slashCandidate.replace(/^file:\/\/\/?/, "").replace(/^\/+/, "");
         const clean = norm.startsWith("src/") ? norm : "src/" + norm.replace(/^.*\/src\//, "");
-        if (globalThis.__DINOU_ROUTE_MODULES__[clean] || globalThis.__DINOU_ROUTE_MODULES__[norm]) {
-          return clean;
+        if (routeModules[clean] || routeModules[norm]) {
+          resolved = clean;
+          break outer;
         }
       }
     }
   }
-  return null;
+
+  if (cacheKey !== null) {
+    layoutFunctionsPathCache.set(cacheKey, resolved);
+  }
+  return resolved;
 }
 
 /**
@@ -55,12 +150,23 @@ async function getLayoutProps(layoutPath, dParams = {}) {
   if (!layoutFunctionsPath) return {};
 
   try {
-    const mod = await importModule(layoutFunctionsPath);
-    const defaultExport = mod.default?.default ? mod.default.default : mod.default;
-    const getPropsFn =
-      mod.getProps ||
-      defaultExport?.getProps ||
-      (typeof mod.default === "function" ? mod.default : null);
+    let getPropsFn = null;
+    if (!isLayoutDevMode()) {
+      const cfgKey = getLayoutConfigCacheKey(layoutFunctionsPath);
+      const cached = layoutFunctionsConfigCache.get(cfgKey);
+      if (cached) {
+        getPropsFn = cached.getProps;
+        if (typeof getPropsFn !== "function") return {};
+      }
+    }
+    if (!getPropsFn) {
+      const mod = await importModule(layoutFunctionsPath);
+      const defaultExport = mod.default?.default ? mod.default.default : mod.default;
+      getPropsFn =
+        mod.getProps ||
+        defaultExport?.getProps ||
+        (typeof mod.default === "function" ? mod.default : null);
+    }
     if (typeof getPropsFn === "function") {
       const res = await getPropsFn(dParams);
       return res && typeof res === "object" ? res : {};
@@ -73,6 +179,9 @@ async function getLayoutProps(layoutPath, dParams = {}) {
 
 /**
  * Resolves layout_functions configuration (revalidate, tags, dynamic, allowISG, validateParams).
+ * Caches static module exports (including `getStaticPaths` set, `allowISG`, `ppr`, `validateParams`,
+ * `getProps`) in production while still invoking per-request dynamic `revalidate(dParams)` and
+ * `getCacheTags(dParams)` functions on every call.
  * @param {string} layoutPath
  * @param {object} dParams
  * @returns {Promise<object>}
@@ -103,99 +212,134 @@ async function resolveLayoutFunctionsConfig(layoutPath, dParams = {}) {
   const layoutFunctionsPath = getLayoutFunctionsPath(layoutFolder);
   if (!layoutFunctionsPath) return defaultConfig;
 
-  let layoutPpr = null;
-  try {
-    const mod = await importModule(layoutFunctionsPath);
-    if (mod) {
-      layoutPpr = await resolveModulePpr(mod);
-    }
-    if (layoutPpr === null && typeof globalThis !== "undefined" && globalThis.__DINOU_ROUTE_METADATA__) {
-      const normKey = layoutFunctionsPath ? layoutFunctionsPath.replace(/\\/g, "/") : "";
-      for (const [k, meta] of Object.entries(globalThis.__DINOU_ROUTE_METADATA__)) {
-        if (meta.ppr !== undefined && (normKey === k || normKey.endsWith("/" + k) || normKey.endsWith(k))) {
-          layoutPpr = Boolean(meta.ppr);
-          break;
+  const isDev = isLayoutDevMode();
+  const cacheKey = !isDev ? getLayoutConfigCacheKey(layoutFunctionsPath) : null;
+  let cachedStatic = cacheKey ? layoutFunctionsConfigCache.get(cacheKey) : null;
+
+  if (!cachedStatic) {
+    let layoutPpr = null;
+    try {
+      const mod = await importModule(layoutFunctionsPath);
+      if (mod) {
+        layoutPpr = await resolveModulePpr(mod);
+      }
+      if (layoutPpr === null && typeof globalThis !== "undefined" && globalThis.__DINOU_ROUTE_METADATA__) {
+        const normKey = layoutFunctionsPath ? layoutFunctionsPath.replace(/\\/g, "/") : "";
+        for (const [k, meta] of Object.entries(globalThis.__DINOU_ROUTE_METADATA__)) {
+          if (meta.ppr !== undefined && (normKey === k || normKey.endsWith("/" + k) || normKey.endsWith(k))) {
+            layoutPpr = Boolean(meta.ppr);
+            break;
+          }
         }
       }
-    }
-    const defaultExport = mod.default?.default ? mod.default.default : mod.default;
-    const rawAllowISG =
-      mod.allowISG !== undefined ? mod.allowISG : defaultExport?.allowISG;
-    const resolvedAllowISG =
-      typeof rawAllowISG === "function"
-        ? await rawAllowISG()
-        : (rawAllowISG ?? defaultAllowISG);
+      const defaultExport = mod.default?.default ? mod.default.default : mod.default;
+      const rawAllowISG =
+        mod.allowISG !== undefined ? mod.allowISG : defaultExport?.allowISG;
+      const resolvedAllowISG =
+        typeof rawAllowISG === "function"
+          ? await rawAllowISG()
+          : (rawAllowISG ?? null);
 
-    const getStaticPathsFn = mod.getStaticPaths || defaultExport?.getStaticPaths;
-    let staticPathsSet = null;
-    if (getStaticPathsFn) {
-      const paths = await (typeof getStaticPathsFn === "function" ? getStaticPathsFn() : getStaticPathsFn);
-      if (Array.isArray(paths)) {
-        staticPathsSet = new Set(
-          paths.map((p) => {
-            if (typeof p === "object" && p !== null && !Array.isArray(p)) {
-              const sorted = Object.entries(p)
-                .sort((a, b) => a[0].localeCompare(b[0]))
-                .map(([k, v]) => [
-                  k,
-                  Array.isArray(v)
-                    ? v.join(",")
-                    : v === undefined || v === null
-                    ? ""
-                    : String(v),
-                ]);
-              return JSON.stringify(sorted);
-            }
-            if (Array.isArray(p)) {
-              return p.join(",");
-            }
-            return p === undefined || p === null ? "" : String(p);
-          })
-        );
+      const getStaticPathsFn = mod.getStaticPaths || defaultExport?.getStaticPaths;
+      let staticPathsSet = null;
+      if (getStaticPathsFn) {
+        const paths = await (typeof getStaticPathsFn === "function" ? getStaticPathsFn() : getStaticPathsFn);
+        if (Array.isArray(paths)) {
+          staticPathsSet = new Set(
+            paths.map((p) => {
+              if (typeof p === "object" && p !== null && !Array.isArray(p)) {
+                const sorted = Object.entries(p)
+                  .sort((a, b) => a[0].localeCompare(b[0]))
+                  .map(([k, v]) => [
+                    k,
+                    Array.isArray(v)
+                      ? v.join(",")
+                      : v === undefined || v === null
+                      ? ""
+                      : String(v),
+                  ]);
+                return JSON.stringify(sorted);
+              }
+              if (Array.isArray(p)) {
+                return p.join(",");
+              }
+              return p === undefined || p === null ? "" : String(p);
+            })
+          );
+        }
       }
-    }
 
-    const rawRevalidate =
-      mod.revalidate !== undefined ? mod.revalidate : defaultExport?.revalidate;
-    const revalidateVal =
-      typeof rawRevalidate === "function"
-        ? await rawRevalidate(dParams)
-        : rawRevalidate;
+      const rawRevalidate =
+        mod.revalidate !== undefined ? mod.revalidate : defaultExport?.revalidate;
+      const revalidateFn = typeof rawRevalidate === "function" ? rawRevalidate : null;
+      const staticRevalidate = revalidateFn ? undefined : rawRevalidate;
 
-    const isDynamic = typeof revalidateVal === "number" && revalidateVal < 1;
+      const rawTags = mod.getCacheTags ?? defaultExport?.getCacheTags;
+      const getCacheTagsFn = typeof rawTags === "function" ? rawTags : null;
+      const staticTags = Array.isArray(rawTags) ? rawTags : [];
 
-    const rawTags = mod.getCacheTags ?? defaultExport?.getCacheTags;
-    let tagsVal = [];
-    if (typeof rawTags === "function") {
-      try {
-        tagsVal = await rawTags(dParams);
-      } catch (e) {
-        console.error("Error running getCacheTags in layout-functions:", e);
+      const validateParamsFn = mod.validateParams || defaultExport?.validateParams;
+      const getPropsFn =
+        mod.getProps ||
+        defaultExport?.getProps ||
+        (typeof mod.default === "function" ? mod.default : null);
+
+      cachedStatic = {
+        allowISG: resolvedAllowISG,
+        staticPathsSet,
+        validateParams: typeof validateParamsFn === "function" ? validateParamsFn : null,
+        revalidateFn,
+        staticRevalidate,
+        getCacheTagsFn,
+        staticTags,
+        getProps: typeof getPropsFn === "function" ? getPropsFn : null,
+        ppr: layoutPpr,
+      };
+      if (cacheKey) {
+        layoutFunctionsConfigCache.set(cacheKey, cachedStatic);
       }
-    } else if (Array.isArray(rawTags)) {
-      tagsVal = rawTags;
+    } catch (err) {
+      console.error(`[Dinou] Error resolving layout_functions config from ${layoutFunctionsPath}:`, err);
+      return { ...defaultConfig, ppr: layoutPpr };
     }
-
-    const validateParamsFn = mod.validateParams || defaultExport?.validateParams;
-    const getPropsFn =
-      mod.getProps ||
-      defaultExport?.getProps ||
-      (typeof mod.default === "function" ? mod.default : null);
-
-    return {
-      allowISG: resolvedAllowISG,
-      staticPathsSet,
-      validateParams: typeof validateParamsFn === "function" ? validateParamsFn : null,
-      isDynamic,
-      revalidate: revalidateVal,
-      tags: Array.isArray(tagsVal) ? tagsVal : [],
-      getProps: typeof getPropsFn === "function" ? getPropsFn : null,
-      ppr: layoutPpr,
-    };
-  } catch (err) {
-    console.error(`[Dinou] Error resolving layout_functions config from ${layoutFunctionsPath}:`, err);
-    return { ...defaultConfig, ppr: layoutPpr };
   }
+
+  let revalidateVal = cachedStatic.staticRevalidate;
+  if (typeof cachedStatic.revalidateFn === "function") {
+    try {
+      revalidateVal = await cachedStatic.revalidateFn(dParams);
+    } catch (err) {
+      console.error(`[Dinou] Error running revalidate in ${layoutFunctionsPath}:`, err);
+    }
+  }
+  const isDynamic = typeof revalidateVal === "number" && revalidateVal < 1;
+
+  let tagsVal = cachedStatic.staticTags;
+  if (typeof cachedStatic.getCacheTagsFn === "function") {
+    try {
+      const dynTags = await cachedStatic.getCacheTagsFn(dParams);
+      tagsVal = Array.isArray(dynTags) ? dynTags : [];
+    } catch (e) {
+      console.error("Error running getCacheTags in layout-functions:", e);
+      tagsVal = [];
+    }
+  }
+
+  const effectiveAllowISG =
+    cachedStatic.allowISG !== null && cachedStatic.allowISG !== undefined
+      ? Boolean(cachedStatic.allowISG)
+      : defaultAllowISG;
+
+  return {
+    allowISG: effectiveAllowISG,
+    staticPathsSet: cachedStatic.staticPathsSet,
+    validateParams: cachedStatic.validateParams,
+    isDynamic,
+    revalidate: revalidateVal,
+    tags: Array.isArray(tagsVal) ? tagsVal : [],
+    getProps: cachedStatic.getProps,
+    ppr: cachedStatic.ppr,
+  };
 }
 
 function safeDecodeSegment(val) {
@@ -310,11 +454,45 @@ function getActiveLayoutChain(
   srcFolder = path.resolve(process.cwd(), "src"),
   options = {}
 ) {
+  const normSrc = String(srcFolder || "").replace(/\\/g, "/").replace(/\/+$/, "");
+  let chainCacheKey = null;
+  if (!isLayoutDevMode()) {
+    const currentVfs =
+      typeof globalThis !== "undefined" ? globalThis.__DINOU_VFS__ || null : null;
+    if (currentVfs !== activeLayoutChainCacheVfsRef) {
+      activeLayoutChainCache.clear();
+      activeLayoutChainCacheVfsRef = currentVfs;
+    }
+    const segKey = Array.isArray(reqSegments) ? reqSegments.join("\x1f") : "";
+    chainCacheKey = `${normSrc}\0${segKey}\0${options?.ignoreNoLayout ? 1 : 0}\0${options?.exactLayoutKey ? 1 : 0}`;
+    if (activeLayoutChainCache.has(chainCacheKey)) {
+      const cachedChain = activeLayoutChainCache.get(chainCacheKey);
+      // Refresh LRU recency
+      activeLayoutChainCache.delete(chainCacheKey);
+      activeLayoutChainCache.set(chainCacheKey, cachedChain);
+      return cloneActiveLayoutChain(cachedChain);
+    }
+  }
+
+  const storeChainInCache = (chain) => {
+    if (chainCacheKey !== null) {
+      const snapshot = cloneActiveLayoutChain(chain);
+      if (activeLayoutChainCache.has(chainCacheKey)) {
+        activeLayoutChainCache.delete(chainCacheKey);
+      } else if (activeLayoutChainCache.size >= MAX_ACTIVE_CHAIN_CACHE_ENTRIES) {
+        const oldestKey = activeLayoutChainCache.keys().next().value;
+        activeLayoutChainCache.delete(oldestKey);
+      }
+      activeLayoutChainCache.set(chainCacheKey, snapshot);
+    }
+    return chain;
+  };
+
   if (
     !options.ignoreNoLayout &&
     getFilePathAndDynamicParams(reqSegments, queryObj, srcFolder, "no_layout", false)[0]
   ) {
-    return [];
+    return storeChainInCache([]);
   }
 
   const allLayouts = options.exactLayoutKey
@@ -333,10 +511,9 @@ function getActiveLayoutChain(
       );
 
   if (!allLayouts || !Array.isArray(allLayouts) || allLayouts.length === 0) {
-    return [];
+    return storeChainInCache([]);
   }
 
-  const normSrc = srcFolder.replace(/\\/g, "/").replace(/\/+$/, "");
   const activeChain = [];
 
   for (const [layoutPath, dParams, slots] of [...allLayouts].reverse()) {
@@ -385,7 +562,7 @@ function getActiveLayoutChain(
     }
   }
 
-  return activeChain;
+  return storeChainInCache(activeChain);
 }
 
 /**
@@ -401,12 +578,16 @@ async function resolveLayoutChainPpr(
 ) {
   const globalCfg = await getDinouConfig();
   const defaultPpr = Boolean(globalCfg?.ppr);
-  const activeChain = getActiveLayoutChain(reqSegments, queryObj, srcFolder, options);
+  const activeChain = Array.isArray(options?.activeChain)
+    ? options.activeChain
+    : getActiveLayoutChain(reqSegments, queryObj, srcFolder, options);
   const layoutPprMap = new Map();
 
   for (let i = activeChain.length - 1; i >= 0; i--) {
     const entry = activeChain[i];
-    const lConfig = await resolveLayoutFunctionsConfig(entry.layoutPath, entry.dParams);
+    const lConfig =
+      entry._layoutConfig ||
+      (await resolveLayoutFunctionsConfig(entry.layoutPath, entry.dParams));
     const segmentPpr =
       lConfig && lConfig.ppr !== null && lConfig.ppr !== undefined
         ? Boolean(lConfig.ppr)
@@ -428,6 +609,10 @@ async function resolveLayoutChainPpr(
 
 export {
   getLayoutFunctionsPath,
+  clearLayoutFunctionsPathCache,
+  clearLayoutFunctionsConfigCache,
+  clearActiveLayoutChainCache,
+  getActiveLayoutChainCacheSize,
   getLayoutProps,
   resolveLayoutFunctionsConfig,
   computeLayoutKeyFromFolder,
@@ -436,6 +621,10 @@ export {
 };
 export default {
   getLayoutFunctionsPath,
+  clearLayoutFunctionsPathCache,
+  clearLayoutFunctionsConfigCache,
+  clearActiveLayoutChainCache,
+  getActiveLayoutChainCacheSize,
   getLayoutProps,
   resolveLayoutFunctionsConfig,
   computeLayoutKeyFromFolder,

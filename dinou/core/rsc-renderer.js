@@ -3,7 +3,10 @@
 
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
-import { ensureServerHooksPatched } from "./render-jsx-to-client-jsx.js";
+import {
+  ensureServerHooksPatched,
+  runWithNativeAsyncDispatcherInit,
+} from "./render-jsx-to-client-jsx.js";
 
 let require = null;
 try {
@@ -74,14 +77,18 @@ function renderRSCStream(model, manifest, options = {}) {
       manifest ||
       (typeof globalThis !== "undefined" && globalThis.__DINOU_CLIENT_MANIFEST__) ||
       {};
-    return edge.renderToReadableStream(model, clientManifest, options);
+    return runWithNativeAsyncDispatcherInit(() =>
+      edge.renderToReadableStream(model, clientManifest, options)
+    );
   }
 
   const node = getNodeRenderer();
   const manifestOrUrl = isWebpack
     ? manifest
     : (pathToFileURL(process.cwd()).href + "/");
-  return node.renderToPipeableStream(model, manifestOrUrl, options);
+  return runWithNativeAsyncDispatcherInit(() =>
+    node.renderToPipeableStream(model, manifestOrUrl, options)
+  );
 }
 
 /**

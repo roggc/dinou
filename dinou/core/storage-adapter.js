@@ -10,11 +10,13 @@ class StorageAdapter {
     this._deletedKeys = new Set();
     this._invalidatedTags = new Map();
     this.hydrateFromDisk = true;
+    this._mutationEpoch = 0;
   }
 
   markTagInvalidated(tag) {
     if (tag) {
       this._invalidatedTags.set(String(tag), Date.now());
+      this._mutationEpoch++;
     }
   }
 
@@ -38,6 +40,7 @@ class StorageAdapter {
   }
 
   _markDeleted(key) {
+    this._mutationEpoch++;
     const k = this._normalizeTrackKey(key);
     this._deletedKeys.add(k);
     if (k.endsWith("/index.html")) {
@@ -55,6 +58,7 @@ class StorageAdapter {
   }
 
   _unmarkDeleted(key) {
+    this._mutationEpoch++;
     const k = this._normalizeTrackKey(key);
     this._deletedKeys.delete(k);
     if (k.endsWith("/index.html")) {
@@ -95,6 +99,229 @@ class StorageAdapter {
 }
 
 /**
+ * Shared in-memory inverted tag index across slots, layouts, and pages.
+ * Tracks route tags (`tags`) separately from slot tags (`slotTags`/`ownSlotTags`)
+ * so `revalidateTag(tag)` preserves exact `onlyRefreshSlots` semantics in O(1).
+ */
+class InvertedTagIndex {
+  constructor() {
+    this.tagToSlots = new Map();   // tag -> Map<recordKey, slotDirId>
+    this.tagToLayouts = new Map(); // tag -> Map<recordKey, { normPath, hasRouteTag, hasSlotTag }>
+    this.tagToPages = new Map();   // tag -> Map<recordKey, { normPath, hasRouteTag, hasSlotTag }>
+    this.records = new Map();      // recordKey -> { kind: "slot"|"layout"|"page", tags: Set<string> }
+  }
+
+  _getBucketMap(kind) {
+    if (kind === "slot") return this.tagToSlots;
+    if (kind === "layout") return this.tagToLayouts;
+    return this.tagToPages;
+  }
+
+  removeRecord(recordKey) {
+    const key = String(recordKey || "").replace(/\\/g, "/").replace(/^\/+/, "");
+    const prev = this.records.get(key);
+    if (!prev) return;
+    const bucketMap = this._getBucketMap(prev.kind);
+    for (const tag of prev.tags) {
+      const m = bucketMap.get(tag);
+      if (m) {
+        m.delete(key);
+        if (m.size === 0) bucketMap.delete(tag);
+      }
+    }
+    this.records.delete(key);
+  }
+
+  removeByPrefix(prefix) {
+    const cleanPrefix = String(prefix || "")
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+    if (!cleanPrefix) {
+      this.clear();
+      return;
+    }
+    const prefixSlash = `${cleanPrefix}/`;
+    for (const rk of Array.from(this.records.keys())) {
+      if (rk === cleanPrefix || rk.startsWith(prefixSlash)) {
+        this.removeRecord(rk);
+      }
+    }
+  }
+
+  clear() {
+    this.tagToSlots.clear();
+    this.tagToLayouts.clear();
+    this.tagToPages.clear();
+    this.records.clear();
+  }
+
+  upsert(recordKey, meta) {
+    const key = String(recordKey || "").replace(/\\/g, "/").replace(/^\/+/, "");
+    this.removeRecord(key);
+    if (!key) return;
+
+    if (
+      key.endsWith("/slot.metadata.json") ||
+      key.startsWith("slots/") ||
+      key.endsWith("/slot.json")
+    ) {
+      const slotIdMatch = key.match(/^slots\/([^/]+)\//);
+      const slotDirId = slotIdMatch?.[1] || null;
+      const canonicalId = (meta && meta.slotId) || slotDirId;
+      if (!slotDirId && !canonicalId) return;
+      const tags = new Set();
+      if (canonicalId) tags.add(canonicalId);
+      if (slotDirId) tags.add(slotDirId);
+      if (meta && Array.isArray(meta.tags)) {
+        for (const t of meta.tags) {
+          if (t) tags.add(t);
+        }
+      }
+      if (tags.size === 0) return;
+      const effectiveDirId = slotDirId || canonicalId;
+      for (const t of tags) {
+        let m = this.tagToSlots.get(t);
+        if (!m) {
+          m = new Map();
+          this.tagToSlots.set(t, m);
+        }
+        m.set(key, effectiveDirId);
+      }
+      this.records.set(key, { kind: "slot", tags });
+      return;
+    }
+
+    if (!meta || typeof meta !== "object") return;
+
+    const routeTags = new Set();
+    if (Array.isArray(meta.tags)) {
+      for (const t of meta.tags) {
+        if (t) routeTags.add(t);
+      }
+    }
+    const slotTags = new Set();
+    if (Array.isArray(meta.slotTags)) {
+      for (const t of meta.slotTags) {
+        if (t) slotTags.add(t);
+      }
+    }
+    if (Array.isArray(meta.ownSlotTags)) {
+      for (const t of meta.ownSlotTags) {
+        if (t) slotTags.add(t);
+      }
+    }
+    if (routeTags.size === 0 && slotTags.size === 0) return;
+
+    const allTags = new Set([...routeTags, ...slotTags]);
+
+    if (key.endsWith("layout.metadata.json") || key.endsWith("layout.rsc")) {
+      const cleanKey = key
+        .replace(/\/(?:layout\.metadata\.json|layout\.rsc)$/, "")
+        .replace(/^(?:layout\.metadata\.json|layout\.rsc)$/, "");
+      const normPath = cleanKey ? (cleanKey.startsWith("/") ? cleanKey : "/" + cleanKey) : "/";
+      for (const t of allTags) {
+        let m = this.tagToLayouts.get(t);
+        if (!m) {
+          m = new Map();
+          this.tagToLayouts.set(t, m);
+        }
+        m.set(key, {
+          normPath,
+          hasRouteTag: routeTags.has(t),
+          hasSlotTag: slotTags.has(t),
+        });
+      }
+      this.records.set(key, { kind: "layout", tags: allTags });
+      return;
+    }
+
+    if (
+      key.endsWith("metadata.json") ||
+      key.endsWith("index.html") ||
+      key.endsWith("shell.html")
+    ) {
+      const cleanKey = key
+        .replace(/\/(?:metadata\.json|index\.html|shell\.html)$/, "")
+        .replace(/^(?:metadata\.json|index\.html|shell\.html)$/, "");
+      if (
+        cleanKey.startsWith("slots/") ||
+        cleanKey.endsWith("layout.rsc") ||
+        cleanKey.endsWith("layout.metadata.json")
+      ) {
+        return;
+      }
+      const normPath = cleanKey ? (cleanKey.startsWith("/") ? cleanKey : "/" + cleanKey) : "/";
+      for (const t of allTags) {
+        let m = this.tagToPages.get(t);
+        if (!m) {
+          m = new Map();
+          this.tagToPages.set(t, m);
+        }
+        m.set(key, {
+          normPath,
+          hasRouteTag: routeTags.has(t),
+          hasSlotTag: slotTags.has(t),
+        });
+      }
+      this.records.set(key, { kind: "page", tags: allTags });
+    }
+  }
+
+  query(tag, isRecordValid = null) {
+    const slotKeys = new Set();
+    const layoutPaths = new Map();
+    const pagePaths = new Map();
+
+    const slotMatches = this.tagToSlots.get(tag);
+    if (slotMatches) {
+      for (const [rk, slotDirId] of Array.from(slotMatches.entries())) {
+        if (isRecordValid && !isRecordValid(rk)) {
+          this.removeRecord(rk);
+          continue;
+        }
+        slotKeys.add(`slots/${slotDirId}/slot.json`);
+        slotKeys.add(`slots/${slotDirId}/slot.metadata.json`);
+      }
+    }
+
+    const layoutMatches = this.tagToLayouts.get(tag);
+    if (layoutMatches) {
+      for (const [rk, info] of Array.from(layoutMatches.entries())) {
+        if (isRecordValid && !isRecordValid(rk)) {
+          this.removeRecord(rk);
+          continue;
+        }
+        const prev = layoutPaths.get(info.normPath);
+        layoutPaths.set(info.normPath, {
+          onlyRefreshSlots: prev
+            ? prev.onlyRefreshSlots && !info.hasRouteTag
+            : !info.hasRouteTag && info.hasSlotTag,
+        });
+      }
+    }
+
+    const pageMatches = this.tagToPages.get(tag);
+    if (pageMatches) {
+      for (const [rk, info] of Array.from(pageMatches.entries())) {
+        if (isRecordValid && !isRecordValid(rk)) {
+          this.removeRecord(rk);
+          continue;
+        }
+        const prev = pagePaths.get(info.normPath);
+        pagePaths.set(info.normPath, {
+          onlyRefreshSlots: prev
+            ? prev.onlyRefreshSlots && !info.hasRouteTag
+            : !info.hasRouteTag && info.hasSlotTag,
+        });
+      }
+    }
+
+    return { slotKeys, layoutPaths, pagePaths };
+  }
+}
+
+/**
  * FileSystem storage adapter (Default for Node.js, Netlify, Docker).
  * Reads and writes directly to .dinou/dist2.
  */
@@ -102,6 +329,236 @@ class FileSystemStorage extends StorageAdapter {
   constructor(baseDir = path.resolve(process.cwd(), ".dinou/dist2")) {
     super();
     this.baseDir = baseDir;
+    this._slotTagIndex = null;
+    this._fullTagIndex = null;
+  }
+
+  invalidateTagIndex() {
+    this._slotTagIndex = null;
+    this._fullTagIndex = null;
+  }
+
+  _refreshFullTagIndexMtimes() {
+    if (!this._fullTagIndex) return;
+    const baseDirMtimeKey = this._readSlotsDirMtimeKey(this.baseDir);
+    if (baseDirMtimeKey === null) {
+      this._fullTagIndex = null;
+      return;
+    }
+    this._fullTagIndex.baseDirMtimeKey = baseDirMtimeKey;
+    this._fullTagIndex.slotsDirMtimeKey = this._readSlotsDirMtimeKey(
+      path.join(this.baseDir, "slots")
+    );
+  }
+
+  _buildFullTagIndex() {
+    const baseDirMtimeKey = this._readSlotsDirMtimeKey(this.baseDir);
+    if (baseDirMtimeKey === null) {
+      this._fullTagIndex = null;
+      return null;
+    }
+    const slotsDirMtimeKey = this._readSlotsDirMtimeKey(
+      path.join(this.baseDir, "slots")
+    );
+    const index = new InvertedTagIndex();
+    const walkMeta = (dir, rel = "") => {
+      let entries;
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch (e) {
+        return;
+      }
+      for (const entry of entries) {
+        const entryRel = rel ? `${rel}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+          walkMeta(path.join(dir, entry.name), entryRel);
+        } else if (entry.name.endsWith("metadata.json")) {
+          try {
+            const raw = fs.readFileSync(path.join(dir, entry.name), "utf8");
+            const meta = JSON.parse(raw);
+            index.upsert(entryRel, meta);
+          } catch (e) {
+            if (entryRel.endsWith("/slot.metadata.json")) {
+              index.upsert(entryRel, null);
+            }
+          }
+        }
+      }
+    };
+    walkMeta(this.baseDir);
+    this._fullTagIndex = { baseDirMtimeKey, slotsDirMtimeKey, index };
+    return this._fullTagIndex;
+  }
+
+  findTargetsByTag(tag) {
+    if (!tag) {
+      return {
+        slotKeys: new Set(),
+        layoutPaths: new Map(),
+        pagePaths: new Map(),
+      };
+    }
+    const baseDirMtimeKey = this._readSlotsDirMtimeKey(this.baseDir);
+    if (baseDirMtimeKey === null) {
+      this._fullTagIndex = null;
+      return {
+        slotKeys: new Set(),
+        layoutPaths: new Map(),
+        pagePaths: new Map(),
+      };
+    }
+    const slotsDirMtimeKey = this._readSlotsDirMtimeKey(
+      path.join(this.baseDir, "slots")
+    );
+    if (
+      !this._fullTagIndex ||
+      this._fullTagIndex.baseDirMtimeKey !== baseDirMtimeKey ||
+      this._fullTagIndex.slotsDirMtimeKey !== slotsDirMtimeKey
+    ) {
+      this._buildFullTagIndex();
+    }
+    if (!this._fullTagIndex) {
+      return {
+        slotKeys: new Set(),
+        layoutPaths: new Map(),
+        pagePaths: new Map(),
+      };
+    }
+    return this._fullTagIndex.index.query(tag, (rk) =>
+      fs.existsSync(path.join(this.baseDir, rk))
+    );
+  }
+
+  _readSlotsDirMtimeKey(slotsDir) {
+    try {
+      const st = fs.statSync(slotsDir, { bigint: true });
+      if (st && st.mtimeNs !== undefined) return String(st.mtimeNs);
+    } catch (e) {}
+    try {
+      return String(fs.statSync(slotsDir).mtimeMs);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  _updateSlotTagIndex(normSlotKey, metadata) {
+    if (!this._slotTagIndex) return;
+    const match = String(normSlotKey || "").match(/^slots\/([^/]+)\//);
+    if (!match) return;
+    const dirName = match[1];
+    const canonicalId = (metadata && metadata.slotId) || dirName;
+    const nextTags = new Set([canonicalId]);
+    if (metadata && Array.isArray(metadata.tags)) {
+      for (const t of metadata.tags) {
+        if (t) nextTags.add(t);
+      }
+    }
+    const { tagToSlotIds, slotTagsById, dirToCanonicalId } = this._slotTagIndex;
+    const prevTags = slotTagsById.get(canonicalId);
+    if (prevTags) {
+      for (const oldTag of prevTags) {
+        if (!nextTags.has(oldTag)) {
+          const s = tagToSlotIds.get(oldTag);
+          if (s) {
+            s.delete(canonicalId);
+            if (s.size === 0) tagToSlotIds.delete(oldTag);
+          }
+        }
+      }
+    }
+    for (const tag of nextTags) {
+      if (!tagToSlotIds.has(tag)) {
+        tagToSlotIds.set(tag, new Set());
+      }
+      tagToSlotIds.get(tag).add(canonicalId);
+    }
+    slotTagsById.set(canonicalId, nextTags);
+    dirToCanonicalId.set(dirName, canonicalId);
+    const slotsDir = path.join(this.baseDir, "slots");
+    const mtimeKey = this._readSlotsDirMtimeKey(slotsDir);
+    if (mtimeKey !== null) {
+      this._slotTagIndex.mtimeKey = mtimeKey;
+    }
+  }
+
+  _removeSlotFromTagIndex(normSlotKey) {
+    if (!this._slotTagIndex) return;
+    const match = String(normSlotKey || "").match(/^slots\/([^/]+)\//);
+    if (!match) {
+      this._slotTagIndex = null;
+      return;
+    }
+    const dirName = match[1];
+    const { tagToSlotIds, slotTagsById, dirToCanonicalId } = this._slotTagIndex;
+    const canonicalId = dirToCanonicalId.get(dirName) || dirName;
+    dirToCanonicalId.delete(dirName);
+    const prevTags = slotTagsById.get(canonicalId);
+    if (prevTags) {
+      for (const oldTag of prevTags) {
+        const s = tagToSlotIds.get(oldTag);
+        if (s) {
+          s.delete(canonicalId);
+          if (s.size === 0) tagToSlotIds.delete(oldTag);
+        }
+      }
+      slotTagsById.delete(canonicalId);
+    }
+    const slotsDir = path.join(this.baseDir, "slots");
+    const mtimeKey = this._readSlotsDirMtimeKey(slotsDir);
+    if (mtimeKey !== null) {
+      this._slotTagIndex.mtimeKey = mtimeKey;
+    } else {
+      this._slotTagIndex = null;
+    }
+  }
+
+  getSlotTagIndex() {
+    const slotsDir = path.join(this.baseDir, "slots");
+    const mtimeKey = this._readSlotsDirMtimeKey(slotsDir);
+    if (mtimeKey === null) {
+      this._slotTagIndex = null;
+      return new Map();
+    }
+    if (this._slotTagIndex && this._slotTagIndex.mtimeKey === mtimeKey) {
+      return this._slotTagIndex.tagToSlotIds;
+    }
+    let entries;
+    try {
+      entries = fs.readdirSync(slotsDir, { withFileTypes: true });
+    } catch (e) {
+      return new Map();
+    }
+    const tagToSlotIds = new Map();
+    const slotTagsById = new Map();
+    const dirToCanonicalId = new Map();
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const slotDirName = entry.name;
+      const metaPath = path.join(slotsDir, slotDirName, "slot.metadata.json");
+      let meta = null;
+      if (fs.existsSync(metaPath)) {
+        try {
+          meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+        } catch (e) {}
+      }
+      const canonicalId = (meta && meta.slotId) || slotDirName;
+      const tagsForSlot = new Set([canonicalId]);
+      if (meta && Array.isArray(meta.tags)) {
+        for (const tag of meta.tags) {
+          if (tag) tagsForSlot.add(tag);
+        }
+      }
+      slotTagsById.set(canonicalId, tagsForSlot);
+      dirToCanonicalId.set(slotDirName, canonicalId);
+      for (const tag of tagsForSlot) {
+        if (!tagToSlotIds.has(tag)) {
+          tagToSlotIds.set(tag, new Set());
+        }
+        tagToSlotIds.get(tag).add(canonicalId);
+      }
+    }
+    this._slotTagIndex = { mtimeKey, tagToSlotIds, slotTagsById, dirToCanonicalId };
+    return tagToSlotIds;
   }
 
   _resolve(key) {
@@ -121,11 +578,21 @@ class FileSystemStorage extends StorageAdapter {
 
   async get(key) {
     let targetPath = this._resolve(key);
-    if (fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()) {
-      targetPath = path.join(targetPath, "index.html");
+    let content;
+    try {
+      content = fs.readFileSync(targetPath, "utf8");
+    } catch (err) {
+      if (err && (err.code === "EISDIR" || err.code === "EPERM")) {
+        targetPath = path.join(targetPath, "index.html");
+        try {
+          content = fs.readFileSync(targetPath, "utf8");
+        } catch (err2) {
+          return null;
+        }
+      } else {
+        return null;
+      }
     }
-    if (!fs.existsSync(targetPath)) return null;
-    const content = fs.readFileSync(targetPath, "utf8");
 
     const cleanKey = String(key || "").replace(/\\/g, "/");
     const isMetaJson = cleanKey.endsWith("metadata.json") || path.basename(targetPath).endsWith("metadata.json");
@@ -139,7 +606,7 @@ class FileSystemStorage extends StorageAdapter {
       return { content, metadata };
     }
 
-    // Check companion metadata if available
+    // Check companion metadata if available (single readFileSync without redundant existsSync)
     let metadata = null;
     const isLayoutKey =
       cleanKey.includes("layout.rsc") ||
@@ -156,12 +623,22 @@ class FileSystemStorage extends StorageAdapter {
       ? "slot.metadata.json"
       : "metadata.json";
     const metaPath = path.join(path.dirname(targetPath), metaFileName);
-    if (fs.existsSync(metaPath)) {
-      try {
-        metadata = JSON.parse(fs.readFileSync(metaPath, "utf8"));
-      } catch (e) {}
-    }
+    try {
+      metadata = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+    } catch (e) {}
     return { content, metadata };
+  }
+
+  async getSlotMetadata(slotId) {
+    if (!slotId) return null;
+    const slotPath = this._resolve(`slots/${slotId}/slot.json`);
+    if (!fs.existsSync(slotPath)) return null;
+    const metaPath = path.join(path.dirname(slotPath), "slot.metadata.json");
+    let metadata = null;
+    try {
+      metadata = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+    } catch (e) {}
+    return { exists: true, metadata };
   }
 
   async set(key, content, metadata = null) {
@@ -179,6 +656,11 @@ class FileSystemStorage extends StorageAdapter {
     // Only write a companion metadata file if targetPath is NOT itself a metadata file
     const cleanKey = String(key || "").replace(/\\/g, "/");
     const isMetaJson = cleanKey.endsWith("metadata.json") || path.basename(targetPath).endsWith("metadata.json");
+    const normSlotKeyForIndex = cleanKey.replace(/^\/+/, "");
+    const isSlotKeyForIndex =
+      normSlotKeyForIndex.startsWith("slots/") ||
+      normSlotKeyForIndex.endsWith("/slot.json") ||
+      normSlotKeyForIndex.endsWith("/slot.metadata.json");
     if (metadata && !isMetaJson) {
       const isLayoutKey =
         cleanKey.includes("layout.rsc") ||
@@ -187,29 +669,69 @@ class FileSystemStorage extends StorageAdapter {
         cleanKey.includes("shell.layout.json") ||
         cleanKey.includes("shell.layout.own.json") ||
         cleanKey.includes("shell.layout._old.json");
-      const normSlotKey = cleanKey.replace(/^\/+/, "");
-      const isSlotKey = normSlotKey.startsWith("slots/") || normSlotKey.endsWith("/slot.json") || normSlotKey.endsWith("/slot.metadata.json");
       const metaFileName = isLayoutKey
         ? "layout.metadata.json"
-        : isSlotKey
+        : isSlotKeyForIndex
         ? "slot.metadata.json"
         : "metadata.json";
       const metaPath = path.join(dir, metaFileName);
       fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2), "utf8");
+      if (isSlotKeyForIndex) {
+        this._updateSlotTagIndex(normSlotKeyForIndex, metadata);
+      }
+      if (this._fullTagIndex) {
+        const relMetaKey = path.relative(this.baseDir, metaPath).replace(/\\/g, "/");
+        this._fullTagIndex.index.upsert(relMetaKey, metadata);
+        this._refreshFullTagIndexMtimes();
+      }
+    } else if (isMetaJson) {
+      let parsedMeta = null;
+      try {
+        parsedMeta = JSON.parse(content);
+      } catch (e) {
+        if (isSlotKeyForIndex) {
+          this._slotTagIndex = null;
+        }
+      }
+      if (isSlotKeyForIndex && parsedMeta) {
+        this._updateSlotTagIndex(normSlotKeyForIndex, parsedMeta);
+      }
+      if (this._fullTagIndex) {
+        const relMetaKey = path.relative(this.baseDir, targetPath).replace(/\\/g, "/");
+        if (parsedMeta) {
+          this._fullTagIndex.index.upsert(relMetaKey, parsedMeta);
+        } else if (isSlotKeyForIndex) {
+          this._fullTagIndex.index.upsert(relMetaKey, null);
+        } else {
+          this._fullTagIndex.index.removeRecord(relMetaKey);
+        }
+        this._refreshFullTagIndexMtimes();
+      }
+    } else if (this._fullTagIndex) {
+      this._refreshFullTagIndexMtimes();
     }
   }
 
   async has(key) {
-    let targetPath = this._resolve(key);
-    if (fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()) {
-      targetPath = path.join(targetPath, "index.html");
+    const targetPath = this._resolve(key);
+    try {
+      const st = fs.statSync(targetPath);
+      if (st.isDirectory()) {
+        return fs.existsSync(path.join(targetPath, "index.html"));
+      }
+      return true;
+    } catch (e) {
+      return false;
     }
-    return fs.existsSync(targetPath);
   }
 
   async delete(key) {
     this._markDeleted(key);
     let targetPath = this._resolve(key);
+    let wasDir = false;
+    try {
+      wasDir = fs.statSync(targetPath).isDirectory();
+    } catch (e) {}
     if (fs.existsSync(targetPath)) {
       fs.rmSync(targetPath, { force: true, recursive: true });
     }
@@ -222,6 +744,20 @@ class FileSystemStorage extends StorageAdapter {
           fs.rmSync(dir, { force: true, recursive: true });
         } catch (e) {}
       }
+      this._removeSlotFromTagIndex(normSlotKey);
+      if (this._fullTagIndex) {
+        const relSlotDir = path.relative(this.baseDir, dir).replace(/\\/g, "/");
+        this._fullTagIndex.index.removeByPrefix(relSlotDir);
+        this._refreshFullTagIndexMtimes();
+      }
+    } else if (this._fullTagIndex) {
+      const relTarget = path.relative(this.baseDir, targetPath).replace(/\\/g, "/");
+      if (wasDir) {
+        this._fullTagIndex.index.removeByPrefix(relTarget);
+      } else {
+        this._fullTagIndex.index.removeRecord(relTarget);
+      }
+      this._refreshFullTagIndexMtimes();
     }
   }
 
@@ -507,6 +1043,86 @@ class CloudflareKVStorage extends StorageAdapter {
     );
   }
 
+  async listSlotMetadataEntries() {
+    const kv = this._getKv();
+    if (!kv || typeof kv.list !== "function") return null;
+    try {
+      const bySlot = new Map();
+      let cursor = undefined;
+      while (true) {
+        const options = { prefix: "slots/" };
+        if (cursor) options.cursor = cursor;
+        const res = await kv.list(options);
+        if (res && Array.isArray(res.keys)) {
+          for (const k of res.keys) {
+            if (!k || typeof k.name !== "string") continue;
+            const key = k.name.replace(/\\/g, "/");
+            const m = key.match(/^slots\/([^/]+)\/(slot\.json|slot\.metadata\.json)$/);
+            if (!m) continue;
+            const slotDirId = m[1];
+            const prev = bySlot.get(slotDirId);
+            const inlineMeta =
+              k.metadata && typeof k.metadata === "object" ? k.metadata : null;
+            if (!prev || (!prev.metadata && inlineMeta) || m[2] === "slot.metadata.json") {
+              bySlot.set(slotDirId, {
+                slotDirId,
+                key,
+                metadata: inlineMeta || prev?.metadata || null,
+              });
+            }
+          }
+        }
+        if (!res || res.list_complete !== false || !res.cursor) {
+          break;
+        }
+        cursor = res.cursor;
+      }
+      return bySlot;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async listKeysWithMetadata(prefix = "") {
+    const kv = this._getKv();
+    if (!kv || typeof kv.list !== "function") return null;
+    try {
+      const effectivePrefix = prefix === "dinou_cache" ? "" : prefix;
+      const results = new Map();
+      let cursor = undefined;
+      while (true) {
+        const options = {};
+        if (effectivePrefix) options.prefix = effectivePrefix;
+        if (cursor) options.cursor = cursor;
+        const res = await kv.list(
+          Object.keys(options).length > 0 ? options : undefined
+        );
+        if (res && Array.isArray(res.keys)) {
+          for (const k of res.keys) {
+            if (
+              k &&
+              typeof k.name === "string" &&
+              !k.name.startsWith("__tombstone__:") &&
+              !k.name.startsWith("__tag_inv__:")
+            ) {
+              results.set(
+                k.name,
+                k.metadata && typeof k.metadata === "object" ? k.metadata : null
+              );
+            }
+          }
+        }
+        if (!res || res.list_complete !== false || !res.cursor) {
+          break;
+        }
+        cursor = res.cursor;
+      }
+      return results;
+    } catch (e) {
+      return null;
+    }
+  }
+
   async keys(prefix = "") {
     const kv = this._getKv();
     if (!kv || typeof kv.list !== "function") return [];
@@ -553,10 +1169,91 @@ class MemoryStorage extends StorageAdapter {
     super();
     this.store = new Map();
     this.hydrateFromDisk = Boolean(options && options.hydrateFromDisk);
+    this._slotTagIndex = new Map();
+    this._slotTagsById = new Map();
+    this._slotDirToCanonicalId = new Map();
+    this._fullTagIndex = new InvertedTagIndex();
+  }
+
+  findTargetsByTag(tag) {
+    if (this.hydrateFromDisk) return null;
+    if (!tag) {
+      return {
+        slotKeys: new Set(),
+        layoutPaths: new Map(),
+        pagePaths: new Map(),
+      };
+    }
+    return this._fullTagIndex.query(tag);
   }
 
   _cleanKey(key) {
     return String(key || "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
+  }
+
+  _updateSlotTagIndex(cleanKey, content, metadata) {
+    const m = cleanKey.match(/^slots\/([^/]+)\/(slot\.json|slot\.metadata\.json)$/);
+    if (!m) return;
+    const dirName = m[1];
+    let meta = metadata;
+    if (!meta && m[2] === "slot.metadata.json" && typeof content === "string") {
+      try {
+        meta = JSON.parse(content);
+      } catch (e) {}
+    }
+    if (!meta && m[2] === "slot.json" && this._slotDirToCanonicalId.has(dirName)) {
+      return;
+    }
+    const canonicalId = (meta && meta.slotId) || dirName;
+    const nextTags = new Set([canonicalId]);
+    if (meta && Array.isArray(meta.tags)) {
+      for (const t of meta.tags) {
+        if (t) nextTags.add(t);
+      }
+    }
+    const prevTags = this._slotTagsById.get(canonicalId);
+    if (prevTags) {
+      for (const oldTag of prevTags) {
+        if (!nextTags.has(oldTag)) {
+          const s = this._slotTagIndex.get(oldTag);
+          if (s) {
+            s.delete(canonicalId);
+            if (s.size === 0) this._slotTagIndex.delete(oldTag);
+          }
+        }
+      }
+    }
+    for (const tag of nextTags) {
+      if (!this._slotTagIndex.has(tag)) {
+        this._slotTagIndex.set(tag, new Set());
+      }
+      this._slotTagIndex.get(tag).add(canonicalId);
+    }
+    this._slotTagsById.set(canonicalId, nextTags);
+    this._slotDirToCanonicalId.set(dirName, canonicalId);
+  }
+
+  _removeSlotFromTagIndex(cleanKey) {
+    const m = cleanKey.match(/^slots\/([^/]+)\/(slot\.json|slot\.metadata\.json)$/);
+    if (!m) return;
+    const dirName = m[1];
+    const canonicalId = this._slotDirToCanonicalId.get(dirName) || dirName;
+    this._slotDirToCanonicalId.delete(dirName);
+    const prevTags = this._slotTagsById.get(canonicalId);
+    if (prevTags) {
+      for (const oldTag of prevTags) {
+        const s = this._slotTagIndex.get(oldTag);
+        if (s) {
+          s.delete(canonicalId);
+          if (s.size === 0) this._slotTagIndex.delete(oldTag);
+        }
+      }
+      this._slotTagsById.delete(canonicalId);
+    }
+  }
+
+  getSlotTagIndex() {
+    return this._slotTagIndex;
   }
 
   async get(key) {
@@ -569,10 +1266,28 @@ class MemoryStorage extends StorageAdapter {
     return { content: item.content, metadata: item.metadata };
   }
 
+  async getSlotMetadata(slotId) {
+    if (!slotId) return null;
+    const item = this.store.get(`slots/${slotId}/slot.json`);
+    if (!item || !item.content) return null;
+    return { exists: true, metadata: item.metadata || null };
+  }
+
   async set(key, content, metadata = null) {
     this._unmarkDeleted(key);
     const cleanKey = this._cleanKey(key);
     this.store.set(cleanKey, { content, metadata });
+    if (cleanKey.startsWith("slots/")) {
+      this._updateSlotTagIndex(cleanKey, content, metadata);
+    }
+    let effectiveMeta = metadata && typeof metadata === "object" ? metadata : null;
+    if (!effectiveMeta && cleanKey.endsWith("metadata.json") && typeof content === "string") {
+      try {
+        const parsed = JSON.parse(content);
+        if (parsed && typeof parsed === "object") effectiveMeta = parsed;
+      } catch (e) {}
+    }
+    this._fullTagIndex.upsert(cleanKey, effectiveMeta);
     if (cleanKey.endsWith("/index.html")) {
       const folderKey = cleanKey.slice(0, -11);
       this.store.set(folderKey, { content, metadata });
@@ -590,17 +1305,27 @@ class MemoryStorage extends StorageAdapter {
     this._markDeleted(key);
     const cleanKey = this._cleanKey(key);
     this.store.delete(cleanKey);
+    this._fullTagIndex.removeRecord(cleanKey);
+    if (cleanKey.startsWith("slots/")) {
+      this._removeSlotFromTagIndex(cleanKey);
+    }
     if (cleanKey.endsWith("/index.html")) {
       this.store.delete(cleanKey.slice(0, -11));
     } else if (cleanKey === "index.html") {
       this.store.delete("");
     } else if (!cleanKey.includes(".")) {
-      this.store.delete(cleanKey ? `${cleanKey}/index.html` : "index.html");
+      const idxKey = cleanKey ? `${cleanKey}/index.html` : "index.html";
+      this.store.delete(idxKey);
+      this._fullTagIndex.removeRecord(idxKey);
     }
     if (cleanKey.endsWith("/slot.json")) {
-      this.store.delete(cleanKey.slice(0, -10) + "/slot.metadata.json");
+      const metaKey = cleanKey.slice(0, -10) + "/slot.metadata.json";
+      this.store.delete(metaKey);
+      this._fullTagIndex.removeRecord(metaKey);
     } else if (cleanKey.endsWith("/slot.metadata.json")) {
-      this.store.delete(cleanKey.slice(0, -19) + "/slot.json");
+      const slotKey = cleanKey.slice(0, -19) + "/slot.json";
+      this.store.delete(slotKey);
+      this._fullTagIndex.removeRecord(slotKey);
     }
   }
 
@@ -1032,6 +1757,27 @@ class DenoKVStorage extends StorageAdapter {
     }
     return {
       content: typeof val === "string" ? val : (val && val.content !== undefined ? val.content : ""),
+      metadata: val && typeof val === "object" && val.metadata ? val.metadata : null,
+    };
+  }
+
+  async getSlotMetadata(slotId) {
+    if (!slotId) return null;
+    const kv = await this._getKV();
+    if (!kv) return null;
+    const res = await kv.get(["dinou_cache", `slots/${slotId}/slot.json`]);
+    if (!res || res.value === null || res.value === undefined) return null;
+    const val = res.value;
+    if (val && typeof val === "object" && val.chunked) {
+      return { exists: true, metadata: val.metadata || null };
+    }
+    const hasContent =
+      typeof val === "string"
+        ? val.length > 0
+        : Boolean(val && typeof val.content === "string" && val.content.length > 0);
+    if (!hasContent) return null;
+    return {
+      exists: true,
       metadata: val && typeof val === "object" && val.metadata ? val.metadata : null,
     };
   }

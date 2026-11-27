@@ -113,18 +113,102 @@ async function readShellJsonFromStorage(storage, key, platformContext, reqUrl) {
   return null;
 }
 
+async function readRscTextFromStorage(storage, key, platformContext, reqUrl) {
+  if (!key) return null;
+  if (storage) {
+    try {
+      const item = await storage.get(key);
+      if (
+        item &&
+        typeof item.content === "string" &&
+        item.content.length > 0 &&
+        !item.content.trimStart().startsWith("<")
+      ) {
+        return item.content;
+      }
+    } catch (e) {}
+  }
+  const isDeleted =
+    storage &&
+    (typeof storage.isKeyDeleted === "function"
+      ? await storage.isKeyDeleted(key)
+      : typeof storage.isDeleted === "function" && storage.isDeleted(key));
+  if (isDeleted) {
+    return null;
+  }
+  if (platformContext?.env?.ASSETS && reqUrl) {
+    try {
+      const assetRes = await fetchCloudflareDist2Asset(
+        platformContext.env.ASSETS,
+        key,
+        reqUrl
+      );
+      if (assetRes && assetRes.status === 200) {
+        const txt = await assetRes.text();
+        if (txt && txt.length > 0 && !txt.trimStart().startsWith("<")) {
+          if (storage) {
+            try {
+              await storage.set(key, txt);
+            } catch (e) {}
+          }
+          return txt;
+        }
+      }
+    } catch (e) {}
+  }
+  if (storage) {
+    const dist2Item = await readDist2Fallback(storage, key);
+    if (
+      dist2Item &&
+      typeof dist2Item.content === "string" &&
+      dist2Item.content.length > 0 &&
+      !dist2Item.content.trimStart().startsWith("<")
+    ) {
+      return dist2Item.content;
+    }
+  } else {
+    try {
+      const diskPath = path.resolve(process.cwd(), ".dinou/dist2", key);
+      if (existsSync(diskPath)) {
+        const txt = readFileSync(diskPath, "utf8");
+        if (txt && txt.length > 0 && !txt.trimStart().startsWith("<")) {
+          return txt;
+        }
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
 function replaceHolesWithMap(node, liveHolesMap) {
   if (
     !node ||
     typeof node !== "object" ||
     node instanceof Promise ||
     node.$$typeof === Symbol.for("react.client.reference") ||
-    typeof node.then === "function"
+    typeof node.then === "function" ||
+    !liveHolesMap ||
+    liveHolesMap.size === 0
   ) {
     return node;
   }
   if (Array.isArray(node)) {
-    return node.map((item) => replaceHolesWithMap(item, liveHolesMap));
+    let changed = false;
+    let result = null;
+    for (let i = 0; i < node.length; i++) {
+      const item = node[i];
+      const updated = replaceHolesWithMap(item, liveHolesMap);
+      if (updated !== item) {
+        if (!changed) {
+          result = node.slice(0, i);
+          changed = true;
+        }
+      }
+      if (changed) {
+        result.push(updated);
+      }
+    }
+    return changed ? result : node;
   }
   if (node.$$typeof === Symbol.for("react.transitional.element")) {
     const holeId = node.props && node.props["data-ppr-hole"];
@@ -133,13 +217,16 @@ function replaceHolesWithMap(node, liveHolesMap) {
     }
     if (node.props && typeof node.props === "object") {
       let changed = false;
-      const newProps = { ...node.props };
+      let newProps = null;
       for (const [k, v] of Object.entries(node.props)) {
         if (v && typeof v === "object") {
           const updated = replaceHolesWithMap(v, liveHolesMap);
           if (updated !== v) {
+            if (!changed) {
+              newProps = { ...node.props };
+              changed = true;
+            }
             newProps[k] = updated;
-            changed = true;
           }
         }
       }
@@ -156,13 +243,16 @@ function replaceHolesWithMap(node, liveHolesMap) {
     return node;
   }
   let changed = false;
-  const clone = { ...node };
+  let clone = null;
   for (const [k, v] of Object.entries(node)) {
     if (v && typeof v === "object") {
       const updated = replaceHolesWithMap(v, liveHolesMap);
       if (updated !== v) {
+        if (!changed) {
+          clone = { ...node };
+          changed = true;
+        }
         clone[k] = updated;
-        changed = true;
       }
     }
   }
@@ -198,6 +288,10 @@ async function PprDynamicHoleBoundary({ holeId, children }) {
       holeId
     );
   } catch (holeErr) {
+    if (holeErr && holeErr.$$type === "dinou-internal-redirect") {
+      getContext()?.res?.redirect?.(holeErr.url || "/");
+      return null;
+    }
     console.error(`[Dinou PPR] Error resolving dynamic hole ${holeId}:`, holeErr);
     try {
       getContext()?.res?.setHeader?.("x-dinou-has-error", "true");
@@ -314,6 +408,44 @@ function buildPprHoleSkeleton(node, targetHoleId, replacementEl, pageTree = null
   return { found: false, node: null };
 }
 
+const HOIST_ATTR_PATTERN = '(?:"[^"]*"|\'[^\']*\'|[^>"\'])*';
+const LEADING_HOIST_TOKEN_RE = new RegExp(
+  `^(?:(\\s+)|(<title\\b${HOIST_ATTR_PATTERN}>[\\s\\S]*?<\\/title>)|(<meta\\b${HOIST_ATTR_PATTERN}\\/?>)|(<link\\b${HOIST_ATTR_PATTERN}\\/?>)|(<style\\b${HOIST_ATTR_PATTERN}\\bdata-precedence=${HOIST_ATTR_PATTERN}>[\\s\\S]*?<\\/style>))`,
+  "i"
+);
+
+/**
+ * Separates React 19 hoisted document metadata (<title>, <meta>, <link>, and
+ * precedence-scoped <style>) emitted at the beginning of a streamed HTML fragment
+ * from the remaining body markup. Preserves non-hoisted tags (e.g. <meta itemProp>)
+ * and React Suspense boundary comments (<!--$-->) intact in `restHtml`.
+ */
+function extractLeadingHoistedHeadHtml(rawHtml) {
+  if (typeof rawHtml !== "string" || !rawHtml) {
+    return { headHtml: "", restHtml: rawHtml || "" };
+  }
+  let idx = 0;
+  let lastHeadEnd = 0;
+  const len = rawHtml.length;
+  const headParts = [];
+  while (idx < len) {
+    const m = LEADING_HOIST_TOKEN_RE.exec(rawHtml.slice(idx));
+    if (!m) break;
+    idx += m[0].length;
+    if (m[2] || m[3] || m[4] || m[5]) {
+      headParts.push(m[0]);
+      lastHeadEnd = idx;
+    }
+  }
+  if (headParts.length === 0) {
+    return { headHtml: "", restHtml: rawHtml };
+  }
+  return {
+    headHtml: headParts.join(""),
+    restHtml: rawHtml.slice(lastHeadEnd),
+  };
+}
+
 function extractPprHoleHtml(rawHtml, holeId) {
   if (typeof rawHtml !== "string") return null;
   const openTag = `<dinou-ppr-extract data-h="${holeId}">`;
@@ -321,9 +453,22 @@ function extractPprHoleHtml(rawHtml, holeId) {
   const startIdx = rawHtml.indexOf(openTag);
   const endIdx = rawHtml.lastIndexOf(closeTag);
   if (startIdx !== -1 && endIdx > startIdx) {
-    return rawHtml.slice(startIdx + openTag.length, endIdx);
+    const prefix = rawHtml.slice(0, startIdx);
+    const { headHtml } = extractLeadingHoistedHeadHtml(prefix);
+    const bodyHtml = rawHtml.slice(startIdx + openTag.length, endIdx);
+    return { bodyHtml, headHtml };
   }
   return null;
+}
+
+function buildPprHoleChunk(holeId, boundaryIndex, bodyHtml, headHtml) {
+  const headTpl = headHtml
+    ? `<template id="ppr-head-${holeId}">${headHtml}</template>\n`
+    : "";
+  const headScript = headHtml
+    ? `var h=document.getElementById("ppr-head-${holeId}");if(h&&document.head){try{var ns=Array.from((h.content||h).childNodes);for(var i=0;i<ns.length;i++){var n=ns[i];if(!n||n.nodeType!==1)continue;var tn=n.tagName;if(tn==="TITLE"){var exT=document.head.querySelector("title");if(!exT){document.head.appendChild(n);}else if(exT.textContent!==n.textContent){exT.textContent=n.textContent;}continue;}var dup=false;var ex=document.head.querySelectorAll(tn.toLowerCase());for(var j=0;j<ex.length;j++){var e=ex[j];if(e.attributes.length!==n.attributes.length)continue;var same=true;for(var k=0;k<n.attributes.length;k++){var a=n.attributes[k];if(e.getAttribute(a.name)!==a.value){same=false;break;}}if(same){dup=true;break;}}if(!dup)document.head.appendChild(n);}}finally{h.remove();}}`
+    : "";
+  return `\n${headTpl}<template id="ppr-content-${holeId}"><!--$-->${bodyHtml}<!--/$--></template>\n<script>(function(){${headScript}var c=document.getElementById("ppr-content-${holeId}");if(!c)return;var b=document.getElementById("B:${boundaryIndex}");var t=document.querySelector('[data-ppr-hole="${holeId}"]')||(b?b.nextElementSibling:null);try{if(t){if(c.content){t.replaceWith(c.content);}else{t.replaceWith.apply(t,Array.from(c.childNodes));}}}finally{c.remove();}})();</script>\n`;
 }
 
 /**
@@ -766,6 +911,7 @@ async function streamDynamicHoles(
           let chunkToWrite = null;
           try {
             let html = "";
+            let headHtml = "";
             const resolvedChildren = await asyncRenderJSXToClientJSX(children);
             if (isAborted()) return;
             if (resolvedHolesOut && typeof resolvedHolesOut.set === "function") {
@@ -815,7 +961,8 @@ async function streamDynamicHoles(
                     const rawSkelHtml = await new Response(skelHtmlStream).text();
                     const extracted = extractPprHoleHtml(rawSkelHtml, currentHoleId);
                     if (extracted !== null) {
-                      html = extracted;
+                      html = extracted.bodyHtml;
+                      headHtml = extracted.headHtml;
                       renderedViaSkeleton = true;
                     }
                   }
@@ -827,13 +974,25 @@ async function streamDynamicHoles(
                   bootstrapModules: [], importMapHtml: "",
                 });
                 if (isAborted()) return;
-                html = await new Response(htmlStream).text();
+                const rawHoleHtml = await new Response(htmlStream).text();
+                const split = extractLeadingHoistedHeadHtml(rawHoleHtml);
+                html = split.restHtml;
+                headHtml = split.headHtml;
               }
             }
             if (isAborted()) return;
-            chunkToWrite = `\n<template id="ppr-content-${currentHoleId}"><!--$-->${html}<!--/$--></template>\n<script>(function(){var c=document.getElementById("ppr-content-${currentHoleId}");if(!c)return;var b=document.getElementById("B:${currentBoundaryIndex}");var t=document.querySelector('[data-ppr-hole="${currentHoleId}"]')||(b?b.nextElementSibling:null);try{if(t){if(c.content){t.replaceWith(c.content);}else{t.replaceWith.apply(t,Array.from(c.childNodes));}}}finally{c.remove();}})();</script>\n`;
+            chunkToWrite = buildPprHoleChunk(
+              currentHoleId,
+              currentBoundaryIndex,
+              html,
+              headHtml
+            );
           } catch (holeErr) {
             if (isAborted()) return;
+            if (holeErr && holeErr.$$type === "dinou-internal-redirect") {
+              getContext()?.res?.redirect?.(holeErr.url || "/");
+              return;
+            }
             console.error(`[Dinou PPR] Error resolving dynamic hole ${currentHoleId}:`, holeErr);
             const errElement = createPprHoleErrorElement(holeErr, isDevelopment);
             if (resolvedHolesOut && typeof resolvedHolesOut.set === "function") {
@@ -921,18 +1080,60 @@ async function handlePprResume({
   metadata,
   isDevelopment,
   getDiscoveredLayouts,
+  getDiscoveredLayoutsJson,
   createRequestContext,
   copyCustomContextProperties,
   preloadedPageShellJson,
   preloadedLayoutShellJson,
+  preloadedPageRsc,
+  preloadedLayoutRsc,
+  activeLayoutChain,
 }) {
+  const buildPprResponseHeaders = () => {
+    const headers = new Headers(bridge?.headers);
+    if (Array.isArray(bridge?.cookies)) {
+      for (const c of bridge.cookies) {
+        headers.append("Set-Cookie", c);
+      }
+    }
+    headers.set("Content-Type", "text/html; charset=utf-8");
+    const existingCacheControl = headers.get("Cache-Control");
+    if (!existingCacheControl) {
+      headers.set("Cache-Control", "no-store, no-cache, must-revalidate, no-transform");
+    } else if (!/\bno-transform\b/i.test(existingCacheControl)) {
+      headers.set("Cache-Control", `${existingCacheControl}, no-transform`);
+    }
+    if (!headers.has("Content-Encoding")) {
+      headers.set("Content-Encoding", "identity");
+    }
+    if (!headers.has("X-Accel-Buffering")) {
+      headers.set("X-Accel-Buffering", "no");
+    }
+    return headers;
+  };
+
+  // RFC 9110 §9.3.2: HEAD on warm Pure PPR returns matching status & headers
+  // with an empty body and MUST NOT spawn TransformStream or execute dynamic holes.
+  if (String(simReq?.method || "").toUpperCase() === "HEAD") {
+    const headers = buildPprResponseHeaders();
+    return new Response(null, {
+      status: bridge?._explicitStatusSet
+        ? bridge.statusCode
+        : metadata?.status || 200,
+      headers,
+    });
+  }
+
   let shellHtml = cachedItem.content;
   if (typeof shellHtml === "string") {
     if (!shellHtml.includes("window.__DINOU_LAYOUTS__")) {
-      const knownLayouts = typeof getDiscoveredLayouts === "function" ? getDiscoveredLayouts() : {};
+      const layoutsJson =
+        typeof getDiscoveredLayoutsJson === "function"
+          ? getDiscoveredLayoutsJson()
+          : JSON.stringify(typeof getDiscoveredLayouts === "function" ? getDiscoveredLayouts() : {});
       shellHtml = shellHtml.replace(
         "</head>",
-        `<script>window.__DINOU_LAYOUTS__=${JSON.stringify(knownLayouts)};</script></head>`
+        `<script>window.__DINOU_LAYOUTS__=${layoutsJson};</script></head>`
       );
     }
     shellHtml = shellHtml.replace(
@@ -1006,31 +1207,29 @@ async function handlePprResume({
       const cleanRel = (reqPath || "").replace(/^\/+/, "").replace(/\/+$/, "");
       const reqSegments = cleanRel ? cleanRel.split("/").filter(Boolean) : [];
       const srcFolder = path.resolve(process.cwd(), "src");
-      let activeChain = [];
-      try {
-        activeChain = getActiveLayoutChain(reqSegments, queryObj || {}, srcFolder);
-      } catch (e) {}
+      let activeChain = Array.isArray(activeLayoutChain) ? activeLayoutChain : [];
+      if (!Array.isArray(activeLayoutChain)) {
+        try {
+          activeChain = getActiveLayoutChain(reqSegments, queryObj || {}, srcFolder);
+        } catch (e) {}
+      }
       const hasActiveLayout = activeChain.length > 0;
       const leafLayoutKey = hasActiveLayout ? activeChain[0].cleanLayoutKey : null;
       const shellPageKey = cleanRel ? `${cleanRel}/shell.page.json` : "shell.page.json";
+      const pageRscKey = cleanRel ? `${cleanRel}/page.rsc` : "page.rsc";
       const shellLayoutKey = hasActiveLayout
         ? leafLayoutKey
           ? `${leafLayoutKey}/shell.layout.json`
           : "shell.layout.json"
         : null;
+      const layoutRscKey = hasActiveLayout
+        ? leafLayoutKey
+          ? `${leafLayoutKey}/layout.rsc`
+          : "layout.rsc"
+        : null;
       const reqOriginUrl = simReq?.url
         ? `http://${simReq.headers?.host || "localhost:3000"}${simReq.url}`
         : null;
-      const [pageShellJson, layoutShellJson] = await Promise.all([
-        preloadedPageShellJson !== undefined
-          ? Promise.resolve(preloadedPageShellJson)
-          : readShellJsonFromStorage(storage, shellPageKey, platformContext, reqOriginUrl),
-        hasActiveLayout
-          ? preloadedLayoutShellJson !== undefined
-            ? Promise.resolve(preloadedLayoutShellJson)
-            : readShellJsonFromStorage(storage, shellLayoutKey, platformContext, reqOriginUrl)
-          : Promise.resolve(null),
-      ]);
 
       let holes = Array.isArray(metadata?.holes) ? metadata.holes : null;
       if ((!holes || holes.length === 0) && typeof shellPrelude === "string") {
@@ -1040,6 +1239,45 @@ async function handlePprResume({
         if (extracted.length > 0 || Array.isArray(metadata?.holes)) {
           holes = extracted;
         }
+      }
+      const hasDynamicHoles = !Array.isArray(holes) || holes.length > 0;
+
+      // Fast path for 0-hole PPR routes: if pre-rendered page.rsc & layout.rsc are available,
+      // skip reading/deserializing shell.*.json and skip renderRSCStream() completely.
+      let resolvedPreloadedPageRsc = preloadedPageRsc;
+      let resolvedPreloadedLayoutRsc = preloadedLayoutRsc;
+      if (!hasDynamicHoles) {
+        const [fetchedPageRsc, fetchedLayoutRsc] = await Promise.all([
+          resolvedPreloadedPageRsc !== undefined
+            ? Promise.resolve(resolvedPreloadedPageRsc)
+            : readRscTextFromStorage(storage, pageRscKey, platformContext, reqOriginUrl),
+          hasActiveLayout
+            ? resolvedPreloadedLayoutRsc !== undefined
+              ? Promise.resolve(resolvedPreloadedLayoutRsc)
+              : readRscTextFromStorage(storage, layoutRscKey, platformContext, reqOriginUrl)
+            : Promise.resolve(""),
+        ]);
+        resolvedPreloadedPageRsc = fetchedPageRsc;
+        resolvedPreloadedLayoutRsc = fetchedLayoutRsc;
+      }
+      const hasZeroHolePreloadedRsc =
+        !hasDynamicHoles &&
+        Boolean(resolvedPreloadedPageRsc) &&
+        (!hasActiveLayout || Boolean(resolvedPreloadedLayoutRsc));
+
+      let pageShellJson = null;
+      let layoutShellJson = null;
+      if (!hasZeroHolePreloadedRsc) {
+        [pageShellJson, layoutShellJson] = await Promise.all([
+          preloadedPageShellJson !== undefined
+            ? Promise.resolve(preloadedPageShellJson)
+            : readShellJsonFromStorage(storage, shellPageKey, platformContext, reqOriginUrl),
+          hasActiveLayout
+            ? preloadedLayoutShellJson !== undefined
+              ? Promise.resolve(preloadedLayoutShellJson)
+              : readShellJsonFromStorage(storage, shellLayoutKey, platformContext, reqOriginUrl)
+            : Promise.resolve(null),
+        ]);
       }
 
       const dynamicState = { value: true };
@@ -1055,15 +1293,17 @@ async function handlePprResume({
       const resolvedHolesMap = new Map();
       let cachedPageTreeForResume = null;
       let cachedLayoutTreeForResume = null;
-      if (pageShellJson) {
-        try {
-          cachedPageTreeForResume = deserializeJSX(pageShellJson);
-        } catch (_) {}
-      }
-      if (hasActiveLayout && layoutShellJson) {
-        try {
-          cachedLayoutTreeForResume = deserializeJSX(layoutShellJson);
-        } catch (_) {}
+      if (!hasZeroHolePreloadedRsc) {
+        if (pageShellJson) {
+          try {
+            cachedPageTreeForResume = deserializeJSX(pageShellJson);
+          } catch (_) {}
+        }
+        if (hasActiveLayout && layoutShellJson) {
+          try {
+            cachedLayoutTreeForResume = deserializeJSX(layoutShellJson);
+          } catch (_) {}
+        }
       }
       const shellContextForHoles =
         cachedPageTreeForResume || cachedLayoutTreeForResume
@@ -1074,7 +1314,7 @@ async function handlePprResume({
           : null;
 
       await requestStorage.run(context, async () => {
-        if (!Array.isArray(holes) || holes.length > 0) {
+        if (hasDynamicHoles) {
           const isNotFound = { value: false };
           const jsx = await getJSX(
             reqPath,
@@ -1130,38 +1370,95 @@ async function handlePprResume({
 
         if (
           !isAborted() &&
-          pageShellJson &&
-          (!hasActiveLayout || layoutShellJson)
+          (hasZeroHolePreloadedRsc ||
+            (pageShellJson && (!hasActiveLayout || layoutShellJson)))
         ) {
           try {
-            const clientManifest = getClientManifest();
-            const cachedPageTree = cachedPageTreeForResume || deserializeJSX(pageShellJson);
-            const splicedPageTree = replaceHolesWithMap(cachedPageTree, resolvedHolesMap);
-            const pageRscStream = renderRSCStream(splicedPageTree, clientManifest, {
-              runtime: "edge",
-            });
-            let layoutRscPromise = Promise.resolve("");
-            if (hasActiveLayout && layoutShellJson) {
-              const cachedLayoutTree =
-                cachedLayoutTreeForResume || deserializeJSX(layoutShellJson);
-              const splicedLayoutTree = replaceHolesWithMap(
-                cachedLayoutTree,
-                resolvedHolesMap
-              );
-              const layoutRscStream = renderRSCStream(
-                splicedLayoutTree,
-                clientManifest,
-                { runtime: "edge" }
-              );
-              layoutRscPromise = new Response(layoutRscStream).text();
+            let layoutRscText = "";
+            let pageRscText = "";
+            if (hasZeroHolePreloadedRsc) {
+              layoutRscText = hasActiveLayout ? resolvedPreloadedLayoutRsc : "";
+              pageRscText = resolvedPreloadedPageRsc;
+            } else {
+              const clientManifest = getClientManifest();
+              const pageHasShellHoles =
+                typeof pageShellJson === "string" &&
+                pageShellJson.includes('"data-ppr-hole"');
+              let pageRscPromise = null;
+              if (!pageHasShellHoles) {
+                const cachedPageRsc =
+                  resolvedPreloadedPageRsc !== undefined
+                    ? resolvedPreloadedPageRsc
+                    : await readRscTextFromStorage(
+                        storage,
+                        pageRscKey,
+                        platformContext,
+                        reqOriginUrl
+                      );
+                if (cachedPageRsc) {
+                  pageRscPromise = Promise.resolve(cachedPageRsc);
+                }
+              }
+              if (!pageRscPromise) {
+                const cachedPageTree =
+                  cachedPageTreeForResume || deserializeJSX(pageShellJson);
+                const splicedPageTree = replaceHolesWithMap(
+                  cachedPageTree,
+                  resolvedHolesMap
+                );
+                const pageRscStream = renderRSCStream(
+                  splicedPageTree,
+                  clientManifest,
+                  {
+                    runtime: "edge",
+                  }
+                );
+                pageRscPromise = new Response(pageRscStream).text();
+              }
+
+              let layoutRscPromise = Promise.resolve("");
+              if (hasActiveLayout && layoutShellJson) {
+                const layoutHasShellHoles =
+                  typeof layoutShellJson === "string" &&
+                  layoutShellJson.includes('"data-ppr-hole"');
+                let reusedLayoutRsc = null;
+                if (!layoutHasShellHoles) {
+                  reusedLayoutRsc =
+                    resolvedPreloadedLayoutRsc !== undefined
+                      ? resolvedPreloadedLayoutRsc
+                      : await readRscTextFromStorage(
+                          storage,
+                          layoutRscKey,
+                          platformContext,
+                          reqOriginUrl
+                        );
+                }
+                if (reusedLayoutRsc) {
+                  layoutRscPromise = Promise.resolve(reusedLayoutRsc);
+                } else {
+                  const cachedLayoutTree =
+                    cachedLayoutTreeForResume || deserializeJSX(layoutShellJson);
+                  const splicedLayoutTree = replaceHolesWithMap(
+                    cachedLayoutTree,
+                    resolvedHolesMap
+                  );
+                  const layoutRscStream = renderRSCStream(
+                    splicedLayoutTree,
+                    clientManifest,
+                    { runtime: "edge" }
+                  );
+                  layoutRscPromise = new Response(layoutRscStream).text();
+                }
+              }
+              [layoutRscText, pageRscText] = await Promise.all([
+                layoutRscPromise,
+                pageRscPromise,
+              ]);
             }
-            const [layoutRscText, pageRscText] = await Promise.all([
-              layoutRscPromise,
-              new Response(pageRscStream).text(),
-            ]);
             if (!isAborted() && pageRscText && (!hasActiveLayout || layoutRscText)) {
+              const pprPageCacheMode = hasDynamicHoles ? "ppr" : "static";
               let rscScripts =
-                "\n<script>window.__DINOU_INLINE_RSC__=true;window.__DINOU_RSC_P__=window.__DINOU_RSC_P__||[];window.__DINOU_RSC_L__=window.__DINOU_RSC_L__||[];</script>";
+                `\n<script>window.__DINOU_INLINE_RSC__=true;window.__DINOU_PAGE_CACHE_MODE__="${pprPageCacheMode}";window.__DINOU_RSC_P__=window.__DINOU_RSC_P__||[];window.__DINOU_RSC_L__=window.__DINOU_RSC_L__||[];</script>`;
               if (hasActiveLayout && layoutRscText) {
                 rscScripts +=
                   formatRscPushScript("L", layoutRscText) + formatRscDoneScript("L");
@@ -1206,25 +1503,7 @@ async function handlePprResume({
     platformContext.ctx.waitUntil(resumePromise);
   }
 
-  const headers = new Headers(bridge.headers);
-  if (Array.isArray(bridge.cookies)) {
-    for (const c of bridge.cookies) {
-      headers.append("Set-Cookie", c);
-    }
-  }
-  headers.set("Content-Type", "text/html; charset=utf-8");
-  const existingCacheControl = headers.get("Cache-Control");
-  if (!existingCacheControl) {
-    headers.set("Cache-Control", "no-store, no-cache, must-revalidate, no-transform");
-  } else if (!/\bno-transform\b/i.test(existingCacheControl)) {
-    headers.set("Cache-Control", `${existingCacheControl}, no-transform`);
-  }
-  if (!headers.has("Content-Encoding")) {
-    headers.set("Content-Encoding", "identity");
-  }
-  if (!headers.has("X-Accel-Buffering")) {
-    headers.set("X-Accel-Buffering", "no");
-  }
+  const headers = buildPprResponseHeaders();
 
   return new Response(readable, {
     status: bridge._explicitStatusSet
@@ -1240,10 +1519,14 @@ export {
   handlePprResume,
   spliceDynamicHolesIntoShell,
   readShellJsonFromStorage,
+  readRscTextFromStorage,
+  replaceHolesWithMap,
 };
 export default {
   streamDynamicHoles,
   handlePprResume,
   spliceDynamicHolesIntoShell,
   readShellJsonFromStorage,
+  readRscTextFromStorage,
+  replaceHolesWithMap,
 };

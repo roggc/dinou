@@ -87,7 +87,16 @@ async function sendWebResponseToNode(webResponse, res) {
     }
   }
 
-  if (!webResponse.body) {
+  const reqMethod = String(res?.req?.method || "").toUpperCase();
+  if (!webResponse.body || reqMethod === "HEAD") {
+    if (webResponse.body && typeof webResponse.body.cancel === "function") {
+      try {
+        const cancelResult = webResponse.body.cancel();
+        if (cancelResult && typeof cancelResult.catch === "function") {
+          cancelResult.catch(() => {});
+        }
+      } catch (_) {}
+    }
     return res.end();
   }
 

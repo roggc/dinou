@@ -27,6 +27,7 @@ import {
   serializeJSX,
   deserializeJSX,
   refreshNestedSlotsInTree,
+  inspectSlotsFreshness,
 } from "./cache-slot.js";
 import {
   renderSingleLayoutLevel,
@@ -34,6 +35,22 @@ import {
   hydrateActiveChainPpr,
 } from "./layout-composition.js";
 import { fetchCloudflareDist2Asset } from "./static-assets.js";
+
+let _cachedRevalLayoutsRef = null;
+let _cachedRevalLayoutsJson = "[]";
+
+function getRevalLayoutsJson() {
+  const knownLayouts =
+    (typeof globalThis !== "undefined" && globalThis.__DINOU_LAYOUTS__) || null;
+  if (!knownLayouts) return "[]";
+  if (knownLayouts === _cachedRevalLayoutsRef) {
+    return _cachedRevalLayoutsJson;
+  }
+  const serialized = JSON.stringify(knownLayouts);
+  _cachedRevalLayoutsRef = knownLayouts;
+  _cachedRevalLayoutsJson = serialized;
+  return serialized;
+}
 
 const INFLIGHT_LAYOUT_REVAL_KEY = Symbol.for("dinou.layout.inflight.revalidations");
 if (!globalThis[INFLIGHT_LAYOUT_REVAL_KEY]) {
@@ -89,11 +106,43 @@ function isCloudflareWorkersRuntime() {
   );
 }
 
+function recordClientRevalidationHint(kind, value, explicitCtx = null) {
+  try {
+    const ctx = explicitCtx || getContext();
+    if (!ctx || !ctx._isServerFunction) return;
+    if (!ctx._revalidatedHint) {
+      ctx._revalidatedHint = {
+        pages: new Set(),
+        layouts: new Set(),
+        allPages: false,
+        allLayouts: false,
+      };
+    }
+    if (kind === "page" && value) {
+      ctx._revalidatedHint.pages.add(String(value));
+    } else if (kind === "layout" && value) {
+      ctx._revalidatedHint.layouts.add(String(value));
+    } else if (kind === "allPages") {
+      ctx._revalidatedHint.allPages = true;
+    } else if (kind === "allLayouts") {
+      ctx._revalidatedHint.allLayouts = true;
+    }
+  } catch (e) {}
+}
+
 function enqueueRevalidation(fn) {
   if (revalQueueStorage.getStore()) {
     return fn();
   }
   if (isCloudflareWorkersRuntime()) {
+    const reqCtx = requestStorage?.getStore?.();
+    if (reqCtx && typeof reqCtx === "object") {
+      const prevQueue = reqCtx._cfRevalQueue || Promise.resolve();
+      const run = () => revalQueueStorage.run(true, fn);
+      const nextPromise = prevQueue.then(run, run);
+      reqCtx._cfRevalQueue = nextPromise.catch(() => {});
+      return nextPromise;
+    }
     return revalQueueStorage.run(true, fn);
   }
   const run = () => revalQueueStorage.run(true, fn);
@@ -462,12 +511,26 @@ function normalizeRevalidatePath(reqPath) {
   }
 
   let cleanPath = String(targetPath || "/").split("?")[0].split("#")[0] || "/";
-  if (!cleanPath.startsWith("/")) {
-    cleanPath = "/" + cleanPath;
+  const decodedSegs = [];
+  for (const rawSeg of cleanPath.split("/").filter(Boolean)) {
+    let dec = rawSeg;
+    try {
+      dec = decodeURIComponent(rawSeg);
+    } catch (e) {
+      dec = rawSeg;
+    }
+    if (
+      dec === "." ||
+      dec === ".." ||
+      dec.includes("/") ||
+      dec.includes("\\") ||
+      dec.includes("\0")
+    ) {
+      continue;
+    }
+    decodedSegs.push(dec);
   }
-  if (cleanPath !== "/" && cleanPath.endsWith("/")) {
-    cleanPath = cleanPath.slice(0, -1);
-  }
+  cleanPath = decodedSegs.length > 0 ? "/" + decodedSegs.join("/") : "/";
   return cleanPath;
 }
 
@@ -475,6 +538,10 @@ async function revalidatePage(reqPath, internalOptions = {}) {
   const cleanPath = normalizeRevalidatePath(reqPath);
   const onlyRefreshSlots = Boolean(internalOptions?.onlyRefreshSlots);
   const onlyIfExpired = Boolean(internalOptions?.onlyIfExpired);
+  const retryDepth = Number(internalOptions?._retryDepth || 0);
+  if (!onlyIfExpired && !onlyRefreshSlots) {
+    recordClientRevalidationHint("page", cleanPath);
+  }
   const inFlightKey = `${cleanPath}:${onlyRefreshSlots ? "slots" : "full"}:${onlyIfExpired ? "ttl" : "force"}`;
   // Never await an outer queued inflightPageRevalidations promise when already inside
   // revalQueueStorage (holding revalState.queue), or a concurrent caller queued behind us
@@ -537,6 +604,74 @@ async function revalidatePage(reqPath, internalOptions = {}) {
       return;
     }
 
+    const transitionPageToDynamicTombstone = async ({
+      prevGen = 0,
+      notFound = false,
+      logMessage = null,
+    } = {}) => {
+      markRouteDynamicInMap(reqPathWithSlash, cleanPath, true);
+      const prevGenForTombstone = Math.max(
+        Number((currentMeta && currentMeta.generatedAt) || 0),
+        Number(prevGen || 0)
+      );
+      // Preserve causal _old snapshots BEFORE advancing metadata.json and evicting current artifacts
+      // so in-flight tabs hydrating ?____build_id____=T_prev receive matching page._old.rsc /
+      // shell.page._old.json with zero React #418!
+      try {
+        if (cached && cached.content) {
+          await storage.set(oldHtmlKey, cached.content);
+        }
+        if (existingPageRsc && existingPageRsc.content) {
+          await storage.set(oldRscKey, existingPageRsc.content);
+        }
+        const prevShellPage = await readEdgeStorageOrAsset(storage, shellPageKey);
+        if (prevShellPage && prevShellPage.content) {
+          await storage.set(shellPageOldKey, prevShellPage.content);
+        }
+      } catch (e) {}
+      const tombstoneMeta = {
+        ...currentMeta,
+        dynamic: true,
+        generatedAt: nextMonotonicGenTime(prevGenForTombstone),
+      };
+      if (notFound) {
+        tombstoneMeta.notFound = true;
+        tombstoneMeta.status = 404;
+      } else {
+        delete tombstoneMeta.notFound;
+      }
+      // Commit metadata.json BEFORE evicting current RSC/PPR/HTML artifacts so concurrent readers
+      // never observe evicted artifacts with a stale generatedAt timestamp.
+      try {
+        await storage.set(metaKey, JSON.stringify(tombstoneMeta));
+      } catch (e) {}
+      // Keep physical index.html intact on FileSystemStorage (storage.baseDir) for concurrency safety
+      // (in-flight file streams & Hybrid Static/Dynamic switching; FileSystemStorage.get() reads
+      // companion metadata.json so cachedItem.metadata.dynamic === true is immediately visible).
+      // On non-FS distributed/Edge adapters (Redis, Deno KV, Cloudflare KV, Memory), storage.get(htmlKey)
+      // returns inline metadata stored on htmlKey itself — so we MUST delete htmlKey & cleanPathKey
+      // (writing KV/Redis tombstones that suppress stale .dinou/dist2 and env.ASSETS fallback).
+      const bailoutKeysToEvict = [
+        shellHtmlKey,
+        rscKey,
+        shellRscKey,
+        shellPageKey,
+        legacyRscKey,
+      ];
+      if (!storage.baseDir) {
+        bailoutKeysToEvict.push(htmlKey);
+        if (cleanPathKey) {
+          bailoutKeysToEvict.push(cleanPathKey);
+        }
+      }
+      await Promise.all(
+        bailoutKeysToEvict.map((k) => Promise.resolve(storage.delete(k)).catch(() => {}))
+      );
+      if (logMessage) {
+        console.log(logMessage);
+      }
+    };
+
     const hasExistingPageArtifact = Boolean(
       (cached && cached.content) || (existingPageRsc && existingPageRsc.content)
     );
@@ -547,6 +682,15 @@ async function revalidatePage(reqPath, internalOptions = {}) {
       hasExistingPageArtifact
     );
     if (routeCfg.isBlocked) {
+      if (
+        hasExistingPageArtifact ||
+        (currentMeta && Object.keys(currentMeta).length > 0)
+      ) {
+        await transitionPageToDynamicTombstone({
+          notFound: true,
+          logMessage: `[ISR] Perimeter block / notFound detected for ${cleanPath}. Switching to Dynamic 404.`,
+        });
+      }
       return;
     }
     const effectivePageReval =
@@ -594,6 +738,8 @@ async function revalidatePage(reqPath, internalOptions = {}) {
     let leafSuspenseCount = 0;
     let leafHoles = [];
     let hasActiveLayoutChain = false;
+    let composedLeafLayoutMetaKey = null;
+    let composedLeafLayoutGen = 0;
     let hasDynamicLayoutInChain = false;
     try {
       const activeChain = getActiveLayoutChain(reqSegments, {}, srcFolder);
@@ -696,6 +842,10 @@ async function revalidatePage(reqPath, internalOptions = {}) {
           leafHoles = Array.isArray(leafLayout.holes) ? leafLayout.holes : [];
           if (hasValidLeafRsc) {
             activeLayoutRscText = leafRscItem.content;
+            composedLeafLayoutMetaKey = leafLayout.cleanLayoutKey
+              ? `${leafLayout.cleanLayoutKey}/layout.metadata.json`
+              : "layout.metadata.json";
+            composedLeafLayoutGen = Number(leafLayout.generatedAt || 0);
           }
         }
       }
@@ -704,6 +854,30 @@ async function revalidatePage(reqPath, internalOptions = {}) {
     const prevGenTime = Math.max((currentMeta && currentMeta.generatedAt) || 0, maxActiveLayoutGenTime);
     const prevPageOwnGenTime =
       (currentMeta && (currentMeta.pageGeneratedAt || currentMeta.generatedAt)) || 0;
+    const initialTagInvMap = new Map();
+    if (isCloudflareWorkersRuntime() && retryDepth < 2) {
+      const initTags = Array.from(
+        new Set([
+          ...(Array.isArray(currentMeta?.slotTags) ? currentMeta.slotTags : []),
+          ...(Array.isArray(currentMeta?.tags) ? currentMeta.tags : []),
+        ])
+      ).filter(Boolean);
+      if (initTags.length > 0) {
+        await Promise.all(
+          initTags.map(async (t) => {
+            try {
+              const invAt =
+                typeof storage.getTagInvalidatedAtAsync === "function"
+                  ? await storage.getTagInvalidatedAtAsync(t)
+                  : typeof storage.getTagInvalidatedAt === "function"
+                  ? storage.getTagInvalidatedAt(t)
+                  : 0;
+              initialTagInvMap.set(t, Number(invAt || 0));
+            } catch (e) {}
+          })
+        );
+      }
+    }
     const now = Date.now();
     const newGenTime = nextMonotonicGenTime(prevGenTime);
     currentMeta.generatedAt = newGenTime;
@@ -744,7 +918,16 @@ async function revalidatePage(reqPath, internalOptions = {}) {
           env: activeEnv,
         },
         res: {
-          status() {},
+          status(code) {
+            const numericCode = Number(code);
+            if (!Number.isNaN(numericCode)) {
+              revalContext._statusCode = numericCode;
+            }
+            if (Number.isNaN(numericCode) || numericCode !== 200) {
+              markRevalDynamic();
+            }
+            return revalContext.res;
+          },
           setHeader() {
             markRevalDynamic();
           },
@@ -754,8 +937,15 @@ async function revalidatePage(reqPath, internalOptions = {}) {
           clearCookie() {
             markRevalDynamic();
           },
-          redirect() {
+          redirect(urlOrStatus, targetUrl) {
             revalContext._hasRedirected = true;
+            if (typeof urlOrStatus === "number") {
+              revalContext._statusCode = urlOrStatus;
+              revalContext._redirectLocation = targetUrl;
+            } else {
+              revalContext._statusCode = 302;
+              revalContext._redirectLocation = urlOrStatus;
+            }
             markRevalDynamic();
           },
         },
@@ -763,13 +953,14 @@ async function revalidatePage(reqPath, internalOptions = {}) {
         platformContext: outerCtx?.platformContext || { env: activeEnv },
         _isStaticHtmlRender: true,
         _hasRedirected: false,
+        _statusCode: 200,
       };
       const clientManifest =
         (typeof globalThis !== "undefined" && globalThis.__DINOU_CLIENT_MANIFEST__) || {};
+      const isNotFound = { value: false };
 
       try {
         await requestStorage.run(revalContext, async () => {
-          const isNotFound = {};
           let resolvedPageJsx = null;
 
           if (onlyRefreshSlots) {
@@ -879,11 +1070,10 @@ async function revalidatePage(reqPath, internalOptions = {}) {
 
           const renderHtmlStream =
             typeof globalThis !== "undefined" && globalThis.__DINOU_RENDER_HTML_STREAM__;
-          const knownLayouts =
-            (typeof globalThis !== "undefined" && globalThis.__DINOU_LAYOUTS__) || [];
+          const knownLayoutsJson = getRevalLayoutsJson();
           const bootstrapScriptContent = isRoutePpr
-            ? `window.__DINOU_LAYOUTS__ = ${JSON.stringify(knownLayouts)};\nwindow.__DINOU_USE_STATIC__ = false;\nwindow.__DINOU_PPR__ = true;\nwindow.__DINOU_BUILD_ID__ = "${newGenTime}";\n`
-            : `window.__DINOU_LAYOUTS__ = ${JSON.stringify(knownLayouts)};\nwindow.__DINOU_USE_STATIC__ = true;\nwindow.__DINOU_BUILD_ID__ = "${newGenTime}";\n`;
+            ? `window.__DINOU_LAYOUTS__ = ${knownLayoutsJson};\nwindow.__DINOU_USE_STATIC__ = false;\nwindow.__DINOU_PPR__ = true;\nwindow.__DINOU_BUILD_ID__ = "${newGenTime}";\n`
+            : `window.__DINOU_LAYOUTS__ = ${knownLayoutsJson};\nwindow.__DINOU_USE_STATIC__ = true;\nwindow.__DINOU_BUILD_ID__ = "${newGenTime}";\n`;
           const assetManifest =
             (typeof globalThis !== "undefined" && globalThis.__DINOU_ASSET_MANIFEST__) || {};
           const rawMain = assetManifest["main.js"] || "/main.js";
@@ -1004,53 +1194,34 @@ async function revalidatePage(reqPath, internalOptions = {}) {
           }
         });
       } catch (e) {
-        if (isEdgeRuntime() || process.env.DINOU_DEBUG) {
+        if (e && e.$$type === "dinou-internal-redirect") {
+          revalContext._hasRedirected = true;
+          revalDynamicState.value = true;
+        } else if (isEdgeRuntime() || process.env.DINOU_DEBUG) {
           console.warn(`⚠️ [Edge Revalidate] Render fallback for ${cleanPath}:`, e?.message || e);
         }
       }
-      if (revalContext._hasRedirected) {
+      const hasNon200Status = Boolean(
+        revalContext._statusCode && Number(revalContext._statusCode) !== 200
+      );
+      if (revalDynamicState.value || revalContext._hasRedirected || hasNon200Status) {
+        await transitionPageToDynamicTombstone({
+          prevGen: prevGenTime,
+          notFound: Number(revalContext._statusCode) === 404,
+          logMessage: revalContext._hasRedirected
+            ? `[ISR] Redirect detected for ${cleanPath}. Switching to Dynamic.`
+            : hasNon200Status
+            ? `[ISR] Non-200 status (${revalContext._statusCode}) detected for ${cleanPath}. Switching to Dynamic.`
+            : `[ISR] Bailout detected for ${cleanPath}. Switching to Dynamic.`,
+        });
         return;
       }
-      if (revalDynamicState.value) {
-        markRouteDynamicInMap(reqPathWithSlash, cleanPath, true);
-        // Preserve causal _old snapshots AND keep physical index.html intact for concurrency safety
-        // (in-flight file streams & Hybrid Static/Dynamic switching). Persisting metadata.json with
-        // dynamic: true immediately directs all pods (warm & cold) on Direct SSR, Step 2b PPR, and
-        // /____rsc_page____ to serve live dynamic SSR while in-flight tabs hydrating ?____build_id____=T_prev
-        // receive matching page._old.rsc / shell.page._old.json with zero React #418!
-        try {
-          if (cached && cached.content) {
-            await storage.set(oldHtmlKey, cached.content);
-          }
-          if (existingPageRsc && existingPageRsc.content) {
-            await storage.set(oldRscKey, existingPageRsc.content);
-          }
-          const prevShellPage = await readEdgeStorageOrAsset(storage, shellPageKey);
-          if (prevShellPage && prevShellPage.content) {
-            await storage.set(shellPageOldKey, prevShellPage.content);
-          }
-        } catch (e) {}
-        try {
-          await storage.set(
-            metaKey,
-            JSON.stringify({
-              ...currentMeta,
-              dynamic: true,
-              generatedAt: nextMonotonicGenTime(prevGenTime),
-            })
-          );
-        } catch (e) {}
-        const bailoutKeysToEvict = [
-          shellHtmlKey,
-          rscKey,
-          shellRscKey,
-          shellPageKey,
-          legacyRscKey,
-        ];
-        await Promise.all(
-          bailoutKeysToEvict.map((k) => Promise.resolve(storage.delete(k)).catch(() => {}))
-        );
-        console.log(`[ISR] Bailout detected for ${cleanPath}. Switching to Dynamic.`);
+      if (isNotFound.value) {
+        await transitionPageToDynamicTombstone({
+          prevGen: prevGenTime,
+          notFound: true,
+          logMessage: `[ISR] NotFound detected for ${cleanPath}. Switching to Dynamic 404.`,
+        });
         return;
       }
       markRouteDynamicInMap(reqPathWithSlash, cleanPath, false);
@@ -1060,25 +1231,32 @@ async function revalidatePage(reqPath, internalOptions = {}) {
       renderedRsc || renderedFullRsc || composedFromCachedLayout
     );
 
-    if (!didRenderFreshPage && !isEdgeRuntime()) {
-      const keysToEvict = [
-        htmlKey,
-        shellHtmlKey,
-        oldHtmlKey,
-        rscKey,
-        shellRscKey,
-        shellPageKey,
-        shellPageOldKey,
-        oldRscKey,
-        legacyRscKey,
-        metaKey,
-      ];
-      if (cleanPathKey) {
-        keysToEvict.push(cleanPathKey);
+    if (!didRenderFreshPage) {
+      if (!pagePath) {
+        await transitionPageToDynamicTombstone({
+          prevGen: prevGenTime,
+          notFound: true,
+          logMessage: `[ISR] Removed route detected for ${cleanPath}. Switching to Dynamic 404.`,
+        });
+        return;
       }
-      await Promise.all(
-        keysToEvict.map((k) => Promise.resolve(storage.delete(k)).catch(() => {}))
-      );
+      if (!isEdgeRuntime()) {
+        const keysToEvict = [
+          htmlKey,
+          shellHtmlKey,
+          rscKey,
+          shellRscKey,
+          shellPageKey,
+          legacyRscKey,
+          metaKey,
+        ];
+        if (cleanPathKey) {
+          keysToEvict.push(cleanPathKey);
+        }
+        await Promise.all(
+          keysToEvict.map((k) => Promise.resolve(storage.delete(k)).catch(() => {}))
+        );
+      }
       return;
     }
 
@@ -1108,6 +1286,9 @@ async function revalidatePage(reqPath, internalOptions = {}) {
         `window.__DINOU_BUILD_ID__ = "${commitGenTime}"`
       );
     }
+    delete currentMeta.dynamic;
+    delete currentMeta.notFound;
+    currentMeta.status = 200;
     currentMeta.generatedAt = commitGenTime;
     currentMeta.pageSlotsGeneratedAt = commitGenTime;
 
@@ -1147,6 +1328,86 @@ async function revalidatePage(reqPath, internalOptions = {}) {
       } catch (e) {}
     }
 
+    // Cross-isolate optimistic consistency check (Cloudflare Workers / distributed KV):
+    // Prevent a slower isolate from clobbering newer layout/page/slot commits with stale artifacts,
+    // without false-triggering on slots freshly written by THIS revalidation pass or upgrading
+    // surgical `onlyRefreshSlots` retries into full page re-executions.
+    const checkCloudflarePageRace = async (committedGen = 0) => {
+      if (!isCloudflareWorkersRuntime() || retryDepth >= 2) return false;
+      try {
+        const latestMetaItem = await storage.get(metaKey);
+        const latestMetaObj =
+          latestMetaItem?.metadata ||
+          (latestMetaItem?.content && latestMetaItem.content.trim().startsWith("{")
+            ? JSON.parse(latestMetaItem.content)
+            : null);
+        const latestMetaGen = Number(latestMetaObj?.generatedAt || 0);
+        if (committedGen > 0) {
+          if (latestMetaGen > committedGen) return true;
+        } else if (latestMetaGen > prevGenTime) {
+          return true;
+        }
+        if (composedLeafLayoutMetaKey) {
+          const latestLeafItem = await storage.get(composedLeafLayoutMetaKey);
+          const latestLeafObj =
+            latestLeafItem?.metadata ||
+            (latestLeafItem?.content && latestLeafItem.content.trim().startsWith("{")
+              ? JSON.parse(latestLeafItem.content)
+              : null);
+          if (Number(latestLeafObj?.generatedAt || 0) > composedLeafLayoutGen) {
+            return true;
+          }
+        }
+        const tagsToCheck = Array.from(
+          new Set([
+            ...(Array.isArray(currentMeta.slotTags) ? currentMeta.slotTags : []),
+            ...(Array.isArray(currentMeta.tags) ? currentMeta.tags : []),
+          ])
+        ).filter(Boolean);
+        if (tagsToCheck.length > 0) {
+          const tagInvResults = await Promise.all(
+            tagsToCheck.map(async (t) => {
+              const invAt =
+                typeof storage.getTagInvalidatedAtAsync === "function"
+                  ? await storage.getTagInvalidatedAtAsync(t)
+                  : typeof storage.getTagInvalidatedAt === "function"
+                  ? storage.getTagInvalidatedAt(t)
+                  : 0;
+              const baselineInvAt = initialTagInvMap.has(t)
+                ? initialTagInvMap.get(t)
+                : now;
+              return Number(invAt || 0) > baselineInvAt;
+            })
+          );
+          if (tagInvResults.some(Boolean)) {
+            return true;
+          }
+        }
+        if (
+          committedGen > 0 &&
+          Array.isArray(currentMeta.slotTags) &&
+          currentMeta.slotTags.length > 0
+        ) {
+          const slotCheck = await inspectSlotsFreshness(
+            currentMeta.slotTags,
+            committedGen,
+            { bypassRequestCache: true }
+          );
+          if (slotCheck.hasNewer) {
+            return true;
+          }
+        }
+      } catch (e) {}
+      return false;
+    };
+
+    if (await checkCloudflarePageRace(0)) {
+      return await revalidatePage(reqPath, {
+        ...internalOptions,
+        _retryDepth: retryDepth + 1,
+      });
+    }
+
     // Causal commit order to guarantee zero hydration mismatch (#418) under concurrent ISR reads:
     // 1. _old snapshot already committed above (so buildId < currentGeneratedAt resolves T_prev)
     // 2. metadata.json advances currentGeneratedAt to commitGenTime (routing T_prev clients to _old)
@@ -1180,6 +1441,13 @@ async function revalidatePage(reqPath, internalOptions = {}) {
       if (cleanPathKey) {
         await storage.set(cleanPathKey, newHtml, currentMeta);
       }
+    }
+
+    if (await checkCloudflarePageRace(commitGenTime)) {
+      return await revalidatePage(reqPath, {
+        ...internalOptions,
+        _retryDepth: retryDepth + 1,
+      });
     }
 
     console.log(`✅ [Edge Revalidate] Successfully revalidated page ${cleanPath} (generatedAt: ${commitGenTime})`);
@@ -1299,6 +1567,10 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
   const onlyRefreshSlots = Boolean(internalOptions?.onlyRefreshSlots);
   const onlyIfExpired = Boolean(internalOptions?.onlyIfExpired);
   const recomposeOnly = Boolean(internalOptions?.recomposeOnly);
+  const retryDepth = Number(internalOptions?._retryDepth || 0);
+  if (!onlyIfExpired && !onlyRefreshSlots) {
+    recordClientRevalidationHint("layout", targetPath);
+  }
   const inFlightKey = `${targetPath}:${recomposeOnly ? "recompose" : onlyRefreshSlots ? "slots" : "full"}:${onlyIfExpired ? "ttl" : "force"}`;
   // Never await an outer queued inflightLayoutRevalidations promise when already inside
   // revalQueueStorage (e.g. revalidatePage holding revalState.queue calling nested revalidateLayout),
@@ -1428,6 +1700,31 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
             currentMeta.layoutGeneratedAt ||
             currentMeta.generatedAt)) ||
         0;
+      const initialLayoutTagInvMap = new Map();
+      if (isCloudflareWorkersRuntime() && retryDepth < 2) {
+        const initLayoutTags = Array.from(
+          new Set([
+            ...(Array.isArray(currentMeta?.ownSlotTags) ? currentMeta.ownSlotTags : []),
+            ...(Array.isArray(currentMeta?.slotTags) ? currentMeta.slotTags : []),
+            ...(Array.isArray(currentMeta?.tags) ? currentMeta.tags : []),
+          ])
+        ).filter(Boolean);
+        if (initLayoutTags.length > 0) {
+          await Promise.all(
+            initLayoutTags.map(async (t) => {
+              try {
+                const invAt =
+                  typeof storage.getTagInvalidatedAtAsync === "function"
+                    ? await storage.getTagInvalidatedAtAsync(t)
+                    : typeof storage.getTagInvalidatedAt === "function"
+                    ? storage.getTagInvalidatedAt(t)
+                    : 0;
+                initialLayoutTagInvMap.set(t, Number(invAt || 0));
+              } catch (e) {}
+            })
+          );
+        }
+      }
       const now = Date.now();
       const newGenTime = nextMonotonicGenTime(prevGenTime);
       currentMeta.generatedAt = newGenTime;
@@ -1463,6 +1760,7 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
           outerCtx?.req?.env ||
           (typeof globalThis !== "undefined" ? globalThis.__DINOU_ENV__ : undefined) ||
           {};
+        let layoutStatusCode = 200;
         const revalContext = {
           req: {
             query: createBailoutProxy({}, "req.query", markRevalDynamic),
@@ -1473,7 +1771,17 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
             env: activeEnv,
           },
           res: {
-            status() {},
+            status(code) {
+              const numericCode = Number(code);
+              if (!Number.isNaN(numericCode)) {
+                layoutStatusCode = numericCode;
+                revalContext._statusCode = numericCode;
+              }
+              if (Number.isNaN(numericCode) || numericCode !== 200) {
+                markRevalDynamic();
+              }
+              return revalContext.res;
+            },
             setHeader() {
               markRevalDynamic();
             },
@@ -1483,9 +1791,18 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
             clearCookie() {
               markRevalDynamic();
             },
-            redirect() {
+            redirect(urlOrStatus, targetUrl) {
               layoutHasRedirected = true;
               revalContext._hasRedirected = true;
+              if (typeof urlOrStatus === "number") {
+                layoutStatusCode = urlOrStatus;
+                revalContext._statusCode = urlOrStatus;
+                revalContext._redirectLocation = targetUrl;
+              } else {
+                layoutStatusCode = 302;
+                revalContext._statusCode = 302;
+                revalContext._redirectLocation = urlOrStatus;
+              }
               markRevalDynamic();
             },
           },
@@ -1493,6 +1810,7 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
           platformContext: outerCtx?.platformContext || { env: activeEnv },
           _isStaticHtmlRender: true,
           _hasRedirected: false,
+          _statusCode: 200,
         };
         const clientManifest =
           (typeof globalThis !== "undefined" && globalThis.__DINOU_CLIENT_MANIFEST__) || {};
@@ -1533,6 +1851,9 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
                 }
               }
             } catch (e) {
+              if (e && e.$$type === "dinou-internal-redirect") {
+                throw e;
+              }
               resolvedLayoutJsx = null;
             }
           }
@@ -1620,6 +1941,9 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
                 }
               }
             } catch (e) {
+              if (e && e.$$type === "dinou-internal-redirect") {
+                throw e;
+              }
               resolvedLayoutJsx = null;
             }
           }
@@ -1697,6 +2021,9 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
                 }
               }
             } catch (e) {
+              if (e && e.$$type === "dinou-internal-redirect") {
+                throw e;
+              }
               resolvedLayoutJsx = null;
             }
           }
@@ -1749,17 +2076,18 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
           }
         });
       } catch (e) {
-        if (isEdgeRuntime() || process.env.DINOU_DEBUG) {
+        if (e && e.$$type === "dinou-internal-redirect") {
+          layoutHasRedirected = true;
+          revalDynamicState.value = true;
+        } else if (isEdgeRuntime() || process.env.DINOU_DEBUG) {
           console.warn(`⚠️ [Edge Revalidate] Layout render fallback for ${targetPath}:`, e?.message || e);
         }
       }
 
-      if (layoutHasRedirected) {
-        return false;
-      }
-      if (revalDynamicState.value) {
-        // Preserve causal layout _old snapshots BEFORE evicting current layout artifacts
-        // so in-flight tabs hydrating T_prev receive matching layout._old.rsc with zero #418!
+      if (revalDynamicState.value || layoutHasRedirected) {
+        // Preserve causal layout _old snapshots BEFORE advancing layout.metadata.json and
+        // evicting current layout artifacts so in-flight tabs hydrating T_prev receive
+        // matching layout._old.rsc / shell.layout._old.json with zero #418!
         try {
           if (cached && cached.content) {
             await storage.set(layoutOldRscKey, cached.content);
@@ -1769,13 +2097,6 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
             await storage.set(shellLayoutOldKey, prevShellLayout.content);
           }
         } catch (e) {}
-        await Promise.all(
-          [
-            layoutRscKey,
-            shellLayoutKey,
-            shellLayoutOwnKey,
-          ].map((k) => Promise.resolve(storage.delete(k)).catch(() => {}))
-        );
         try {
           await storage.set(
             layoutMetaKey,
@@ -1786,16 +2107,55 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
             })
           );
         } catch (e) {}
+        await Promise.all(
+          [
+            layoutRscKey,
+            shellLayoutKey,
+            shellLayoutOwnKey,
+          ].map((k) => Promise.resolve(storage.delete(k)).catch(() => {}))
+        );
         return false;
       }
 
-      if (!didRenderFreshLayout && !isEdgeRuntime()) {
-        await Promise.all(
-          [layoutRscKey, layoutOldRscKey, layoutMetaKey, shellLayoutKey, shellLayoutOwnKey, shellLayoutOldKey].map((k) =>
-            Promise.resolve(storage.delete(k)).catch(() => {})
-          )
-        );
-        return Boolean(cached || hasCachedMeta || resolvedLayoutFilePath);
+      if (!didRenderFreshLayout) {
+        if (!resolvedLayoutFilePath) {
+          if (cached || hasCachedMeta) {
+            try {
+              if (cached && cached.content) {
+                await storage.set(layoutOldRscKey, cached.content);
+              }
+              const prevShellLayout = await readEdgeStorageOrAsset(storage, shellLayoutKey);
+              if (prevShellLayout && prevShellLayout.content) {
+                await storage.set(shellLayoutOldKey, prevShellLayout.content);
+              }
+              await storage.set(
+                layoutMetaKey,
+                JSON.stringify({
+                  ...currentMeta,
+                  dynamic: true,
+                  notFound: true,
+                  generatedAt: nextMonotonicGenTime(prevGenTime),
+                })
+              );
+            } catch (e) {}
+            await Promise.all(
+              [layoutRscKey, shellLayoutKey, shellLayoutOwnKey].map((k) =>
+                Promise.resolve(storage.delete(k)).catch(() => {})
+              )
+            );
+            return true;
+          }
+          return false;
+        }
+        if (!isEdgeRuntime()) {
+          await Promise.all(
+            [layoutRscKey, layoutMetaKey, shellLayoutKey, shellLayoutOwnKey].map((k) =>
+              Promise.resolve(storage.delete(k)).catch(() => {})
+            )
+          );
+          return Boolean(cached || hasCachedMeta || resolvedLayoutFilePath);
+        }
+        return false;
       }
 
       if (!resolvedLayoutFilePath && !cached && !hasCachedMeta) {
@@ -1814,10 +2174,10 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
         }
       } catch (e) {}
 
-      const commitLayoutGenTime = Math.max(newGenTime, Date.now());
-      if (commitLayoutGenTime > revalState.lastGenTime) {
-        revalState.lastGenTime = commitLayoutGenTime;
-      }
+      const commitLayoutGenTime = nextMonotonicGenTime(newGenTime);
+      delete currentMeta.dynamic;
+      delete currentMeta.notFound;
+      currentMeta.status = 200;
       currentMeta.generatedAt = commitLayoutGenTime;
       if (
         newLayoutRsc &&
@@ -1851,6 +2211,72 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
         (didSpliceOnlyLayoutSlots || didRecomposeOnly) && prevLayoutOwnLevelGenTime > 0
           ? prevLayoutOwnLevelGenTime
           : commitLayoutGenTime;
+      const checkCloudflareLayoutRace = async (committedGen = 0) => {
+        if (!isCloudflareWorkersRuntime() || retryDepth >= 2) return false;
+        try {
+          const latestItem = await storage.get(layoutMetaKey);
+          const latestObj =
+            latestItem?.metadata ||
+            (latestItem?.content && latestItem.content.trim().startsWith("{")
+              ? JSON.parse(latestItem.content)
+              : null);
+          const latestGen = Number(latestObj?.generatedAt || 0);
+          if (committedGen > 0) {
+            if (latestGen > committedGen) return true;
+          } else if (latestGen > prevGenTime) {
+            return true;
+          }
+          const lAllTags = Array.from(
+            new Set([
+              ...(Array.isArray(currentMeta.ownSlotTags) ? currentMeta.ownSlotTags : []),
+              ...(Array.isArray(currentMeta.slotTags) ? currentMeta.slotTags : []),
+              ...(Array.isArray(currentMeta.tags) ? currentMeta.tags : []),
+            ])
+          ).filter(Boolean);
+          if (lAllTags.length > 0) {
+            const lTagInvResults = await Promise.all(
+              lAllTags.map(async (t) => {
+                const invAt =
+                  typeof storage.getTagInvalidatedAtAsync === "function"
+                    ? await storage.getTagInvalidatedAtAsync(t)
+                    : typeof storage.getTagInvalidatedAt === "function"
+                    ? storage.getTagInvalidatedAt(t)
+                    : 0;
+                const baselineInvAt = initialLayoutTagInvMap.has(t)
+                  ? initialLayoutTagInvMap.get(t)
+                  : now;
+                return Number(invAt || 0) > baselineInvAt;
+              })
+            );
+            if (lTagInvResults.some(Boolean)) {
+              return true;
+            }
+          }
+          const lSlotTags = Array.from(
+            new Set([
+              ...(Array.isArray(currentMeta.ownSlotTags) ? currentMeta.ownSlotTags : []),
+              ...(Array.isArray(currentMeta.slotTags) ? currentMeta.slotTags : []),
+            ])
+          );
+          if (committedGen > 0 && lSlotTags.length > 0) {
+            const slotCheck = await inspectSlotsFreshness(
+              lSlotTags,
+              committedGen,
+              { bypassRequestCache: true }
+            );
+            if (slotCheck.hasNewer) return true;
+          }
+        } catch (e) {}
+        return false;
+      };
+
+      if (await checkCloudflareLayoutRace(0)) {
+        return await revalidateLayout(reqPath, {
+          ...internalOptions,
+          _retryDepth: retryDepth + 1,
+        });
+      }
+
       // Causal commit order: persist layout payload artifacts (shell.layout.own.json, shell.layout.json,
       // and layout.rsc with inline currentMeta) BEFORE advancing layout.metadata.json so concurrent
       // readers checking layoutGeneratedAt never observe T_new while layout.rsc is still T_old.
@@ -1868,6 +2294,14 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
         await storage.set(layoutRscKey, newLayoutRsc, currentMeta);
       }
       await storage.set(layoutMetaKey, JSON.stringify(currentMeta));
+
+      if (await checkCloudflareLayoutRace(commitLayoutGenTime)) {
+        return await revalidateLayout(reqPath, {
+          ...internalOptions,
+          _retryDepth: retryDepth + 1,
+        });
+      }
+
       console.log(`✅ [Edge Revalidate] Successfully revalidated layout ${targetPath} (generatedAt: ${commitLayoutGenTime})`);
       return true;
   });
@@ -1884,7 +2318,23 @@ async function revalidateLayout(reqPath, internalOptions = {}) {
   }
 }
 
+const TAG_SCAN_CONCURRENCY = 16;
+
+async function runBoundedConcurrency(items, concurrency, worker) {
+  if (!Array.isArray(items) || items.length === 0) return;
+  const limit = Math.min(concurrency, items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: limit }, async () => {
+    while (cursor < items.length) {
+      const idx = cursor++;
+      await worker(items[idx]);
+    }
+  });
+  await Promise.all(runners);
+}
+
 async function revalidateTag(tag, options) {
+  const sfCallerCtx = getContext();
   if (options !== undefined) {
     console.warn(
       `⚠️ [Dinou] The second parameter (options) in revalidateTag("${tag}", ...) is deprecated and ignored since v9.0.3. Zero hydration mismatch is now guaranteed automatically via lazy index.html re-composition.`
@@ -1895,33 +2345,11 @@ async function revalidateTag(tag, options) {
   const storage = getStorageAdapter();
   if (isEdgeRuntime() || (storage && typeof storage.keys === "function")) {
     if (storage && typeof storage.keys === "function") {
-      const allKeysSet = new Set(await storage.keys());
       const isFsStorage = Boolean(storage && storage.baseDir);
-      if (!isFsStorage && storage.hydrateFromDisk !== false) {
-        try {
-          const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
-          if (existsSync(dist2Folder)) {
-            const diskMetaFiles = await walkMetadataFiles(dist2Folder);
-            for (const diskMeta of diskMetaFiles) {
-              const relKey = path
-                .relative(dist2Folder, diskMeta)
-                .replace(/\\/g, "/");
-              const deleted =
-                typeof storage.isKeyDeleted === "function"
-                  ? await storage.isKeyDeleted(relKey)
-                  : typeof storage.isDeleted === "function" &&
-                    storage.isDeleted(relKey);
-              if (!deleted) {
-                allKeysSet.add(relKey);
-              }
-            }
-          }
-        } catch (e) {}
-      }
-      const allKeys = Array.from(allKeysSet);
       const targetPaths = new Map();
       const targetLayoutPaths = new Map();
       const targetSlotKeys = new Set();
+
       if (typeof storage.markTagInvalidatedAsync === "function") {
         await storage.markTagInvalidatedAsync(tag);
       } else if (typeof storage.markTagInvalidated === "function") {
@@ -1937,19 +2365,80 @@ async function revalidateTag(tag, options) {
           }
         }
       }
+
       const readKeyOrFallback = async (k) =>
         (await storage.get(k)) || (await readEdgeStorageOrAsset(storage, k));
-      for (const rawKey of allKeys) {
-        const key = String(rawKey || "").replace(/\\/g, "/");
-        if (key.endsWith("/slot.metadata.json") || (!isFsStorage && (key.startsWith("slots/") || key.endsWith("/slot.json")))) {
-          try {
-            const item = await readKeyOrFallback(key);
-            let meta = item?.metadata;
-            if (!meta && item?.content) {
-              try {
-                meta = JSON.parse(item.content);
-              } catch (e) {}
+
+      // O(1) inverted tag index fast path (FileSystemStorage & non-disk-hydrated MemoryStorage)
+      const indexedTargets =
+        typeof storage.findTargetsByTag === "function"
+          ? await storage.findTargetsByTag(tag)
+          : null;
+
+      if (indexedTargets) {
+        if (indexedTargets.slotKeys) {
+          for (const k of indexedTargets.slotKeys) targetSlotKeys.add(k);
+        }
+        if (indexedTargets.layoutPaths) {
+          for (const [normPath, opts] of indexedTargets.layoutPaths.entries()) {
+            const prev = targetLayoutPaths.get(normPath);
+            targetLayoutPaths.set(normPath, {
+              onlyRefreshSlots: prev
+                ? prev.onlyRefreshSlots && opts.onlyRefreshSlots
+                : opts.onlyRefreshSlots,
+            });
+          }
+        }
+        if (indexedTargets.pagePaths) {
+          for (const [normPath, opts] of indexedTargets.pagePaths.entries()) {
+            const prev = targetPaths.get(normPath);
+            targetPaths.set(normPath, {
+              onlyRefreshSlots: prev
+                ? prev.onlyRefreshSlots && opts.onlyRefreshSlots
+                : opts.onlyRefreshSlots,
+            });
+          }
+        }
+      } else {
+        let listedMetaMap = null;
+        const allKeysSet = new Set();
+        if (typeof storage.listKeysWithMetadata === "function") {
+          listedMetaMap = await storage.listKeysWithMetadata();
+          if (listedMetaMap) {
+            for (const k of listedMetaMap.keys()) {
+              allKeysSet.add(k);
             }
+          }
+        }
+        if (!listedMetaMap) {
+          for (const k of await storage.keys()) {
+            allKeysSet.add(k);
+          }
+        }
+        if (!isFsStorage && storage.hydrateFromDisk !== false) {
+          try {
+            const dist2Folder = path.resolve(process.cwd(), ".dinou/dist2");
+            if (existsSync(dist2Folder)) {
+              const diskMetaFiles = await walkMetadataFiles(dist2Folder);
+              await runBoundedConcurrency(diskMetaFiles, TAG_SCAN_CONCURRENCY, async (diskMeta) => {
+                const relKey = path
+                  .relative(dist2Folder, diskMeta)
+                  .replace(/\\/g, "/");
+                const deleted =
+                  typeof storage.isKeyDeleted === "function"
+                    ? await storage.isKeyDeleted(relKey)
+                    : typeof storage.isDeleted === "function" &&
+                      storage.isDeleted(relKey);
+                if (!deleted) {
+                  allKeysSet.add(relKey);
+                }
+              });
+            }
+          } catch (e) {}
+        }
+
+        const classifyWithMeta = (key, kind, meta) => {
+          if (kind === "slot") {
             const slotIdMatch = key.match(/^slots\/([^/]+)\//);
             const matchedSlotId = meta?.slotId || slotIdMatch?.[1];
             const matchesSlotId = Boolean(matchedSlotId && matchedSlotId === tag);
@@ -1964,87 +2453,94 @@ async function revalidateTag(tag, options) {
                 targetSlotKeys.add(key.slice(0, -"/slot.json".length) + "/slot.metadata.json");
               }
             }
-          } catch (e) {}
-        } else if (key.endsWith("layout.metadata.json") || (!isFsStorage && key.endsWith("layout.rsc"))) {
-          try {
-            const item = await readKeyOrFallback(key);
-            let meta = item?.metadata;
-            if (!meta && item?.content) {
-              try {
-                meta = JSON.parse(item.content);
-              } catch (e) {}
+            return;
+          }
+          const hasRouteTag = Boolean(meta && Array.isArray(meta.tags) && meta.tags.includes(tag));
+          const hasSlotTag = Boolean(
+            meta &&
+              ((Array.isArray(meta.slotTags) && meta.slotTags.includes(tag)) ||
+                (Array.isArray(meta.ownSlotTags) && meta.ownSlotTags.includes(tag)))
+          );
+          if (!hasRouteTag && !hasSlotTag) return;
+
+          if (kind === "layout") {
+            const cleanKey = key
+              .replace(/\/(?:layout\.metadata\.json|layout\.rsc)$/, "")
+              .replace(/^(?:layout\.metadata\.json|layout\.rsc)$/, "");
+            const normPath = cleanKey ? (cleanKey.startsWith("/") ? cleanKey : "/" + cleanKey) : "/";
+            const prev = targetLayoutPaths.get(normPath);
+            targetLayoutPaths.set(normPath, {
+              onlyRefreshSlots: prev ? prev.onlyRefreshSlots && !hasRouteTag : !hasRouteTag && hasSlotTag,
+            });
+            return;
+          }
+
+          const cleanKey = key
+            .replace(/\/(?:metadata\.json|index\.html|shell\.html)$/, "")
+            .replace(/^(?:metadata\.json|index\.html|shell\.html)$/, "");
+          if (cleanKey.startsWith("slots/") || cleanKey.endsWith("layout.rsc") || cleanKey.endsWith("layout.metadata.json")) {
+            return;
+          }
+          const normPath = cleanKey ? (cleanKey.startsWith("/") ? cleanKey : "/" + cleanKey) : "/";
+          const prev = targetPaths.get(normPath);
+          targetPaths.set(normPath, {
+            onlyRefreshSlots: prev ? prev.onlyRefreshSlots && !hasRouteTag : !hasRouteTag && hasSlotTag,
+          });
+        };
+
+        const keysNeedingFetch = [];
+        for (const rawKey of allKeysSet) {
+          const key = String(rawKey || "").replace(/\\/g, "/");
+          let kind = null;
+          let storageOnly = false;
+          if (key.endsWith("/slot.metadata.json") || (!isFsStorage && (key.startsWith("slots/") || key.endsWith("/slot.json")))) {
+            kind = "slot";
+          } else if (key.endsWith("layout.metadata.json") || (!isFsStorage && key.endsWith("layout.rsc"))) {
+            kind = "layout";
+          } else if (key.endsWith("metadata.json")) {
+            kind = "page";
+          } else if (!isFsStorage && (key.endsWith("index.html") || key.endsWith("shell.html"))) {
+            kind = "page";
+            storageOnly = true;
+          }
+          if (!kind) continue;
+
+          // Cloudflare KV fast path: classify directly from kv.list() inline metadata with 0 kv.get() calls!
+          if (listedMetaMap && listedMetaMap.has(rawKey)) {
+            const inlineMeta = listedMetaMap.get(rawKey);
+            if (inlineMeta && typeof inlineMeta === "object") {
+              classifyWithMeta(key, kind, inlineMeta);
+              continue;
             }
-            const hasRouteTag = Boolean(meta && Array.isArray(meta.tags) && meta.tags.includes(tag));
-            const hasSlotTag = Boolean(
-              meta &&
-                ((Array.isArray(meta.slotTags) && meta.slotTags.includes(tag)) ||
-                  (Array.isArray(meta.ownSlotTags) && meta.ownSlotTags.includes(tag)))
-            );
-            if (hasRouteTag || hasSlotTag) {
-              const cleanKey = key
-                .replace(/\/(?:layout\.metadata\.json|layout\.rsc)$/, "")
-                .replace(/^(?:layout\.metadata\.json|layout\.rsc)$/, "");
-              const normPath = cleanKey ? (cleanKey.startsWith("/") ? cleanKey : "/" + cleanKey) : "/";
-              const prev = targetLayoutPaths.get(normPath);
-              targetLayoutPaths.set(normPath, {
-                onlyRefreshSlots: prev ? prev.onlyRefreshSlots && !hasRouteTag : !hasRouteTag && hasSlotTag,
-              });
+            // If inline metadata overflowed (>1024B) and its companion *.metadata.json is also listed,
+            // skip reading the bulky payload key (index.html / shell.html / layout.rsc / slot.json).
+            if (kind === "page" && (key.endsWith("index.html") || key.endsWith("shell.html"))) {
+              const compMeta = key.replace(/(?:index|shell)\.html$/, "metadata.json");
+              if (allKeysSet.has(compMeta)) continue;
+            } else if (kind === "layout" && key.endsWith("layout.rsc")) {
+              const compMeta = key.replace(/layout\.rsc$/, "layout.metadata.json");
+              if (allKeysSet.has(compMeta)) continue;
+            } else if (kind === "slot" && key.endsWith("/slot.json")) {
+              const compMeta = key.replace(/\/slot\.json$/, "/slot.metadata.json");
+              if (allKeysSet.has(compMeta)) continue;
             }
-          } catch (e) {}
-        } else if (key.endsWith("metadata.json")) {
-          try {
-            const item = await readKeyOrFallback(key);
-            let meta = item?.metadata;
-            if (!meta && item?.content) {
-              try {
-                meta = JSON.parse(item.content);
-              } catch (e) {}
-            }
-            const hasRouteTag = Boolean(meta && Array.isArray(meta.tags) && meta.tags.includes(tag));
-            const hasSlotTag = Boolean(
-              meta &&
-                ((Array.isArray(meta.slotTags) && meta.slotTags.includes(tag)) ||
-                  (Array.isArray(meta.ownSlotTags) && meta.ownSlotTags.includes(tag)))
-            );
-            if (hasRouteTag || hasSlotTag) {
-              const cleanKey = key
-                .replace(/\/(?:metadata\.json|index\.html)$/, "")
-                .replace(/^(?:metadata\.json|index\.html)$/, "");
-              if (cleanKey.startsWith("slots/") || cleanKey.endsWith("layout.rsc") || cleanKey.endsWith("layout.metadata.json")) {
-                continue;
-              }
-              const normPath = cleanKey ? (cleanKey.startsWith("/") ? cleanKey : "/" + cleanKey) : "/";
-              const prev = targetPaths.get(normPath);
-              targetPaths.set(normPath, {
-                onlyRefreshSlots: prev ? prev.onlyRefreshSlots && !hasRouteTag : !hasRouteTag && hasSlotTag,
-              });
-            }
-          } catch (e) {}
-        } else if (!isFsStorage && (key.endsWith("index.html") || key.endsWith("shell.html"))) {
-          try {
-            const item = await storage.get(key);
-            const meta = item?.metadata;
-            const hasRouteTag = Boolean(meta && Array.isArray(meta.tags) && meta.tags.includes(tag));
-            const hasSlotTag = Boolean(
-              meta &&
-                ((Array.isArray(meta.slotTags) && meta.slotTags.includes(tag)) ||
-                  (Array.isArray(meta.ownSlotTags) && meta.ownSlotTags.includes(tag)))
-            );
-            if (hasRouteTag || hasSlotTag) {
-              const cleanKey = key
-                .replace(/\/(?:metadata\.json|index\.html|shell\.html)$/, "")
-                .replace(/^(?:metadata\.json|index\.html|shell\.html)$/, "");
-              if (cleanKey.startsWith("slots/") || cleanKey.endsWith("layout.rsc") || cleanKey.endsWith("layout.metadata.json")) {
-                continue;
-              }
-              const normPath = cleanKey ? (cleanKey.startsWith("/") ? cleanKey : "/" + cleanKey) : "/";
-              const prev = targetPaths.get(normPath);
-              targetPaths.set(normPath, {
-                onlyRefreshSlots: prev ? prev.onlyRefreshSlots && !hasRouteTag : !hasRouteTag && hasSlotTag,
-              });
-            }
-          } catch (e) {}
+          }
+
+          keysNeedingFetch.push({ key, kind, storageOnly });
         }
+
+        await runBoundedConcurrency(keysNeedingFetch, TAG_SCAN_CONCURRENCY, async ({ key, kind, storageOnly }) => {
+          try {
+            const item = storageOnly ? await storage.get(key) : await readKeyOrFallback(key);
+            let meta = item?.metadata;
+            if (!meta && !storageOnly && item?.content) {
+              try {
+                meta = JSON.parse(item.content);
+              } catch (e) {}
+            }
+            classifyWithMeta(key, kind, meta);
+          } catch (e) {}
+        });
       }
 
       // 0. Snapshot invalidated slot artifacts before deletion so if slot regeneration throws during
@@ -2100,12 +2596,26 @@ async function revalidateTag(tag, options) {
         compareLayoutPathsAncestorFirst(a, b)
       );
       for (const [p, opts] of sortedTargetLayouts) {
+        if (!opts?.onlyRefreshSlots) {
+          recordClientRevalidationHint("layout", p, sfCallerCtx);
+        }
         await revalidateLayout(p, opts);
       }
 
       // 3. Revalidate affected pages sequentially (without deleting metadata.json!)
       for (const [p, opts] of targetPaths.entries()) {
+        if (!opts?.onlyRefreshSlots) {
+          recordClientRevalidationHint("page", p, sfCallerCtx);
+        }
         await revalidatePage(p, opts);
+      }
+
+      if (
+        sortedTargetLayouts.length === 0 &&
+        targetPaths.size === 0 &&
+        targetSlotKeys.size === 0
+      ) {
+        recordClientRevalidationHint("allPages", true, sfCallerCtx);
       }
 
       // 4. Restore last-known-good slot cache (BOTH slot.json AND full slot.metadata.json)
@@ -2190,10 +2700,15 @@ async function revalidateTag(tag, options) {
   await Promise.all(slotPromises);
   targetLayoutPaths.sort((a, b) => compareLayoutPathsAncestorFirst(a.reqPath, b.reqPath));
   for (const { reqPath, onlyRefreshSlots } of targetLayoutPaths) {
+    recordClientRevalidationHint("layout", reqPath, sfCallerCtx);
     await revalidateLayout(reqPath, { onlyRefreshSlots });
   }
   for (const { reqPath, onlyRefreshSlots } of targetPagePaths) {
+    recordClientRevalidationHint("page", reqPath, sfCallerCtx);
     await revalidatePage(reqPath, { onlyRefreshSlots });
+  }
+  if (targetLayoutPaths.length === 0 && targetPagePaths.length === 0) {
+    recordClientRevalidationHint("allPages", true, sfCallerCtx);
   }
 }
 

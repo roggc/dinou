@@ -316,8 +316,134 @@ function patchDispatcherObject(dispatcher, internals) {
   } catch (_) {}
 }
 
+const DinouServerAsyncDispatcher = {
+  getCacheForType(resourceType) {
+    const slotStore = getActiveCachedSlotStore();
+    if (slotStore && slotStore.depth > 0) {
+      if (!slotStore._dinouReactCacheMap) {
+        slotStore._dinouReactCacheMap = new Map();
+      }
+      if (!slotStore._dinouReactCacheMap.has(resourceType)) {
+        slotStore._dinouReactCacheMap.set(resourceType, resourceType());
+      }
+      return slotStore._dinouReactCacheMap.get(resourceType);
+    }
+    const reqCtx = getContext();
+    if (reqCtx && typeof reqCtx === "object") {
+      if (!reqCtx._dinouReactCacheMap) {
+        reqCtx._dinouReactCacheMap = new Map();
+      }
+      if (!reqCtx._dinouReactCacheMap.has(resourceType)) {
+        reqCtx._dinouReactCacheMap.set(resourceType, resourceType());
+      }
+      return reqCtx._dinouReactCacheMap.get(resourceType);
+    }
+    return resourceType();
+  },
+  cacheSignal() {
+    return null;
+  },
+  getOwner() {
+    return null;
+  },
+  _dinouIsServerAsyncDispatcher: true,
+};
+
+const SUPPRESS_ASYNC_DISPATCHER_KEY = Symbol.for(
+  "dinou.suppress.fallback.async.dispatcher"
+);
+
+function runWithNativeAsyncDispatcherInit(fn) {
+  globalThis[SUPPRESS_ASYNC_DISPATCHER_KEY] =
+    Number(globalThis[SUPPRESS_ASYNC_DISPATCHER_KEY] || 0) + 1;
+  try {
+    return fn();
+  } finally {
+    globalThis[SUPPRESS_ASYNC_DISPATCHER_KEY] = Math.max(
+      0,
+      Number(globalThis[SUPPRESS_ASYNC_DISPATCHER_KEY] || 1) - 1
+    );
+  }
+}
+
+function patchAsyncDispatcherObject(dispatcher) {
+  if (
+    !dispatcher ||
+    typeof dispatcher !== "object" ||
+    dispatcher === DinouServerAsyncDispatcher ||
+    dispatcher._dinouIsServerAsyncDispatcher ||
+    dispatcher._dinouWrappedAsyncDispatcher
+  ) {
+    return dispatcher;
+  }
+  const origGetCacheForType =
+    typeof dispatcher.getCacheForType === "function"
+      ? dispatcher.getCacheForType.bind(dispatcher)
+      : null;
+  try {
+    // Mutate getCacheForType in-place to preserve exact object reference identity
+    // (React's RequestInstance asserts `ReactSharedInternals.A === DefaultAsyncDispatcher`).
+    dispatcher.getCacheForType = function dinouUnifiedGetCacheForType(resourceType) {
+      const slotStore = getActiveCachedSlotStore();
+      if (slotStore && slotStore.depth > 0) {
+        return DinouServerAsyncDispatcher.getCacheForType(resourceType);
+      }
+      const reqCtx = getContext();
+      if (reqCtx && typeof reqCtx === "object") {
+        return DinouServerAsyncDispatcher.getCacheForType(resourceType);
+      }
+      return origGetCacheForType
+        ? origGetCacheForType(resourceType)
+        : resourceType();
+    };
+    Object.defineProperty(dispatcher, "_dinouWrappedAsyncDispatcher", {
+      value: true,
+      enumerable: false,
+      configurable: true,
+    });
+  } catch (_) {}
+  return dispatcher;
+}
+
+function patchInternalsAsyncDispatcher(internals) {
+  if (
+    !internals ||
+    typeof internals !== "object" ||
+    !("A" in internals) ||
+    internals._dinouPatchedA
+  ) {
+    return;
+  }
+  let currentA = internals.A ? patchAsyncDispatcherObject(internals.A) : null;
+  try {
+    Object.defineProperty(internals, "A", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        if (currentA) return currentA;
+        if (Number(globalThis[SUPPRESS_ASYNC_DISPATCHER_KEY] || 0) > 0) {
+          return null;
+        }
+        const slotStore = getActiveCachedSlotStore();
+        if ((slotStore && slotStore.depth > 0) || getContext()) {
+          return DinouServerAsyncDispatcher;
+        }
+        return null;
+      },
+      set(nextA) {
+        currentA = nextA ? patchAsyncDispatcherObject(nextA) : null;
+      },
+    });
+    internals._dinouPatchedA = true;
+  } catch (_) {}
+}
+
 function patchInternalsDispatcherSetter(internals) {
-  if (!internals || typeof internals !== "object" || internals._dinouPatchedH) {
+  if (!internals || typeof internals !== "object") {
+    return;
+  }
+  patchInternalsAsyncDispatcher(internals);
+  if (internals._dinouPatchedH) {
     return;
   }
   let currentH = internals.H;
@@ -968,11 +1094,13 @@ export {
   asyncRenderJSXToClientJSX,
   invokeWithServerHooksDispatcher,
   ensureServerHooksPatched,
+  runWithNativeAsyncDispatcherInit,
   replaceLayoutChildrenPlaceholder,
 };
 export default {
   asyncRenderJSXToClientJSX,
   invokeWithServerHooksDispatcher,
   ensureServerHooksPatched,
+  runWithNativeAsyncDispatcherInit,
   replaceLayoutChildrenPlaceholder,
 };

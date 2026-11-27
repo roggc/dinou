@@ -421,6 +421,30 @@ async function composeLayoutChainFromOwnFragments(activeChain, storage, options 
   let anyLayoutPpr = false;
   let leafOwnMeta = null;
 
+  // Prefetch all non-override levels' [ownItem, lMeta] concurrently before sequential composition
+  const prefetchedLevels = new Map();
+  const levelsToPrefetch = [];
+  for (let i = activeChain.length - 1; i >= 0; i--) {
+    const entry = activeChain[i];
+    const key = entry.cleanLayoutKey || "";
+    const override = overrides && overrides.has(key) ? overrides.get(key) : null;
+    if (!override || override.ownTree === undefined) {
+      levelsToPrefetch.push({ idx: i, key });
+    }
+  }
+  if (levelsToPrefetch.length > 0) {
+    await Promise.all(
+      levelsToPrefetch.map(async ({ idx, key }) => {
+        const ownKey = key ? `${key}/shell.layout.own.json` : "shell.layout.own.json";
+        const [ownItem, lMeta] = await Promise.all([
+          readStorageArtifact(storage, ownKey, platformContext, reqUrl),
+          readLayoutMeta(storage, key, platformContext, reqUrl),
+        ]);
+        prefetchedLevels.set(idx, { ownItem, lMeta, ownKey });
+      })
+    );
+  }
+
   for (let i = activeChain.length - 1; i >= 0; i--) {
     const entry = activeChain[i];
     const key = entry.cleanLayoutKey || "";
@@ -441,11 +465,11 @@ async function composeLayoutChainFromOwnFragments(activeChain, storage, options 
         levelPpr = override.effectivePpr;
       }
     } else {
-      const ownKey = key ? `${key}/shell.layout.own.json` : "shell.layout.own.json";
-      const [ownItem, lMeta] = await Promise.all([
-        readStorageArtifact(storage, ownKey, platformContext, reqUrl),
-        readLayoutMeta(storage, key, platformContext, reqUrl),
-      ]);
+      const prefetched = prefetchedLevels.get(i);
+      const ownKey =
+        prefetched?.ownKey || (key ? `${key}/shell.layout.own.json` : "shell.layout.own.json");
+      const ownItem = prefetched?.ownItem ?? null;
+      const lMeta = prefetched?.lMeta ?? null;
       if (!ownItem || !ownItem.content || !ownItem.content.trim().startsWith("{")) {
         return null;
       }
@@ -579,7 +603,7 @@ async function hydrateActiveChainPpr(activeChain, reqSegments, queryObj, srcFold
     reqSegments,
     queryObj,
     srcFolder,
-    options
+    { ...options, activeChain }
   );
   for (const entry of activeChain) {
     const norm = entry.layoutPath.replace(/\\/g, "/");

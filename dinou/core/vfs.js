@@ -1,11 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const isDevelopment =
-  process.env.DINOU_DEV === "true" ||
-  (typeof globalThis !== "undefined" && Boolean(globalThis.__DINOU_DEV__)) ||
-  process.env.NODE_ENV !== "production";
+function isDevMode() {
+  return (
+    process.env.DINOU_DEV === "true" ||
+    (typeof globalThis !== "undefined" && Boolean(globalThis.__DINOU_DEV__)) ||
+    process.env.NODE_ENV !== "production"
+  );
+}
 const localVfs = {};
+let localVfsSrcRoot = null;
+let cachedCwd = null;
+let cachedCwdSrcNorm = null;
 
 export function getVfs() {
   if (typeof globalThis !== "undefined" && globalThis.__DINOU_VFS__) {
@@ -19,6 +25,71 @@ function normalizeKey(p) {
   let s = String(p).replace(/\\/g, "/");
   if (s.length > 2 && s[1] === ":") s = s.slice(2);
   return s;
+}
+
+function getRuntimeSrcRootNorm() {
+  const cwd =
+    typeof process !== "undefined" && typeof process.cwd === "function"
+      ? process.cwd()
+      : null;
+  if (!cwd) return null;
+  if (cwd !== cachedCwd) {
+    cachedCwd = cwd;
+    cachedCwdSrcNorm = normalizeKey(path.resolve(cwd, "src")).replace(/\/+$/, "");
+  }
+  return cachedCwdSrcNorm;
+}
+
+function isPathCoveredByRoot(normPath, rootNorm) {
+  if (!normPath || !rootNorm) return false;
+  return normPath === rootNorm || normPath.startsWith(rootNorm + "/");
+}
+
+function isAuthoritativeVfsPath(vfs, filePath) {
+  if (!vfs || !filePath || isDevMode()) return false;
+  const isGlobalVfs =
+    typeof globalThis !== "undefined" &&
+    globalThis.__DINOU_VFS__ &&
+    vfs === globalThis.__DINOU_VFS__;
+  if (isGlobalVfs) {
+    if (!vfs["src"] && !vfs["/src"]) return false;
+  } else if (!localVfsSrcRoot) {
+    return false;
+  }
+
+  const norm = normalizeKey(filePath).replace(/\/+$/, "");
+  if (!norm) return false;
+
+  if (
+    norm === "src" ||
+    norm.startsWith("src/") ||
+    norm === "/src" ||
+    norm.startsWith("/src/")
+  ) {
+    if (isGlobalVfs) return true;
+    const runtimeSrc = getRuntimeSrcRootNorm();
+    return !runtimeSrc || runtimeSrc === localVfsSrcRoot;
+  }
+
+  if (isGlobalVfs) {
+    const runtimeSrc = getRuntimeSrcRootNorm();
+    if (isPathCoveredByRoot(norm, runtimeSrc)) {
+      return true;
+    }
+    if (!norm.includes("/.dinou/")) {
+      const srcIdx = norm.lastIndexOf("/src");
+      if (
+        srcIdx !== -1 &&
+        (srcIdx + 4 === norm.length || norm[srcIdx + 4] === "/")
+      ) {
+        const candidateRoot = norm.slice(0, srcIdx + 4);
+        if (vfs[candidateRoot]) return true;
+      }
+    }
+    return false;
+  }
+
+  return isPathCoveredByRoot(norm, localVfsSrcRoot);
 }
 
 function sortByName(entries) {
@@ -62,9 +133,12 @@ export function buildVfs(dir, baseDir = dir) {
   vfs[slashDir] = entry;
   vfs[relDir ? "src/" + relDir : "src"] = entry;
   vfs[relDir ? "/src/" + relDir : "/src"] = entry;
+  if (dir === baseDir && vfs === localVfs) {
+    localVfsSrcRoot = normalizeKey(baseDir).replace(/\/+$/, "");
+  }
 }
 
-if (!isDevelopment) {
+if (!isDevMode()) {
   try {
     const srcDir = path.resolve(process.cwd(), "src");
     if (Object.keys(getVfs()).length === 0 && fs.existsSync && fs.existsSync(srcDir)) {
@@ -91,6 +165,13 @@ function lookupVfs(vfs, p) {
     if (vfs[fromSlash]) return vfs[fromSlash];
     const noSlash = fromSlash.slice(1);
     if (vfs[noSlash]) return vfs[noSlash];
+    const lastIdx = s.lastIndexOf("/src");
+    if (lastIdx !== idx) {
+      const lastFromSlash = s.slice(lastIdx);
+      if (vfs[lastFromSlash]) return vfs[lastFromSlash];
+      const lastNoSlash = lastFromSlash.slice(1);
+      if (vfs[lastNoSlash]) return vfs[lastNoSlash];
+    }
   } else if (s.startsWith("src/") || s === "src") {
     if (vfs[s]) return vfs[s];
     if (vfs["/" + s]) return vfs["/" + s];
@@ -107,6 +188,9 @@ export function existsSync(filePath) {
   const vfs = getVfs();
   if (lookupVfs(vfs, filePath) !== null) {
     return true;
+  }
+  if (isAuthoritativeVfsPath(vfs, filePath)) {
+    return false;
   }
   try {
     if (typeof fs.existsSync === "function" && fs.existsSync(filePath)) {
@@ -129,6 +213,10 @@ export function readdirSync(dirPath, options) {
       }));
     }
     return entry.children.map(child => child.name);
+  }
+
+  if (isAuthoritativeVfsPath(vfs, dirPath)) {
+    return [];
   }
 
   try {
