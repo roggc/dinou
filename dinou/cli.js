@@ -39,7 +39,7 @@ program
   .description(
     "Full-stack React 19 framework with native RSC, progressive streaming, and dual-mode vendoring"
   )
-  .version("10.0.5")
+  .version("10.0.6")
   .option(
     "-u, --unvendorized",
     "Run with standard node_modules dependencies instead of pre-bundled vendor packages"

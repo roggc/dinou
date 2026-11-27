@@ -57,7 +57,28 @@ function resolveSlotFileUrlFromManifest(exportName) {
   return pathToFileURL(slotPath).href;
 }
 
-function createDinouPageSlotElement() {
+let _cachedDinouPageSlot = null;
+let _cachedDinouPageSlotManifest = undefined;
+let _cachedDinouPageSlotEdgeRenderer = undefined;
+
+function clearDinouPageSlotCache() {
+  _cachedDinouPageSlot = null;
+  _cachedDinouPageSlotManifest = undefined;
+  _cachedDinouPageSlotEdgeRenderer = undefined;
+}
+
+function getDinouPageSlotRef() {
+  const manifest =
+    typeof globalThis !== "undefined" ? globalThis.__DINOU_CLIENT_MANIFEST__ : null;
+  const edgeRenderer =
+    typeof globalThis !== "undefined" ? globalThis.__DINOU_EDGE_RENDERER__ : null;
+  if (
+    _cachedDinouPageSlot &&
+    _cachedDinouPageSlotManifest === manifest &&
+    _cachedDinouPageSlotEdgeRenderer === edgeRenderer
+  ) {
+    return _cachedDinouPageSlot;
+  }
   let DinouPageSlot = RawDinouPageSlot;
   if (
     typeof DinouPageSlot === "function" &&
@@ -66,11 +87,10 @@ function createDinouPageSlotElement() {
     const fileUrl = resolveSlotFileUrlFromManifest("DinouPageSlot");
     let regFn = null;
     if (
-      typeof globalThis !== "undefined" &&
-      globalThis.__DINOU_EDGE_RENDERER__ &&
-      typeof globalThis.__DINOU_EDGE_RENDERER__.registerClientReference === "function"
+      edgeRenderer &&
+      typeof edgeRenderer.registerClientReference === "function"
     ) {
-      regFn = globalThis.__DINOU_EDGE_RENDERER__.registerClientReference;
+      regFn = edgeRenderer.registerClientReference;
     }
     if (!regFn) {
       try {
@@ -93,7 +113,14 @@ function createDinouPageSlotElement() {
       });
     }
   }
-  return React.createElement(DinouPageSlot);
+  _cachedDinouPageSlot = DinouPageSlot;
+  _cachedDinouPageSlotManifest = manifest;
+  _cachedDinouPageSlotEdgeRenderer = edgeRenderer;
+  return _cachedDinouPageSlot;
+}
+
+function createDinouPageSlotElement() {
+  return React.createElement(getDinouPageSlotRef());
 }
 
 async function getJSX(
@@ -456,6 +483,9 @@ async function getJSX(
               ? elementToRender
               : resolvedSlot;
         } catch (e) {
+          if (e && e.$$type === "dinou-internal-redirect") {
+            throw e;
+          }
           layoutSegmentStore.idCount = prevSlotIdCount;
           layoutSegmentStore.holeCount = prevSlotHoleCount;
           if (slotFilePath) {
@@ -538,6 +568,9 @@ async function getJSX(
           );
           layoutOnlyJsx = null;
         } catch (layoutErr) {
+          if (layoutErr && layoutErr.$$type === "dinou-internal-redirect") {
+            throw layoutErr;
+          }
           layoutRenderFailed = true;
           layoutOnlyJsx = null;
           console.warn(
@@ -579,6 +612,9 @@ async function getJSX(
             layoutOnlyJsx = replaceLayoutChildrenPlaceholder(resolvedLayout, layoutOnlyJsx, placeholder);
           }
         } catch (layoutErr) {
+          if (layoutErr && layoutErr.$$type === "dinou-internal-redirect") {
+            throw layoutErr;
+          }
           layoutRenderFailed = true;
           layoutOnlyJsx = null;
           layoutSegmentStore.idCount = prevLayoutIdCount;
@@ -629,5 +665,5 @@ async function getJSX(
   return jsx;
 }
 
-export { getJSX, createDinouPageSlotElement };
+export { getJSX, createDinouPageSlotElement, clearDinouPageSlotCache };
 export default getJSX;

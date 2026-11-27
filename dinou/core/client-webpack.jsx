@@ -481,6 +481,51 @@ const executeRscRedirect = (redirectUrl) => {
 
 const erroredPageCacheKeys = new Set();
 const erroredLayoutCacheKeys = new Set();
+const volatilePageCacheKeys = new Set();
+const volatileLayoutCacheKeys = new Set();
+
+const normalizeCachePathname = (p) => {
+  const clean = String(p || "/").split("?")[0].split("#")[0] || "/";
+  const segs = clean.split("/").filter(Boolean).map(safeDecodeSeg);
+  return segs.length > 0 ? "/" + segs.join("/") : "/";
+};
+
+const invalidateClientRouterCache = (hint) => {
+  if (!hint || typeof hint !== "object") return;
+  if (hint.allPages) {
+    pageCache.clear();
+    volatilePageCacheKeys.clear();
+  } else if (Array.isArray(hint.pages) && hint.pages.length > 0) {
+    const pageTargets = new Set(hint.pages.map(normalizeCachePathname));
+    for (const k of Array.from(pageCache.keys())) {
+      const kPath = normalizeCachePathname(k);
+      if (pageTargets.has(kPath)) {
+        pageCache.delete(k);
+        volatilePageCacheKeys.delete(k);
+      }
+    }
+  }
+  if (hint.allLayouts) {
+    layoutCache.clear();
+    volatileLayoutCacheKeys.clear();
+  } else if (Array.isArray(hint.layouts) && hint.layouts.length > 0) {
+    const layoutTargets = hint.layouts.map(normalizeCachePathname);
+    for (const k of Array.from(layoutCache.keys())) {
+      const kPath = normalizeCachePathname(k);
+      const matchesLayout = layoutTargets.some(
+        (t) => t === "/" || kPath === t || kPath.startsWith(t + "/")
+      );
+      if (matchesLayout) {
+        layoutCache.delete(k);
+        volatileLayoutCacheKeys.delete(k);
+      }
+    }
+  }
+};
+
+if (typeof window !== "undefined") {
+  window.__DINOU_INVALIDATE_CLIENT_CACHE__ = invalidateClientRouterCache;
+}
 
 const clearErroredCaches = () => {
   if (
@@ -509,6 +554,27 @@ const clearErroredCaches = () => {
     layoutCache.delete(k);
   }
   erroredLayoutCacheKeys.clear();
+};
+
+const INITIAL_HYDRATION_RETRY_DELAYS = [60, 180, 450];
+
+const fetchWithInitialHydrationRetry = (fetchOnce, isInitialHydration) => {
+  const attempt = (retryIdx) =>
+    fetchOnce().catch((err) => {
+      if (
+        isInitialHydration &&
+        !isStaticExportUnloading() &&
+        isNavigationAbortError(err) &&
+        retryIdx < INITIAL_HYDRATION_RETRY_DELAYS.length
+      ) {
+        const delayMs = INITIAL_HYDRATION_RETRY_DELAYS[retryIdx];
+        return new Promise((resolve) => setTimeout(resolve, delayMs)).then(() =>
+          isStaticExportUnloading() ? new Promise(() => {}) : attempt(retryIdx + 1)
+        );
+      }
+      throw err;
+    });
+  return attempt(0);
 };
 
 const getPagePayload = (route, isPrefetch = false, version = 0) => {
@@ -558,11 +624,21 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
   }
 
   const inlineRes = isInitialHydration && !version ? consumeInlineRscResponse("P") : null;
+  if (inlineRes && typeof window !== "undefined") {
+    const initPageMode = String(window.__DINOU_PAGE_CACHE_MODE__ || "").toLowerCase();
+    window.__DINOU_PAGE_CACHE_MODE__ = null;
+    if (initPageMode === "ppr") {
+      volatilePageCacheKeys.add(url);
+    }
+  }
+  const fetchPageOnce = () =>
+    fetch(payloadUrl, {
+      cache: staticExport && !version ? "default" : "no-store",
+    });
   const fetchPromise = inlineRes
     ? Promise.resolve(inlineRes)
-    : fetch(payloadUrl, {
-        cache: staticExport && !version ? "default" : "no-store",
-      }).then((res) => {
+    : fetchWithInitialHydrationRetry(fetchPageOnce, isInitialHydration)
+        .then((res) => {
         if (res.headers.has("x-rsc-redirect")) {
           const redirectUrl = res.headers.get("x-rsc-redirect");
           const isCurrentTarget =
@@ -595,6 +671,12 @@ const getPagePayload = (route, isPrefetch = false, version = 0) => {
         }
         if (res.status >= 500 || res.headers.get("x-dinou-has-error") === "true") {
           erroredPageCacheKeys.add(url);
+        }
+        const cacheMode = (res.headers.get("x-dinou-cache-mode") || "").toLowerCase();
+        if (cacheMode === "ppr") {
+          volatilePageCacheKeys.add(url);
+        } else if (cacheMode === "static" || cacheMode === "dynamic") {
+          volatilePageCacheKeys.delete(url);
         }
         return wrapAbortSafeResponse(res);
       }, (err) => {
@@ -659,11 +741,14 @@ const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
   }
 
   const inlineRes = isInitialHydration && !version ? consumeInlineRscResponse("L") : null;
+  const fetchLayoutOnce = () =>
+    fetch(layoutUrl, {
+      cache: staticExport && !version ? "default" : "no-store",
+    });
   const fetchPromise = inlineRes
     ? Promise.resolve(inlineRes)
-    : fetch(layoutUrl, {
-        cache: staticExport && !version ? "default" : "no-store",
-      }).then(
+    : fetchWithInitialHydrationRetry(fetchLayoutOnce, isInitialHydration)
+        .then(
         (res) => {
           if (res.headers.has("x-rsc-redirect")) {
             const redirectUrl = res.headers.get("x-rsc-redirect");
@@ -697,6 +782,12 @@ const getLayoutPayload = (layoutKey, searchPart = "", version = 0) => {
           }
           if (res.status >= 500 || res.headers.get("x-dinou-has-error") === "true") {
             erroredLayoutCacheKeys.add(cacheKey);
+          }
+          const layoutCacheMode = (res.headers.get("x-dinou-cache-mode") || "").toLowerCase();
+          if (layoutCacheMode === "ppr") {
+            volatileLayoutCacheKeys.add(cacheKey);
+          } else if (layoutCacheMode === "static" || layoutCacheMode === "dynamic") {
+            volatileLayoutCacheKeys.delete(cacheKey);
           }
           return wrapAbortSafeResponse(res);
         },
@@ -793,7 +884,7 @@ const fetchSlotRSC = (slotId, options = {}) => {
     (typeof window !== "undefined" ? window.location.pathname : "/");
   const freshQuery = options && options.fresh ? "&fresh=1" : "";
   const slotSeq = (window.__DINOU_SLOT_SEQ__ = (window.__DINOU_SLOT_SEQ__ || 0) + 1);
-  const slotUrl = `/____rsc_slot____/${slotId}?t=${Date.now()}-${slotSeq}${freshQuery}`;
+  const slotUrl = `/____rsc_slot____/${encodeURIComponent(slotId)}?t=${Date.now()}-${slotSeq}${freshQuery}`;
   return createFromFetch(
     fetch(slotUrl, {
       headers: {
@@ -1021,8 +1112,37 @@ function Router() {
     const routeWithoutHash = finalPath.split("#")[0] || "/";
 
     clearErroredCaches();
-    if (options.fresh) {
+    const isVolatilePage = volatilePageCacheKeys.has(routeWithoutHash);
+    if (options.fresh || isVolatilePage) {
       pageCache.delete(routeWithoutHash);
+      volatilePageCacheKeys.delete(routeWithoutHash);
+    }
+    const prevLayoutKey = getLayoutKey(window.location.pathname);
+    const nextPathOnly = routeWithoutHash.split("?")[0] || "/";
+    const nextSearchOnly = routeWithoutHash.includes("?")
+      ? "?" + routeWithoutHash.split("?")[1]
+      : "";
+    const nextLayoutKey = getLayoutKey(nextPathOnly);
+    const nextLayoutCacheKey = nextLayoutKey
+      ? isStaticExportMode()
+        ? nextLayoutKey
+        : `${nextLayoutKey}${nextSearchOnly}`
+      : null;
+    let shouldBumpLayoutVersion = false;
+    if (nextLayoutCacheKey) {
+      if (
+        nextLayoutKey !== prevLayoutKey &&
+        volatileLayoutCacheKeys.has(nextLayoutCacheKey)
+      ) {
+        layoutCache.delete(nextLayoutCacheKey);
+        volatileLayoutCacheKeys.delete(nextLayoutCacheKey);
+      } else if (
+        options.fresh &&
+        nextLayoutKey === prevLayoutKey &&
+        !layoutCache.has(nextLayoutCacheKey)
+      ) {
+        shouldBumpLayoutVersion = true;
+      }
     }
 
     // Normal RSC Navigation
@@ -1040,8 +1160,11 @@ function Router() {
     startTransition(() => {
       setIsPopState(false);
       setRoute(routeWithoutHash);
-      if (options.fresh) {
+      if (options.fresh || (isVolatilePage && routeWithoutHash === route)) {
         setVersion((v) => v + 1);
+      }
+      if (shouldBumpLayoutVersion) {
+        setLayoutVersion((v) => v + 1);
       }
       setNavError(null);
       setNavCount((c) => c + 1);

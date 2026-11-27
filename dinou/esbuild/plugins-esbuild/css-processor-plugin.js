@@ -11,6 +11,7 @@ import {
 } from "../../core/postcss-pipeline.js";
 import createPostCSSExtractPlugin from "../plugins-postcss/postcss-extract-plugin.js";
 
+const CSS_CACHE_VERSION = 2;
 const cssCache = new Map();
 let cssCacheLoaded = false;
 let cssCacheDirty = false;
@@ -29,7 +30,7 @@ function getFileMtimeSafe(filePath) {
 }
 
 function isCssCacheEntryFresh(cached, rootPath) {
-  if (!cached || cached.isTailwind) return false;
+  if (!cached || cached.v !== CSS_CACHE_VERSION || cached.isTailwind) return false;
   const rootMtime = getFileMtimeSafe(rootPath);
   if (rootMtime < 0 || cached.mtime !== rootMtime) return false;
   if (Array.isArray(cached.deps)) {
@@ -56,7 +57,9 @@ function loadCssCache() {
     if (fsSync.existsSync(file)) {
       const parsed = JSON.parse(fsSync.readFileSync(file, "utf8"));
       for (const [k, v] of Object.entries(parsed)) {
-        cssCache.set(k, v);
+        if (v && v.v === CSS_CACHE_VERSION) {
+          cssCache.set(k, v);
+        }
       }
     }
   } catch (e) {}
@@ -207,6 +210,7 @@ export default function cssProcessorPlugin({
 
     if (process.env.NODE_ENV !== "production") {
       cssCache.set(cacheKey, {
+        v: CSS_CACHE_VERSION,
         mtime: stat.mtimeMs,
         deps,
         assets: localAssets,

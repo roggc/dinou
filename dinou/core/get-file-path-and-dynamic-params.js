@@ -1,6 +1,106 @@
 import path from "node:path";
 import { existsSync, readdirSync } from "./vfs.js";
 
+const DEFAULT_EXTENSIONS = [".tsx", ".ts", ".jsx", ".js", ".mjs"];
+const MAX_ROUTE_CACHE_ENTRIES = 1000;
+const routeMatchCache = new Map();
+const layoutsForKeyCache = new Map();
+let routeCacheVfsRef = null;
+
+function isRouteDevMode() {
+  return (
+    process.env.DINOU_DEV === "true" ||
+    (typeof globalThis !== "undefined" && Boolean(globalThis.__DINOU_DEV__)) ||
+    process.env.NODE_ENV !== "production"
+  );
+}
+
+function syncRouteCacheVfs() {
+  const currentVfs =
+    typeof globalThis !== "undefined" ? globalThis.__DINOU_VFS__ || null : null;
+  if (currentVfs !== routeCacheVfsRef) {
+    routeMatchCache.clear();
+    layoutsForKeyCache.clear();
+    routeCacheVfsRef = currentVfs;
+  }
+}
+
+function clearRouteMatchCache() {
+  routeMatchCache.clear();
+  layoutsForKeyCache.clear();
+  routeCacheVfsRef =
+    typeof globalThis !== "undefined" ? globalThis.__DINOU_VFS__ || null : null;
+}
+
+function getRouteMatchCacheSize() {
+  return routeMatchCache.size;
+}
+
+function lruGet(map, key) {
+  if (!map.has(key)) return undefined;
+  const val = map.get(key);
+  map.delete(key);
+  map.set(key, val);
+  return val;
+}
+
+function lruSet(map, key, val) {
+  if (map.has(key)) {
+    map.delete(key);
+  } else if (map.size >= MAX_ROUTE_CACHE_ENTRIES) {
+    const oldestKey = map.keys().next().value;
+    map.delete(oldestKey);
+  }
+  map.set(key, val);
+}
+
+function cloneParams(params) {
+  if (!params || typeof params !== "object") return {};
+  const out = {};
+  for (const [k, v] of Object.entries(params)) {
+    out[k] = Array.isArray(v) ? v.slice() : v;
+  }
+  return out;
+}
+
+function cloneSlots(slots) {
+  if (!slots || typeof slots !== "object") return {};
+  const out = {};
+  for (const [k, v] of Object.entries(slots)) {
+    out[k] =
+      v && typeof v === "object"
+        ? { slotPath: v.slotPath, slotParams: cloneParams(v.slotParams) }
+        : v;
+  }
+  return out;
+}
+
+function cloneAccumulativeList(list) {
+  if (!Array.isArray(list) || list.length === 0) return [];
+  return list.map(([fp, dp, sl]) => [fp, cloneParams(dp), cloneSlots(sl)]);
+}
+
+function cloneSingleMatch(res) {
+  if (!Array.isArray(res) || res.length === 0) return [];
+  return [res[0], cloneParams(res[1])];
+}
+
+function serializeExtensionsKey(possibleExtensions) {
+  if (
+    possibleExtensions === DEFAULT_EXTENSIONS ||
+    (Array.isArray(possibleExtensions) &&
+      possibleExtensions.length === 5 &&
+      possibleExtensions[0] === ".tsx" &&
+      possibleExtensions[1] === ".ts" &&
+      possibleExtensions[2] === ".jsx" &&
+      possibleExtensions[3] === ".js" &&
+      possibleExtensions[4] === ".mjs")
+  ) {
+    return "d";
+  }
+  return Array.isArray(possibleExtensions) ? possibleExtensions.join(",") : "";
+}
+
 function safeDecode(val) {
   try {
     return !!val ? decodeURIComponent(val) : val;
@@ -569,9 +669,50 @@ function getFilePathAndDynamicParams(
   accumulative = false,
   accumulate = [],
   isFound = { value: false },
-  possibleExtensions = [".tsx", ".ts", ".jsx", ".js", ".mjs"]
+  possibleExtensions = DEFAULT_EXTENSIONS
 ) {
   const normCurrentPath = String(currentPath).replace(/\\/g, "/");
+  const canUseRouteCache =
+    !isRouteDevMode() &&
+    index === 0 &&
+    lastFound === undefined &&
+    (!dParams || Object.keys(dParams).length === 0) &&
+    (!Array.isArray(accumulate) || accumulate.length === 0) &&
+    (!isFound || isFound.value === false);
+
+  let routeCacheKey = null;
+  if (canUseRouteCache) {
+    syncRouteCacheVfs();
+    const segKey = Array.isArray(reqSegments) ? reqSegments.join("\x1f") : "";
+    routeCacheKey = `${normCurrentPath}\0${segKey}\0${fileName}\0${withExtension ? 1 : 0}\0${finalDestination ? 1 : 0}\0${accumulative ? 1 : 0}\0${serializeExtensionsKey(possibleExtensions)}`;
+    const cached = lruGet(routeMatchCache, routeCacheKey);
+    if (cached !== undefined) {
+      if (isFound) isFound.value = cached.found;
+      if (accumulative) {
+        const cloned = cloneAccumulativeList(cached.value);
+        if (Array.isArray(accumulate)) {
+          accumulate.push(...cloned);
+          return accumulate;
+        }
+        return cloned;
+      }
+      return cloneSingleMatch(cached.value);
+    }
+  }
+
+  const storeInCache = (result) => {
+    if (routeCacheKey !== null) {
+      const snapshot = accumulative
+        ? cloneAccumulativeList(result)
+        : cloneSingleMatch(result);
+      lruSet(routeMatchCache, routeCacheKey, {
+        value: snapshot,
+        found: Boolean(isFound?.value),
+      });
+    }
+    return result;
+  };
+
   const isCompanionLookup =
     index === 0 &&
     !normCurrentPath.includes("/@") &&
@@ -596,7 +737,7 @@ function getFilePathAndDynamicParams(
       false,
       [],
       pageIsFound,
-      [".tsx", ".ts", ".jsx", ".js", ".mjs"],
+      DEFAULT_EXTENSIONS,
       pageLineage,
       { value: 0 }
     );
@@ -616,7 +757,7 @@ function getFilePathAndDynamicParams(
             accumulate.push([candidatePath, step.dParams, slots]);
           }
         }
-        return accumulate;
+        return storeInCache(accumulate);
       }
 
       if (finalDestination) {
@@ -630,10 +771,10 @@ function getFilePathAndDynamicParams(
           );
           if (candidatePath) {
             isFound.value = true;
-            return [candidatePath, pageLineage[i].dParams];
+            return storeInCache([candidatePath, pageLineage[i].dParams]);
           }
         }
-        return [];
+        return storeInCache([]);
       }
 
       for (let i = pageLineage.length - 1; i >= 0; i--) {
@@ -645,30 +786,32 @@ function getFilePathAndDynamicParams(
         );
         if (candidatePath) {
           isFound.value = true;
-          return [candidatePath, pageLineage[i].dParams];
+          return storeInCache([candidatePath, pageLineage[i].dParams]);
         }
       }
       const leafParams = pageLineage[pageLineage.length - 1].dParams;
-      return [lastFound, leafParams];
+      return storeInCache([lastFound, leafParams]);
     }
   }
 
-  return matchRouteTree(
-    reqSegments,
-    query,
-    currentPath,
-    fileName,
-    withExtension,
-    finalDestination,
-    lastFound,
-    index,
-    dParams,
-    accumulative,
-    accumulate,
-    isFound,
-    possibleExtensions,
-    [],
-    { value: index }
+  return storeInCache(
+    matchRouteTree(
+      reqSegments,
+      query,
+      currentPath,
+      fileName,
+      withExtension,
+      finalDestination,
+      lastFound,
+      index,
+      dParams,
+      accumulative,
+      accumulate,
+      isFound,
+      possibleExtensions,
+      [],
+      { value: index }
+    )
   );
 }
 
@@ -676,8 +819,25 @@ function getLayoutsForLayoutKey(
   reqSegments,
   query,
   srcFolder,
-  possibleExtensions = [".tsx", ".ts", ".jsx", ".js", ".mjs"]
+  possibleExtensions = DEFAULT_EXTENSIONS
 ) {
+  let layoutKeyCacheKey = null;
+  if (!isRouteDevMode()) {
+    syncRouteCacheVfs();
+    const normSrc = String(srcFolder || "").replace(/\\/g, "/");
+    const segKey = Array.isArray(reqSegments) ? reqSegments.join("\x1f") : "";
+    layoutKeyCacheKey = `${normSrc}\0${segKey}\0${serializeExtensionsKey(possibleExtensions)}`;
+    const cached = lruGet(layoutsForKeyCache, layoutKeyCacheKey);
+    if (cached !== undefined) {
+      return cloneAccumulativeList(cached);
+    }
+  }
+  const storeLayoutKeyCache = (list) => {
+    if (layoutKeyCacheKey !== null) {
+      lruSet(layoutsForKeyCache, layoutKeyCacheKey, cloneAccumulativeList(list));
+    }
+    return list;
+  };
   const decodedSegs = (reqSegments || []).map((s) =>
     s === undefined || s === null ? "" : safeDecode(String(s))
   );
@@ -834,7 +994,7 @@ function getLayoutsForLayoutKey(
 
   const exactRes = walk(srcFolder, 0, {}, []);
   if (exactRes.matched && exactRes.leafHasLayout) {
-    return exactRes.layouts;
+    return storeLayoutKeyCache(exactRes.layouts);
   }
 
   const hasExplicitKeySyntax = decodedSegs.some(
@@ -844,31 +1004,37 @@ function getLayoutsForLayoutKey(
       isOptionalSingleDynamicDir(s)
   );
   if (hasExplicitKeySyntax) {
-    return exactRes.matched ? exactRes.layouts : [];
+    return storeLayoutKeyCache(exactRes.matched ? exactRes.layouts : []);
   }
 
-  return getFilePathAndDynamicParams(
-    reqSegments,
-    query,
-    srcFolder,
-    "layout",
-    true,
-    false,
-    undefined,
-    0,
-    {},
-    true,
-    [],
-    { value: false },
-    possibleExtensions
+  return storeLayoutKeyCache(
+    getFilePathAndDynamicParams(
+      reqSegments,
+      query,
+      srcFolder,
+      "layout",
+      true,
+      false,
+      undefined,
+      0,
+      {},
+      true,
+      [],
+      { value: false },
+      possibleExtensions
+    )
   );
 }
 
 export {
   getFilePathAndDynamicParams,
   getLayoutsForLayoutKey,
+  clearRouteMatchCache,
+  getRouteMatchCacheSize,
 };
 export default {
   getFilePathAndDynamicParams,
   getLayoutsForLayoutKey,
+  clearRouteMatchCache,
+  getRouteMatchCacheSize,
 };
